@@ -2411,6 +2411,11 @@ formatMessage(content, index) {
         else if (data.type === "trigger_clear_message" ){
           this.clearMessages();
         }
+        // 扩展推送的请求（如 sap-snack-director）：进弹幕队列，由闸门串行调度 ——
+        // 既不会打断正在生成/正在播报的一轮，也不会像 trigger_send_message 那样在 isTyping 时被静默丢掉。
+        else if (data.type === 'live_enqueue') {
+          this.enqueueLiveRequest(data.data);
+        }
         // 新增：接收来自其他窗口的消息同步
         else if (data.type === 'messages_update') {
           if (data.data && data.data.messages && !this.isSending) {
@@ -12218,6 +12223,58 @@ processMarkdownStreamForTTS(message, deltaText, isFinal = false) {
     }
   },
 
+  /**
+   * 队列裁剪：保留最新 N 条，但**永不丢弃扩展推来的请求**（`source === 'director'`）。
+   *
+   * 为什么必须豁免：导演请求是 `push` 到**队尾**的（队尾 = 队首，下一个被处理），
+   * 而裁剪是 `slice(0, limit)` —— 保留队首、砍掉队尾。
+   * 不豁免的话，只要再来一条观众弹幕，导演请求就被裁掉了（`danmakuQueueLimit` 默认只有 5）。
+   */
+  trimDanmuQueue() {
+    const limit = this.liveConfig.danmakuQueueLimit || 5;
+    if (this.danmu.length <= limit) return;
+    const keep = this.danmu.slice(0, limit);
+    const pinned = this.danmu.slice(limit).filter((d) => d && d.source === 'director');
+    this.danmu = keep.concat(pinned);
+  },
+
+  /**
+   * 外部（如 sap-snack-director 扩展）经 `/ws` 的 `live_enqueue` 推来的请求：
+   * **进弹幕队列**，不直接 `sendMessage()`。
+   *
+   * 为什么不走 `set_user_input` + `trigger_send_message`：
+   *   · `trigger_send_message` → `sendMessage()` 会 `stopAllAudioPlayback()` + 清 `TTSrunning`
+   *     ⇒ **打断正在播报的语音**；
+   *   · 而 `sendMessage()` 开头 `if (this.isTyping) return;` ⇒ 正在生成时**静默丢弃**，
+   *     调用方还以为发出去了。
+   * 进队列后由 `processDanmuQueue` 的闸门（`isTyping` / `TTSrunning` / `isProcessingDanmu`）
+   * 串行调度，两个问题一起解决。
+   *
+   * 队列里**至多留一条**导演请求：新请求替换旧请求（游戏状态已经变了，旧问题过期了）。
+   */
+  enqueueLiveRequest(payload) {
+    const text = String((payload && payload.text) || '').trim();
+    if (!text) return;
+
+    this.danmu = this.danmu.filter((d) => !d || d.source !== 'director');
+    this.danmu.push({
+      id: (payload && payload.id) || ('director-' + Date.now()),
+      content: text,
+      type: (payload && payload.source) || 'director',
+      platform: (payload && payload.platform) || 'director',
+      source: 'director',
+      // 默认不上 OBS 弹幕叠加层（这是一大段提示词）
+      silent: payload ? payload.silent !== false : true,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    });
+    this.trimDanmuQueue();
+
+    // 没开直播面板时 danmuProcessTimer 可能不存在，这里保证它被挂上
+    this.startDanmuProcessor();
+    // 若当前空闲，别等下一个 1s tick；忙的话闸门会挡住，下一 tick 再来
+    this.processDanmuQueue();
+  },
+
   // 启动弹幕处理器
   startDanmuProcessor() {
     console.log('启动弹幕处理器');
@@ -12296,7 +12353,27 @@ copyIslandEndpoint(){
   },
 
 // 处理弹幕队列 - 新版
+  /**
+   * 从弹幕队列里移除**指定的那一条**（按引用删，不是 `pop()`）。
+   *
+   * ⚠️ 这里**必须**按引用删，不能 `this.danmu.pop()`。
+   *
+   * `await this.sendMessage()` 期间队列还会变：观众弹幕 `unshift` 到队首、
+   * 扩展请求 `push` 到队尾。而 `pop()` 删的是「当前最后一条」，可能根本不是刚处理的那条 ——
+   * 真机实测（2026-10-07）：处理 A 的过程中扩展推进来 B（B 在队尾），A 跑完后 `pop()` 把 **B** 删了，
+   * 于是 B 从队列里凭空消失、永远不会被处理（主窗口看起来"收到请求但没反应"）。
+   *
+   * 原来只用 `pop()` 之所以没暴露，是因为观众弹幕一律 `unshift` 到队首（队尾那条始终没变）——
+   * 是「扩展请求 push 到队尾」打破了这个不变量。
+   */
+  removeDanmuItem(item) {
+    if (!item) return;
+    const i = this.danmu.indexOf(item);
+    if (i >= 0) this.danmu.splice(i, 1);
+  },
+
   async processDanmuQueue() {
+    let processing = null;
     try {
       const hasStaleTTSLock = this.TTSrunning &&
           this.ttsSettings.enabled &&
@@ -12307,18 +12384,26 @@ copyIslandEndpoint(){
         this.TTSrunning = false;
       }
 
-      // 基础检查 (保持不变)
-      if (!this.isLiveRunning || this.danmu.length === 0 || this.isTyping || 
+      /**
+       * 基础闸门：**正在生成 / 正在播报 / 正在处理** 时一律不取队列 ——
+       * 这正是「扩展的请求不会打断 LLM 说话」的机制：它排队，不抢麦。
+       *
+       * ⚠️ `isLiveRunning` 只该拦**观众弹幕**。扩展推来的请求（`source === 'director'`）
+       * 即使没开直播面板也必须处理，否则整个导演功能会被「没开直播」卡死。
+       */
+      if ((!this.isLiveRunning && !this.danmu.some((d) => d && d.source === 'director')) || this.danmu.length === 0 || this.isTyping || 
           (this.TTSrunning && this.ttsSettings.enabled) || this.isProcessingDanmu) {
         return;
       }
 
       this.isProcessingDanmu = true;
       const oldestDanmu = this.danmu[this.danmu.length - 1];
+      processing = oldestDanmu;
       
       if (oldestDanmu && oldestDanmu.content) {
-        if (this.lastProcessedContent === oldestDanmu.content) {
-            this.danmu.pop();
+        // 扩展的请求带唯一 id，且游戏没变化时正文会重复，所以**只对观众弹幕**做连续重复去重。
+        if (oldestDanmu.source !== 'director' && this.lastProcessedContent === oldestDanmu.content) {
+            this.removeDanmuItem(processing);
             this.isProcessingDanmu = false;
             return;
         }
@@ -12332,23 +12417,26 @@ copyIslandEndpoint(){
         // 设置 LLM 的输入
         this.userInput = oldestDanmu.content;
         
-        // 触发 OBS 弹窗显示 (调用后端 API)
-        try {
-            fetch('/api/overlay/danmaku', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(oldestDanmu)
-            }).catch(()=>{});
-        } catch(e) {}
+        // 触发 OBS 弹窗显示 (调用后端 API)。
+        // 扩展的请求标了 `silent`，不上画面 —— 它是一大段提示词，滚到 OBS 上会很难看。
+        if (!oldestDanmu.silent) {
+          try {
+              fetch('/api/overlay/danmaku', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(oldestDanmu)
+              }).catch(()=>{});
+          } catch(e) {}
+        }
 
         // 发送消息，启动 AI 生成流程
         await this.sendMessage();
         
-        this.danmu.pop(); 
+        this.removeDanmuItem(processing); 
       }
     } catch (error) {
       console.error('处理弹幕出错:', error);
-      this.danmu.pop(); 
+      this.removeDanmuItem(processing); 
     } finally {
       this.isProcessingDanmu = false;
     }
@@ -12510,9 +12598,7 @@ copyIslandEndpoint(){
       if (this.danmu.length > 0 && this.danmu[0].content === danmuItem.content) return;
 
       this.danmu.unshift(danmuItem);
-      if (this.danmu.length > this.liveConfig.danmakuQueueLimit) {
-        this.danmu = this.danmu.slice(0, this.liveConfig.danmakuQueueLimit);
-      }
+      this.trimDanmuQueue();
     }
   },
   toggleBriefly(index){
