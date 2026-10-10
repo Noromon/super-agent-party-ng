@@ -4654,6 +4654,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
+                    if choice.delta is None:  # 某些服务在收尾 chunk 里回传 delta:null
+                        continue
                     if choice.delta.tool_calls:  # function_calling
                         is_tool_call = True
                         for tool in choice.delta.tool_calls:
@@ -5536,6 +5538,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             continue
                         if chunk.choices:
                             choice = chunk.choices[0]
+                            if choice.delta is None:  # 某些服务在收尾 chunk 里回传 delta:null
+                                continue
                             if hasattr(choice.delta, "audio") and choice.delta.audio:
                                 # 只把 Base64 音频数据留在 delta 里，别动它
                                 yield f"data: {chunk.model_dump_json()}\n\n"
@@ -6572,7 +6576,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 extra_body = extra_params, # 其他参数
                 **extra
             )
-        if response.choices[0].message.tool_calls:
+        if response.choices[0].message and response.choices[0].message.tool_calls:
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
@@ -6674,8 +6678,8 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     }
                 )
         reasoner_messages = copy.deepcopy(request.messages)
-        while response.choices[0].message.tool_calls or search_not_done:
-            if response.choices[0].message.tool_calls:
+        while (response.choices[0].message and response.choices[0].message.tool_calls) or search_not_done:
+            if response.choices[0].message and response.choices[0].message.tool_calls:
                 assistant_message = response.choices[0].message
                 response_content = assistant_message.tool_calls[0].function
                 print(response_content.name)
@@ -6804,7 +6808,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     extra_body = extra_params, # 其他参数
                     **extra
                 )
-            if response.choices[0].message.tool_calls:
+            if response.choices[0].message and response.choices[0].message.tool_calls:
                 pass
             elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
                 search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
@@ -12821,6 +12825,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     
             elif msg_type == "trigger_clear_message":
                 await ws_manager.broadcast({"type": "trigger_clear_message", "data": {}})
+
+            elif msg_type == "live_enqueue":
+                """
+                扩展（如 sap-snack-director）推送的「请求」：**不直接触发 sendMessage**，
+                而是交给主窗口塞进弹幕队列，由 processDanmuQueue 的闸门串行调度。
+
+                为什么需要它（`set_user_input` + `trigger_send_message` 为什么不行）：
+                  · `trigger_send_message` → `sendMessage()` 会 stopAllAudioPlayback() 并清 TTSrunning
+                    ⇒ **打断正在播报的语音**；
+                  · 而 `sendMessage()` 开头有 `if (this.isTyping) return;`
+                    ⇒ 正在生成时请求被**静默丢弃**，调用方还以为发出去了。
+                进队列后这两个问题一起消失：忙的时候排队，闲下来才处理。
+
+                data: { text: str(必填), id?, source?, platform?, silent? }
+                """
+                await ws_manager.broadcast({
+                    "type": "live_enqueue",
+                    "data": data.get("data", {}) or {}
+                }, exclude=websocket)
 
             elif msg_type == "get_messages":
                 await ws_manager.broadcast({"type": "request_messages", "data": {}})
