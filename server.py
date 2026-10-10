@@ -4654,6 +4654,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     if not chunk.choices:
                         continue
                     choice = chunk.choices[0]
+                    if choice.delta is None:  # 某些服务在收尾 chunk 里回传 delta:null
+                        continue
                     if choice.delta.tool_calls:  # function_calling
                         is_tool_call = True
                         for tool in choice.delta.tool_calls:
@@ -5536,6 +5538,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             continue
                         if chunk.choices:
                             choice = chunk.choices[0]
+                            if choice.delta is None:  # 某些服务在收尾 chunk 里回传 delta:null
+                                continue
                             if hasattr(choice.delta, "audio") and choice.delta.audio:
                                 # 只把 Base64 音频数据留在 delta 里，别动它
                                 yield f"data: {chunk.model_dump_json()}\n\n"
@@ -6572,7 +6576,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 extra_body = extra_params, # 其他参数
                 **extra
             )
-        if response.choices[0].message.tool_calls:
+        if response.choices[0].message and response.choices[0].message.tool_calls:
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
@@ -6674,8 +6678,8 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     }
                 )
         reasoner_messages = copy.deepcopy(request.messages)
-        while response.choices[0].message.tool_calls or search_not_done:
-            if response.choices[0].message.tool_calls:
+        while (response.choices[0].message and response.choices[0].message.tool_calls) or search_not_done:
+            if response.choices[0].message and response.choices[0].message.tool_calls:
                 assistant_message = response.choices[0].message
                 response_content = assistant_message.tool_calls[0].function
                 print(response_content.name)
@@ -6804,7 +6808,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     extra_body = extra_params, # 其他参数
                     **extra
                 )
-            if response.choices[0].message.tool_calls:
+            if response.choices[0].message and response.choices[0].message.tool_calls:
                 pass
             elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
                 search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
