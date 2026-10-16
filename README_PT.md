@@ -57,7 +57,7 @@
 
 ### 🚀 **Um companheiro de desktop com inteligência artificial com possibilidades infinitas!**
 
-#### Companheiro de Desktop: Suporta modelos VRM personalizados, ações, cenas 3D e é compatível com [extensões live2D](https://github.com/heshengtao/sap-live2d)
+#### Companheiro de Desktop: Suporta modelos VRM personalizados, ações, cenas 3D (para modelos Live2D, use a integração VTS abaixo)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: Controle modelos Live2D no Vtube Studio, suportando ações personalizadas e controle de expressões
@@ -216,7 +216,6 @@ Adicionado um sistema de extensões totalmente novo. Você pode verificar os plu
 | Super Agent Party Example With NodeJS | heshengtao        | Este é um exemplo de frontend de chat com ambiente NodeJS | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | Um plugin que permite funcionalidade de pré-visualização web para o Super Agent Party. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | Um plugin de aventura interativa que gera conteúdo de história e opções usando IA. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Esta é uma extensão Live 2D                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | Este é um Editor de IA       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | Esta é uma extensão de galgame com IA     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | Esta é uma extensão de leitura de tarô com IA      | https://github.com/heshengtao/sap-tarot  |

@@ -57,7 +57,7 @@
 
 ### 🚀 **Настольный AI-компаньон с безграничными возможностями!**
 
-#### Настольный компаньон: поддерживает кастомные VRM-модели, действия, 3D-сцены и совместим с [live2D-расширениями](https://github.com/heshengtao/sap-live2d)
+#### Настольный компаньон: поддерживает кастомные VRM-модели, действия, 3D-сцены (для Live2D-моделей используйте интеграцию с VTS ниже)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: управляйте Live2D-моделями в Vtube Studio с поддержкой кастомных действий и контролем выражений лица
@@ -216,7 +216,6 @@ docker-compose up -d
 | Super Agent Party Example With NodeJS | heshengtao        | Пример чат-интерфейса с окружением NodeJS | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | Плагин, добавляющий функциональность веб-просмотра для Super Agent Party. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | Интерактивный плагин приключенческой истории, генерирующий сюжет и варианты с помощью AI. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Расширение Live 2D                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | AI-редактор       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | Расширение AI galgame     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | Расширение AI таролога      | https://github.com/heshengtao/sap-tarot  |

@@ -58,7 +58,7 @@
 
 ### 🚀 **An AI desktop companion with endless possibilities!**  
 
-#### Desktop Companion: Supports custom VRM models, actions, 3D scenes, and is compatible with [live2D extensions](https://github.com/heshengtao/sap-live2d)
+#### Desktop Companion: Supports custom VRM models, actions, 3D scenes (for Live2D avatars, use the VTS integration below)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: Control Live2D models in Vtube Studio, supporting custom actions and expression control
@@ -246,7 +246,6 @@ Added a brand-new extension system. You can check available plugins at [plugins 
 | Super Agent Party Example With NodeJS | heshengtao        | This is a chat frontend example with nodeJS environment | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | A plugin enabling web previewing functionality for Super Agent Party. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | An interactive story adventure plugin that generates story content and options using AI. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | This is a Live 2D extension                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | This is an AI Editor       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | This is an AI galgame extension     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | This is an AI tarot reader extension      | https://github.com/heshengtao/sap-tarot  |
