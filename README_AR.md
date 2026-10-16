@@ -57,7 +57,7 @@
 
 ### 🚀 **رفيق مكتب يعمل بالذكاء الاصطناعي بإمكانيات لا نهائية!**
 
-#### الرفيق المكتبي: يدعم نماذج VRM مخصصة، وإجراءات، ومشاهد ثلاثية الأبعاد، ومتوافق مع [إضافات live2D](https://github.com/heshengtao/sap-live2d)
+#### الرفيق المكتبي: يدعم نماذج VRM مخصصة، وإجراءات، ومشاهد ثلاثية الأبعاد (لموديلات Live2D استخدم تكامل VTS أدناه)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### ربط VTS: التحكم في نماذج Live2D في Vtube Studio، مع دعم الإجراءات المخصصة والتحكم في التعابير
@@ -216,7 +216,6 @@ docker-compose up -d
 | Super Agent Party Example With NodeJS | heshengtao        | هذا مثال لواجهة محادثة أمامية مع بيئة nodeJS | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | إضافة تتيح وظيفة المعاينة على الويب لـ Super Agent Party. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | إضافة مغامرات قصصية تفاعلية تولد محتوى القصة والخيارات باستخدام الذكاء الاصطناعي. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | هذه إضافة Live 2D                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | هذا محرر ذكاء اصطناعي       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | هذه إضافة galgame تعمل بالذكاء الاصطناعي     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | هذه إضافة قارئ تاروت بالذكاء الاصطناعي      | https://github.com/heshengtao/sap-tarot  |

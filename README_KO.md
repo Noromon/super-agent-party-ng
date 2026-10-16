@@ -57,7 +57,7 @@
 
 ### 🚀 **끝없는 가능성을 지닌 AI 데스크톱 컴패니언!**
 
-#### 데스크톱 컴패니언: 커스텀 VRM 모델, 액션, 3D 장면을 지원하며, [live2D 확장 기능](https://github.com/heshengtao/sap-live2d)과 호환됩니다.
+#### 데스크톱 컴패니언: 커스텀 VRM 모델, 액션, 3D 장면을 지원합니다 (Live2D 모델은 아래 VTS 연동을 사용하세요)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: Vtube Studio에서 Live2D 모델을 제어하며, 커스텀 액션 및 표정 제어를 지원합니다.
@@ -216,7 +216,6 @@ docker-compose up -d
 | Super Agent Party Example With NodeJS | heshengtao        | NodeJS 환경을 사용한 채팅 프론트엔드 예제입니다. | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | Super Agent Party에 웹 미리보기 기능을 제공하는 플러그인입니다. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | AI를 사용하여 스토리 콘텐츠와 선택지를 생성하는 인터랙티브 스토리 어드벤처 플러그인입니다. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Live 2D 확장 기능입니다.                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | AI 편집기입니다.       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | AI 갈게임 확장 기능입니다.     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | AI 타로 리더 확장 기능입니다.      | https://github.com/heshengtao/sap-tarot  |

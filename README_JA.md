@@ -57,7 +57,7 @@
 
 ### 🚀 **無限の可能性を秘めたAIデスクトップコンパニオン！**
 
-#### デスクトップコンパニオン：カスタムVRMモデル、アクション、3Dシーンをサポートし、[live2D拡張](https://github.com/heshengtao/sap-live2d)にも対応しています。
+#### デスクトップコンパニオン：カスタムVRMモデル、アクション、3Dシーンをサポート（Live2Dの2Dモデルは下記のVTS連携をご利用ください）
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: Vtube StudioでLive2Dモデルを制御し、カスタムアクションや表情コントロールをサポート
@@ -215,7 +215,6 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
 | Super Agent Party Example With NodeJS | heshengtao        | NodeJS環境を使用したチャットフロントエンドのサンプル | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | Super Agent PartyにWebプレビュー機能を追加するプラグイン。 | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | AIを使用してストーリーコンテンツと選択肢を生成するインタラクティブなストーリーアドベンチャープラグイン。 | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Live 2D拡張機能                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | AIエディター       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | AIギャルゲー拡張機能     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | AIタロットリーダー拡張機能      | https://github.com/heshengtao/sap-tarot  |

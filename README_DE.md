@@ -57,7 +57,7 @@
 
 ### 🚀 **Ein KI-Desktop-Begleiter mit unendlichen Möglichkeiten!**
 
-#### Desktop-Begleiter: Unterstützt benutzerdefinierte VRM-Modelle, Aktionen, 3D-Szenen und ist kompatibel mit [live2D-Erweiterungen](https://github.com/heshengtao/sap-live2d)
+#### Desktop-Begleiter: Unterstützt benutzerdefinierte VRM-Modelle, Aktionen, 3D-Szenen (für Live2D-Modelle nutzen Sie bitte die VTS-Integration unten)
 ![image](doc/image/img-2/cover.jpeg)
 
 #### Link VTS: Steuern Sie Live2D-Modelle in Vtube Studio mit benutzerdefinierten Aktionen und Ausdruckssteuerung
@@ -216,7 +216,6 @@ Ein brandneues Erweiterungssystem wurde hinzugefügt. Sie können verfügbare Pl
 | Super Agent Party Example With NodeJS | heshengtao        | Ein Chat-Frontend-Beispiel mit NodeJS-Umgebung | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao        | Ein Plugin, das Web-Vorschaufunktionen für Super Agent Party ermöglicht. | https://github.com/heshengtao/sap-web-preview    |
 | Story Adventure       | heshengtao | Ein interaktives Story-Adventure-Plugin, das mit KI Geschichteninhalte und Optionen generiert. | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Eine Live-2D-Erweiterung                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | Ein KI-Editor       | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | Eine KI-Galgame-Erweiterung     | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | Eine KI-Tarotkartenleser-Erweiterung      | https://github.com/heshengtao/sap-tarot  |

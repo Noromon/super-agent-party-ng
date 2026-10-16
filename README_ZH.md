@@ -57,7 +57,7 @@
 
 ### 🚀 **一款拥有无限可能的AI桌面伴侣！**
 
-#### 桌面伴侣：支持自定义VRM模型、动作、3D场景，并支持[live2D扩展](https://github.com/heshengtao/sap-live2d)
+#### 桌面伴侣：支持自定义VRM模型、动作、3D场景（2D 形象请使用下方的 VTS 联动）
 ![image](doc/image/img-1/cover.jpeg)
 
 #### 链接VTS：控制Vtube studio中的live2d模型，支持自定义动作和表情控制
@@ -249,7 +249,6 @@ docker-compose -f docker-compose-acr.yml up -d
 | Super Agent Party Example With NodeJS | heshengtao        | 带nodeJS环境的Super Agent Party 的示例插件 | https://github.com/heshengtao/sap-example-with-node        |
 | Web Preview           | heshengtao         | 为 Super Agent Party 提供网页预览功能的插件。                        | https://github.com/heshengtao/sap-web-preview      |
 | Story Adventure       | heshengtao  | 一款利用 AI 生成故事内容和选项的交互式故事冒险插件。                   | https://github.com/heshengtao/sap-story-adventure  |
-| Live 2D      | heshengtao  | 一款live2d前端插件。                   | https://github.com/heshengtao/sap-live2d  |
 | AI Editor      | heshengtao  | 一款AI编辑器插件。                   | https://github.com/heshengtao/sap-aieditor  |
 | AI galgame      | heshengtao  | 一款AI galgame 插件。                   | https://github.com/heshengtao/sap-aigalgame  |
 | AI tarot reader      | heshengtao  | 一款AI 塔罗牌插件。                   | https://github.com/heshengtao/sap-tarot  |
