@@ -640,7 +640,7 @@ async def edit_file_patch_tool(path: str, old_string: str, new_string: str) -> s
         os.unlink(tmp_path)
         
         if cp_proc.returncode != 0: return "[Error] Patch copy failed."
-        return f"[Success] Patched '{path}'."
+        return f"[Success] Patched '{path}' (1 replacement).{_EDIT_CONTINUE_HINT}"
         
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
@@ -935,7 +935,7 @@ async def edit_file_tool(path: str, content: str) -> str:
         proc = await asyncio.create_subprocess_exec("docker", "cp", tmp_path, dest, stdout=asyncio.subprocess.PIPE)
         await proc.wait()
         os.unlink(tmp_path)
-        return f"[Success] Saved {path}"
+        return f"[Success] Saved {path}.{_EDIT_CONTINUE_HINT}"
     except Exception as e: return str(e)
 
 async def search_files_tool(pattern: str, path: str = ".") -> str:
@@ -1433,7 +1433,7 @@ async def edit_file_tool_local(path: str, content: str) -> str:
                 os.remove(temp_path)
             raise e
 
-        return f"Saved successfully{backup_msg}."
+        return f"[OK] Saved '{path}'{backup_msg}.{_EDIT_CONTINUE_HINT}"
 
     except Exception as e:
         return f"[Error] Edit failed: {str(e)}"
@@ -1564,6 +1564,13 @@ async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
     except Exception as e:
         return f"[Error] Glob failed: {str(e)}"
 
+_EDIT_CONTINUE_HINT = (
+    " Reminder: this single tool call only modified ONE spot in ONE file; "
+    "the overall user task is NOT necessarily finished now. "
+    "If any requirement, file edit, or verification step is still pending, continue with your next tool call immediately; "
+    "only summarize as completed after everything is verified."
+)
+
 async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str) -> str:
     """[Local] 精确替换：自动处理换行符差异 (CRLF/LF) 与空白字符容错"""
     try:
@@ -1573,45 +1580,57 @@ async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str
         if not target.exists():
             return f"[Error] File not found: {path}"
 
-        # 读取文件内容
-        async with aiofiles.open(target, 'r', encoding='utf-8') as f:
+        # 读取文件内容 (newline='' 保留原始换行符，读写全程不做隐式转换)
+        async with aiofiles.open(target, 'r', encoding='utf-8', newline='') as f:
             content = await f.read()
 
         # --- 策略 1: 直接替换 (最快) ---
         if old_string in content:
-            new_content = content.replace(old_string, new_string, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
+            # 文件是 CRLF 而 new_string 带裸 LF 换行时，把 new_string 转成 CRLF，避免混入异体换行
+            new_part = new_string
+            if '\r\n' in content and '\r\n' not in new_string and '\n' in new_string:
+                new_part = new_string.replace('\n', '\r\n')
+            new_content = content.replace(old_string, new_part, 1)
+            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
                 await f.write(new_content)
-            return "Patched successfully (Exact match)."
+            return f"Patched '{path}' successfully (exact match, 1 replacement).{_EDIT_CONTINUE_HINT}"
 
-        # --- 策略 2: 归一化换行符后替换 (处理 Windows/Linux 差异) ---
-        # 将所有 \r\n 转换为 \n 进行比对
-        content_normalized = content.replace('\r\n', '\n')
+        # --- 策略 2: 换行符风格适配替换 (不破坏原文件其余部分的换行风格) ---
         old_normalized = old_string.replace('\r\n', '\n')
         new_normalized = new_string.replace('\r\n', '\n')
 
-        if old_normalized in content_normalized:
-            # 这里的难点是：如果我们在 normalized 版本中替换了，
-            # 我们需要把写回的内容最好保持原文件的换行符风格。
-            # 简单起见，我们统一写回 normalized 的内容 (Python write 通常会自动处理 OS 换行)
-            new_content_normalized = content_normalized.replace(old_normalized, new_normalized, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
-                await f.write(new_content_normalized)
-            return "Patched successfully (Normalized line endings match)."
+        # 2a: 文件是 CRLF，把 old/new 转成 CRLF 后在原始内容上替换，原文件换行风格保持不变
+        if '\r\n' in content and '\r\n' not in old_string:
+            old_crlf = old_normalized.replace('\n', '\r\n')
+            new_crlf = new_normalized.replace('\n', '\r\n')
+            if old_crlf in content:
+                new_content = content.replace(old_crlf, new_crlf, 1)
+                async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
+                    await f.write(new_content)
+                return f"Patched '{path}' successfully (CRLF line endings matched, original style preserved, 1 replacement).{_EDIT_CONTINUE_HINT}"
 
-        # --- 策略 3: 容错匹配 (忽略行尾空格) ---
-        # 如果还是找不到，尝试逐行对比，忽略 strip() 后的差异
-        lines = content.splitlines()
+        # 2b: old_string 带 CRLF 而文件是 LF（或混合换行），归一化后替换
+        content_normalized = content.replace('\r\n', '\n')
+        if old_normalized in content_normalized:
+            new_content_normalized = content_normalized.replace(old_normalized, new_normalized, 1)
+            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
+                await f.write(new_content_normalized)
+            how = "line endings normalized to LF for match, whole file now LF" if '\r\n' in content else "exact match after whitespace/line-ending normalization"
+            return f"Patched '{path}' successfully ({how}, 1 replacement).{_EDIT_CONTINUE_HINT}"
+
+        # --- 策略 3: 容错匹配 (忽略行尾空格与缩进差异) ---
+        # 逐行对比，忽略 strip() 后的差异；替换时保留文件其余部分的原样与首尾完整性
+        lines_kept = content.splitlines(keepends=True)
         old_lines = old_string.splitlines()
         
         if not old_lines: return "[Error] old_string is empty."
 
         # 简单的滑动窗口匹配
         match_index = -1
-        for i in range(len(lines) - len(old_lines) + 1):
+        for i in range(len(lines_kept) - len(old_lines) + 1):
             match = True
             for j in range(len(old_lines)):
-                if lines[i+j].strip() != old_lines[j].strip():
+                if lines_kept[i+j].strip() != old_lines[j].strip():
                     match = False
                     break
             if match:
@@ -1619,31 +1638,34 @@ async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str
                 break
         
         if match_index != -1:
-            # 找到了逻辑上匹配的块，进行替换
-            # 注意：这里我们使用 new_string (保持 AI 生成的格式)
-            # 但我们需要小心缩进。这里假设 AI 提供了正确的 new_string 缩进。
-            pre_content = "\n".join(lines[:match_index])
-            post_content = "\n".join(lines[match_index + len(old_lines):])
+            # 找到了逻辑上匹配的块：只替换该块，前后内容按 keepends 原样保留，不做任何 strip
+            end_index = match_index + len(old_lines)
+            replaced_text = "".join(lines_kept[match_index:end_index])
+            # 新块沿用被替换块所在处的换行风格
+            ref_line = lines_kept[match_index]
+            eol = '\r\n' if ref_line.endswith('\r\n') else '\n'
+            new_block = new_normalized.replace('\n', eol)
+            if replaced_text.endswith(('\n', '\r')) and not new_block.endswith(('\n', '\r')):
+                new_block += eol
+            final_content = "".join(lines_kept[:match_index]) + new_block + "".join(lines_kept[end_index:])
             
-            # 拼接时要注意原文件的换行符，这里简化为 \n
-            final_content = (pre_content + "\n" + new_string + "\n" + post_content).strip()
-            
-            async with aiofiles.open(target, 'w', encoding='utf-8') as f:
+            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
                 await f.write(final_content)
-            return "Patched successfully (Fuzzy match: ignored whitespace/indentation differences)."
+            return f"Patched '{path}' successfully (fuzzy match: whitespace/indentation differences ignored, 1 replacement).{_EDIT_CONTINUE_HINT}"
 
         # --- 失败：提供详细诊断信息 ---
         # 帮助 AI 找到它可能想改的地方
         first_line = old_lines[0].strip()[:50]
         candidates = []
-        for i, line in enumerate(lines):
-            if first_line in line.strip():
+        for i, line in enumerate(lines_kept):
+            if first_line and first_line in line.strip():
                 candidates.append(f"Line {i+1}: {line.strip()[:80]}")
         
-        error_msg = f"[Error] old_string not found in '{path}'.\n"
+        error_msg = f"[Error] Patch NOT applied: old_string not found in '{path}'. No changes were made.\n"
         error_msg += "Check line endings or indentation.\n"
         if candidates:
-            error_msg += "Did you mean one of these locations?\n" + "\n".join(candidates[:3])
+            error_msg += "Did you mean one of these locations?\n" + "\n".join(candidates[:3]) + "\n"
+        error_msg += "Re-read the file to get the exact current content, then retry the patch."
             
         return error_msg
 
@@ -2040,7 +2062,7 @@ TOOLS_REGISTRY = {
     "edit_file": {
         "type": "function", "function": {
             "name": "edit_file_tool", 
-            "description": "Overwrite file.",
+            "description": "Overwrite a workspace file with the full new content. Success here only means this one file was saved - continue the remaining task steps and verify results before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2057,7 +2079,7 @@ TOOLS_REGISTRY = {
     "edit_file_patch": {
         "type": "function", "function": {
             "name": "edit_file_patch_tool", 
-            "description": "Precise replacement.",
+            "description": "Replace one exact occurrence of old_string with new_string in a file. One call patches one spot only: a successful patch does NOT mean the overall task is done - continue remaining steps and verify (re-read or test) before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2304,7 +2326,7 @@ LOCAL_TOOLS_REGISTRY = {
     "edit_file_local": {
         "type": "function", "function": {
             "name": "edit_file_tool_local", 
-            "description": "Write local file.",
+            "description": "Overwrite a local file with the full new content. Success here only means this one file was saved - continue the remaining task steps and verify results before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2321,7 +2343,7 @@ LOCAL_TOOLS_REGISTRY = {
     "edit_file_patch_local": {
         "type": "function", "function": {
             "name": "edit_file_patch_tool_local", 
-            "description": "Patch local file.",
+            "description": "Replace one exact occurrence of old_string with new_string in a local file. One call patches one spot only: a successful patch does NOT mean the overall task is done - continue remaining steps and verify (re-read or test) before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {

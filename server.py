@@ -350,8 +350,12 @@ if hasattr(sys, '_MEIPASS'):
     os.environ['PYTHONPATH'] = sys._MEIPASS
     os.environ['PATH'] = sys._MEIPASS + os.pathsep + os.environ.get('PATH', '')
 import asyncio
+import contextvars
 import copy
 from functools import partial
+
+# 用于在工具调用时传递当前对话上下文（特别是 review_image 工具需要）
+current_request_messages = contextvars.ContextVar('current_request_messages', default=None)
 import json
 import re
 import shutil
@@ -852,6 +856,20 @@ async def lifespan(app: FastAPI):
     else:
         asyncio.create_task(ws_manager.broadcast_settings_update(settings or {}))
 
+    # --- [心跳维持机制] ---
+    async def heartbeat_loop():
+        try:
+            while True:
+                await asyncio.sleep(10)  # 心跳间隔10秒，必须在uvicorn ws_ping_interval(20s)内完成，防止1006断开
+                await ws_manager.send_heartbeat()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Heartbeat loop error: {e}")
+
+    heartbeat_task = asyncio.create_task(heartbeat_loop())
+    logger.info("WebSocket heartbeat task started")
+
     # --- [启动完成] ---
     yield
 
@@ -863,6 +881,12 @@ async def lifespan(app: FastAPI):
         print("🛡️ 防休眠保护已停止，系统将恢复正常休眠策略")
     except Exception as e:
         print(f"防休眠停止异常: {e}")
+
+    if 'heartbeat_task' in locals() or 'heartbeat_task' in globals(): # 简单的清理检查
+        try:
+            # 因为 heartbeat_task 是在 lifespan 作用域内定义的，这里需要正确引用
+            pass 
+        except: pass
 
     if scheduler_task:
         scheduler_task.cancel()
@@ -995,8 +1019,265 @@ async def get_image_content(image_url: str) -> str:
                 f.write(str(response.choices[0].message.content))
     return content
 
+async def analyze_image(image_url: str, prompt: str) -> str:
+    """针对特定提示词分析图像，不使用通用描述缓存"""
+    settings = await load_settings()
+    base64_image = await get_image_base64(image_url)
+    media_type = await get_image_media_type(image_url)
+    url = f"data:{media_type};base64,{base64_image}"
+    
+    if settings['vision']['enabled']:
+        client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
+        extra = {}
+        if settings['vision']['temperature'] != 1:
+            extra['temperature'] = settings['vision']['temperature']
+        
+        response = await client.chat.completions.create(
+            model=settings['vision']['model'],
+            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
+            **extra
+        )
+        return response.choices[0].message.content
+    else:
+        client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
+        extra = {}
+        if settings['temperature'] != 1:
+            extra['temperature'] = settings['temperature']
+        response = await client.chat.completions.create(
+            model=settings['model'],
+            messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
+            **extra
+        )
+        return response.choices[0].message.content
+
+async def analyze_images(image_urls: list, prompt: str) -> str:
+    """一次性将多张图片交给VLM联合分析或比较，每张图前附序号标记便于模型指代"""
+    settings = await load_settings()
+    if not image_urls:
+        return "错误：image_urls 不能为空"
+    content = [{"type": "text", "text": prompt}]
+    for index, image_url in enumerate(image_urls, start=1):
+        base64_image = await get_image_base64(image_url)
+        media_type = await get_image_media_type(image_url)
+        content.append({"type": "text", "text": f"【第{index}张图】"})
+        content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{base64_image}"}})
+
+    if settings['vision']['enabled']:
+        client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
+        extra = {}
+        if settings['vision']['temperature'] != 1:
+            extra['temperature'] = settings['vision']['temperature']
+        response = await client.chat.completions.create(
+            model=settings['vision']['model'],
+            messages=[{"role": "user", "content": content}],
+            **extra
+        )
+        return response.choices[0].message.content
+    else:
+        client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
+        extra = {}
+        if settings['temperature'] != 1:
+            extra['temperature'] = settings['temperature']
+        response = await client.chat.completions.create(
+            model=settings['model'],
+            messages=[{"role": "user", "content": content}],
+            **extra
+        )
+        return response.choices[0].message.content
+
+async def review_image(image_url: str, prompt: str) -> str:
+    """基于对话上下文审查图像，使VLM像读连环画一样理解图像在对话中的位置和意义
+    
+    截断行为由 vision.contextTruncation 配置控制：
+    - False（默认）：完整传递对话历史，不做任何截断。适用于本地部署等不在意token数的场景。
+    - True：启用截断以节省token。会剥离思考内容，限制历史条数，截断过长消息。
+    """
+    settings = await load_settings()
+    base64_image = await get_image_base64(image_url)
+    media_type = await get_image_media_type(image_url)
+    url = f"data:{media_type};base64,{base64_image}"
+    
+    # 读取截断配置，默认不截断（完整传递上下文，审查质量最高）
+    vision_cfg = settings.get('vision', {})
+    context_truncation = vision_cfg.get('contextTruncation', False)
+    
+    # 从 contextvars 获取当前对话历史
+    raw_messages = current_request_messages.get() or []
+    
+    # 构建上下文消息：只保留文本，去除图片以节省token
+    context_messages = [
+        {"role": "system", "content": "你是一个图像审查助手。你需要基于对话上下文来审查图像是否符合要求。以下是之前的对话历史，请结合上下文理解当前图像的意义："}
+    ]
+    
+    if context_truncation:
+        # ===== 截断模式：节省token，适合云端API =====
+        # 限制历史长度
+        recent_messages = raw_messages[-20:] if len(raw_messages) > 20 else raw_messages
+        for msg in recent_messages:
+            content = msg.get('content', '')
+            role = msg.get('role', '')
+            if role not in ('user', 'assistant'):
+                continue
+            # 如果content是list（图文混合），只提取文本部分
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+                content = '\n'.join(text_parts)
+            if content and isinstance(content, str) and content.strip():
+                # 剥离思考内容（深度思考模式下，思考过程可能很长但审查图像通常不需要看AI的内心独白）
+                # 匹配 <think>...</think> 或 ༞...༎ 或 <thought>...</thought> 等常见思考标签
+                content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+                content = re.sub(r'༎.*?༎', '', content, flags=re.DOTALL)
+                content = re.sub(r'<thought>.*?</thought>', '', content, flags=re.DOTALL)
+                content = content.strip()
+                # 截断过长的单条消息
+                if len(content) > 500:
+                    content = content[:500] + "...(已截断)"
+                if content:
+                    context_messages.append({"role": role, "content": content})
+    else:
+        # ===== 完整模式（默认）：不截断，完整传递上下文 =====
+        # 适用于本地部署等不在意token数的场景，审查质量最高
+        for msg in raw_messages:
+            content = msg.get('content', '')
+            role = msg.get('role', '')
+            if role not in ('user', 'assistant'):
+                continue
+            # 如果content是list（图文混合），只提取文本部分（图片已单独传给VLM，无需重复）
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+                content = '\n'.join(text_parts)
+            if content and isinstance(content, str) and content.strip():
+                context_messages.append({"role": role, "content": content})
+    
+    # 添加实际的审查请求（带图片）
+    context_messages.append({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": url}}
+        ]
+    })
+    
+    # 调用VLM
+    if settings['vision']['enabled']:
+        client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
+        extra = {}
+        if settings['vision']['temperature'] != 1:
+            extra['temperature'] = settings['vision']['temperature']
+        response = await client.chat.completions.create(
+            model=settings['vision']['model'],
+            messages=context_messages,
+            **extra
+        )
+        return response.choices[0].message.content
+    else:
+        client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
+        extra = {}
+        if settings['temperature'] != 1:
+            extra['temperature'] = settings['temperature']
+        response = await client.chat.completions.create(
+            model=settings['model'],
+            messages=context_messages,
+            **extra
+        )
+        return response.choices[0].message.content
+
 # 存储等待中的MCP调用结果
 mcp_call_results: Dict[str, asyncio.Future] = {}
+
+# ==================== 断点续传：活跃流缓存 ====================
+# 结构: {stream_id: {"buffer": [str, ...], "done": bool, "error": str|None, "new_data": asyncio.Event, "created_at": float, "consumer_count": int}}
+_active_streams: Dict[str, dict] = {}
+_active_streams_lock = asyncio.Lock()
+
+async def _stream_producer_wrapper(stream_id: str, gen):
+    """
+    包装原始 stream_generator，作为生产者：
+    - 将每个 yield 的 SSE 字符串写入 buffer
+    - 生成结束/出错时标记 done/error
+    - 捕获 GeneratorExit，确保消费者断开不会终止生产者
+    """
+    entry = _active_streams[stream_id]
+    try:
+        async for sse_chunk in gen:
+            entry["buffer"].append(sse_chunk)
+            await asyncio.sleep(0)
+        entry["done"] = True
+    except GeneratorExit:
+        # 消费者断开不应终止生产者，标记完成即可
+        entry["done"] = True
+        logger.info(f"Stream producer {stream_id} received GeneratorExit, marking done")
+    except asyncio.CancelledError:
+        # 生产者被显式取消（如清理），标记完成
+        entry["done"] = True
+        raise
+    except Exception as e:
+        entry["error"] = str(e)
+        entry["done"] = True
+        logger.error(f"Stream producer {stream_id} error: {e}")
+    finally:
+        entry["done"] = True
+
+
+async def _stream_consumer_generator(stream_id: str, from_index: int = 0):
+    """
+    消费者生成器：从 buffer[from_index] 开始读取并 yield。
+    使用轮询方式等待生产者产出新数据，避免 Event 引用失效问题。
+    在等待新数据时定期发送 SSE 心跳注释，保持连接活跃。
+    """
+    entry = _active_streams[stream_id]
+    idx = from_index
+    _heartbeat_counter = 0
+    try:
+        while True:
+            buf = entry["buffer"]
+            # 消费所有已缓存但未读的 chunk
+            while idx < len(buf):
+                yield buf[idx]
+                idx += 1
+                await asyncio.sleep(0)
+            # 如果生产者已完成且无更多数据，退出
+            if entry["done"]:
+                break
+            # 短暂等待后重新检查（轮询，50ms 间隔）
+            await asyncio.sleep(0.05)
+            # 每 3 秒发送一次 SSE 心跳注释，防止浏览器/代理超时关闭连接
+            _heartbeat_counter += 1
+            if _heartbeat_counter >= 60:  # 60 * 0.05s = 3s
+                _heartbeat_counter = 0
+                yield ": heartbeat\n\n"
+        # 最终确保消费完所有
+        buf = entry["buffer"]
+        while idx < len(buf):
+            yield buf[idx]
+            idx += 1
+    except asyncio.CancelledError:
+        # 消费者被取消（客户端断开），不删除缓存，生产者继续
+        pass
+
+
+
+async def _cleanup_stream(stream_id: str, delay: float = 30.0):
+    """延迟清理已完成的流缓存，给客户端足够的重连时间"""
+    await asyncio.sleep(delay)
+
+    async with _active_streams_lock:
+        entry = _active_streams.get(stream_id)
+        if entry and entry.get("consumer_count", 0) <= 0:
+            # 取消可能仍在运行的生产者任务
+            task = entry.get("task")
+            if task and not task.done():
+                task.cancel()
+            _active_streams.pop(stream_id, None)
+            logger.info(f"Stream {stream_id} cache cleaned up")
+
+
 
 async def call_node_extension_tool(ext_id: str, tool_name: str, tool_params: dict) -> str:
     """通过WebSocket调用Node扩展的工具"""
@@ -1166,6 +1447,9 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "pollinations_image":pollinations_image,
         "get_file_content":get_file_content,
         "get_image_content": get_image_content,
+        "analyze_image": analyze_image,
+        "review_image": review_image,
+        "analyze_images": analyze_images,
         "e2b_code": e2b_code,
         "local_run_code": local_run_code,
         "openai_image": openai_image,
@@ -1463,8 +1747,12 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         
     tool_call = _TOOL_HOOKS[tool_name]
     try:
-        if tool_name in ("acpx_agent", "shell_tool_local", "docker_sandbox"):
+        if tool_name in ("shell_tool_local", "docker_sandbox"):
+            # 异步生成器：调用即返回 AsyncIterator，无需 await
             return tool_call(**tool_params)
+        if tool_name == "acpx_agent":
+            # 常规异步函数：必须 await 才能获得实际结果
+            return await tool_call(**tool_params)
 
         ret_out = await tool_call(**tool_params)
         if tool_name == "auto_behavior":
@@ -2997,6 +3285,19 @@ def get_tcs(m):
     if get_role(m) != "assistant": return None
     return m.get("tool_calls") if isinstance(m, dict) else getattr(m, "tool_calls", None)
 
+RESUME_NUDGE_TEXT = (
+    "【系统提示】上面的工具结果已收到。工具的“成功”仅代表这一处操作完成，"
+    "不代表用户的原始任务已全部完成。如果任务仍有未完成的步骤（继续修改、读回验证、运行测试等），"
+    "请立即继续调用工具执行；只有在确认全部完成并验证后，才向用户做最终总结。"
+)
+
+def append_resume_nudge(messages):
+    """恢复续跑 nudge：当请求历史以 tool 结果结尾（审批通过后手动执行工具再恢复的典型场景）时，
+    追加一条“继续推进”指令，防止模型把成功的工具结果当成最终报告直接收尾。"""
+    if messages and get_role(messages[-1]) == "tool":
+        messages.append({"role": "user", "content": RESUME_NUDGE_TEXT})
+    return messages
+
 # =========================================================================
 # 第三阶段：思考模式字段填充 (Thinking Mode Sanitizer)
 # 目标：防止 "reasoning_content must be passed back" 错误
@@ -3030,6 +3331,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
     try:
         from mem0 import Memory
         global mcp_client_list, HA_client, ChromeMCP_client, sql_client
+        
+        # 设置对话上下文，供 review_image 等工具使用
+        current_request_messages.set(request.messages)
         
         DRS_STAGE = 1
         if len(request.messages) > 2:
@@ -3252,7 +3556,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # =========================================================================
         images = await images_in_messages(request.messages,fastapi_base_url)
         request.messages = await message_without_images(request.messages)
-        from py.load_files import get_files_content,file_tool,image_tool
+        from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool
         from py.web_search import (
             DDGsearch, 
             searxng, 
@@ -3452,6 +3756,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         if settings['tools']['getFile']['enabled']:
             tools.append(file_tool)
             tools.append(image_tool)
+            tools.append(analyze_image_tool)
+            tools.append(review_image_tool)
+            tools.append(analyze_images_tool)
         if settings['tools']['autoBehavior']['enabled'] and request.messages[-1]['role'] == 'user':
             tools.append(auto_behavior_tool)
         if settings["codeSettings"]['enabled']:
@@ -3615,6 +3922,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
+        append_resume_nudge(request.messages)
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'
         for modelProvider in settings['modelProviders']: 
@@ -4197,9 +4505,13 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 search_not_done = False
                 search_task = ""
                 is_tool_call = False
+                _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
                 async for chunk in response:
                     if not chunk.choices:
                         continue
+                    _chunk_count += 1
+                    if _chunk_count % 5 == 0:
+                        await asyncio.sleep(0)  # 定期让出控制权，让事件循环处理WebSocket ping
                     choice = chunk.choices[0]
                     if choice.delta.tool_calls:  # function_calling
                         is_tool_call = True
@@ -4541,7 +4853,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 }
                             results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation." # 保持原样
                         else:
+                            await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
                             results = await dispatch_tool(response_content.name, first_arg, settings)
+                            await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
 
                         if results is None:
                             # 保持原样，但建议加上 ID
@@ -4998,9 +5312,13 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         **extra
                     )
                     tool_calls = []
+                    _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
                     async for chunk in response:
                         if not chunk.choices:
                             continue
+                        _chunk_count2 += 1
+                        if _chunk_count2 % 5 == 0:
+                            await asyncio.sleep(0)  # 定期让出控制权，防止事件循环饥饿导致1006断开
                         if chunk.choices:
                             choice = chunk.choices[0]
                             if hasattr(choice.delta, "audio") and choice.delta.audio:
@@ -5338,17 +5656,61 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 yield "data: [DONE]\n\n"  # 确保最终结束
                 return
         
-        return StreamingResponse(
-            stream_generator(user_prompt, DRS_STAGE, tools, images),
-            media_type="text/event-stream",
-            headers={
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+        # 检查是否启用断点续传
+        enable_stream_resume = settings.get('enableStreamResume', True)
+        
+        if enable_stream_resume:
+            # 生产者/消费者解耦模式：客户端断开后生成器继续运行
+            stream_id = str(uuid.uuid4())
+            _active_streams[stream_id] = {
+                "buffer": [],
+                "done": False,
+                "error": None,
+                "created_at": time.time(),
+                "consumer_count": 1,
+                "task": None,
             }
-        )
+            # 启动生产者后台任务
+            # 关键：必须将 task 引用保存到字典中，否则会被 Python GC 回收，
+            # 导致 stream_generator 中的 httpx 流式请求中途被中断！
+            _active_streams[stream_id]["task"] = asyncio.create_task(
+                _stream_producer_wrapper(
+                    stream_id,
+                    stream_generator(user_prompt, DRS_STAGE, tools, images)
+                )
+            )
+
+            
+            async def _first_frame_consumer():
+                """消费者：先发 stream_id 元数据帧，再转发实际内容"""
+                meta_chunk = {"choices": [{"delta": {"stream_id": stream_id}}]}
+                yield f"data: {json.dumps(meta_chunk)}\n\n"
+                async for chunk in _stream_consumer_generator(stream_id, 0):
+                    yield chunk
+            
+            return StreamingResponse(
+                _first_frame_consumer(),
+                media_type="text/event-stream",
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Stream-Id": stream_id,
+                }
+            )
+        else:
+            return StreamingResponse(
+                stream_generator(user_prompt, DRS_STAGE, tools, images),
+                media_type="text/event-stream",
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
     except Exception as e:
         logger.error(f"Error occurred: {e}")
+
         # 如果e.status_code存在，则使用它作为HTTP状态码，否则使用500
         return JSONResponse(
             status_code=getattr(e, "status_code", 500),
@@ -5358,6 +5720,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 async def generate_complete_response(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
     from mem0 import Memory
     global mcp_client_list,HA_client,ChromeMCP_client,sql_client
+    
+    # 设置对话上下文，供 review_image 等工具使用
+    current_request_messages.set(request.messages)
+    
     DRS_STAGE = 1 # 1: 明确用户需求阶段 2: 工具调用阶段 3: 生成结果阶段
     if len(request.messages) > 2:
         DRS_STAGE = 2
@@ -5465,7 +5831,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         request.messages = ensure_thinking_fields(request.messages)
         # =========================================================================
 
-    from py.load_files import get_files_content,file_tool,image_tool
+    from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool
     from py.web_search import (
         DDGsearch, 
         searxng, 
@@ -5638,6 +6004,9 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
     if settings['tools']['getFile']['enabled']:
         tools.append(file_tool)
         tools.append(image_tool)
+        tools.append(analyze_image_tool)
+        tools.append(review_image_tool)
+        tools.append(analyze_images_tool)
     if settings['tools']['autoBehavior']['enabled'] and request.messages[-1]['role'] == 'user':
         tools.append(auto_behavior_tool)
     if settings["codeSettings"]['enabled']:
@@ -5837,6 +6206,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
+        append_resume_nudge(request.messages)
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'
         for modelProvider in settings['modelProviders']: 
@@ -6551,6 +6921,9 @@ async def execute_tool_manually(request: Request):
         "pollinations_image":pollinations_image,
         "get_file_content":get_file_content,
         "get_image_content": get_image_content,
+        "analyze_image": analyze_image,
+        "review_image": review_image,
+        "analyze_images": analyze_images,
         "e2b_code": e2b_code,
         "local_run_code": local_run_code,
         "openai_image": openai_image,
@@ -6652,11 +7025,15 @@ async def execute_tool_manually(request: Request):
     tool_func = _TOOL_HOOKS[tool_name]
     
     try:
-        if tool_name in ("acpx_agent", "shell_tool_local", "docker_sandbox"):
-            return tool_func(**tool_params)
-
-        # 2. 执行工具
-        result = await tool_func(**tool_params)
+        if tool_name in ("shell_tool_local", "docker_sandbox"):
+            # 异步生成器：调用即返回 AsyncIterator，无需 await
+            result = tool_func(**tool_params)
+        elif tool_name == "acpx_agent":
+            # 常规异步函数：必须 await 才能获得实际结果
+            result = await tool_func(**tool_params)
+        else:
+            # 2. 执行工具
+            result = await tool_func(**tool_params)
         
         # 3. 处理流式输出 (AsyncIterator)
         # 如果是流，我们需要将其消耗完合并成字符串返回给前端一次性显示
@@ -7036,8 +7413,53 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": {"message": str(e), "type": "server_error", "code": 500}})
 
+class StreamResumeRequest(BaseModel):
+    stream_id: str
+    from_index: int = 0
+
+@app.post("/v1/chat/resume")
+async def resume_stream_endpoint(req: StreamResumeRequest):
+    """
+    断点续传端点：客户端 SSE 连接中断后，通过此端点恢复接收剩余的流内容。
+    后端生产者仍在后台运行（如果尚未完成），此端点作为新的消费者从 buffer[from_index] 开始读取。
+    """
+    stream_id = req.stream_id
+    from_index = req.from_index
+
+    entry = _active_streams.get(stream_id)
+    if not entry:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Stream not found or expired", "stream_id": stream_id}
+        )
+
+    # 增加消费者计数
+    entry["consumer_count"] = entry.get("consumer_count", 0) + 1
+
+    async def _resume_consumer():
+        try:
+            async for chunk in _stream_consumer_generator(stream_id, from_index):
+                yield chunk
+        finally:
+            entry["consumer_count"] = max(0, entry.get("consumer_count", 0) - 1)
+            # 如果生产者已完成且没有其他消费者，延迟清理
+            if entry["done"] and entry["consumer_count"] <= 0:
+                asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
+
+    return StreamingResponse(
+        _resume_consumer(),
+        media_type="text/event-stream",
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Stream-Id": stream_id,
+        }
+    )
+
 @app.post("/simple_chat")
 async def simple_chat_endpoint(request: ChatRequest):
+
     """
     同时支持流式(stream=true)与非流式(stream=false)
     默认使用 fast_client 以提高响应速度
@@ -11218,14 +11640,34 @@ async def websocket_endpoint(websocket: WebSocket):
         # 3. 消息处理循环
         while True:
             try:
-                data = await websocket.receive_json()
+                # ✨ 核心修复：添加接收超时，防止无限阻塞在已死亡的连接上
+                # 超时后主动探测连接是否还活着，避免事件循环饥饿时无法感知断开
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=120.0)
+            except asyncio.TimeoutError:
+                # 客户端长时间没发消息，主动探测连接是否还活着
+                try:
+                    await ws_manager.send_json({"type": "ping"}, websocket)
+                except Exception:
+                    print(f"[WS] Ping probe failed for {connection_id}, connection is dead")
+                    break
+                continue
+            except WebSocketDisconnect as e:
+                print(f"[WS] Client {connection_id} disconnected with code={e.code} reason={e.reason or ''}")
+                # 1006 = 异常关闭（无close frame），通常意味着连接被中间代理/网络层切断
+                if e.code == 1006:
+                    logger.warning(f"[WS] Client {connection_id} 异常断开(1006)，可能原因：心跳超时/事件循环饥饿/网络中断")
+                break
             except RuntimeError as e:
-                # ✨ 核心修复：捕获“接收已断开连接的消息”错误
+                # ✨ 核心修复：捕获"接收已断开连接的消息"错误
                 if "receive" in str(e):
+                    print(f"[WS] Client {connection_id} RuntimeError on receive: {e}")
                     break # 退出循环
                 raise e # 其他运行时错误继续抛出
             
             msg_type = data.get("type")
+            
+            # 定期让出控制权，确保事件循环能处理WebSocket ping/pong和心跳
+            await asyncio.sleep(0)
             
             if msg_type == "ping":
                 await ws_manager.send_json({"type": "pong"}, websocket)
@@ -11287,9 +11729,11 @@ async def websocket_endpoint(websocket: WebSocket):
             
             elif msg_type == "set_user_input":
                 user_input = data.get("data", {}).get("text", "")
+                # [XMPP Bridge] 透传扩展注入的图片附件（已上传到 uploaded_files，形如 {path, name, type}）
+                extension_images = data.get("data", {}).get("images") or []
                 await ws_manager.broadcast({
                     "type": "update_user_input",
-                    "data": {"text": user_input}
+                    "data": {"text": user_input, "images": extension_images}
                 })
 
             elif msg_type == "set_system_prompt":
@@ -11500,9 +11944,14 @@ if __name__ == "__main__":
     print(f"📖 API 文档地址: http://{display_host}:{PORT}/docs") # 如果是 FastAPI
     print("="*50 + "\n")
 
-    uvicorn.run(
+    # 使用 uvicorn.Config + uvicorn.Server 方式启动，以支持 websocket_ping_interval 等高级参数
+    config = uvicorn.Config(
         app,
         host=HOST,
         port=PORT,
-        log_level="warning"
+        log_level="warning",
+        ws_ping_interval=20,   # 每20秒发送协议级ping，防止连接被静默断开
+        ws_ping_timeout=180,   # ping响应超时180秒才断开，给复杂任务的事件循环足够喘息时间（防止1006异常断开）
     )
+    server = uvicorn.Server(config)
+    asyncio.run(server.serve())

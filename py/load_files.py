@@ -731,16 +731,85 @@ image_tool = {
     "type": "function",
     "function": {
         "name": "get_image_content",
-        "description": f"获取给定的图片URL中的内容，无论是公网URL还是服务器内部URL（内部URL只支持查看/uploaded_files路由下的图片），支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "description": f"获取给定图片的内容，输入可以是公网URL、服务器内部URL（内部URL只支持查看/uploaded_files路由下的图片）或本机本地文件路径。本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
                 "image_url": {
                     "type": "string",
-                    "description": "图片URL",
+                    "description": "图片URL或本机本地文件路径（使用当前操作系统的原生风格书写，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
                 }
             },
             "required": ["image_url"],
+        },
+    },
+}
+
+analyze_image_tool = {
+    "type": "function",
+    "function": {
+        "name": "analyze_image",
+        "description": f"对给定的图片进行针对性的分析或验证。你可以提供具体的提示词来指引VLM关注图像的特定细节（如文字校验、物体识别、场景验证等）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "type": "string",
+                    "description": "图片URL或本机本地文件路径（使用当前操作系统的原生风格书写，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "分析指令，例如：'请检查图中的验证码文字是什么' 或 '确认图中是否包含红色的按钮'",
+                }
+            },
+            "required": ["image_url", "prompt"],
+        },
+    },
+}
+
+review_image_tool = {
+    "type": "function",
+    "function": {
+        "name": "review_image",
+        "description": f"基于对话上下文审查图像，使VLM像读连环画一样理解图像在对话中的位置和意义。与analyze_image不同，review_image会将当前对话历史作为上下文传递给VLM，使其能结合对话语境来理解图像。适用于需要根据对话上下文判断图像是否符合要求、验证生成结果等场景。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_url": {
+                    "type": "string",
+                    "description": "图片URL或本机本地文件路径（使用当前操作系统的原生风格书写，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "审查指令，例如：'请确认这张图片是否符合我之前描述的要求' 或 '结合上下文判断这张图是否正确'",
+                }
+            },
+            "required": ["image_url", "prompt"],
+        },
+    },
+}
+
+analyze_images_tool = {
+    "type": "function",
+    "function": {
+        "name": "analyze_images",
+        "description": f"将多张图片一次性交给VLM进行联合分析或比较，例如判断生成图中的角色与参考图中的角色是否为同一角色。可在提示词中用『第1张图』『第2张图』指代图片（顺序与image_urls列表一致）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "图片URL或本机本地文件路径组成的列表，每个元素的格式要求与analyze_image相同（公网URL、服务器内部URL（仅支持/uploaded_files路由）或本机原生风格路径，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "针对这组图片的联合分析或比较指令，例如：'请判断第1张图中的角色与第2、3张参考图中的角色是否为同一角色，对比发型、发色、服装、配饰等特征并说明依据'",
+                }
+            },
+            "required": ["image_urls", "prompt"],
         },
     },
 }

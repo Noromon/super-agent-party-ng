@@ -1311,7 +1311,7 @@ let vue_methods = {
       // --- 后处理 (MathJax & Mermaid) ---
       // 我们不再在 formatMessage 内部直接调用 MathJax，而是将其推入队列
       this.$nextTick(() => {
-        this.queueMathJax(index);
+        this.queueMathJax(index, content);
         this.initCopyButtons();
         this.initPreviewButtons();
         // Mermaid 也可以在这里懒加载
@@ -1332,20 +1332,19 @@ let vue_methods = {
     },
 
   // 3. MathJax 队列处理 (解决流式输出时的公式闪烁/报错)
-  queueMathJax(index) {
-    // 找到对应的 DOM 元素（假设您在 template 中给了消息容器一个 ID，如 id="msg-content-${index}"）
-    const element = document.getElementById(`message-content-${index}`);
-    if (!element) return;
-
-    // 将渲染任务加入队列
-    this.mathJaxQueue = this.mathJaxQueue.then(() => {
-      if (!window.MathJax) return Promise.resolve();
-      // 使用 typesetPromise 而不是 typeset
-      return window.MathJax.typesetPromise([element]).catch(err => {
-        // 忽略渲染过程中的临时错误（常见于流式传输公式未闭合时）
-        console.debug('MathJax rendering skipped:', err.message);
-      });
-    });
+  queueMathJax(index, content) {
+    // 仅当内容确实包含公式时才处理，避免流式期间每次更新都入队
+    const text = (typeof content === 'string' ? content : '') || '';
+    if (!/\$[^$\n]+\$|\\\[[\s\S]*?\\\]/.test(text)) return;
+    if (!window.MathJax) return;
+    if (!this.mathJaxTimers) this.mathJaxTimers = {};
+    // 每消息防抖：取消上一次待执行的 typeset，静默 300ms 后只执行一次（替代无限 Promise 链）
+    clearTimeout(this.mathJaxTimers[index]);
+    this.mathJaxTimers[index] = setTimeout(() => {
+      const element = document.getElementById(`message-content-${index}`);
+      if (!element) return;
+      window.MathJax.typesetPromise([element]).catch(err => { console.debug('MathJax rendering skipped:', err.message); });
+    }, 300);
   },
     formatMessageWrapper(content) {
         // 调用您现有的 formatMessage，这里传 index = -1 避免产生副作用（如 thinking 图标）
@@ -1816,6 +1815,13 @@ let vue_methods = {
       const ws_protocol = http_protocol === 'https:' ? 'wss:' : 'ws:';
       const ws_url = `${ws_protocol}//${window.location.host}/ws`;
 
+      // 【重连保护】如果已有旧连接，说明是重连而非首次连接
+      const isReconnect = !!this.ws;
+      if (isReconnect) {
+        this._isWsReconnect = true;
+        console.log('[WS] 检测到重连，将保护当前对话状态不被覆盖');
+      }
+
       this.ws = new WebSocket(ws_url);
 
       // 设置心跳间隔和重连间隔（单位：毫秒）
@@ -1943,6 +1949,26 @@ let vue_methods = {
           this.customHttpTools = data.data.custom_http || this.customHttpTools;
       }
       else if (data.type === 'settings') {
+          // 【重连保护】如果是重连，保护当前对话状态不被服务端全量覆盖
+          const isReconnect = this._isWsReconnect;
+          if (isReconnect) {
+            console.log('[WS] 重连模式：保护当前对话状态，仅同步非对话配置');
+            this._isWsReconnect = false;
+            // 【修复】重连后补发被缓存的扩展消息，确保插件收到完整回复
+            if (this._pendingExtensionMessage) {
+              setTimeout(() => {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                  try {
+                    this.ws.send(this._pendingExtensionMessage);
+                    this._pendingExtensionMessage = null;
+                    console.log('[WS] 重连后已补发缓存的扩展消息');
+                  } catch (e) {
+                    console.error('[WS] 补发缓存消息失败:', e);
+                  }
+                }
+              }, 500); // 延迟500ms确保连接稳定
+            }
+          }
           this.ensureConversationGroups();
           this.isdocker = data.data.isdocker || false;
           this.settings = {
@@ -1963,9 +1989,12 @@ let vue_methods = {
           this.showHistorySidebar = data.data.showHistorySidebar || false;
           this.system_prompt = data.data.system_prompt || '';
           this.SystemPromptsList = data.data.SystemPromptsList || [];
-          this.conversations = data.data.conversations || this.conversations;
-          this.conversationGroups = data.data.conversationGroups || this.conversationGroups;
-          this.conversationId = data.data.conversationId || this.conversationId;
+          // 【重连保护】重连时不覆盖对话数据，避免丢失正在进行的对话
+          if (!isReconnect) {
+            this.conversations = data.data.conversations || this.conversations;
+            this.conversationGroups = data.data.conversationGroups || this.conversationGroups;
+            this.conversationId = data.data.conversationId || this.conversationId;
+          }
           this.agents = data.data.agents || this.agents;
           this.mainAgent = data.data.mainAgent || this.mainAgent;
           this.qqBotConfig = data.data.qqBotConfig || this.qqBotConfig;
@@ -2029,7 +2058,10 @@ let vue_methods = {
               return existingButton;
             });
           }
-          this.loadConversation(this.conversationId);
+          // 【重连保护】重连时不重新加载对话，避免覆盖正在进行的 SSE 流消息
+          if (!isReconnect) {
+            this.loadConversation(this.conversationId);
+          }
           this.currentLanguage = data.data.currentLanguage || this.currentLanguage;
           this.mcpServers = data.data.mcpServers || this.mcpServers;
           this.a2aServers = data.data.a2aServers || this.a2aServers;
@@ -2094,6 +2126,11 @@ let vue_methods = {
         // 新增：处理用户输入更新
         else if (data.type === 'update_user_input') {
           this.userInput = data.data.text;
+          // [XMPP Bridge] 接收扩展注入的图片附件（已上传到 uploaded_files，形如 [{path, name, type}]）
+          const extImages = Array.isArray(data.data.images) ? data.data.images : [];
+          if (extImages.length > 0) {
+            this.extensionImageLinks = [...(this.extensionImageLinks || []), ...extImages];
+          }
         }
         // 更新或添加提示词
         else if (data.type === 'update_system_prompt') {
@@ -2263,19 +2300,28 @@ let vue_methods = {
         .replace(/'/g, "&#039;");
     },  
     // 新增：发送当前消息列表到所有连接的客户端
-    sendMessagesToExtension() {
+    sendMessagesToExtension(force) {
+      const now = Date.now();
+      if (!force && now - (this._lastExtSendTime || 0) < 500) return; // 流式期间节流：最多每 500ms 序列化一次
+      this._lastExtSendTime = now;
+      const payload = JSON.stringify({
+        type: 'broadcast_messages',
+        data: {
+          messages: this.messages,
+          conversationId: this.conversationId
+        }
+      });
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         try {
-          this.ws.send(JSON.stringify({
-            type: 'broadcast_messages',
-            data: {
-              messages: this.messages,
-              conversationId: this.conversationId
-            }
-          }));
+          this.ws.send(payload);
         } catch (e) {
           console.error('Failed to send messages to extension:', e);
+          // 发送失败也暂存，等重连后补发
+          this._pendingExtensionMessage = payload;
         }
+      } else {
+        // WS 未连接，暂存消息，等重连后补发
+        this._pendingExtensionMessage = payload;
       }
     },
     async syncSystemPromptToMessages(newPrompt) {
@@ -2357,9 +2403,11 @@ let vue_methods = {
     // ==========================================
     // 1. 用户动作入口与调度函数（可直接替换）
     // ==========================================
-    async sendMessage(role = 'user') { 
+    async sendMessage(role = 'user') {
+        // [XMPP Bridge] 扩展注入的图片附件（已上传到 uploaded_files，形如 [{path,name,type}]）
+        const hasExtensionImages = Array.isArray(this.extensionImageLinks) && this.extensionImageLinks.length > 0;
         // 基础校验
-        if (!this.userInput.trim() && (!this.files || this.files.length === 0) && (!this.images || this.images.length === 0)) return;
+        if (!this.userInput.trim() && (!this.files || this.files.length === 0) && (!this.images || this.images.length === 0) && !hasExtensionImages) return;
         if (this.isTyping) return;
         if (this.CLISettings.enabled) {
             const pathToCheck = this.CLISettings.cc_path;
@@ -2461,6 +2509,14 @@ let vue_methods = {
               } catch (error) { console.error(error); }
         }
 
+        // [XMPP Bridge] 合并扩展注入的图片附件（已上传到 SAP，无需再次上传），作为本次发言的附图传给 Agent
+        if (hasExtensionImages) {
+            const validExtLinks = this.extensionImageLinks.filter(l => l && typeof l.path === 'string' && /^https?:\/\//i.test(l.path));
+            if (validExtLinks.length > 0) {
+                imageLinks = [...imageLinks, ...validExtLinks];
+            }
+        }
+
         // --- 核心修复点：确保 this.fileLinks 是数组 ---
         if (!Array.isArray(this.fileLinks)) {
             this.fileLinks = []; 
@@ -2486,6 +2542,7 @@ let vue_methods = {
         this.sendMessagesToExtension();
         this.files = [];
         this.images = [];
+        this.extensionImageLinks = []; // [XMPP Bridge] 消费后清空注入附件，避免下次发言重复附图
         this.userInput = '';
         
         this.$nextTick(() => { this.requestScrollToBottom(); });
@@ -2759,7 +2816,7 @@ let vue_methods = {
                 throw new Error(errText);
             }
 
-            const reader = response.body.getReader();
+            let reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
 
@@ -2767,9 +2824,16 @@ let vue_methods = {
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
 
+            // === 断点续传：追踪 stream_id 和已处理 chunk 数量 ===
+            let _streamId = null;
+            let _chunkIndex = 0;
+            const _enableStreamResume = this.settings?.enableStreamResume !== false;
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+
+
                 buffer += decoder.decode(value, { stream: true });
 
                 while (buffer.includes('\n\n')) {
@@ -2784,7 +2848,15 @@ let vue_methods = {
                         const delta = parsed.choices?.[0]?.delta;
                         if (!delta) continue;
 
+                        // 断点续传：捕获 stream_id（后端首帧携带）
+                        if (delta.stream_id && !_streamId) {
+                            _streamId = delta.stream_id;
+                            continue;
+                        }
+                        _chunkIndex++;
+
                         if (currentMsg.content === '' && !isResume) {
+
                             this.stopTimer();
                             currentMsg.first_token_latency = this.elapsedTime;
                         }
@@ -2850,7 +2922,7 @@ let vue_methods = {
                             }
 
                             const b = getBlock('tool_call', toolCallId, progress.name);
-                            b.args = accArgs;
+                            b.args = this.truncateDisplayContent(accArgs);
                             // 不再生成 HTML 字符串
                             this.requestScrollToBottom();
                             continue;
@@ -2931,7 +3003,7 @@ let vue_methods = {
                                 
                                 // 截断显示内容（只影响 UI 显示）
                                 if (tool.type === 'call') {
-                                    targetBlock.args = tool.content;
+                                    targetBlock.args = this.truncateDisplayContent(tool.content);
                                 } else {
                                     targetBlock.content = this.truncateDisplayContent(tool.content);
                                 }
@@ -3020,7 +3092,29 @@ let vue_methods = {
         } catch (error) {
             console.error(error);
             if (error.name !== 'AbortError') {
+                // === 断点续传：如果是网络中断且后端支持续传，尝试自动恢复 ===
+                if (_enableStreamResume && _streamId && _chunkIndex > 0 && currentMsg && !currentMsg.generationFinished) {
+                    console.log(`[StreamResume] 网络中断，尝试断点续传: stream_id=${_streamId}, from_index=${_chunkIndex}`);
+                    const resumed = await this._resumeStream(
+                        _streamId, _chunkIndex, currentMsg, getBlock,
+                        isCodeBlock, tts_buffer, toolCallStack
+                    );
+                    if (resumed) {
+                        // 续传成功，更新 chunkIndex 并跳过错误处理
+                        _chunkIndex = resumed.newChunkIndex;
+                        _streamId = resumed.newStreamId || _streamId;
+                        // 续传成功后正常完成
+                        if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                        this.flushStreamTextBuffer();
+                        currentMsg.generationFinished = true;
+                        if (audioResolve) audioResolve();
+                        return; // 跳过 finally 中的错误处理
+                    }
+                    // 续传失败，回退到原有错误处理逻辑
+                    console.warn('[StreamResume] 断点续传失败，回退到错误处理');
+                }
                 showNotification(error.message, 'error');
+
                 const b = getBlock('error', 'err', 'System Error');
                 b.content = this.truncateDisplayContent(error.message);
                 if (currentMsg) {
@@ -3116,6 +3210,10 @@ let vue_methods = {
             }
 
             this.saveConversations();
+
+            // 【修复】流完成后强制广播最终消息状态，确保插件收到完整回复
+            // 即使流末尾的 chunk 调用因 WS 断线被暂存，此处也会补发或排队
+            this.sendMessagesToExtension(true);
 
             if (this.ttsSettings.enabled && audioProcess) {
                 await audioProcess;
@@ -3753,8 +3851,189 @@ let vue_methods = {
         this.abortController = null;
       }
     },
+    /**
+     * 断点续传：SSE 连接中断后，调用 /v1/chat/resume 恢复接收剩余内容
+     * 复用现有的 SSE 解析逻辑，继续追加到 currentMsg
+     */
+    async _resumeStream(streamId, fromIndex, currentMsg, getBlock, isCodeBlock, tts_buffer, toolCallStack) {
+        const maxRetries = 3;
+        const baseDelay = 1000;
+        let currentFromIndex = fromIndex; // 跨重试追踪，避免重复处理 chunk
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            let chunkIndex = currentFromIndex; // 声明在 try 外部，使 catch 可访问
+            try {
+                const delay = baseDelay * Math.pow(2, attempt);
+                if (attempt > 0) {
+                    console.log(`[StreamResume] 第 ${attempt + 1} 次重试，从 index=${currentFromIndex} 恢复，等待 ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                }
+
+                // 添加超时保护，防止 resume 连接永久挂起
+                const resumeController = new AbortController();
+                const timeoutId = setTimeout(() => resumeController.abort(), 60000);
+
+                const resumeResponse = await fetch('/v1/chat/resume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stream_id: streamId, from_index: currentFromIndex }),
+                    signal: resumeController.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!resumeResponse.ok) {
+                    console.warn(`[StreamResume] 恢复请求失败: ${resumeResponse.status}`);
+                    continue;
+                }
+
+                const resumeReader = resumeResponse.body.getReader();
+                const resumeDecoder = new TextDecoder();
+                let resumeBuffer = '';
+                let newStreamId = streamId;
+                let streamDone = false;
+
+
+                while (!streamDone) {
+                    const { done, value } = await resumeReader.read();
+                    if (done) { streamDone = true; break; }
+
+                    resumeBuffer += resumeDecoder.decode(value, { stream: true });
+
+                    while (resumeBuffer.includes('\n\n')) {
+                        const eventEndIndex = resumeBuffer.indexOf('\n\n');
+                        const eventData = resumeBuffer.slice(0, eventEndIndex);
+                        resumeBuffer = resumeBuffer.slice(eventEndIndex + 2);
+
+                        if (eventData.startsWith('data: ')) {
+                            const jsonStr = eventData.slice(6).trim();
+                            if (jsonStr === '[DONE]') { streamDone = true; break; }
+                            try {
+                                const parsed = JSON.parse(jsonStr);
+                                const delta = parsed.choices?.[0]?.delta;
+                                if (!delta) continue;
+
+                                chunkIndex++;
+
+                                if (delta.reasoning_content) {
+                                    const block = getBlock('reasoning');
+                                    block.content += delta.reasoning_content;
+                                    this.requestScrollToBottom();
+                                }
+
+                                if (delta.content) {
+                                    this._streamTargetMsg = currentMsg;
+                                    this._streamTextBuffer = (this._streamTextBuffer || '') + delta.content;
+
+                                    const parts = delta.content.split('```');
+                                    for (let i = 0; i < parts.length; i++) {
+                                        if (!isCodeBlock) { tts_buffer += parts[i]; }
+                                        if (i < parts.length - 1) { isCodeBlock = !isCodeBlock; }
+                                    }
+                                    const { chunks, chunks_voice, remaining, remaining_voice } = this.splitTTSBuffer(tts_buffer);
+                                    if (chunks.length > 0) {
+                                        currentMsg.chunks_voice.push(...chunks_voice);
+                                        currentMsg.ttsChunks.push(...chunks);
+                                    }
+                                    tts_buffer = remaining;
+
+                                    if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                                    this._streamUpdateTimer = setTimeout(() => {
+                                        this.flushStreamTextBuffer();
+                                    }, 80);
+                                }
+
+                                if (delta.tool_progress) {
+                                    const progress = delta.tool_progress;
+                                    let toolCallId = progress.tool_call_id || progress.id;
+                                    if (!toolCallId) {
+                                        const existingCall = toolCallStack.find(c => c.name === progress.name && !c.resolved);
+                                        if (existingCall) { toolCallId = existingCall.id; }
+                                        else {
+                                            toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                            toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
+                                        }
+                                    } else if (!toolCallStack.find(c => c.id === toolCallId)) {
+                                        toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
+                                    }
+                                    let accArgs = this.toolArgsAccumulator[toolCallId] || "";
+                                    if (progress.arguments !== undefined) {
+                                        if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
+                                            accArgs = progress.arguments;
+                                        } else {
+                                            accArgs += progress.arguments;
+                                        }
+                                        this.toolArgsAccumulator[toolCallId] = accArgs;
+                                    }
+                                    const b = getBlock('tool_call', toolCallId, progress.name);
+                                    b.args = this.truncateDisplayContent(accArgs);
+                                    this.requestScrollToBottom();
+                                    continue;
+                                }
+
+                                if (delta.tool_content) {
+                                    const tool = delta.tool_content;
+                                    const toolName = tool.title || 'unknown';
+                                    let toolCallId = delta.tool_call_id || delta.async_tool_id;
+                                    if (tool.type === 'call') {
+                                        if (!toolCallId) toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                                        toolCallStack.push({ id: toolCallId, name: toolName, resolved: false });
+                                    } else {
+                                        if (!toolCallId) {
+                                            const pendingCall = toolCallStack.find(c => c.name === toolName && !c.resolved);
+                                            if (pendingCall) { toolCallId = pendingCall.id; pendingCall.resolved = true; }
+                                            else { toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
+                                        }
+                                        const callItem = toolCallStack.find(c => c.id === toolCallId);
+                                        if (callItem) callItem.resolved = true;
+                                    }
+                                    let bType = 'tool_result';
+                                    if (tool.type === 'error') bType = 'error';
+                                    else if (tool.type === 'call') bType = 'tool_call';
+                                    const targetBlock = getBlock(bType, toolCallId, toolName);
+                                    if (tool.type === 'call') {
+                                        targetBlock.args = this.truncateDisplayContent(tool.content);
+                                    } else {
+                                        targetBlock.content = this.truncateDisplayContent(tool.content);
+                                    }
+                                    this.requestScrollToBottom();
+                                }
+
+                                this.sendMessagesToExtension();
+                            } catch (e) {
+                                // 忽略 JSON 解析错误
+                            }
+                        }
+                    }
+                }
+
+                // 恢复成功，flush 剩余文本
+                if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                this.flushStreamTextBuffer();
+
+                if (tts_buffer.trim() && this.ttsSettings.enabled) {
+                    currentMsg.chunks_voice.push(this.cur_voice);
+                    currentMsg.ttsChunks.push(tts_buffer);
+                }
+
+                console.log(`[StreamResume] 断点续传成功，已恢复 ${chunkIndex - fromIndex} 个 chunk`);
+                return { newChunkIndex: chunkIndex, newStreamId };
+            } catch (retryError) {
+                // 保存已处理的 chunk 进度，下次重试从断点继续，避免重复处理
+                currentFromIndex = chunkIndex;
+                console.warn(`[StreamResume] 第 ${attempt + 1} 次恢复失败 (已处理到 index=${currentFromIndex}):`, retryError.message);
+            }
+        }
+
+
+        // 所有重试均失败
+        console.error('[StreamResume] 所有重试均失败');
+        return null;
+    },
+
     stopGenerate() {
       if (this.abortController) {
+
         this.abortController.abort();
       }
       this.isThinkOpen = false;
@@ -4060,7 +4339,7 @@ let vue_methods = {
       this.randomGreetings(); // 重新生成随机问候语
       this.requestScrollToBottom();    // 触发界面更新
       this.autoSaveSettings();
-      this.sendMessagesToExtension(); // 发送消息到插件
+      this.sendMessagesToExtension(true); // 发送消息到插件
     },
 
 

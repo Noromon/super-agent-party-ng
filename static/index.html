@@ -119,13 +119,10 @@ function updateElement(el, rawMarkdown, formatFn) {
     }
   });
 
-  // E. 触发 MathJax 渲染 (Debounced)
-  // 建议在组件 methods 里定义一个防抖的 queueMathJax，这里简单模拟
-  if (window.MathJax) {
-    // 使用 Promise 队列防止冲突，这里简化处理
-    setTimeout(() => {
-      window.MathJax.typesetPromise([el]).catch(()=>{});
-    }, 50);
+  // E. 触发 MathJax 渲染（仅含公式时 + per-element 防抖，避免流式期间高频排版）
+  if (window.MathJax && /\$[^$\n]+\$|\\\[[\s\S]*?\\\]/.test(el.textContent || '')) {
+    if (el._mjTimer) clearTimeout(el._mjTimer);
+    el._mjTimer = setTimeout(() => { window.MathJax.typesetPromise([el]).catch(()=>{}); }, 300);
   }
 }
   </script>

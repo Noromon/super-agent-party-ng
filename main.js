@@ -361,7 +361,7 @@ if (globalConfig?.chromeMCPSettings?.type === 'internal' && globalConfig?.chrome
   IS_INTERNAL_MODE_ACTIVE = true;
   console.log('[CDP] 已请求系统自动分配内置浏览器调试端口...');
 }
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096'); // 允许使用 4GB 内存
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192'); // 允许使用 8GB 内存
 // 新增：检测端口是否可用
 function isPortAvailable(port) {
   return new Promise((resolve) => {
@@ -1954,9 +1954,17 @@ app.on('window-all-closed', () => {
 
 // 处理渲染进程崩溃
 app.on('render-process-gone', (event, webContents, details) => {
-  console.error('渲染进程崩溃:', details)
-  dialog.showErrorBox('应用崩溃', `渲染进程异常: ${details.reason}`)
-})
+  console.error('渲染进程崩溃:', JSON.stringify(details));
+  if (!webContents || webContents.isDestroyed()) return;
+  // 自动 reload 自愈（带防重入标记）：每次崩溃只重载一次，避免反复崩溃时死循环
+  if (!webContents._crashReloaded) {
+    webContents._crashReloaded = true;
+    console.log('尝试自动重载渲染进程...');
+    try { webContents.reload(); } catch (e) { console.error('自动重载失败:', e); }
+  } else {
+    dialog.showErrorBox('应用崩溃', `渲染进程异常: ${details.reason}（已尝试自动恢复，若仍白屏请重启应用）`);
+  }
+});
 
 // 处理主进程未捕获异常
 process.on('uncaughtException', (err) => {

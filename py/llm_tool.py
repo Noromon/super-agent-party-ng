@@ -1,3 +1,4 @@
+import os
 import base64
 import json
 import aiohttp
@@ -18,9 +19,19 @@ ROBOTS_CACHE = {}
 async def get_image_base64(image_url: str) -> str:
     """
     下载图片并转换为base64编码
+    - 本地：支持直接读取本地磁盘路径文件
     - 对内：仅允许 'uploaded_files' 路径并重定向至本地
     - 对外：遵守 robots.txt 并拦截内网 IP (放行 Fake-IP)
     """
+    # 首先检查是否为存在的本地文件路径
+    if os.path.exists(image_url):
+        try:
+            with open(image_url, 'rb') as f:
+                image_data = f.read()
+                return base64.b64encode(image_data).decode('utf-8')
+        except Exception as e:
+            raise RuntimeError(f"读取本地图片失败: {str(e)}")
+
     parsed_url = urlparse(image_url)
     
     # --- 场景 1: 内部文件路径处理 ---
@@ -87,7 +98,7 @@ async def get_llm_tool(settings):
                         },
                         "image_url": {
                             "type": "string",
-                            "description": "需要向工具发送的图片URL，可选，来自本地服务器上的图片URL也可以填入（例如：http://127.0.0.1:3456/xxx.jpg），会被自动处理为base64编码发送",
+                            "description": "需要向工具发送的图片URL或本机本地文件路径，可选。来自本地服务器上的图片URL也可以填入（例如：http://127.0.0.1:3456/xxx.jpg），本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），会被自动处理为base64编码发送",
                         }
                     },
                     "required": ["tool_name","query"]
