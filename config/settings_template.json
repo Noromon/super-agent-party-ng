@@ -187,7 +187,10 @@
       "cc_path": "",
       "shortcut": true,
       "max_iterations": 100,
-      "mode_change": false
+      "mode_change": false,
+      "agentCorePrompt": {
+        "enabled": true
+      }
     },
     "acpSettings": {
       "agent": "claude",          

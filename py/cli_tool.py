@@ -1159,7 +1159,7 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
     
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
-    perm = settings.get("localEnvSettings", {}).get("permissionMode", "default")
+    perm = normalize_permission_mode(settings.get("localEnvSettings", {}).get("permissionMode", "default"))
     
     if not cwd: 
         yield "Error: No workspace directory specified."
@@ -2519,3 +2519,53 @@ def get_local_tools_for_mode(mode: str) -> list:
     if mode == "auto-approve": return read + edit + [LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"], LOCAL_TOOLS_REGISTRY["kill_process"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]
     if mode == "yolo": return read + edit + infra
     return read
+
+
+def normalize_permission_mode(mode) -> str:
+    """统一权限模式值域：acceptEdits 等历史变体归一化为 auto-approve"""
+    if mode in ("acceptEdits", "accept-edits", "accept_edits"):
+        return "auto-approve"
+    return mode or "default"
+
+
+def get_tools_for_permission(permission_mode: str) -> list:
+    """Docker 环境：按权限模式给模型的工具集，与 dispatch_tool 强制层保持一致。
+    plan=只读 / auto-approve=读+编辑(无命令执行) / default,yolo,cowork=全量(default 由审批弹窗拦截)"""
+    permission_mode = normalize_permission_mode(permission_mode)
+    read = [TOOLS_REGISTRY["list_files"],
+            TOOLS_REGISTRY["read_file"],
+            TOOLS_REGISTRY["read_file_range"],
+            TOOLS_REGISTRY["tail_file"],
+            TOOLS_REGISTRY["search_files"],
+            TOOLS_REGISTRY["glob_files"],
+            TOOLS_REGISTRY["read_skill"]]
+    edit = [TOOLS_REGISTRY["edit_file"], TOOLS_REGISTRY["edit_file_patch"], TOOLS_REGISTRY["todo_write"]]
+    infra = [TOOLS_REGISTRY["bash"], TOOLS_REGISTRY["list_processes"], TOOLS_REGISTRY["get_process_logs"],
+             TOOLS_REGISTRY["kill_process"], TOOLS_REGISTRY["manage_ports"]]
+    if permission_mode == "plan":
+        return read
+    if permission_mode == "auto-approve":
+        return read + edit
+    return read + edit + infra
+
+
+def get_local_tools_for_permission(permission_mode: str) -> list:
+    """Local 环境：按权限模式给模型的工具集，与 dispatch_tool 强制层保持一致。
+    plan=只读 / auto-approve=读+编辑(无命令执行) / default,yolo,cowork=全量(default 由审批弹窗拦截)"""
+    permission_mode = normalize_permission_mode(permission_mode)
+    read = [LOCAL_TOOLS_REGISTRY["list_files_local"],
+            LOCAL_TOOLS_REGISTRY["read_file_local"],
+            LOCAL_TOOLS_REGISTRY["read_file_range_local"],
+            LOCAL_TOOLS_REGISTRY["tail_file_local"],
+            LOCAL_TOOLS_REGISTRY["search_files_local"],
+            LOCAL_TOOLS_REGISTRY["glob_files_local"],
+            LOCAL_TOOLS_REGISTRY["read_skill_local"]]
+    edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
+    infra = [LOCAL_TOOLS_REGISTRY["bash_local"],
+             LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"],
+             LOCAL_TOOLS_REGISTRY["kill_process"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]
+    if permission_mode == "plan":
+        return read
+    if permission_mode == "auto-approve":
+        return read + edit
+    return read + edit + infra

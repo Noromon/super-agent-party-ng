@@ -93,11 +93,11 @@ mode_change_tool = {
             "(Local / Docker Sandbox / ACP Protocol), "
             "and change permission modes for each engine.\n\n"
             "Permission modes:\n"
-            "  plan         - Read-only, deny all operations\n"
-            "  default      - Interactive, confirm each action\n"
-            "  auto-approve - Allow writes, deny destructive ops\n"
+            "  plan         - Read-only: write/execute tools are hidden and hard-blocked\n"
+            "  default      - Read-only tools run directly; write/execute tools ask user approval\n"
+            "  auto-approve - Edits run directly; shell/process/port tools are hidden and blocked\n"
             "  yolo         - Full autonomy, no confirmations\n"
-            "  cowork       - Same as yolo, collaborative mode"
+            "  cowork       - Main agent orchestrates via create_subtask; sub-agents execute"
         ),
         "parameters": {
             "type": "object",

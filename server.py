@@ -1561,6 +1561,23 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "local_net_tool",
     ]
     
+    # --- 规则 0: 计划模式只读硬拦截（对全部写入/执行类工具生效，不经审批弹窗） ---
+    PLAN_BLOCKED_TOOLS = set(SENSITIVE_TOOLS) | {
+        "todo_write_tool", "todo_write_tool_local", "acpx_agent", "update_workspace_settings",
+    }
+    if tool_name in PLAN_BLOCKED_TOOLS:
+        from py.cli_tool import normalize_permission_mode
+        _engine0 = settings.get("CLISettings", {}).get("engine", "")
+        if _engine0 == "local":
+            _env0 = settings.get("localEnvSettings", {})
+        elif _engine0 == "ds":
+            _env0 = settings.get("dsSettings", {})
+        else:
+            _env0 = settings.get("acpSettings", {})
+        if normalize_permission_mode(_env0.get("permissionMode", "default")) == "plan":
+            print(f"[Permission] plan mode blocked '{tool_name}'")
+            return "[Blocked] 你当前处于计划模式（只读），该工具不可用。请使用只读工具完成分析，用自然语言输出执行计划，并等待用户确认后再执行。"
+
     # 只有当调用的工具属于敏感工具列表时才进行拦截检查
     if tool_name in SENSITIVE_TOOLS:
         
@@ -1577,7 +1594,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         else:
             env_settings = settings.get("acpSettings", {})
         
-        permission_mode = env_settings.get("permissionMode", "default")
+        permission_mode = cli_permission_mode_for(settings)
         
         is_allowed = False
 
@@ -2321,7 +2338,7 @@ async def read_agents_md(cwd: str) -> str:  # 返回str而不是list
         print(f"Error reading AGENTS.md: {e}")
         return ""
 
-def get_system_context() -> str:
+def get_system_context(cwd: str = None) -> str:
     """
     获取当前系统环境的详细描述，帮助 AI 适配正确的命令和路径格式
     """
@@ -2343,6 +2360,10 @@ def get_system_context() -> str:
         path_hint = "使用 Unix 路径格式（/home/name/file），区分大小写"
         command_hint = f"当前为 Linux ({release})，使用 {shell}。支持标准 GNU 命令和工具链"
     
+    cwd_line = ""
+    if cwd:
+        cwd_line = f"\n7. 当前工作目录：{cwd} —— 所有相对路径（文件与命令）均相对此目录解析；工具调用尽量使用相对路径\n"
+
     return f"""【环境信息】操作系统：{system} {release} | Shell：{shell}
 
 ⚠️ 重要提示：
@@ -2351,8 +2372,7 @@ def get_system_context() -> str:
 3. 执行 shell_tool_local 时，命令必须符合当前系统的语法规范
 4. 路径分隔符：Windows 使用反斜杠(\\)，Unix 使用正斜杠(/)
 5. 如果需要使用网络端口，请尽可能选择不常用的端口，避免冲突，例如：10000 以上的端口
-6. 请尽量使用相对路径，避免使用绝对路径，以免在跨平台时出现问题
-"""
+6. 请尽量使用相对路径，避免使用绝对路径，以免在跨平台时出现问题{cwd_line}"""
 
 
 async def get_project_skills_summary(cwd: str, visibility_scope: str = "workspace") -> str:
@@ -2451,7 +2471,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
     else:
         env_settings = settings.get("acpSettings", {})
     
-    permissionMode = env_settings.get("permissionMode", "default")
+    permissionMode = cli_permission_mode_for(settings)
     
     if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
         
@@ -2533,9 +2553,15 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 
     if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
         permission_message = ""
-        # 权限模式提示（原有逻辑，但修复了变量名）
-        if permissionMode != "plan" and permissionMode != "cowork":
-            permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
+        # 权限模式提示：描述必须与实际工具可见性和强制行为一致
+        if permissionMode == "yolo":
+            permission_message = "你当前处于最高权限（YOLO）模式：所有工具都会直接执行，不会请求用户批准。请谨慎操作，能使用更安全的专用工具时不要直接跑 bash 命令。"
+            content_append(request.messages, 'system', permission_message)
+        elif permissionMode == "auto-approve":
+            permission_message = "你当前处于接受编辑（Auto-approve）模式：文件编辑类工具会直接执行；shell 命令与进程/端口管理工具在本模式下不可用，请勿尝试。"
+            content_append(request.messages, 'system', permission_message)
+        elif permissionMode != "plan" and permissionMode != "cowork":
+            permission_message = "你当前处于默认（每次确认）模式：只读工具直接执行；文件写入与命令执行类工具在执行前会请求用户批准。请优先使用只读/专用工具，避免无谓的审批打扰。"
             content_append(request.messages, 'system', permission_message)
         elif permissionMode == "cowork":
             if not request.is_sub_agent:
@@ -2548,7 +2574,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                 permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
                 content_append(request.messages, 'system', permission_message)
         else:
-            permission_message = "你当前处于计划模式，请尽可能只使用只读工具了解当前项目，使用自然语言描述你的需求和计划，并等待用户确认后再执行！"
+            permission_message = "你当前处于计划模式：只有只读工具可用，写入与执行类工具已被禁用（调用会被直接拦截）。请使用只读工具了解项目，用自然语言描述你的需求和计划，并等待用户确认后再执行！"
             content_append(request.messages, 'system', permission_message)
 
     if permissionMode == "cowork" and not request.is_sub_agent:
@@ -2559,7 +2585,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         
         if engine == "local":
             # 在本地环境下，首先注入系统环境信息
-            system_context = get_system_context()
+            system_context = get_system_context(cwd=cwd)
             content_append(request.messages, 'system', system_context)
         elif engine == "ds":
             # 在 Docker 环境下，注入系统环境信息
@@ -3158,6 +3184,20 @@ Assistant: 表格如下：
 显然，这个需求下，直接使用markdown语法发送表格更加适合，而不是使用A2UI！
 """
         content_append(request.messages, 'system', A2UI_messages)
+
+    # ===== 分层 system prompt：Agent 核心契约置最前，权限模式契约置最后 =====
+    _cli_cfg = settings.get("CLISettings", {})
+    if (_cli_cfg.get("enabled", False) and _cli_cfg.get("engine") in ("local", "ds")
+            and _cli_cfg.get("agentCorePrompt", {}).get("enabled", True)):
+        from py.agent_prompt import build_agent_core_prompt, build_mode_footer
+        _core_mode = cli_permission_mode_for(settings)
+        content_prepend(request.messages, 'system', build_agent_core_prompt(
+            _core_mode,
+            engine=_cli_cfg.get("engine", "local"),
+            is_cowork_main=(_core_mode == "cowork" and not request.is_sub_agent),
+        ))
+        content_append(request.messages, 'system', build_mode_footer(_core_mode))
+
     print(f"系统提示：{request.messages[0]['content']}")
     return request
 
@@ -3284,6 +3324,55 @@ def get_role(m): return m.get("role") if isinstance(m, dict) else m.role
 def get_tcs(m): 
     if get_role(m) != "assistant": return None
     return m.get("tool_calls") if isinstance(m, dict) else getattr(m, "tool_calls", None)
+
+def parse_tool_arguments(raw):
+    """解析工具调用参数。返回 (args_dict, error_msg)。
+    先直接 JSON 解析；失败则回退到 '}{ 拼接拆分旧 hack；仍失败返回错误供模型自愈，不炸流。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return {}, None
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data, None
+        if isinstance(data, list):
+            return (data[0] if data and isinstance(data[0], dict) else {}), None
+        return {}, None
+    except Exception:
+        pass
+    try:
+        data_list = json.loads('[' + raw.replace('}{', '},{') + ']')
+        if isinstance(data_list, list) and data_list and isinstance(data_list[0], dict):
+            return data_list[0], None
+        return {}, None
+    except Exception as e:
+        return None, f"Invalid JSON arguments: {e}. Raw arguments (truncated): {raw[:200]!r}"
+
+def truncate_tool_result(text, limit: int = 32000):
+    """截断超长工具结果（头 2/3 + 尾 1/3），仅用于回填 message 历史，UI 展示不受影响。"""
+    if not isinstance(text, str):
+        text = str(text)
+    if len(text) <= limit:
+        return text
+    head = int(limit * 2 / 3)
+    tail = limit - head
+    omitted = len(text) - limit
+    return (text[:head]
+            + f"\n\n...[结果过长，已截断中间 {omitted} 个字符。如需完整内容请缩小查询范围或写文件后读取]...\n\n"
+            + text[-tail:])
+
+def cli_permission_mode_for(settings: dict) -> str:
+    """读取当前 CLI 引擎对应的权限模式（值域已归一化）"""
+    from py.cli_tool import normalize_permission_mode
+    cli = settings.get("CLISettings", {})
+    engine = cli.get("engine", "")
+    if engine == "local":
+        env = settings.get("localEnvSettings", {})
+    elif engine == "ds":
+        env = settings.get("dsSettings", {})
+    else:
+        env = settings.get("acpSettings", {})
+    return normalize_permission_mode(env.get("permissionMode", "default"))
 
 RESUME_NUDGE_TEXT = (
     "【系统提示】上面的工具结果已收到。工具的“成功”仅代表这一处操作完成，"
@@ -3598,7 +3687,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             arxiv_tool 
         ) 
         from py.autoBehavior import auto_behavior_tool
-        from py.cli_tool import get_tools_for_mode,get_local_tools_for_mode
+        from py.cli_tool import get_tools_for_mode,get_local_tools_for_mode,get_tools_for_permission,get_local_tools_for_permission
         from py.cdp_tool import all_cdp_tools
         from py.random_topic import random_topics_tools
         from py.computer_use_tool import computer_use_tools,mouse_use_tools,keyboard_use_tools,desktopVision_use_tools
@@ -3717,13 +3806,15 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             if sql_tool:
                 tools.extend(sql_tool)
         if settings['CLISettings']['enabled']:
+            _cli_mode = cli_permission_mode_for(settings)
             if settings['CLISettings']['engine'] == 'ds':
-                tools.extend(get_tools_for_mode('yolo'))
+                tools.extend(get_tools_for_permission(_cli_mode))
             elif settings['CLISettings']['engine'] == 'local':
-                tools.extend(get_local_tools_for_mode('yolo'))
+                tools.extend(get_local_tools_for_permission(_cli_mode))
             elif settings['CLISettings']['engine'] == 'acp':
-                tools.append(acp_agent_tool)
-        if  settings['CLISettings']['mode_change']:
+                if _cli_mode != "plan":
+                    tools.append(acp_agent_tool)
+        if  settings['CLISettings']['mode_change'] and cli_permission_mode_for(settings) != "plan":
             tools.append(mode_change_tool)
         if settings['visionControlSettings']['enabled']:
             tools.extend(computer_use_tools)
@@ -4222,7 +4313,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 else:
                     env_settings = settings.get("acpSettings", {})
                 
-                permission_mode = env_settings.get("permissionMode", "default")
+                permission_mode = cli_permission_mode_for(settings)
                 if permission_mode == "cowork" and settings['CLISettings']['enabled'] and not request.is_sub_agent:
                     tools = []
                     tools.append(create_subtask_tool)
@@ -4789,174 +4880,248 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         )
 
                 reasoner_messages = copy.deepcopy(request.messages)
+                _tool_loop_count = 0
+                _max_tool_iterations = int(settings.get("max_tool_iterations", 100) or 100)
+                force_no_tools = False
                 while tool_calls or search_not_done:
-                    full_content = ""
-                    if tool_calls:
-                        response_content = tool_calls[0].function
-                        print(response_content)
-                        modified_data = '[' + response_content.arguments.replace('}{', '},{') + ']'
-                        data_list = json.loads(modified_data)
-                        first_arg = data_list[0] if len(data_list) > 0 else {}
-                        
-                        # 【修复 1】显式发送 "call" 事件，锁定 UI 状态并同步 ID
-                        # 这告诉前端：参数接收完毕，确认调用，并绑定 ID
-                        call_confirm_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_call_id": tool_calls[0].id, # 关键：带上 ID
-                                    "tool_content": {
-                                        "title": response_content.name,
-                                        "content": modified_data, # 发送完整参数
-                                        "type": "call"
-                                    }
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
-
-                        modified_tool = f"{await t("sendArg")}{first_arg}"
-                        
-                        if settings['tools']['asyncTools']['enabled']:
-                            # ... 异步工具逻辑保持不变 ...
-                            tool_id = uuid.uuid4()
-                            async_tool_id = f"{response_content.name}_{tool_id}"
-                            chunk_dict = {
-                                "id": "agentParty",
-                                "choices": [
-                                    {
-                                        "finish_reason": None,
-                                        "index": 0,
-                                        "delta": {
-                                            "role":"assistant",
-                                            "content": "",
-                                            "async_tool_id": async_tool_id
-                                        }
-                                    }
-                                ]
-                            }
-                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-                            asyncio.create_task(
-                                execute_tool(
-                                    async_tool_id,
-                                    response_content.name,
-                                    first_arg,
-                                    settings,
-                                    user_prompt
-                                )
-                            )
-                            async with async_tools_lock:
-                                async_tools[async_tool_id] = {
-                                    "status": "pending",
-                                    "result": None,
-                                    "name":response_content.name,
-                                    "parameters":first_arg
-                                }
-                            results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation." # 保持原样
-                        else:
-                            await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
-                            results = await dispatch_tool(response_content.name, first_arg, settings)
-                            await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
-
-                        if results is None:
-                            # 保持原样，但建议加上 ID
-                            chunk = {
-                                "id": "extra_tools",
-                                "choices": [
-                                    {
-                                        "index": 0,
-                                        "delta": {
-                                            "role":"assistant",
-                                            "content": "",
-                                            "tool_calls": modified_data,
-                                        }
-                                    }
-                                ]
-                            }
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                            break
-
-                        if response_content.name in ["query_knowledge_base"] and type(results) == list:
-                            if settings["KBSettings"]["is_rerank"]:
-                                results = await rerank_knowledge_base(user_prompt, results)
-                            results = json.dumps(results, ensure_ascii=False, indent=4)
-                        
-                        # 更新 messages 历史 (保持不变)
+                    _tool_loop_count += 1
+                    if tool_calls and _tool_loop_count > _max_tool_iterations:
+                        print(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
                         request.messages.append({
-                            "tool_calls": [{
-                                "id": tool_calls[0].id,
+                            "role": "user",
+                            "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
+                        })
+                        tool_calls = []
+                        force_no_tools = True
+                    if tool_calls:
+                        # 将本轮全部 tool_calls 连同伴随的叙述文本一次性 append 为 assistant 消息
+                        assistant_tool_calls = []
+                        for _tc in tool_calls:
+                            _fn = _tc.function
+                            assistant_tool_calls.append({
+                                "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
                                 "function": {
-                                    "arguments": json.dumps(first_arg),
-                                    "name": response_content.name,
+                                    "arguments": _fn.arguments or "",
+                                    "name": _fn.name,
                                 },
-                                "type": tool_calls[0].type,
-                            }],
+                                "type": getattr(_tc, "type", None) or "function",
+                            })
+                        request.messages.append({
                             "role": "assistant",
-                            "content": "",
+                            "content": full_content or "",
+                            "tool_calls": assistant_tool_calls,
                             "reasoning_content": "",
                         })
+                        pending_abort = False
+                        acked_ids = set()
+                        reasoner_tool_events = []
+                        for _ti, _tc in enumerate(tool_calls):
+                            tool_call_id = assistant_tool_calls[_ti]["id"]
+                            response_content = _tc.function
+                            print(response_content)
+                            args_dict, arg_err = parse_tool_arguments(response_content.arguments)
+                            if arg_err is not None:
+                                err_text = f"[Argument Error] {arg_err}，请使用合法的 JSON 参数重试该工具调用。"
+                                acked_ids.add(tool_call_id)
+                                reasoner_tool_events.append((f"{response_content.name}({response_content.arguments})", err_text))
+                                err_chunk = {
+                                    "choices": [{
+                                        "delta": {
+                                            "tool_call_id": tool_call_id,
+                                            "tool_content": {
+                                                "title": response_content.name,
+                                                "content": err_text,
+                                                "type": "tool_result"
+                                            }
+                                        }
+                                    }]
+                                }
+                                yield f"data: {json.dumps(err_chunk)}\n\n"
+                                request.messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "name": response_content.name,
+                                    "content": err_text,
+                                })
+                                continue
 
-                        # 【修复 2】发送结果时，务必带上 tool_call_id
-                        if not isinstance(results, AsyncIterator):
-                            result_chunk = {
+                            # 显式发送 "call" 事件，锁定 UI 状态并同步 ID（参数接收完毕，确认调用，绑定 ID）
+                            call_confirm_chunk = {
                                 "choices": [{
                                     "delta": {
-                                        "tool_call_id": tool_calls[0].id, # 关键：匹配之前的 Call ID
+                                        "tool_call_id": tool_call_id,
                                         "tool_content": {
                                             "title": response_content.name,
-                                            "content": str(results),
-                                            "type": "tool_result"
+                                            "content": json.dumps(args_dict, ensure_ascii=False),
+                                            "type": "call"
                                         }
                                     }
                                 }]
                             }
-                            yield f"data: {json.dumps(result_chunk)}\n\n"
-                        else:  
-                            # 流式工具结果处理 (AsyncIterator)
-                            buffer = []
-                            first = True
-                            async for chunk in results:
-                                buffer.append(chunk)
-                                if first:
-                                    # 第一帧带 title
-                                    stream_chunk = {
-                                        "choices": [{
-                                            "delta": {
-                                                "tool_call_id": tool_calls[0].id, # 关键
-                                                "tool_content": {
-                                                    "title": response_content.name,
-                                                    "content": chunk,
-                                                    "type": "tool_result_stream"
-                                                }
-                                            }
-                                        }]
-                                    }
-                                    yield f"data: {json.dumps(stream_chunk)}\n\n"
-                                    first = False
-                                else:
-                                    # 后续帧
-                                    stream_chunk = {
-                                        "choices": [{
-                                            "delta": {
-                                                "tool_call_id": tool_calls[0].id, # 关键
-                                                "tool_content": {
-                                                    "title": "tool_result_stream",
-                                                    "content": chunk,
-                                                    "type": "tool_result_stream"
-                                                }
-                                            }
-                                        }]
-                                    }
-                                    yield f"data: {json.dumps(stream_chunk)}\n\n"
-                            results = "".join(buffer)
+                            yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
 
-                        request.messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_calls[0].id,
-                                "name": response_content.name,
-                                "content": str("".join(results)),
-                            }
-                        )
+                            if settings['tools']['asyncTools']['enabled']:
+                                # ... 异步工具逻辑保持不变 ...
+                                tool_id = uuid.uuid4()
+                                async_tool_id = f"{response_content.name}_{tool_id}"
+                                chunk_dict = {
+                                    "id": "agentParty",
+                                    "choices": [
+                                        {
+                                            "finish_reason": None,
+                                            "index": 0,
+                                            "delta": {
+                                                "role":"assistant",
+                                                "content": "",
+                                                "async_tool_id": async_tool_id
+                                            }
+                                        }
+                                    ]
+                                }
+                                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                                asyncio.create_task(
+                                    execute_tool(
+                                        async_tool_id,
+                                        response_content.name,
+                                        args_dict,
+                                        settings,
+                                        user_prompt
+                                    )
+                                )
+                                async with async_tools_lock:
+                                    async_tools[async_tool_id] = {
+                                        "status": "pending",
+                                        "result": None,
+                                        "name":response_content.name,
+                                        "parameters":args_dict
+                                    }
+                                results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
+                            else:
+                                try:
+                                    await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
+                                    results = await dispatch_tool(response_content.name, args_dict, settings)
+                                    await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
+                                except Exception as e:
+                                    results = f"[Tool Execution Error] {type(e).__name__}: {e}"
+
+                            if results is None:
+                                chunk = {
+                                    "id": "extra_tools",
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {
+                                                "role":"assistant",
+                                                "content": "",
+                                                "tool_calls": json.dumps(args_dict, ensure_ascii=False),
+                                            }
+                                        }
+                                    ]
+                                }
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                                none_text = "[Error] 该工具调用未获得可用结果，工具可能不可用。"
+                                acked_ids.add(tool_call_id)
+                                reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", none_text))
+                                request.messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "name": response_content.name,
+                                    "content": none_text,
+                                })
+                                pending_abort = True
+                                break
+
+                            if response_content.name in ["query_knowledge_base"] and type(results) == list:
+                                if settings["KBSettings"]["is_rerank"]:
+                                    results = await rerank_knowledge_base(user_prompt, results)
+                                results = json.dumps(results, ensure_ascii=False, indent=4)
+
+                            # 发送结果，带上匹配的 tool_call_id
+                            if not isinstance(results, AsyncIterator):
+                                result_chunk = {
+                                    "choices": [{
+                                        "delta": {
+                                            "tool_call_id": tool_call_id,
+                                            "tool_content": {
+                                                "title": response_content.name,
+                                                "content": str(results),
+                                                "type": "tool_result"
+                                            }
+                                        }
+                                    }]
+                                }
+                                yield f"data: {json.dumps(result_chunk)}\n\n"
+                            else:
+                                # 流式工具结果处理 (AsyncIterator)
+                                buffer = []
+                                first = True
+                                async for chunk in results:
+                                    buffer.append(chunk)
+                                    if first:
+                                        # 第一帧带 title
+                                        stream_chunk = {
+                                            "choices": [{
+                                                "delta": {
+                                                    "tool_call_id": tool_call_id,
+                                                    "tool_content": {
+                                                        "title": response_content.name,
+                                                        "content": chunk,
+                                                        "type": "tool_result_stream"
+                                                    }
+                                                }
+                                            }]
+                                        }
+                                        yield f"data: {json.dumps(stream_chunk)}\n\n"
+                                        first = False
+                                    else:
+                                        # 后续帧
+                                        stream_chunk = {
+                                            "choices": [{
+                                                "delta": {
+                                                    "tool_call_id": tool_call_id,
+                                                    "tool_content": {
+                                                        "title": "tool_result_stream",
+                                                        "content": chunk,
+                                                        "type": "tool_result_stream"
+                                                    }
+                                                }
+                                            }]
+                                        }
+                                        yield f"data: {json.dumps(stream_chunk)}\n\n"
+                                results = "".join(buffer)
+
+                            tool_result_text = str("".join(results))
+                            acked_ids.add(tool_call_id)
+                            reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", tool_result_text))
+                            request.messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "name": response_content.name,
+                                    "content": truncate_tool_result(tool_result_text),
+                                }
+                            )
+
+                            # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
+                            if isinstance(results, str) and '"approval_required"' in results:
+                                try:
+                                    parsed_res = json.loads(results)
+                                    if parsed_res.get("type") == "approval_required":
+                                        pending_abort = True
+                                        break
+                                except Exception:
+                                    pass
+
+                        # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
+                        for _tc_meta in assistant_tool_calls:
+                            if _tc_meta["id"] not in acked_ids:
+                                request.messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": _tc_meta["id"],
+                                    "name": _tc_meta["function"]["name"],
+                                    "content": "[Skipped] 未执行：同一轮中前面的工具调用正在等待用户审批，或流程被中断。",
+                                })
+
 
                         # =========================================================================
                         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
@@ -5060,30 +5225,26 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 
                         request.messages = final_messages
                         request.messages = ensure_thinking_fields(request.messages)
-                        # =========================================================================
-                        reasoner_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": str(response_content),
-                                "reasoning_content": "",
-                            }
-                        )
-                        reasoner_messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{response_content.name}工具结果："+str(results),
-                                "reasoning_content": "",
-                            }
-                        )
 
-                        # 【核心修复】：如果工具返回的是审批请求，立即跳出循环，结束当前流，等待前端手动调用恢复
-                        if isinstance(results, str) and '"approval_required"' in results:
-                            try:
-                                parsed_res = json.loads(results)
-                                if parsed_res.get("type") == "approval_required":
-                                    break  # 立即跳出 while 循环，不再进行下一轮 LLM 推理
-                            except Exception:
-                                pass
+                        # 将本轮工具事件喂给推理模型上下文
+                        for _r_call, _r_result in reasoner_tool_events:
+                            reasoner_messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": _r_call,
+                                    "reasoning_content": "",
+                                }
+                            )
+                            reasoner_messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"工具结果：" + truncate_tool_result(str(_r_result), 8000),
+                                    "reasoning_content": "",
+                                }
+                            )
+
+                        if pending_abort:
+                            break  # 命中审批请求/不可用工具：跳出 while，等待前端手动执行工具后恢复
                     # 如果启用推理模型
                     if settings['reasoner']['enabled'] or enable_thinking:
                         if tools:
@@ -5302,7 +5463,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     if settings['temperature'] !=1:
                         extra['temperature'] = settings['temperature']
 
-                    if tools:
+                    full_content = ""
+                    if tools and not force_no_tools:
                         extra['tools'] = tools
                     response = await client.chat.completions.create(
                         model=model,
@@ -5874,7 +6036,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         arxiv_tool
     ) 
     from py.autoBehavior import auto_behavior_tool
-    from py.cli_tool import get_tools_for_mode,get_local_tools_for_mode
+    from py.cli_tool import get_tools_for_mode,get_local_tools_for_mode,get_tools_for_permission,get_local_tools_for_permission
     from py.cdp_tool import all_cdp_tools
     from py.random_topic import random_topics_tools
     from py.computer_use_tool import computer_use_tools,mouse_use_tools,keyboard_use_tools,desktopVision_use_tools
@@ -5965,13 +6127,15 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         if sql_tool:
             tools.extend(sql_tool)
     if settings['CLISettings']['enabled']:
+        _cli_mode = cli_permission_mode_for(settings)
         if settings['CLISettings']['engine'] == 'ds':
-            tools.extend(get_tools_for_mode('yolo'))
+            tools.extend(get_tools_for_permission(_cli_mode))
         elif settings['CLISettings']['engine'] == 'local':
-            tools.extend(get_local_tools_for_mode('yolo'))
+            tools.extend(get_local_tools_for_permission(_cli_mode))
         elif settings['CLISettings']['engine'] == 'acp':
-            tools.append(acp_agent_tool)
-    if  settings['CLISettings']['mode_change']:
+            if _cli_mode != "plan":
+                tools.append(acp_agent_tool)
+    if  settings['CLISettings']['mode_change'] and cli_permission_mode_for(settings) != "plan":
         tools.append(mode_change_tool)
     if settings['visionControlSettings']['enabled']:
         tools.extend(computer_use_tools)
@@ -6496,78 +6660,124 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     }
                 )
         reasoner_messages = copy.deepcopy(request.messages)
+        _ns_loop_count = 0
+        _ns_max_iterations = int(settings.get("max_tool_iterations", 100) or 100)
+        ns_force_no_tools = False
         while response.choices[0].message.tool_calls or search_not_done:
+            _ns_loop_count += 1
+            if response.choices[0].message.tool_calls and _ns_loop_count > _ns_max_iterations:
+                print(f"[LoopCap] 非流式工具调用迭代上限({_ns_max_iterations})，强制模型收尾")
+                request.messages.append({
+                    "role": "user",
+                    "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
+                })
+                ns_force_no_tools = True
+                response.choices[0].message.tool_calls = None
             if response.choices[0].message.tool_calls:
                 assistant_message = response.choices[0].message
-                response_content = assistant_message.tool_calls[0].function
-                print(response_content.name)
-                modified_data = '[' + response_content.arguments.replace('}{', '},{') + ']'
-                # 使用json.loads来解析修改后的字符串为列表
-                data_list = json.loads(modified_data)
-                # 存储处理结果
-                results = []
-                for data in data_list:
-                    result = await dispatch_tool(response_content.name, data,settings) # 将结果添加到results列表中
+                ns_tool_calls_meta = []
+                for _tc in assistant_message.tool_calls:
+                    ns_tool_calls_meta.append({
+                        "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
+                        "function": {
+                            "arguments": _tc.function.arguments or "",
+                            "name": _tc.function.name,
+                        },
+                        "type": getattr(_tc, "type", None) or "function",
+                    })
+                request.messages.append({
+                    "role": "assistant",
+                    "content": assistant_message.content or "",
+                    "tool_calls": ns_tool_calls_meta,
+                    "reasoning_content": "",
+                })
+                ns_pending_abort = False
+                ns_acked_ids = set()
+                for _ti, _tc in enumerate(assistant_message.tool_calls):
+                    tool_call_id = ns_tool_calls_meta[_ti]["id"]
+                    response_content = _tc.function
+                    print(response_content.name)
+                    args_dict, arg_err = parse_tool_arguments(_tc.function.arguments)
+                    if arg_err is not None:
+                        err_text = f"[Argument Error] {arg_err}，请使用合法的 JSON 参数重试该工具调用。"
+                        ns_acked_ids.add(tool_call_id)
+                        reasoner_messages.append({
+                            "role": "assistant",
+                            "content": f"{response_content.name}({_tc.function.arguments})",
+                            "reasoning_content": "",
+                        })
+                        reasoner_messages.append({
+                            "role": "user",
+                            "content": f"{response_content.name}工具结果：" + truncate_tool_result(err_text, 8000),
+                        })
+                        request.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": response_content.name,
+                            "content": err_text,
+                        })
+                        continue
+                    try:
+                        results = await dispatch_tool(response_content.name, args_dict, settings)
+                    except Exception as e:
+                        results = f"[Tool Execution Error] {type(e).__name__}: {e}"
                     if isinstance(results, AsyncIterator):
                         buffer = []
                         async for chunk in results:
                             buffer.append(chunk)
                         results = "".join(buffer)
-                    if result is not None:
-                        # 将结果添加到results列表中
-                        results.append(json.dumps(result))
-                # 将所有结果拼接成一个连续的字符串
-                combined_results = ''.join(results)
-                if combined_results:
-                    results = combined_results
-                else:
-                    results = None
-                if results is None:
-                    break
-                if response_content.name in ["query_knowledge_base"]:
-                    if settings["KBSettings"]["is_rerank"]:
-                        results = await rerank_knowledge_base(user_prompt,results)
-                    results = json.dumps(results, ensure_ascii=False, indent=4)
-                request.messages.append(
-                    {
-                        "tool_calls": [
-                            {
-                                "id": assistant_message.tool_calls[0].id,
-                                "function": {
-                                    "arguments": response_content.arguments,
-                                    "name": response_content.name,
-                                },
-                                "type": assistant_message.tool_calls[0].type,
-                            }
-                        ],
-                        "role": "assistant",
-                        "content": "",
-                        "reasoning_content": "",
-                    }
-                )
-                request.messages.append(
-                    {
+                    if results is None:
+                        ns_acked_ids.add(tool_call_id)
+                        request.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "name": response_content.name,
+                            "content": "[Error] 该工具调用未获得可用结果，工具可能不可用。",
+                        })
+                        ns_pending_abort = True
+                        break
+                    if response_content.name in ["query_knowledge_base"] and isinstance(results, list):
+                        if settings["KBSettings"]["is_rerank"]:
+                            results = await rerank_knowledge_base(user_prompt, results)
+                        results = json.dumps(results, ensure_ascii=False, indent=4)
+                    tool_result_text = str(results)
+                    ns_acked_ids.add(tool_call_id)
+                    request.messages.append({
                         "role": "tool",
-                        "tool_call_id": assistant_message.tool_calls[0].id,
+                        "tool_call_id": tool_call_id,
                         "name": response_content.name,
-                        "content": str(results),
-                    }
-                )
+                        "content": truncate_tool_result(tool_result_text),
+                    })
+                    reasoner_messages.append({
+                        "role": "assistant",
+                        "content": f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})",
+                        "reasoning_content": "",
+                    })
+                    reasoner_messages.append({
+                        "role": "user",
+                        "content": f"{response_content.name}工具结果：" + truncate_tool_result(tool_result_text, 8000),
+                    })
+                    if isinstance(results, str) and '"approval_required"' in results:
+                        try:
+                            parsed_res = json.loads(results)
+                            if parsed_res.get("type") == "approval_required":
+                                ns_pending_abort = True
+                                break
+                        except Exception:
+                            pass
+                # 为未执行的调用补上说明性 tool 结果，保证成对闭合
+                for _tc_meta in ns_tool_calls_meta:
+                    if _tc_meta["id"] not in ns_acked_ids:
+                        request.messages.append({
+                            "role": "tool",
+                            "tool_call_id": _tc_meta["id"],
+                            "name": _tc_meta["function"]["name"],
+                            "content": "[Skipped] 未执行：同一轮中前面的工具调用正在等待用户审批，或流程被中断。",
+                        })
+                if ns_pending_abort:
+                    break
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
                 content_append(request.messages, 'user',  f"\n对于联网搜索的结果，如果联网搜索的信息不足以回答问题时，你可以进一步使用联网搜索查询还未给出的必要信息。如果已经足够回答问题，请直接回答问题。")
-            reasoner_messages.append(
-                {
-                    "role": "assistant",
-                    "content": str(response_content),
-                    "reasoning_content": "",
-                }
-            )
-            reasoner_messages.append(
-                {
-                    "role": "user",
-                    "content": f"{response_content.name}工具结果："+str(results),
-                }
-            )
             if settings['reasoner']['enabled'] or enable_thinking:
                 if tools:
                     content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
@@ -6607,7 +6817,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             msg = await images_add_in_messages(request.messages, images,settings)
             if request.top_p != 1 or settings['top_p'] != 1:
                 extra['top_p'] = request.top_p or settings['top_p']
-            if tools:
+            if tools and not ns_force_no_tools:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
