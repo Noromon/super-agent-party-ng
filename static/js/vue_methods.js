@@ -3144,6 +3144,8 @@ let vue_methods = {
                             if (isApproval && approvalData) {
                                 const b = getBlock('approval', toolCallId, toolName);
                                 b.data = approvalData;
+                                // 围栏快照：审批必须记住产生它的流，停止/换流后不得借用新流身份执行
+                                approvalData._stream_id = this._currentStreamId || null;
                                 this.approvalMap[toolCallId] = approvalData;
 
                                 // 不再生成 HTML，直接更新 backend_content
@@ -3183,10 +3185,10 @@ let vue_methods = {
                                     if (last.role === 'assistant') {
                                         if (!last.tool_calls) last.tool_calls = [];
                                         if (!last.tool_calls.some(tc => tc.id === toolCallId)) {
-                                            last.tool_calls.push({ id: toolCallId, type: 'function', function: { name: tool.title, arguments: "{}" } });
+                                            last.tool_calls.push({ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } });
                                         }
                                     } else {
-                                        currentMsg.backend_content.push({ role: 'assistant', content: null, tool_calls: [{ id: toolCallId, type: 'function', function: { name: tool.title, arguments: "{}" } }] });
+                                        currentMsg.backend_content.push({ role: 'assistant', content: null, tool_calls: [{ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } }] });
                                     }
                                 } else if (tool.type === 'tool_result' || tool.type === 'tool_result_stream' || tool.type === 'error') {
                                     const hide = this.toolsSettings?.hideToolResults?.enabled && tool.type === 'tool_result';
@@ -3450,7 +3452,7 @@ let vue_methods = {
             if (action === 'deny') {
                 resultText = `User denied the execution of tool '${toolName}'.`;
             } else {
-                resultText = await this.executeToolBackend(toolName, data.tool_params, action);
+                resultText = await this.executeToolBackend(toolName, data.tool_params, action, data._stream_id);
 
                 // 1. UI 显示：处理 \r 确保显示正常（比如手动执行了带进度条的脚本）
                 if (targetBlock) {
@@ -3554,7 +3556,7 @@ let vue_methods = {
     // === 辅助函数 ===
 
     // 辅助：调用后端手动执行接口
-    async executeToolBackend(name, params, type) {
+    async executeToolBackend(name, params, type, streamId) {
         try {
             const res = await fetch('/execute_tool_manually', {
                 method: 'POST',
@@ -3563,7 +3565,7 @@ let vue_methods = {
                     tool_name: name, 
                     tool_params: params,
                     approval_type: type,
-                    stream_id: this._currentStreamId || null
+                    stream_id: streamId || null
                 })
             });
             const json = await res.json();
