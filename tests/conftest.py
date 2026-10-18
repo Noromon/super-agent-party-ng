@@ -60,6 +60,11 @@ def _seed_db(data_dir: Path, mock: MockLLM, project_dir: Path):
     con.close()
 
 
+class SapUrl(str):
+    """Instance base URL with attached data dir (str-compatible for f-strings)."""
+    data_dir = None
+
+
 @pytest.fixture(scope="session")
 def sap(tmp_path_factory, mock_llm):
     root = tmp_path_factory.mktemp("sap-data")
@@ -81,7 +86,8 @@ def sap(tmp_path_factory, mock_llm):
     proc = subprocess.Popen(
         [sys.executable, "server.py", "--port", str(port)],
         cwd=str(REPO), env=env, stdout=out, stderr=err)
-    base = f"http://127.0.0.1:{port}"
+    base = SapUrl(f"http://127.0.0.1:{port}")
+    base.data_dir = data_dir
     deadline = time.time() + 90
     while time.time() < deadline:
         try:

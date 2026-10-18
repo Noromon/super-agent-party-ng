@@ -251,6 +251,15 @@ async def init_covs_db():
         ''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_group_status ON group_memory(group_id, status)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_source_chat ON group_memory(source_chat_id)')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS turn_log (
+                conversation_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                msg TEXT NOT NULL,
+                created_at REAL,
+                PRIMARY KEY (conversation_id, seq)
+            )
+        ''')
         await db.commit()
     _covs_db_init_done = True
 

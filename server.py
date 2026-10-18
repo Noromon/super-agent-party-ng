@@ -5848,6 +5848,11 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     print(f"[Context] usage 事件生成异常（跳过）: {_ue}")
                 logger.info(f"all msg: {request.messages}")
                 yield "data: [DONE]\n\n"
+                try:
+                    from py.turn_log import shadow_append as _shadow_append
+                    await _shadow_append(request.conversation_id, request.messages, log=print)
+                except Exception as _tle:
+                    print(f"[TurnLog] stream shadow skip: {_tle}")
                 if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
                     try:
                         from py.affection_system import extract_and_update_affection
@@ -6964,6 +6969,11 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
                          if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
                 wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
+        try:
+            from py.turn_log import shadow_append as _shadow_append
+            await _shadow_append(request.conversation_id, request.messages, log=print)
+        except Exception as _tle:
+            print(f"[TurnLog] complete shadow skip: {_tle}")
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(
