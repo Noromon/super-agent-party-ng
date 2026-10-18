@@ -29,7 +29,10 @@ def get_base_path():
 base_path = get_base_path()
 
 # ----------------- 2. 路径定义 -----------------
-if IS_DOCKER:
+if os.environ.get("SAP_DATA_DIR"):
+    # 冲刺期数据隔离：开发/测试实例经环境变量指向独立目录，生产目录在切换日前对新代码只读
+    USER_DATA_DIR = os.path.abspath(os.environ["SAP_DATA_DIR"])
+elif IS_DOCKER:
     USER_DATA_DIR = '/app/data'
 else:
     USER_DATA_DIR = user_data_dir(APP_NAME, roaming=True)
