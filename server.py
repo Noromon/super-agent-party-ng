@@ -10,6 +10,7 @@ import argparse
 import socket
 import errno
 from py.cli_tool import read_file_tool_local
+from py.context_builder import sanitize_tool_chains
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
 from py import llm_gate
@@ -3758,63 +3759,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 chat_messages = sys_msgs + compressed_dialog
                 print(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
-        final_messages = []
-        pending_tool_call_ids = set()
-
-        for msg in chat_messages:
-            role = get_role(msg)
-            
-            if role == "tool":
-                t_id = msg.get("tool_call_id") if isinstance(msg, dict) else getattr(msg, "tool_call_id", None)
-                # 核心校验：如果这个 tool 消息不在我们记录的待响应 ID 列表中，直接丢弃
-                if t_id and t_id in pending_tool_call_ids:
-                    final_messages.append(msg)
-                    pending_tool_call_ids.remove(t_id) # 匹配成功，移除
-                else:
-                    print(f"[Sanitizer] 丢弃孤立的 tool 消息: {t_id}")
-                    continue
-            
-            elif role == "assistant":
-                tcs = get_tcs(msg)
-                if tcs:
-                    # 这是一个发起工具调用的消息
-                    # 暂时先存入，并记录它期望的 ID
-                    current_tcs_ids = {tc.get("id") if isinstance(tc, dict) else tc.id for tc in tcs}
-                    final_messages.append(msg)
-                    for tid in current_tcs_ids: pending_tool_call_ids.add(tid)
-                else:
-                    # 普通助手回复
-                    final_messages.append(msg)
-            
-            else:
-                # user 或 system 消息，直接通过
-                final_messages.append(msg)
-
-        # 最终反向检查：如果最后一条是带 tool_calls 的 assistant，但后面没有 tool 消息
-        # 我们需要移除这些 tool_calls 标记，或者直接移除该条消息（取决于业务需求）
-        # 这里选择保留消息文本但清空 tool_calls，防止 API 报错
-        while final_messages:
-            last_msg = final_messages[-1]
-            tcs = get_tcs(last_msg)
-            # 如果最后一条助手消息发起了调用，但我们已经没有后续消息来填补它了
-            if tcs and any( ( (tc.get("id") if isinstance(tc, dict) else tc.id) in pending_tool_call_ids ) for tc in tcs ):
-                # 如果该消息有文本内容，我们抹除 tool_calls 保留文本
-                # 如果没文本，就直接弹出整条消息
-                content = last_msg.get("content") if isinstance(last_msg, dict) else getattr(last_msg, "content", "")
-                if content:
-                    if isinstance(last_msg, dict):
-                        last_msg["tool_calls"] = None
-                    else:
-                        setattr(last_msg, "tool_calls", None)
-                    print("[Sanitizer] 抹除末尾未闭合的 tool_calls")
-                    break # 处理完毕
-                else:
-                    final_messages.pop()
-                    print("[Sanitizer] 弹出末尾无内容的孤立 tool_call 发起消息")
-            else:
-                break
-
-        request.messages = final_messages
+        request.messages = sanitize_tool_chains(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
         # =========================================================================
         images = await images_in_messages(request.messages,fastapi_base_url)
@@ -5346,63 +5291,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 print(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
 
-                        final_messages = []
-                        pending_tool_call_ids = set()
-
-                        for msg in chat_messages:
-                            role = get_role(msg)
-                            
-                            if role == "tool":
-                                t_id = msg.get("tool_call_id") if isinstance(msg, dict) else getattr(msg, "tool_call_id", None)
-                                # 核心校验：如果这个 tool 消息不在我们记录的待响应 ID 列表中，直接丢弃
-                                if t_id and t_id in pending_tool_call_ids:
-                                    final_messages.append(msg)
-                                    pending_tool_call_ids.remove(t_id) # 匹配成功，移除
-                                else:
-                                    print(f"[Sanitizer] 丢弃孤立的 tool 消息: {t_id}")
-                                    continue
-                            
-                            elif role == "assistant":
-                                tcs = get_tcs(msg)
-                                if tcs:
-                                    # 这是一个发起工具调用的消息
-                                    # 暂时先存入，并记录它期望的 ID
-                                    current_tcs_ids = {tc.get("id") if isinstance(tc, dict) else tc.id for tc in tcs}
-                                    final_messages.append(msg)
-                                    for tid in current_tcs_ids: pending_tool_call_ids.add(tid)
-                                else:
-                                    # 普通助手回复
-                                    final_messages.append(msg)
-                            
-                            else:
-                                # user 或 system 消息，直接通过
-                                final_messages.append(msg)
-
-                        # 最终反向检查：如果最后一条是带 tool_calls 的 assistant，但后面没有 tool 消息
-                        # 我们需要移除这些 tool_calls 标记，或者直接移除该条消息（取决于业务需求）
-                        # 这里选择保留消息文本但清空 tool_calls，防止 API 报错
-                        while final_messages:
-                            last_msg = final_messages[-1]
-                            tcs = get_tcs(last_msg)
-                            # 如果最后一条助手消息发起了调用，但我们已经没有后续消息来填补它了
-                            if tcs and any( ( (tc.get("id") if isinstance(tc, dict) else tc.id) in pending_tool_call_ids ) for tc in tcs ):
-                                # 如果该消息有文本内容，我们抹除 tool_calls 保留文本
-                                # 如果没文本，就直接弹出整条消息
-                                content = last_msg.get("content") if isinstance(last_msg, dict) else getattr(last_msg, "content", "")
-                                if content:
-                                    if isinstance(last_msg, dict):
-                                        last_msg["tool_calls"] = None
-                                    else:
-                                        setattr(last_msg, "tool_calls", None)
-                                    print("[Sanitizer] 抹除末尾未闭合的 tool_calls")
-                                    break # 处理完毕
-                                else:
-                                    final_messages.pop()
-                                    print("[Sanitizer] 弹出末尾无内容的孤立 tool_call 发起消息")
-                            else:
-                                break
-
-                        request.messages = final_messages
+                        request.messages = sanitize_tool_chains(chat_messages)
                         request.messages = ensure_thinking_fields(request.messages)
 
                         # 将本轮工具事件喂给推理模型上下文
@@ -6123,63 +6012,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 chat_messages = sys_msgs + compressed_dialog
                 print(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
-        final_messages = []
-        pending_tool_call_ids = set()
-
-        for msg in chat_messages:
-            role = get_role(msg)
-            
-            if role == "tool":
-                t_id = msg.get("tool_call_id") if isinstance(msg, dict) else getattr(msg, "tool_call_id", None)
-                # 核心校验：如果这个 tool 消息不在我们记录的待响应 ID 列表中，直接丢弃
-                if t_id and t_id in pending_tool_call_ids:
-                    final_messages.append(msg)
-                    pending_tool_call_ids.remove(t_id) # 匹配成功，移除
-                else:
-                    print(f"[Sanitizer] 丢弃孤立的 tool 消息: {t_id}")
-                    continue
-            
-            elif role == "assistant":
-                tcs = get_tcs(msg)
-                if tcs:
-                    # 这是一个发起工具调用的消息
-                    # 暂时先存入，并记录它期望的 ID
-                    current_tcs_ids = {tc.get("id") if isinstance(tc, dict) else tc.id for tc in tcs}
-                    final_messages.append(msg)
-                    for tid in current_tcs_ids: pending_tool_call_ids.add(tid)
-                else:
-                    # 普通助手回复
-                    final_messages.append(msg)
-            
-            else:
-                # user 或 system 消息，直接通过
-                final_messages.append(msg)
-
-        # 最终反向检查：如果最后一条是带 tool_calls 的 assistant，但后面没有 tool 消息
-        # 我们需要移除这些 tool_calls 标记，或者直接移除该条消息（取决于业务需求）
-        # 这里选择保留消息文本但清空 tool_calls，防止 API 报错
-        while final_messages:
-            last_msg = final_messages[-1]
-            tcs = get_tcs(last_msg)
-            # 如果最后一条助手消息发起了调用，但我们已经没有后续消息来填补它了
-            if tcs and any( ( (tc.get("id") if isinstance(tc, dict) else tc.id) in pending_tool_call_ids ) for tc in tcs ):
-                # 如果该消息有文本内容，我们抹除 tool_calls 保留文本
-                # 如果没文本，就直接弹出整条消息
-                content = last_msg.get("content") if isinstance(last_msg, dict) else getattr(last_msg, "content", "")
-                if content:
-                    if isinstance(last_msg, dict):
-                        last_msg["tool_calls"] = None
-                    else:
-                        setattr(last_msg, "tool_calls", None)
-                    print("[Sanitizer] 抹除末尾未闭合的 tool_calls")
-                    break # 处理完毕
-                else:
-                    final_messages.pop()
-                    print("[Sanitizer] 弹出末尾无内容的孤立 tool_call 发起消息")
-            else:
-                break
-
-        request.messages = final_messages
+        request.messages = sanitize_tool_chains(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
         # =========================================================================
 
