@@ -969,7 +969,7 @@ async def get_image_content(image_url: str) -> str:
     import hashlib
     settings = await load_settings()
     base64_image = await get_image_base64(image_url)
-    media_type = await get_image_media_type(image_url)
+    media_type = await get_image_media_type(image_url, base64_image)
     url= f"data:{media_type};base64,{base64_image}"
     image_hash = hashlib.md5(image_url.encode()).hexdigest()
     content = ""
@@ -992,14 +992,14 @@ async def get_image_content(image_url: str) -> str:
                 messages = [{"role": "user", "content": images_content}],
                 **extra
             )
-            content = f"\n\nn图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
+            content = f"\n\n图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "w", encoding='utf-8') as f:
                 f.write(str(response.choices[0].message.content))
     else:           
         # 如果uploaded_files/{item['image_url']['hash']}.txt存在，则读取文件内容，否则调用vision api
         if os.path.exists(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt")):
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "r", encoding='utf-8') as f:
-                content += f"\n\nn图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(f.read())+"\n\n"
+                content += f"\n\n图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(f.read())+"\n\n"
         else:
             images_content = [{"type": "text", "text": "请仔细描述图片中的内容，包含图片中可能存在的文字、数字、颜色、形状、大小、位置、人物、物体、场景等信息。"},{"type": "image_url", "image_url": {"url": url}}]
             client = AsyncOpenAI(api_key=settings['api_key'],base_url=settings['base_url'])
@@ -1014,7 +1014,7 @@ async def get_image_content(image_url: str) -> str:
                 messages = [{"role": "user", "content": images_content}],
                 **extra
             )
-            content = f"\n\nn图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
+            content = f"\n\n图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "w", encoding='utf-8') as f:
                 f.write(str(response.choices[0].message.content))
     return content
@@ -1023,7 +1023,7 @@ async def analyze_image(image_url: str, prompt: str) -> str:
     """针对特定提示词分析图像，不使用通用描述缓存"""
     settings = await load_settings()
     base64_image = await get_image_base64(image_url)
-    media_type = await get_image_media_type(image_url)
+    media_type = await get_image_media_type(image_url, base64_image)
     url = f"data:{media_type};base64,{base64_image}"
     
     if settings['vision']['enabled']:
@@ -1058,7 +1058,7 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
     content = [{"type": "text", "text": prompt}]
     for index, image_url in enumerate(image_urls, start=1):
         base64_image = await get_image_base64(image_url)
-        media_type = await get_image_media_type(image_url)
+        media_type = await get_image_media_type(image_url, base64_image)
         content.append({"type": "text", "text": f"【第{index}张图】"})
         content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{base64_image}"}})
 
@@ -1094,7 +1094,7 @@ async def review_image(image_url: str, prompt: str) -> str:
     """
     settings = await load_settings()
     base64_image = await get_image_base64(image_url)
-    media_type = await get_image_media_type(image_url)
+    media_type = await get_image_media_type(image_url, base64_image)
     url = f"data:{media_type};base64,{base64_image}"
     
     # 读取截断配置，默认不截断（完整传递上下文，审查质量最高）
@@ -2222,7 +2222,7 @@ async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> Lis
                             # 假设你的 get_image_base64 同样可以将视频流转为 Base64
                             base64_data = await get_image_base64(media_url)
                             # 假设 get_image_media_type 也能正常返回 video/mp4, video/webm 等
-                            mime_type = await get_image_media_type(media_url)
+                            mime_type = await get_image_media_type(media_url, base64_data)
                             
                             item[media_key]["url"] = f"data:{mime_type};base64,{base64_data}"
                             item[media_key]["hash"] = hashlib.md5(item[media_key]["url"].encode()).hexdigest()
@@ -3185,6 +3185,25 @@ Assistant: 表格如下：
 """
         content_append(request.messages, 'system', A2UI_messages)
 
+    # ===== L3 任务检查点：注入此前压缩落盘的任务态（7 天内、当前或未知会话、且历史中尚无摘要时） =====
+    if cli_settings.get("enabled", False) and engine in ("local", "ds"):
+        try:
+            from py.context_manager import SUMMARY_HEADER
+            _hist_text = json.dumps(request.messages, ensure_ascii=False)
+            _cp_cwd = cli_settings.get("cc_path")
+            if SUMMARY_HEADER not in _hist_text and _cp_cwd and Path(_cp_cwd).exists():
+                _cp_file = Path(_cp_cwd) / ".agent" / "context_state.json"
+                if _cp_file.exists():
+                    import time as _t
+                    _cp = json.loads(_cp_file.read_text(encoding="utf-8"))
+                    _conv = request.conversation_id
+                    _conv_ok = _conv is None or _cp.get("conversation_id") in (None, _conv, str(_conv))
+                    if _conv_ok and (_t.time() - _cp.get("updated_at", 0) < 7 * 86400) and _cp.get("summary"):
+                        content_append(request.messages, 'system',
+                                       f"\n\n【任务检查点】此前上下文压缩时落盘的任务态（与更新对话冲突时以对话为准）：\n{_cp['summary'][:3000]}\n")
+        except Exception as e:
+            print(f"[Context] 检查点注入失败: {e}")
+
     # ===== 分层 system prompt：Agent 核心契约置最前，权限模式契约置最后 =====
     _cli_cfg = settings.get("CLISettings", {})
     if (_cli_cfg.get("enabled", False) and _cli_cfg.get("engine") in ("local", "ds")
@@ -3346,7 +3365,12 @@ def parse_tool_arguments(raw):
             return data_list[0], None
         return {}, None
     except Exception as e:
-        return None, f"Invalid JSON arguments: {e}. Raw arguments (truncated): {raw[:200]!r}"
+        return None, (
+            f"Invalid JSON arguments: {e}. "
+            "Arguments must be ONE JSON object like {\"path\": \"src/main.py\"} — "
+            "double-quoted keys/strings, no trailing commas, no markdown fences, no comments. "
+            f"Raw (truncated): {raw[:200]!r}"
+        )
 
 def truncate_tool_result(text, limit: int = 32000):
     """截断超长工具结果（头 2/3 + 尾 1/3），仅用于回填 message 历史，UI 展示不受影响。"""
@@ -3414,6 +3438,140 @@ def ensure_thinking_fields(messages):
                 setattr(msg, "reasoning_content", "")
     
     return messages
+def _cm_context_enabled(settings: dict) -> bool:
+    from py.context_manager import get_context_settings
+    try:
+        return bool(get_context_settings(settings)["enabled"])
+    except Exception:
+        return False
+
+
+def _write_context_state(settings: dict, request, res: dict):
+    """L3: 把压缩产生的结构化摘要落盘为任务检查点（按会话）"""
+    try:
+        cwd = settings.get("CLISettings", {}).get("cc_path")
+        if not cwd or not Path(cwd).exists():
+            return
+        state_dir = Path(cwd) / ".agent"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        import time as _time
+        data = {
+            "conversation_id": request.conversation_id,
+            "updated_at": int(_time.time()),
+            "task_mode": res.get("task_mode"),
+            "summary": (res.get("summary") or "")[:6000],
+        }
+        (state_dir / "context_state.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("[Context] 任务检查点已写入 .agent/context_state.json")
+    except Exception as e:
+        print(f"[Context] 检查点写入失败: {e}")
+
+
+async def _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools=None):
+    """上下文管线：L1 工具结果修剪 -> L2 自动摘要（仅 agent 模式）。
+    执行了 L2 时返回 context_compact 事件 dict（供前端落账），否则 None。"""
+    try:
+        from py.context_manager import (get_context_settings, estimate_tokens, prune_tool_results,
+                                        compact_messages, detect_task_mode)
+        cm = get_context_settings(settings)
+        if not cm["enabled"]:
+            return None
+        budget = int(cm["context_window"] * cm["compact_ratio"])
+        est = estimate_tokens(request.messages, tools)
+        if est <= budget:
+            return None
+        request.messages, pruned_n = prune_tool_results(request.messages, cm["keep_recent_tools"])
+        est2 = estimate_tokens(request.messages, tools)
+        print(f"[Context] L1 修剪旧工具结果 {pruned_n} 条: est {est} -> {est2} (budget {budget})")
+        if est2 <= budget:
+            return None
+        mode = detect_task_mode(request.messages)
+        if not (mode == "agent" and cm["auto_agent_compact"]):
+            print(f"[Context] 超预算但模式={mode}，仅修剪不摘要")
+            return None
+        r_cli = reasoner_client if settings.get("reasoner", {}).get("enabled") else None
+        r_model = settings["reasoner"]["model"] if r_cli else None
+        res = await compact_messages(client, model, request.messages, task_mode="agent",
+                                     keep_recent_dialog=cm["keep_recent_dialog"],
+                                     extra_params=extra_params,
+                                     reasoner_client=r_cli, reasoner_model=r_model)
+        if not res:
+            return None
+        request.messages = res["messages"]
+        _write_context_state(settings, request, res)
+        print(f"[Context] L2 自动摘要完成，压缩 {res['compacted_count']} 条消息")
+        return {"type": "context_compact", "reason": "auto", "summary": res["summary"],
+                "task_mode": res["task_mode"], "compacted_count": res["compacted_count"]}
+    except Exception as e:
+        print(f"[Context] 上下文管线异常（跳过）: {e}")
+        return None
+
+
+TOOL_RESULT_CHAR_CAP = 15000
+
+
+def _cap_tool_result(result):
+    """工具输出源头截断（对齐 opencode）：单条结果超长截断并提示分页续读。"""
+    if not isinstance(result, str) or len(result) <= TOOL_RESULT_CHAR_CAP:
+        return result
+    head = result[:TOOL_RESULT_CHAR_CAP]
+    print(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符")
+    return (f"{head}\n\n==== [输出已截断：共 {len(result)} 字符，仅显示前 {TOOL_RESULT_CHAR_CAP} 字符。"
+            "如需后续内容，请使用工具的 offset/分页参数分段续读] ====")
+
+
+def _apply_ctx_guardrail(extra, messages, settings):
+    """防 Strata 400：max_tokens 不得超过 window - prompt估算 - 512。"""
+    try:
+        from py.context_manager import get_context_settings, estimate_tokens
+        window = get_context_settings(settings)["context_window"]
+        est = estimate_tokens(messages)
+        mt = extra.get('max_completion_tokens') or extra.get('max_tokens')
+        if mt:
+            guard = window - est - 512
+            if mt > guard:
+                key = 'max_completion_tokens' if 'max_completion_tokens' in extra else 'max_tokens'
+                extra = dict(extra)
+                extra[key] = max(512, guard)
+                print(f"[Context] 护栏: max_tokens {mt} -> {extra[key]} (估算 prompt {est}, window {window})")
+    except Exception as e:
+        print(f"[Context] 护栏检查异常（跳过）: {e}")
+    return extra
+
+
+def _breakdown_tokens(messages, tools=None):
+    """上下文分段估算：system/历史user/历史assistant/工具结果/tools schema/本轮user。"""
+    from py.context_manager import estimate_text_tokens
+    seg = {"system": 0, "history_user": 0, "history_assistant": 0,
+           "tool_results": 0, "tools_schema": 0, "current_user": 0}
+    try:
+        import json as _json
+        role_of = lambda m: (m.get('role') if isinstance(m, dict) else getattr(m, 'role', None))
+        last_user = max((i for i, m in enumerate(messages) if role_of(m) == 'user'), default=-1)
+        for i, m in enumerate(messages):
+            role = role_of(m)
+            if role is None:
+                continue
+            c = m.get('content') if isinstance(m, dict) else getattr(m, 'content', None)
+            t = estimate_text_tokens(c if isinstance(c, str) else _json.dumps(c or "", ensure_ascii=False))
+            for tc in (m.get('tool_calls') or [] if isinstance(m, dict) else []):
+                fn = tc.get('function') or {}
+                t += estimate_text_tokens(str(fn.get('name', '')) + str(fn.get('arguments', '')))
+            if role == 'system':
+                seg["system"] += t
+            elif role == 'user':
+                seg["current_user" if i == last_user else "history_user"] += t
+            elif role == 'tool':
+                seg["tool_results"] += t
+            elif role == 'assistant':
+                seg["history_assistant"] += t
+        if tools:
+            seg["tools_schema"] = estimate_text_tokens(_json.dumps(tools, ensure_ascii=False)) // 2
+    except Exception:
+        pass
+    return seg
+
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -3544,8 +3702,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # =========================================================================
         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
         # =========================================================================
-        max_rounds = settings.get("max_rounds", 0)
+        max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
         chat_messages = request.messages # 这里的 chat_messages 包含 system
+        usage_info = None
+        _ctx_peak = 0
         
         if max_rounds > 0:
             
@@ -4061,6 +4221,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 }
                 return f"data: {json.dumps(chunk)}\n\n"
             try:
+                usage_info = None
+                _ctx_peak = 0
                 extra = {}
                 reasoner_extra = {}
                 if chat_vendor == 'OpenAI':
@@ -4131,7 +4293,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     "role": "tool",
                                     "tool_call_id": "agentParty",
                                     "name": response["name"],
-                                    "content": f"之前调用的异步工具（{tid}）的结果：\n\n{response['result']}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
+                                    "content": f"之前调用的异步工具（{tid}）的结果：\n\n{_cap_tool_result(str(response['result']))}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
                                 }
                             )
                         if response["status"] == "error":
@@ -4573,6 +4735,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     drs_msg = get_drs_stage(DRS_STAGE)
                     if drs_msg:
                         content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
+                # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式），结果下发前端落账 =====
+                _compact_event_payload = await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
+                if _compact_event_payload:
+                    yield f"data: {json.dumps(_compact_event_payload, ensure_ascii=False)}\n\n"
                 msg = await images_add_in_messages(request.messages, images,settings)
                 if request.top_p != 1 or settings['top_p'] != 1:
                     extra['top_p'] = request.top_p or settings['top_p']
@@ -4587,8 +4753,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     model=model,
                     messages=msg,  # 添加图片信息到消息
                     stream=True,
+                    stream_options={"include_usage": True},
                     extra_body = extra_params, # 其他参数
-                    **extra
+                    **_apply_ctx_guardrail(extra, msg, settings)
                 )
 
                 tool_calls = []
@@ -4599,6 +4766,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
                 async for chunk in response:
                     if not chunk.choices:
+                        if getattr(chunk, "usage", None):
+                            usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
+                            _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
                         continue
                     _chunk_count += 1
                     if _chunk_count % 5 == 0:
@@ -5038,6 +5208,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 
                             # 发送结果，带上匹配的 tool_call_id
                             if not isinstance(results, AsyncIterator):
+                                results = _cap_tool_result(results)
                                 result_chunk = {
                                     "choices": [{
                                         "delta": {
@@ -5051,6 +5222,17 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     }]
                                 }
                                 yield f"data: {json.dumps(result_chunk)}\n\n"
+                                if str(response_content.name).startswith("todo_write_tool"):
+                                    try:
+                                        from py.cli_tool import read_todo_snapshot
+                                        _td = await read_todo_snapshot()
+                                        _td_done = sum(1 for _t in _td if isinstance(_t, dict) and _t.get("status") == "done")
+                                        _td_evt = {"type": "todo_stats",
+                                                   "items": [{k: _t.get(k) for k in ("id", "content", "status", "priority")} for _t in _td if isinstance(_t, dict)],
+                                                   "done": _td_done, "total": len(_td)}
+                                        yield f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
+                                    except Exception as _te:
+                                        print(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
                             else:
                                 # 流式工具结果处理 (AsyncIterator)
                                 buffer = []
@@ -5126,9 +5308,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         # =========================================================================
                         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
                         # =========================================================================
-                        max_rounds = settings.get("max_rounds", 0)
+                        max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
                         chat_messages = request.messages # 这里的 chat_messages 包含 system
-                        
+                        usage_info = None
+                        _ctx_peak = max(_ctx_peak, 0)
                         if max_rounds > 0:
                             
                             # 区分系统消息和对话消息
@@ -5470,13 +5653,17 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         model=model,
                         messages=msg,  # 添加图片信息到消息
                         stream=True,
+                        stream_options={"include_usage": True},
                         extra_body = extra_params, # 其他参数
-                        **extra
+                        **_apply_ctx_guardrail(extra, msg, settings)
                     )
                     tool_calls = []
                     _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
                     async for chunk in response:
                         if not chunk.choices:
+                            if getattr(chunk, "usage", None):
+                                usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
+                                _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
                             continue
                         _chunk_count2 += 1
                         if _chunk_count2 % 5 == 0:
@@ -5753,6 +5940,23 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     "content": drs_msg,
                                 }
                             )
+                try:
+                    from py.context_manager import get_context_settings as _gcs, estimate_tokens as _esttok
+                    _cm_u = _gcs(settings)
+                    _usage_evt = {
+                        "type": "context_usage",
+                        "prompt_tokens": (usage_info or {}).get("prompt_tokens"),
+                        "completion_tokens": (usage_info or {}).get("completion_tokens"),
+                        "peak_prompt_tokens": _ctx_peak or None,
+                        "window": _cm_u["context_window"],
+                        "budget": int(_cm_u["context_window"] * _cm_u["compact_ratio"]),
+                        "est_total": _esttok(request.messages, tools),
+                        "breakdown": _breakdown_tokens(request.messages, tools),
+                    }
+                    yield f"data: {json.dumps(_usage_evt, ensure_ascii=False)}\n\n"
+                    print(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
+                except Exception as _ue:
+                    print(f"[Context] usage 事件生成异常（跳过）: {_ue}")
                 logger.info(f"all msg: {request.messages}")
                 yield "data: [DONE]\n\n"
                 if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
@@ -5893,7 +6097,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         # =========================================================================
         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
         # =========================================================================
-        max_rounds = settings.get("max_rounds", 0)
+        max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
         chat_messages = request.messages # 这里的 chat_messages 包含 system
         
         if max_rounds > 0:
@@ -6536,6 +6740,8 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
             drs_msg = get_drs_stage(DRS_STAGE)
             if drs_msg:
                 content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
+        # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式；非流式通道不下发事件） =====
+        await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
         msg = await images_add_in_messages(request.messages, images,settings)
         if request.top_p != 1 or settings['top_p'] != 1:
             extra['top_p'] = request.top_p or settings['top_p']
@@ -7414,6 +7620,14 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     enable_deep_research = request.enable_deep_research or False
     enable_web_search = request.enable_web_search or False
     async_tools_id = request.asyncToolsID or None
+    if model != 'super-model':
+        _agents_map = (settings or {}).get('agents') or {}
+        if model not in _agents_map and not any((a or {}).get('name') == model for a in _agents_map.values()):
+            _fresh_agents = (await load_settings()).get('agents') or {}
+            if model not in _fresh_agents and not any((a or {}).get('name') == model for a in _fresh_agents.values()):
+                print(f"[Chat] 警告: Agent '{model}' 不存在于 agents 配置（共 {len(_fresh_agents)} 个），自动回落 super-model")
+                model = 'super-model'
+                request.model = 'super-model'
     await _apply_group_memory_context(request)
 
     if model == 'super-model':
@@ -7550,6 +7764,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                     agentSettings = current_settings['agents'][agentId]
                     break
         if not agentSettings:
+            print(f"[Chat] 404: Agent '{model}' not found in settings['agents']")
             return JSONResponse(status_code=404, content={"error": {"message": f"Agent {model} not found", "type": "not_found", "code": 404}})
             
         # 每次读取文件生成新的 agent_settings 字典
@@ -7772,6 +7987,48 @@ async def extract_group_memory_endpoint(req: GroupMemoryExtractRequest):
         memories,
     )
     return {"success": True, "memories": len(memories)}
+
+@app.post("/api/compact")
+async def compact_conversation_endpoint(request: Request):
+    """手动上下文压缩（/compact 指令）：任意任务模式生成摘要，前端负责替换落账。"""
+    settings = await load_settings()
+    body = await request.json()
+    messages = body.get("messages") or []
+    focus = (body.get("focus") or "").strip() or None
+    conversation_id = body.get("conversation_id")
+    if not messages:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "empty messages"})
+    try:
+        from py.context_manager import compact_messages, detect_task_mode, get_context_settings
+        c_class = get_client_class(settings, settings['selectedProvider'])
+        compact_client = client if client is not None else c_class(
+            api_key=settings['api_key'],
+            base_url=settings['base_url'] or "https://api.openai.com/v1")
+        r_cli = None
+        r_model = None
+        if settings.get('reasoner', {}).get('enabled'):
+            r_class = get_client_class(settings, settings['reasoner']['selectedProvider'])
+            r_cli = reasoner_client if reasoner_client is not None else r_class(
+                api_key=settings['reasoner']['api_key'],
+                base_url=settings['reasoner']['base_url'] or "https://api.openai.com/v1")
+            r_model = settings['reasoner']['model']
+        cm = get_context_settings(settings)
+        task_mode = detect_task_mode(messages)
+        if not cm["enabled"]:
+            cm = dict(cm, enabled=True)  # 手动指令无视自动开关
+        res = await compact_messages(compact_client, settings['model'], messages, task_mode=task_mode,
+                                     focus=focus, keep_recent_dialog=cm["keep_recent_dialog"],
+                                     extra_params=None, reasoner_client=r_cli, reasoner_model=r_model)
+        if not res:
+            return {"ok": False, "reason": "not-worth-compacting"}
+        req_stub = ChatRequest(messages=messages, conversation_id=conversation_id)
+        _write_context_state(settings, req_stub, res)
+        return {"ok": True, "summary": res["summary"], "task_mode": res["task_mode"],
+                "compacted_count": res["compacted_count"]}
+    except Exception as e:
+        print(f"[Compact] /api/compact 失败: {e}")
+        return JSONResponse(status_code=500, content={"ok": False, "reason": str(e)})
+
 
 @app.post("/api/conversations/delete")
 async def delete_conversation_endpoint(req: DeleteConversationRequest):
@@ -11904,6 +12161,26 @@ async def websocket_endpoint(websocket: WebSocket):
                     "success": True
                 }, websocket)
 
+            elif msg_type == "save_conversations_delta":
+                # 增量保存：仅 upsert 前端 dirty 的会话，避免每次全量搬运整棵会话树
+                payload = data.get("data", {}) or {}
+                incoming = [c for c in (payload.get("conversations") or []) if isinstance(c, dict) and c.get("id") is not None]
+                covs = await load_covs()
+                existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
+                by_id = {str(c.get("id")): c for c in existing}
+                fresh = [c for c in incoming if str(c.get("id")) not in by_id]
+                for c in incoming:
+                    by_id[str(c.get("id"))] = c
+                covs["conversations"] = fresh + list(by_id.values())
+                if payload.get("conversationGroups") is not None:
+                    covs["conversationGroups"] = payload["conversationGroups"]
+                await save_covs(covs)
+                await ws_manager.send_json({
+                    "type": "conversations_delta_saved",
+                    "correlationId": data.get("correlationId"),
+                    "success": True
+                }, websocket)
+
             elif msg_type == "get_settings":
                 settings = await load_settings()
                 if settings.get("conversations", None):
@@ -12162,6 +12439,7 @@ if __name__ == "__main__":
         log_level="warning",
         ws_ping_interval=20,   # 每20秒发送协议级ping，防止连接被静默断开
         ws_ping_timeout=180,   # ping响应超时180秒才断开，给复杂任务的事件循环足够喘息时间（防止1006异常断开）
+        ws_max_size=64 * 1024 * 1024,  # 全量会话保存/大历史导入的 WS 消息上限（默认16MiB会被大会话顶爆）
     )
     server = uvicorn.Server(config)
     asyncio.run(server.serve())

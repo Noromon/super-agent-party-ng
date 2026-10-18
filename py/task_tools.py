@@ -284,6 +284,6 @@ async def finish_task(
         return f"❌ 标记任务完成失败: {str(e)}"
     
     if success:
-        return f"🎉 任务 {task_id} 已成功标记为完成！结果已保存。请停止后续操作。"
+        return f"[Info] Task {task_id} marked complete; result saved. Before stopping: check the todo list and the original request - if any other task or deliverable remains, start the next one NOW; stop only when everything the user asked for is done and verified."
     else:
         return f"❌ 任务 {task_id} 状态更新失败（可能任务ID错误）。"

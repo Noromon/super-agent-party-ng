@@ -82,11 +82,17 @@ def get_all(prompt,server_address,settings):
 
 
 async def upload_image_via_url(image_url, server_address):
+    from py.load_files import is_private_ip
     upload_url = f"{server_address}/upload/image"
+    # 内网/本机目标（自签证书常态）跳过 TLS 校验，公网保持校验
+    _dl_host = urllib.parse.urlparse(image_url).hostname
+    _up_host = urllib.parse.urlparse(server_address).hostname
+    dl_ssl = False if (_dl_host and is_private_ip(_dl_host)) else None
+    up_ssl = False if (_up_host and is_private_ip(_up_host)) else None
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
             # 下载图片
-            async with session.get(image_url) as response:
+            async with session.get(image_url, ssl=dl_ssl) as response:
                 if response.status != 200:
                     print("Failed to download image.")
                     return None
@@ -109,7 +115,7 @@ async def upload_image_via_url(image_url, server_address):
             headers = {
                 'Content-Type': mpwriter.content_type,
             }
-            async with session.post(upload_url, data=mpwriter, headers=headers) as resp:
+            async with session.post(upload_url, data=mpwriter, headers=headers, ssl=up_ssl) as resp:
                 if resp.status == 200:
                     result = await resp.json()
                     print("Image uploaded successfully:", result)

@@ -1,12 +1,13 @@
 import os
 import base64
 import json
+import asyncio
 import aiohttp
 from urllib.parse import urlparse
 from py.get_setting import load_settings, get_host, get_port # 确保导入了这两个函数
 from openai import AsyncOpenAI
 
-from py.load_files import check_robots_txt, is_private_ip, sanitize_url
+from py.load_files import check_robots_txt, is_private_ip, sanitize_url, ssrf_gate, NET_BLOCK_HINT
 
 # ================= 安全配置 =================
 
@@ -42,33 +43,43 @@ async def get_image_base64(image_url: str) -> str:
         
         # 【安全动作】使用 sanitize_url 强制重写 netloc，切断原始输入流
         safe_target_url = sanitize_url(image_url, force_netloc=f"{HOST}:{PORT}")
+        # 回连本服务器：自签名 https 场景跳过 TLS 校验
+        no_ssl_verify = True
     
     # --- 场景 2: 公网 URL 爬取 ---
     else:
-        # A. SSRF 安全拦截
+        # A. SSRF 安全拦截（受"网络访问控制"开关门控：本机等价∨局域网）
         if is_private_ip(parsed_url.hostname):
-            raise PermissionError(f"安全拒绝: 不允许从内部网络获取图像 ({parsed_url.hostname})")
-        
-        # B. Robots.txt 检查
-        if not await check_robots_txt(image_url):
+            if not await ssrf_gate(parsed_url.hostname, 'image'):
+                raise PermissionError(f"安全拒绝: 不允许从内部网络获取图像 ({parsed_url.hostname}){NET_BLOCK_HINT}")
+            internal_source = True
+            print(f"[SSRF] 已放行内部图像源: {parsed_url.hostname}")
+        else:
+            internal_source = False
+
+        # B. Robots.txt 检查（放行的内部源跳过）
+        if not internal_source and not await check_robots_txt(image_url):
             raise PermissionError(f"合规拒绝: 目标网站禁止爬虫抓取该图像")
-            
+
         # C. 【安全动作】清洗外部 URL，生成扫描器认可的 safe_url
         safe_target_url = sanitize_url(image_url)
+        # 门控放行的内部源同样豁免 TLS 校验（自签证书常态），公网保持完整校验
+        no_ssl_verify = internal_source
 
     # --- 执行下载 ---
     async with aiohttp.ClientSession() as session:
         # 统一使用 safe_target_url 发起请求
         headers = {'User-Agent': USER_AGENT}
         try:
-            async with session.get(safe_target_url, headers=headers, timeout=20) as response:
+            async with session.get(safe_target_url, headers=headers, timeout=20, ssl=(False if no_ssl_verify else None)) as response:
                 if response.status != 200:
                     raise ValueError(f"无法下载图片: HTTP {response.status}")
-                    
                 image_data = await response.read()
-                return base64.b64encode(image_data).decode('utf-8')
-        except Exception as e:
-            raise RuntimeError(f"图像获取失败: {str(e)}")
+        except aiohttp.ClientError as e:
+            raise RuntimeError(f"图像下载请求失败: {e}")
+        except asyncio.TimeoutError:
+            raise RuntimeError("图像下载超时")
+    return base64.b64encode(image_data).decode('utf-8')
 
 async def get_llm_tool(settings):
     llm_list = []
@@ -98,7 +109,7 @@ async def get_llm_tool(settings):
                         },
                         "image_url": {
                             "type": "string",
-                            "description": "需要向工具发送的图片URL或本机本地文件路径，可选。来自本地服务器上的图片URL也可以填入（例如：http://127.0.0.1:3456/xxx.jpg），本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），会被自动处理为base64编码发送",
+                            "description": "需要向工具发送的图片URL或本机本地文件路径，可选。服务器内部URL默认仅支持 /uploaded_files 路由下的图片（在设置开启「网络访问控制」放行开关后亦支持本机或局域网URL）；本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），会被自动处理为base64编码发送",
                         }
                     },
                     "required": ["tool_name","query"]
@@ -109,7 +120,39 @@ async def get_llm_tool(settings):
     else:
         return None
         
-async def get_image_media_type(image_url: str) -> str:
+_MAGIC_MEDIA = [
+    (b'\x89PNG\r\n\x1a\n', 'image/png'),
+    (b'\xff\xd8\xff', 'image/jpeg'),
+    (b'GIF87a', 'image/gif'),
+    (b'GIF89a', 'image/gif'),
+    (b'BM', 'image/bmp'),
+    (b'II*\x00', 'image/tiff'),
+    (b'MM\x00*', 'image/tiff'),
+]
+
+def sniff_media_type_from_base64(b64_data: str) -> str:
+    """按魔数嗅探真实 MIME，识别不了返回 ''"""
+    try:
+        head = base64.b64decode((b64_data or "")[:32])
+    except Exception:
+        return ''
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        return 'image/webp'
+    if head[4:8] == b'ftyp':
+        return 'video/quicktime' if head[8:12] == b'qt  ' else 'video/mp4'
+    if head[:4] == b'\x1a\x45\xdf\xa3':
+        return 'video/webm'
+    for magic, mt in _MAGIC_MEDIA:
+        if head[:len(magic)] == magic:
+            return mt
+    return ''
+
+async def get_image_media_type(image_url: str, base64_data: str = "") -> str:
+    # 有实际数据时按字节魔数判定（URL 后缀对 /view?filename=x.jpg 之类的查询串 URL 不可靠）
+    if base64_data:
+        sniffed = sniff_media_type_from_base64(base64_data)
+        if sniffed:
+            return sniffed
     # 根据image_url类型调整
     if image_url.endswith('.png'):
         media_type = 'image/png'
@@ -127,6 +170,14 @@ async def get_image_media_type(image_url: str) -> str:
         media_type = 'image/x-icon'
     elif image_url.endswith('.svg'):
         media_type = 'image/svg+xml'
+    elif image_url.endswith('.mp4'):
+        media_type = 'video/mp4'
+    elif image_url.endswith('.webm'):
+        media_type = 'video/webm'
+    elif image_url.endswith('.mov'):
+        media_type = 'video/quicktime'
+    elif image_url.endswith('.avi'):
+        media_type = 'video/x-msvideo'
     else:
         media_type = 'image/png'
     return media_type
@@ -146,7 +197,7 @@ async def custom_llm_tool(tool_name, query, image_url=None):
                     # 处理图片输入
                     if image_url:
                         base64_image = await get_image_base64(image_url)
-                        media_type = await get_image_media_type(image_url)
+                        media_type = await get_image_media_type(image_url, base64_image)
                         content = [
                             {"type": "text", "text": query},
                             {
@@ -166,14 +217,14 @@ async def custom_llm_tool(tool_name, query, image_url=None):
                     )
                     return response.message.content
                 except Exception as e:
-                    return str(e)
+                    return f"Error: {str(e)}"
             else:
                 client = AsyncOpenAI(api_key=llmTool['api_key'],base_url=llmTool['base_url'])
                 try:
                     if image_url:
                         base64_image = await get_image_base64(image_url)
                         # 根据image_url类型调整
-                        media_type = await get_image_media_type(image_url)
+                        media_type = await get_image_media_type(image_url, base64_image)
                         prompt = [
                             {
                                 "type": "image",
@@ -199,4 +250,4 @@ async def custom_llm_tool(tool_name, query, image_url=None):
                         )
                     return response.choices[0].message.content
                 except Exception as e:
-                    return str(e)
+                    return f"Error: {str(e)}"

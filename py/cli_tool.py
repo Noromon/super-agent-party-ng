@@ -137,28 +137,28 @@ def get_detailed_exit_info(code: int, command: str) -> str:
     
     # 基础映射
     explanations = {
-        1: "常规错误 (权限不足、语法错误或逻辑失败)。",
-        2: "Shell 内置命令使用不当。",
-        126: "命令不可执行 (权限不足或不是可执行文件)。",
-        127: "找不到命令 (Linux/Unix)。",
-        130: "由 Control-C 终止。",
-        137: "进程被强制杀死 (可能触发了 OOM 内存溢出)。",
-        # Windows 特有
-        9009: f"Windows: 找不到命令 '{cmd_name}'。请检查程序是否已安装，或是否已加入 PATH 环境变量。",
-        5: "Windows: 拒绝访问 (权限不足)。",
+        1: "Generic failure (permission denied, syntax or logic error). Suggested next: inspect the output above, fix the cause and retry with a changed command.",
+        2: "Shell built-in misuse (bad usage/syntax). Suggested next: check the command syntax and retry.",
+        126: "Not executable (permission bit or not a program). Suggested next: check file type/permissions and retry differently.",
+        127: "Command not found (Linux/Unix). Suggested next: verify the program name and PATH.",
+        130: "Terminated by Ctrl-C. Suggested next: rerun if interrupted; otherwise continue with the task.",
+        137: "Process killed (likely OOM). Suggested next: reduce memory usage (smaller batch/file) or split the work.",
+        # Windows specific
+        9009: f"Windows: command '{cmd_name}' not found. Check whether it is installed or on PATH, then retry.",
+        5: "Windows: access denied. Suggested next: use a path/operation you have permission for.",
     }
     
-    info = f"\n[诊断信息] 进程退出码: {code}\n"
-    info += f"[解释] {explanations.get(code, '未知错误类型')}\n"
+    info = f"\n[Diagnostics] process exit code: {code}\n"
+    info += f"[Explanation] {explanations.get(code, 'No known explanation. Inspect the output above, then retry with a changed approach - a failed step is a signal to adjust, not to stop.')}\n"
     
     if code in [127, 9009]:
-        info += f"💡 建议:\n"
+        info += f"Suggested next steps:\n"
         if system == "Windows":
-            info += f"  1. 运行 'where {cmd_name}' 检查程序位置。\n"
-            info += f"  2. 如果是刚安装的软件，可能需要重启 Agent 或使用绝对路径。\n"
+            info += f"  1. Run 'where {cmd_name}' to locate the program.\n"
+            info += f"  2. For freshly installed software, restart the backend or use an absolute path.\n"
         else:
-            info += f"  1. 运行 'which {cmd_name}' 检查程序位置。\n"
-            info += f"  2. 检查环境变量: 'echo $PATH'\n"
+            info += f"  1. Run 'which {cmd_name}' to locate the program.\n"
+            info += f"  2. Check the environment: 'echo $PATH'\n"
             
     return info
 
@@ -266,7 +266,7 @@ class ProcessManager:
 
     def get_logs(self, pid: str, lines: int = 50) -> str:
         if pid not in self._processes:
-            return f"Error: Process ID {pid} not found."
+            return f"Error: no tracked process with id '{pid}'. Call list_processes_tool to see valid ids (use the small id, not the OS PID). If the process already exited, that is not your task failing - verify its output and continue."
         
         entry = self._processes[pid]
         stored_logs = list(entry["logs"])
@@ -277,7 +277,7 @@ class ProcessManager:
 
     def list_processes(self):
         if not self._processes:
-            return "No background processes running."
+            return "No background processes are tracked yet - entries appear only after launching with 'background': true. If you just launched one, check the PID you received; otherwise continue with the next task step."
         
         result = ["PID | Type   | Status       | Start Time          | Command"]
         result.append("-" * 90)
@@ -290,7 +290,7 @@ class ProcessManager:
             active_found = True
         
         if not active_found:
-            return "No background processes running."
+            return "No background processes are tracked yet - entries appear only after launching with 'background': true. If you just launched one, check the PID you received; otherwise continue with the next task step."
         return "\n".join(result)
 
     async def kill_process(self, pid: str):
@@ -299,7 +299,7 @@ class ProcessManager:
         针对 Windows 使用 taskkill /T 结束进程树，防止子进程残留。
         """
         if pid not in self._processes:
-            return f"Error: Process ID {pid} not found."
+            return f"Error: no tracked process with id '{pid}'. Call list_processes_tool to see valid ids (use the small id, not the OS PID). If the process already exited, that is not your task failing - verify its output and continue."
         
         info = self._processes[pid]
         proc = info["proc"]
@@ -435,7 +435,7 @@ class DockerPortProxy:
     
     def list_proxies(self):
         if not self.proxies:
-            return "No active port forwardings."
+            return "No active port forwardings. Use action='forward' with container_port and host_port if you need access; otherwise continue the task."
         return "\n".join([f"localhost:{p} -> container:{p} (active)" for p in self.proxies.keys()])
 
 DOCKER_PROXIES = {} # {container_name: ProxyInstance}
@@ -546,7 +546,7 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
     if not cwd:
-        yield "Error: No workspace directory specified."
+        yield "[Error] No workspace directory configured (a backend settings problem, not your task). Tell the user to set the workspace path in settings, then continue with other work."
         return
     
     try:
@@ -573,7 +573,7 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
 
         if background:
             pid = await process_manager.register_process(process, f"[Docker] {command}", "docker")
-            yield f"[SUCCESS] Docker PID: {pid}"
+            yield f"[Info] Background process started (Docker PID {pid}). It is NOT verified running yet - wait a few seconds, then check get_process_logs before relying on it."
             return
 
         queue = asyncio.Queue()
@@ -603,10 +603,10 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
 
         except asyncio.TimeoutError:
             process.kill()
-            yield f"\n\n[TIMEOUT ERROR] Docker 命令执行超过 {effective_timeout} 秒已强制终止。注意！命令并未完全执行完毕。"
-            yield "\n💡 提示：对于启动应用或大文件下载，请使用 'background': true。"
+            yield f"\n\n[TIMEOUT] The Docker command was killed after {effective_timeout} s. It did NOT finish - the step is still incomplete. Rerun the long part with 'background': true (then poll get_process_logs) or split it into shorter commands. Do not give up on the step."
+            yield "\nTip: for servers/apps/large downloads use 'background': true and poll get_process_logs instead of waiting."
     except Exception as e:
-        yield f"[ERROR] Docker 进程启动失败: {str(e)}"
+        yield f"[Error] Could not start the command in the sandbox: {e}. Verify the sandbox is up (run 'echo ok') and retry - this is not a task failure."
 
 async def edit_file_patch_tool(path: str, old_string: str, new_string: str) -> str:
     """[Docker] 精确字符串替换"""
@@ -668,7 +668,7 @@ print(json.dumps(filtered))
 '''
         output = await _exec_docker_cmd_simple(real_cwd, ["python3", "-c", python_script])
         files = json.loads(output)
-        if not files: return "[Result] No files found."
+        if not files: return "[Info] No files matched this pattern. Not an error: try a broader pattern (e.g. '**/*.py'); dot-directories are excluded by default."
         
         lines = [f"[{len(files)} files matched]"]
         for f in files[:50]:
@@ -678,6 +678,29 @@ print(json.dumps(filtered))
         return "\n".join(lines)
     except Exception as e:
         return f"[Error] Glob failed: {str(e)}"
+
+async def read_todo_snapshot() -> list:
+    """读取当前 workspace 的 ai_todos.json 快照（供 todo_stats 事件推送）。"""
+    try:
+        cwd = await _get_current_cwd()
+        todo_file = Path(cwd) / ".agent" / "ai_todos.json"
+        if todo_file.exists():
+            async with aiofiles.open(todo_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+            if content.strip():
+                data = json.loads(content)
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    try:
+        real_cwd = await _get_current_cwd()
+        data = await _exec_docker_cmd_simple(real_cwd, ["cat", "/workspace/.agent/ai_todos.json"])
+        parsed = json.loads(data)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
 
 async def todo_write_tool(action: str, id: str = None, content: str = None, 
                           priority: str = "medium", status: str = None) -> str:
@@ -709,7 +732,7 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
         if action == "create":
             """创建新任务 - 自动生成3位数字有序ID"""
             if not content: 
-                return "[Error] 创建任务必须提供 content 参数"
+                return "[Error] action='create' requires a non-empty 'content'. Add the task description and retry - retrying without content will fail the same way."
             
             new_id = _generate_ordered_id(todos)
             new_todo = {
@@ -721,65 +744,66 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
                 "completed_at": None
             }
             todos.append(new_todo)
-            msg = f"[Success] 已创建任务 #{new_id}: {content[:30]}"
+            msg = f"[Info] Created todo #{new_id}: {content[:30]}. Note: creating a todo does not advance the underlying work - execute it now if it is the next step."
             
         elif action == "list":
             """列出所有任务 - 按ID数字排序"""
             if not todos: 
-                return "当前暂无任务"
+                return "[Info] No todos yet. If the task has multiple steps, create them with action='create' first, then immediately start executing the first one."
             
-            lines = ["📋 **任务列表** (ID越大创建越晚):"]
+            pending_n = sum(1 for _t in todos if _t.get("status") != "done")
+            lines = [f"**Todo list**: {pending_n} pending / {len(todos) - pending_n} done (higher id = created later). If pending > 0, work the first pending item NOW - do not end your turn."]
             sorted_todos = sorted(todos, key=lambda x: int(x['id']) if x['id'].isdigit() else 0)
             
             for t in sorted_todos:
                 icon = "✅" if t.get('status') == 'done' else "⏳"
                 priority_map = {"high": "🔴", "medium": "🟡", "low": "🟢"}
                 p_icon = priority_map.get(t.get('priority', 'medium'), "⚪")
-                lines.append(f"{icon} [{t['id']}] {p_icon} {t['content'][:40]}")
+                lines.append(f"{icon} [{t['id']}] {p_icon} {t['content'][:40]} - {'DONE' if t.get('status') == 'done' else 'STILL PENDING'}")
             return "\n".join(lines)
 
         elif action == "complete":
             """【高频】标记任务为已完成 - 幂等操作"""
             if not id: 
-                return "[Error] 完成任务必须提供 id (如: 001)"
+                return "[Error] action='complete' requires 'id' - use the bare number shown by action='list' (e.g. 3, no zero padding)."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if target.get('status') == 'done':
-                msg = f"[Info] 任务 #{id} 已经是完成状态"
+                msg = f"[Info] Todo #{id} was already done. No change. Run action='list' to see remaining pending items and continue with the first one."
             else:
                 target['status'] = 'done'
                 target['completed_at'] = datetime.now().isoformat()
-                msg = f"[Success] 已完成任务 #{id}"
+                msg = f"[Info] Todo #{id} marked done. Before ANY summary: run action='list' - if any item is still pending, start the next pending item with a tool call NOW. Do not end your turn while pending items exist."
 
         elif action == "toggle":
             """切换完成状态"""
             if not id: 
-                return "[Error] 切换状态必须提供 id"
+                return "[Error] action='toggle' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if target.get('status') != 'done':
                 target['status'] = 'done'
                 target['completed_at'] = datetime.now().isoformat()
-                msg = f"[Success] 已完成任务 #{id}"
+                msg = f"[Info] Todo #{id} marked done. Before ANY summary: run action='list' - if any item is still pending, start the next pending item with a tool call NOW. Do not end your turn while pending items exist."
             else:
                 target['status'] = 'pending'
                 target['completed_at'] = None
-                msg = f"[Success] 已重新打开任务 #{id}"
+                msg = f"[Info] Todo #{id} reopened as pending. Work on it now before anything else."
 
         elif action == "update":
             """编辑任务详情"""
             if not id: 
-                return "[Error] 更新任务必须提供 id"
+                return "[Error] action='update' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if content: 
                 target['content'] = content
@@ -794,22 +818,22 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
                 target['status'] = status
             
             target['updated_at'] = datetime.now().isoformat()
-            msg = f"[Success] 已更新任务 #{id}"
+            msg = f"[Info] Todo #{id} updated. Continue with the current task step."
 
         elif action == "delete":
             """删除任务"""
             if not id: 
-                return "[Error] 删除任务必须提供 id"
+                return "[Error] action='delete' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             todos.remove(target)
-            msg = f"[Success] 已删除任务 #{id}"
+            msg = f"[Info] Todo #{id} deleted. Continue with the current task step."
 
         else:
-            return f"[Error] 未知操作: {action}"
+            return f"[Error] Unknown action '{action}'. Valid actions: create, list, complete, toggle, update, delete. Pick one and retry."
 
         # 写回 Docker 容器
         with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
@@ -828,7 +852,7 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
         return msg
         
     except Exception as e:
-        return f"[Error] 任务操作失败: {str(e)}"
+        return f"[Error] Todo operation failed: {e}. Todo bookkeeping is NOT the task itself - continue the main work even if this fails."
     
 # 恢复原有的 Docker 基础文件工具
 async def list_files_tool(path: str = ".", show_all: bool = True) -> str:
@@ -981,7 +1005,7 @@ async def docker_manage_ports_tool(action: str, container_port: int = 8000, host
         if action == "stop":
             if not host_port: return "Error: host_port required to stop."
             return await proxy.stop_forward(host_port)
-        return "Unknown action."
+        return "[Error] Unknown action. Valid port actions: forward, stop, list. Pick one and retry."
     except Exception as e:
         return f"[Error] Port tool failed: {str(e)}"
 
@@ -1162,12 +1186,12 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
     perm = normalize_permission_mode(settings.get("localEnvSettings", {}).get("permissionMode", "default"))
     
     if not cwd: 
-        yield "Error: No workspace directory specified."
+        yield "[Error] No workspace directory configured (a backend settings problem, not your task). Tell the user to set the workspace path in settings, then continue with other work."
         return
     
     allowed, result = validate_bash_command(command, cwd, mode=perm)
     if not allowed:
-        yield f"[Security] Command blocked: {result}"
+        yield f"[Security] Command blocked: {result}. Adjust the command to avoid this pattern (e.g. stay inside the workspace) instead of stopping; do not attempt to bypass the guard."
         return
     
     system = platform.system()
@@ -1200,7 +1224,7 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
 
         if background:
             pid = await process_manager.register_process(process, command, "local")
-            yield f"[SUCCESS] Background process started.\nPID: {pid}"
+            yield f"[Info] Background process started (PID {pid}). It is NOT verified running yet - wait a few seconds, then call get_process_logs with this PID to confirm before continuing."
             return
 
         queue = asyncio.Queue()
@@ -1229,7 +1253,7 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
 
             await process.wait()
             if process.returncode != 0:
-                yield f"\n--- 运行结束 (Exit Code: {process.returncode}) ---"
+                yield f"\n--- Command exited with code {process.returncode} (NON-ZERO means this step FAILED: read the output above, adjust and retry with a changed command; zero means this step succeeded - continue the task, do not summarize yet) ---"
                 yield get_detailed_exit_info(process.returncode, command)
         except asyncio.TimeoutError:
             # 杀进程树逻辑保持不变...
@@ -1238,10 +1262,10 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
             else:
                 try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                 except: process.kill()
-            yield f"\n\n[TIMEOUT ERROR] 命令执行超过 {effective_timeout} 秒已强制终止。注意！命令并未完全执行完毕。"
-            yield "\n💡 提示：对于启动应用或大文件下载，请使用 'background': true。"
+            yield f"\n\n[TIMEOUT] The command was killed after {effective_timeout} s. It did NOT finish - the step is still incomplete. Rerun the long part with 'background': true (then poll get_process_logs) or split it into shorter commands. Do not give up on the step."
+            yield "\nTip: for servers/apps/large downloads use 'background': true and poll get_process_logs instead of waiting."
     except Exception as e: 
-        yield f"[系统错误] 无法启动进程: {str(e)}"
+        yield f"[Error] Could not launch the process: {e}. Simplify the command and retry; this is not a task failure."
 
 
 # 恢复原有的 Local 文件工具
@@ -1252,7 +1276,7 @@ async def list_files_tool_local(path: str = ".", show_all: bool = True) -> str:
         target = resolve_strict_path(cwd, path, check_symlink=True)
         
         if not target.is_dir():
-            return f"[Error] Not a directory: {path}"
+            return f"[Info] '{path}' is a file, not a directory - nothing to list. To inspect its contents, call the read_file tool with the same path."
 
         # 使用 scandir 获取更详细的信息且速度更快
         entries = []
@@ -1268,7 +1292,7 @@ async def list_files_tool_local(path: str = ".", show_all: bool = True) -> str:
                     display_name = f"{entry.name}/" if is_dir else entry.name
                     entries.append((0 if is_dir else 1, entry.name.lower(), display_name))
         except PermissionError:
-            return f"[Error] Permission denied accessing: {path}"
+            return f"[Error] Permission denied accessing: {path}. Skip this directory and continue with another path."
 
         # 排序：先按目录/文件分，再按名称字母序
         entries.sort()
@@ -1282,7 +1306,7 @@ async def list_files_tool_local(path: str = ".", show_all: bool = True) -> str:
             summary += f" (Showing first {MAX_ITEMS})"
             result_lines.append(f"... {len(entries) - MAX_ITEMS} more items")
         
-        return f"{summary} in {path}:\n" + "\n".join(result_lines) if result_lines else "Empty directory."
+        return f"{summary} in {path}:\n" + "\n".join(result_lines) if result_lines else "This directory has 0 entries. Note: this listing is NOT recursive - files in subfolders are not shown. Use the glob tool (**/*) to confirm before concluding the area is empty."
 
     except Exception as e:
         return f"[Error] List failed: {str(e)}"
@@ -1450,11 +1474,11 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
         if os.path.isdir(os.path.join(cwd, ".git")) and shutil.which("git"):
             try:
                 # -I: 不搜索二进制, -n: 行号, --full-name: 相对路径
-                cmd = ["git", "grep", "-I", "-n", "--full-name", pattern]
+                cmd = ["git", "grep", "-I", "-n", "--full-name", "-e", pattern]
                 # 如果指定了子目录，限制搜索范围
                 rel_path = os.path.relpath(target_str, cwd)
                 if rel_path != ".":
-                    cmd.append(rel_path)
+                    cmd.extend(["--", rel_path])
                 
                 proc = await asyncio.create_subprocess_exec(
                     *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
@@ -1477,15 +1501,15 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
         # 判断文件是否为二进制 (读取前 1024 字节检查 NULL)
         def is_binary(file_path):
             try:
-                with open(file_path, 'rb',encoding='utf-8') as f:
+                with open(file_path, 'rb') as f:
                     chunk = f.read(1024)
                     return b'\0' in chunk
             except:
                 return True
 
         for root, dirs, files in os.walk(target_str, topdown=True):
-            # 剪枝：直接修改 dirs 列表，阻止 os.walk 进入这些目录
-            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')]
+            # 剪枝：直接修改 dirs 列表，阻止 os.walk 进入这些目录（.agent 为工作区内容目录，放行）
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and (not d.startswith('.') or d == '.agent')]
             
             for file in files:
                 if any(file.endswith(ext) for ext in SKIP_EXTS): continue
@@ -1511,9 +1535,29 @@ async def search_files_tool_local(pattern: str, path: str = ".") -> str:
                 except Exception:
                     continue
 
-        return "\n".join(matches) if matches else "No matches found."
+        return "\n".join(matches) if matches else "No matches for this pattern. This does NOT mean the code is absent: try a shorter substring, a different identifier, or the glob tool by filename before concluding it is missing."
     except Exception as e:
         return f"[Error] Search failed: {str(e)}"
+
+
+def _normalize_glob_pattern(pattern: str, cwd: str) -> str:
+    p = str(pattern or "").strip().replace("\\", "/")
+    if not p:
+        return "*"
+    if p.startswith("./"):
+        p = p[2:]
+    try:
+        pp = Path(p)
+        if pp.is_absolute():
+            p = pp.resolve().relative_to(Path(cwd).resolve()).as_posix()
+    except Exception:
+        pass
+    parts = []
+    for seg in p.split("/"):
+        if seg.startswith("**") and seg != "**":
+            seg = "**/*" + seg[2:]
+        parts.append(seg)
+    return "/".join(parts)
 
 
 async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
@@ -1526,7 +1570,7 @@ async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
         DEFAULT_EXCLUDES = {'.git', 'node_modules', '__pycache__', 'venv', 'dist', 'build'}
 
         # 使用 pathlib 的 glob，天然支持 ** 递归，并且与系统分隔符无关
-        matched_paths = list(base.glob(pattern))
+        matched_paths = list(base.glob(_normalize_glob_pattern(pattern, cwd)))
 
         results = []
         for p in matched_paths:
@@ -1546,9 +1590,9 @@ async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
             if any(fnmatch.fnmatch(rel_str, ex) for ex in excludes):
                 continue
 
-            # 排除默认隐藏/构建目录（检查路径中的每一级目录）
+            # 排除默认隐藏/构建目录（仅检查目录层级，不误伤以点开头的文件名；.agent 为工作区内容目录，放行）
             parts = rel.parts
-            if any(part in DEFAULT_EXCLUDES or part.startswith('.') for part in parts):
+            if any(part in DEFAULT_EXCLUDES or (part.startswith('.') and part != '.agent') for part in parts[:-1]):
                 continue
 
             results.append(rel_str)
@@ -1556,7 +1600,7 @@ async def glob_files_tool_local(pattern: str, exclude: str = "") -> str:
         output = sorted(results)
         limit = 200
         if not output:
-            return "No files matched."
+            return "No files matched this pattern. This is not an error: try a broader pattern (e.g. '**/*.py'); note that dot-directories are excluded by default."
         if len(output) > limit:
             return "\n".join(output[:limit]) + f"\n... ({len(output)-limit} more files)"
         return "\n".join(output)
@@ -1709,7 +1753,7 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
         if action == "create":
             """创建新任务 - 自动生成3位数字有序ID"""
             if not content: 
-                return "[Error] 创建任务必须提供 content 参数"
+                return "[Error] action='create' requires a non-empty 'content'. Add the task description and retry - retrying without content will fail the same way."
             
             new_id = _generate_ordered_id(todos)
             new_todo = {
@@ -1721,14 +1765,15 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
                 "completed_at": None
             }
             todos.append(new_todo)
-            msg = f"[Success] 已创建任务 #{new_id}: {content[:30]}"
+            msg = f"[Info] Created todo #{new_id}: {content[:30]}. Note: creating a todo does not advance the underlying work - execute it now if it is the next step."
             
         elif action == "list":
             """列出所有任务 - 按ID数字大小排序"""
             if not todos: 
-                return "当前项目暂无任务"
+                return "[Info] No todos yet. If the task has multiple steps, create them with action='create' first, then immediately start executing the first one."
             
-            lines = ["📋 **项目任务列表** (ID越大创建越晚):"]
+            pending_n = sum(1 for _t in todos if _t.get("status") != "done")
+            lines = [f"**Todo list**: {pending_n} pending / {len(todos) - pending_n} done (higher id = created later). If pending > 0, work the first pending item NOW - do not end your turn."]
             # 按ID数字排序，确保展示有序性
             sorted_todos = sorted(todos, key=lambda x: int(x['id']) if x['id'].isdigit() else 0)
             
@@ -1736,51 +1781,51 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
                 status_icon = "✅" if t.get('status') == 'done' else "⏳"
                 priority_map = {"high": "🔴", "medium": "🟡", "low": "🟢"}
                 p_icon = priority_map.get(t.get('priority', 'medium'), "⚪")
-                lines.append(f"{status_icon} [{t['id']}] {p_icon} {t['content'][:40]}")
+                lines.append(f"{status_icon} [{t['id']}] {p_icon} {t['content'][:40]} - {'DONE' if t.get('status') == 'done' else 'STILL PENDING'}")
             return "\n".join(lines)
 
         elif action == "complete":
             """【高频】标记任务为已完成 - 幂等操作"""
             if not id: 
-                return "[Error] 完成任务必须提供 id (如: 001)"
+                return "[Error] action='complete' requires 'id' - use the bare number shown by action='list' (e.g. 3, no zero padding)."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if target.get('status') == 'done':
-                msg = f"[Info] 任务 #{id} 已经是完成状态"
+                msg = f"[Info] Todo #{id} was already done. No change. Run action='list' to see remaining pending items and continue with the first one."
             else:
                 target['status'] = 'done'
                 target['completed_at'] = datetime.now().isoformat()
-                msg = f"[Success] 已完成任务 #{id}"
+                msg = f"[Info] Todo #{id} marked done. Before ANY summary: run action='list' - if any item is still pending, start the next pending item with a tool call NOW. Do not end your turn while pending items exist."
 
         elif action == "toggle":
             """切换完成状态 - pending↔done"""
             if not id: 
-                return "[Error] 切换状态必须提供 id"
+                return "[Error] action='toggle' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if target.get('status') != 'done':
                 target['status'] = 'done'
                 target['completed_at'] = datetime.now().isoformat()
-                msg = f"[Success] 已完成任务 #{id}"
+                msg = f"[Info] Todo #{id} marked done. Before ANY summary: run action='list' - if any item is still pending, start the next pending item with a tool call NOW. Do not end your turn while pending items exist."
             else:
                 target['status'] = 'pending'
                 target['completed_at'] = None
-                msg = f"[Success] 已重新打开任务 #{id}"
+                msg = f"[Info] Todo #{id} reopened as pending. Work on it now before anything else."
 
         elif action == "update":
             """编辑任务详情"""
             if not id: 
-                return "[Error] 更新任务必须提供 id"
+                return "[Error] action='update' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             if content: 
                 target['content'] = content
@@ -1795,22 +1840,22 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
                 target['status'] = status
             
             target['updated_at'] = datetime.now().isoformat()
-            msg = f"[Success] 已更新任务 #{id}"
+            msg = f"[Info] Todo #{id} updated. Continue with the current task step."
 
         elif action == "delete":
             """删除任务"""
             if not id: 
-                return "[Error] 删除任务必须提供 id"
+                return "[Error] action='delete' requires 'id' - get it from action='list'."
             
             target = next((t for t in todos if t['id'] == id), None)
             if not target: 
-                return f"[Error] 未找到任务 #{id}"
+                return f"[Error] Todo #{id} does not exist. Call action='list' to see the valid ids, then retry."
             
             todos.remove(target)
-            msg = f"[Success] 已删除任务 #{id}"
+            msg = f"[Info] Todo #{id} deleted. Continue with the current task step."
 
         else:
-            return f"[Error] 未知操作: {action}"
+            return f"[Error] Unknown action '{action}'. Valid actions: create, list, complete, toggle, update, delete. Pick one and retry."
 
         # 保存到本地文件
         async with aiofiles.open(todo_file, 'w', encoding='utf-8') as f:
@@ -1819,7 +1864,7 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
         return msg
 
     except Exception as e:
-        return f"[Error] 操作失败: {str(e)}"
+        return f"[Error] Todo operation failed: {e}. Todo bookkeeping is NOT the task itself - continue the main work even if this fails."
     
 # ==================== [新增] Skill 专用读取工具 ====================
 
@@ -1952,7 +1997,7 @@ TOOLS_REGISTRY = {
     "list_files": {
         "type": "function", "function": {
             "name": "list_files_tool", 
-            "description": "List files in docker workspace.",
+            "description": "List entries of a sandbox workspace directory (NOT recursive - subfolder contents are hidden). For recursive name matching use glob_files; for contents use search_files.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -1960,7 +2005,7 @@ TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to list files in (from workspace root)."
                     }, 
-                    "show_all": {"type": "boolean", "default": True}
+                    "show_all": {"type": "boolean", "default": True, "description": "Include hidden dotfiles in listing"}
                 }, 
                 "required": ["path"]
             }
@@ -1969,7 +2014,7 @@ TOOLS_REGISTRY = {
     "read_file": {
         "type": "function", "function": {
             "name": "read_file_tool", 
-            "description": "Read file content.",
+            "description": "Read a text file from the sandbox workspace (large files are truncated - continue with read_file_range; for images/binaries use get_image_content).",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -1990,8 +2035,8 @@ TOOLS_REGISTRY = {
                 "type": "object", 
                 "properties": {
                     "path": {"type": "string", "description": "Relative path to file"},
-                    "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"}
+                    "start_line": {"type": "integer", "description": "1-based first line to read"},
+                    "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"}
                 }, 
                 "required": ["path", "start_line", "end_line"]
             }
@@ -2014,11 +2059,11 @@ TOOLS_REGISTRY = {
     "search_files": {
         "type": "function", "function": {
             "name": "search_files_tool", 
-            "description": "Grep search.",
+            "description": "Plain regex (grep BRE) search over file contents in the sandbox workspace. Returns 'path:line_number:line_text' lines; binary files and build dirs are skipped. BRE has no | alternation - use plain substrings or separate searches; if there are no matches, simplify the pattern before concluding absence.",
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "pattern": {"type": "string"}, 
+                    "pattern": {"type": "string", "description": "Basic regex (grep BRE) or a plain substring to search for in file contents"}, 
                     "path": {
                         "type": "string",
                         "description": "Relative path to directory to search in (from workspace root)."
@@ -2031,7 +2076,7 @@ TOOLS_REGISTRY = {
     "glob_files": {
         "type": "function", "function": {
             "name": "glob_files_tool", 
-            "description": "Recursive glob.",
+            "description": "Find files in the sandbox workspace by glob pattern; '**' matches recursively (e.g. '**/*.py'). Returns workspace-relative paths, max 200 results.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2039,7 +2084,7 @@ TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Glob pattern (relative to workspace root)."
                     }, 
-                    "exclude": {"type": "string"}
+                    "exclude": {"type": "string", "description": "Optional comma-separated glob patterns of paths to exclude"}
                 }, 
                 "required": ["pattern"]
             }
@@ -2052,7 +2097,7 @@ TOOLS_REGISTRY = {
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "skill_id": {"type": "string"}
+                    "skill_id": {"type": "string", "description": "Skill directory name under .agent/skills/"}
                 }, 
                 "required": ["skill_id"]
             }
@@ -2070,7 +2115,7 @@ TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from workspace root)."
                     }, 
-                    "content": {"type": "string"}
+                    "content": {"type": "string", "description": "FULL new file content (entire file is overwritten)"}
                 }, 
                 "required": ["path", "content"]
             }
@@ -2087,10 +2132,10 @@ TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from workspace root)."
                     }, 
-                    "old_string": {"type": "string"}, 
-                    "new_string": {"type": "string"}
+                    "old_string": {"type": "string", "description": "Exact existing text to be replaced (must occur in the file)"}, 
+                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}
                 }, 
-                "required": ["path", "old_string"]
+                "required": ["path", "old_string", "new_string"]
             }
         }
     },
@@ -2099,32 +2144,32 @@ TOOLS_REGISTRY = {
         "type": "function",
         "function": {
             "name": "todo_write_tool",
-            "description": "[Docker] 待办任务管理工具。用于在 Docker 沙箱环境中管理任务列表，支持创建、查看、完成、编辑、删除等操作。所有任务持久化存储在容器的 /workspace/.agent/ai_todos.json 文件中。",
+            "description": "[Docker sandbox] Todo list manager. The list is a contract with the user: the overall task is NOT complete while any item is still pending. After marking one done, immediately start the next pending item. Never mark done what was not actually executed and verified.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["create", "list", "complete", "toggle", "update", "delete"],
-                        "description": "操作类型：create(创建), list(查看所有), complete(标记完成-幂等安全), toggle(切换状态-会反向), update(编辑详情), delete(删除)"
+                        "description": "Operation: create | list (show all ids and states) | complete (mark done, idempotent - prefer this) | toggle (flips state in whichever direction) | update | delete."
                     },
                     "id": {
                         "type": "string",
-                        "description": "任务唯一标识。create时可选（自动生成），其他操作（complete/toggle/update/delete）时必需"
+                        "description": "Todo id as a bare number taken from action='list' (e.g. 3, no zero padding). Optional (auto-generated) for create; required for the other actions."
                     },
                     "content": {
                         "type": "string",
-                        "description": "任务内容描述。create时必需，update时可选"
+                        "description": "Task description (one concrete step). Required for create; optional for update."
                     },
                     "priority": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
-                        "description": "优先级：high(高), medium(中/默认), low(低)。create/update时可选"
+                        "description": "Priority: high | medium (default) | low. Optional for create/update."
                     },
                     "status": {
                         "type": "string",
                         "enum": ["pending", "done"],
-                        "description": "【仅用于update】强制设置任务状态：pending(未完成), done(已完成)。注意：标记完成建议使用complete动作而非status参数"
+                        "description": "[update only] Force the status field: pending | done. Prefer the complete action for normal completion."
                     }
                 },
                 "required": ["action"]
@@ -2139,12 +2184,12 @@ TOOLS_REGISTRY = {
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "command": {"type": "string"}, 
+                    "command": {"type": "string", "description": "Shell command to run inside the sandbox container"},
                     "background": {"type": "boolean", "description": "Run non-blocking. Returns PID."},
                     "timeout": {
                         "type": "integer", 
-                        "default": 60, 
-                        "description": "Max execution time in seconds (1-3600). Default 60."
+                        "default": 600, 
+                        "description": "Max execution time in seconds (1-3600). Default 600."
                     }
                 }, 
                 "required": ["command"]
@@ -2204,9 +2249,9 @@ TOOLS_REGISTRY = {
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "action": {"type": "string", "enum": ["forward", "stop", "list"]},
-                    "container_port": {"type": "integer"},
-                    "host_port": {"type": "integer"}
+                    "action": {"type": "string", "enum": ["forward", "stop", "list"], "description": "'forward' adds a host->container port mapping, 'stop' removes it, 'list' shows current mappings"},
+                    "container_port": {"type": "integer", "description": "Port inside the container (required for forward/stop)"},
+                    "host_port": {"type": "integer", "description": "Port on the host (required for forward/stop)"}
                 }, 
                 "required": ["action"]
             }
@@ -2219,7 +2264,7 @@ LOCAL_TOOLS_REGISTRY = {
     "list_files_local": {
         "type": "function", "function": {
             "name": "list_files_tool_local", 
-            "description": "List local files.",
+            "description": "List entries of a host workspace directory (NOT recursive, capped at 200 entries). For recursive name matching use glob_files_local; for contents use search_files_local.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2227,7 +2272,7 @@ LOCAL_TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to list files in (from current working directory)."
                     }, 
-                    "show_all": {"type": "boolean","default": True}
+                    "show_all": {"type": "boolean","default": True, "description": "Include hidden dotfiles in listing"}
                 }, 
                 "required": ["path"]
             }
@@ -2236,7 +2281,7 @@ LOCAL_TOOLS_REGISTRY = {
     "read_file_local": {
         "type": "function", "function": {
             "name": "read_file_tool_local", 
-            "description": "Read local file.",
+            "description": "Read a text file from the host workspace (large files are truncated - continue with read_file_range_local; for images/binaries use get_image_content).",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2257,8 +2302,8 @@ LOCAL_TOOLS_REGISTRY = {
                 "type": "object", 
                 "properties": {
                     "path": {"type": "string", "description": "Relative path to file"},
-                    "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"}
+                    "start_line": {"type": "integer", "description": "1-based first line to read"},
+                    "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"}
                 }, 
                 "required": ["path", "start_line", "end_line"]
             }
@@ -2272,7 +2317,7 @@ LOCAL_TOOLS_REGISTRY = {
                 "type": "object", 
                 "properties": {
                     "path": {"type": "string", "description": "Relative path to file"},
-                    "lines": {"type": "integer", "default": 100}
+                    "lines": {"type": "integer", "default": 100, "description": "Number of lines to read from the end of the file"}
                 }, 
                 "required": ["path"]
             }
@@ -2281,13 +2326,12 @@ LOCAL_TOOLS_REGISTRY = {
     "search_files_local": {
          "type": "function", "function": {
             "name": "search_files_tool_local", 
-            "description": "Search local files.",
+            "description": "Regex search over local workspace file contents (re.search semantics). Returns 'path:line_number:line_text' lines, max 1000 matches. Text files only; binary files and build dirs (.git, node_modules, __pycache__, venv, dist, build) are skipped.",
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "pattern": {"type": "string"}
-                    # 注意：根据之前的代码实现，search_files_local 似乎没有 path 参数，而是直接在 CWD 搜索。
-                    # 如果需要支持指定路径，需要在实现代码中确认。
+                    "pattern": {"type": "string", "description": "Python regex to search for in file contents"},
+                    "path": {"type": "string", "description": "Optional relative subdirectory of the workspace to restrict the search (default: whole workspace)"}
                 }, 
                 "required": ["pattern"]
             }
@@ -2296,13 +2340,17 @@ LOCAL_TOOLS_REGISTRY = {
     "glob_files_local": {
          "type": "function", "function": {
             "name": "glob_files_tool_local", 
-            "description": "Glob local files.",
+            "description": "Find files in the local workspace by glob pattern; '**' matches recursively (e.g. '**/*.py' or 'src/**/*.ts'). Pattern is relative to the workspace root; returns workspace-relative posix paths, max 200 results.",
             "parameters": {
                 "type": "object", 
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Glob pattern (relative to current working directory)."
+                        "description": "Glob pattern (relative to current working directory), e.g. '**/*.md'"
+                    },
+                    "exclude": {
+                        "type": "string",
+                        "description": "Optional comma-separated glob patterns of relative paths to exclude, e.g. 'tests/*,*.min.js'"
                     }
                 }, 
                 "required": ["pattern"]
@@ -2316,7 +2364,7 @@ LOCAL_TOOLS_REGISTRY = {
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "skill_id": {"type": "string"}
+                    "skill_id": {"type": "string", "description": "Skill directory name under .agent/skills/"}
                 }, 
                 "required": ["skill_id"]
             }
@@ -2334,9 +2382,9 @@ LOCAL_TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from current working directory)."
                     }, 
-                    "content": {"type": "string"}
+                    "content": {"type": "string", "description": "FULL new file content (entire file is overwritten)"}
                 }, 
-                "required": ["path"]
+                "required": ["path", "content"]
             }
         }
     },
@@ -2351,10 +2399,10 @@ LOCAL_TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from current working directory)."
                     }, 
-                    "old_string": {"type": "string"}, 
-                    "new_string": {"type": "string"}
+                    "old_string": {"type": "string", "description": "Exact existing text to be replaced (must occur in the file)"}, 
+                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}
                 }, 
-                "required": ["path", "old_string"]
+                "required": ["path", "old_string", "new_string"]
             }
         }
     },
@@ -2362,32 +2410,32 @@ LOCAL_TOOLS_REGISTRY = {
         "type": "function",
         "function": {
             "name": "todo_write_tool_local",
-            "description": "本地待办任务管理工具。用于管理项目中的任务列表，包括创建、查看、完成、编辑、删除等操作。所有任务持久化存储在项目根目录的 .agent/ai_todos.json 文件中。",
+            "description": "[Host workspace] Todo list manager. The list is a contract with the user: the overall task is NOT complete while any item is still pending. After marking one done, immediately start the next pending item. Never mark done what was not actually executed and verified.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
                         "enum": ["create", "list", "complete", "toggle", "update", "delete"],
-                        "description": "操作类型：create(创建), list(查看所有), complete(标记完成-幂等), toggle(切换状态-会反向), update(编辑详情), delete(删除)"
+                        "description": "Operation: create | list (show all ids and states) | complete (mark done, idempotent - prefer this) | toggle (flips state in whichever direction) | update | delete."
                     },
                     "id": {
                         "type": "string",
-                        "description": "任务唯一标识。create时可选（自动生成），其他操作（complete/toggle/update/delete）时必需"
+                        "description": "Todo id as a bare number taken from action='list' (e.g. 3, no zero padding). Optional (auto-generated) for create; required for the other actions."
                     },
                     "content": {
                         "type": "string",
-                        "description": "任务内容描述。create时必需，update时可选"
+                        "description": "Task description (one concrete step). Required for create; optional for update."
                     },
                     "priority": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
-                        "description": "优先级：high(高), medium(中/默认), low(低)。create/update时可选"
+                        "description": "Priority: high | medium (default) | low. Optional for create/update."
                     },
                     "status": {
                         "type": "string",
                         "enum": ["pending", "done"],
-                        "description": "【仅用于update】强制设置任务状态：pending(未完成), done(已完成)。注意：标记完成建议使用complete动作而非status参数"
+                        "description": "[update only] Force the status field: pending | done. Prefer the complete action for normal completion."
                     }
                 },
                 "required": ["action"]
@@ -2402,12 +2450,12 @@ LOCAL_TOOLS_REGISTRY = {
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "command": {"type": "string"},
+                    "command": {"type": "string", "description": "Shell command to run on the host (PowerShell/cmd semantics)"},
                     "background": {"type": "boolean", "description": "Run in background."},
                     "timeout": {
                         "type": "integer", 
-                        "default": 60, 
-                        "description": "Max execution time in seconds (1-3600). Default 60."
+                        "default": 600, 
+                        "description": "Max execution time in seconds (1-3600). Default 600."
                     }
                 }, 
                 "required": ["command"]
@@ -2463,12 +2511,12 @@ LOCAL_TOOLS_REGISTRY = {
     "local_net_tool": {
         "type": "function", "function": {
             "name": "local_net_tool", 
-            "description": "Check local ports.",
+            "description": "Inspect local TCP ports: 'check' whether one port is listening, 'scan' common ports.",
             "parameters": {
-                "type": "object", 
+                "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["check", "scan"]},
-                    "port": {"type": "integer"}
+                    "action": {"type": "string", "enum": ["check", "scan"], "description": "'check' a single port or 'scan' common ports"},
+                    "port": {"type": "integer", "description": "Port number to check (required when action='check')"}
                 }, 
                 "required": ["action"]
             }

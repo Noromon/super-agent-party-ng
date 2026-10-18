@@ -7,7 +7,7 @@ import aiohttp
 from io import BytesIO
 import asyncio
 from urllib.parse import urlparse
-from py.get_setting  import get_host,get_port,BLOCKLIST
+from py.get_setting  import get_host,get_port,BLOCKLIST,load_settings
 import zipfile
 # 平台检测
 IS_WINDOWS = sys.platform == 'win32'
@@ -80,6 +80,81 @@ def is_private_ip(hostname):
         
     return False
 
+_local_addr_cache = {"ips": set(), "names": set(), "ts": 0}
+
+def _refresh_local_addrs():
+    """枚举本机主机名与全部网卡 IP（60 秒缓存），无需额外依赖"""
+    import time
+    now = time.time()
+    if now - _local_addr_cache["ts"] < 60 and _local_addr_cache["ips"]:
+        return _local_addr_cache
+    ips = set()
+    names = set()
+    try:
+        host = socket.gethostname()
+        names.add(host.lower().rstrip('.'))
+        try:
+            names.add(socket.getfqdn().lower().rstrip('.'))
+        except Exception:
+            pass
+        for *_, sockaddr in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP):
+            ips.add(sockaddr[0])
+    except Exception:
+        pass
+    for lh in ("localhost", "ip6-localhost", "ip6-loopback"):
+        try:
+            for *_, sockaddr in socket.getaddrinfo(lh, None, proto=socket.IPPROTO_TCP):
+                ips.add(sockaddr[0])
+        except Exception:
+            pass
+    names.discard("")
+    _local_addr_cache.update(ips=ips, names=names, ts=now)
+    return _local_addr_cache
+
+def is_local_equivalent(hostname: str) -> bool:
+    """host 是否等同于本机：回环地址 / 本机主机名(FQDN) / 解析到本机网卡持有的 IP"""
+    if not hostname:
+        return False
+    h = str(hostname).strip("[]").lower().rstrip(".")
+    try:
+        if ipaddress.ip_address(h).is_loopback:
+            return True
+    except ValueError:
+        pass
+    cache = _refresh_local_addrs()
+    if h in cache["names"]:
+        return True
+    try:
+        addrs = {i[4][0] for i in socket.getaddrinfo(h, None, proto=socket.IPPROTO_TCP)}
+    except Exception:
+        return False
+    for a in addrs:
+        try:
+            if ipaddress.ip_address(a).is_loopback or a in cache["ips"]:
+                return True
+        except ValueError:
+            continue
+    return False
+
+NET_BLOCK_HINT = "（如需访问本机/局域网资源，请在 设置→网络访问控制 开启对应放行开关）"
+
+async def get_network_access_flags():
+    try:
+        s = await load_settings()
+        nas = s.get("networkAccessSettings", {}) or {}
+        return bool(nas.get("allowLocalEquivalentUrls", False)), bool(nas.get("allowLanUrls", False))
+    except Exception:
+        return False, False
+
+async def ssrf_gate(hostname: str, scope: str) -> bool:
+    """私网地址访问门控。scope='image'(本机等价∨局域网) 或 'file'(仅局域网)。True=放行"""
+    allow_local, allow_lan = await get_network_access_flags()
+    if allow_lan:
+        return True
+    if scope == "image" and allow_local and await asyncio.to_thread(is_local_equivalent, hostname):
+        return True
+    return False
+
 def get_domain(url: str) -> str:
     return urlparse(url).netloc.lower()
 
@@ -128,20 +203,27 @@ def sanitize_url(input_url: str, default_base: str = "", endpoint: str = "",forc
     
     # 2. 验证协议 (强制 http/https)
     if not parsed.scheme or not parsed.scheme.startswith("http"):
-        raise HTTPException(status_code=400, detail="仅支持 http 或 https 协议")
+        raise HTTPException(status_code=400, detail="[Error] Only http/https URLs are supported. Use the read_file tool for local paths.")
     
     if not parsed.netloc:
-        raise HTTPException(status_code=400, detail="无效的 URL 域名或 IP")
+        raise HTTPException(status_code=400, detail="[Error] Invalid URL host. Correct the URL and retry.")
     if force_netloc:
         parsed = parsed._replace(netloc=force_netloc)
 
     # 3. 重新构造 URL (这是消除安全报错的关键动作)
     # 我们只拿解析出来的部分进行手动拼接，不直接使用用户传入的原始长字符串
+    # 保留 path 与 query；仅当显式给出 endpoint 时才追加（旧版无条件补 "/" 会造出 /x.png/ 式 404）
     safe_base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-    
-    # 确保 endpoint 格式正确
-    clean_endpoint = endpoint if endpoint.startswith("/") else f"/{endpoint}"
-    final_url = f"{safe_base_url.rstrip('/')}{clean_endpoint}"
+    if parsed.query:
+        safe_base_url += f"?{parsed.query}"
+
+    clean_endpoint = str(endpoint).strip()
+    if clean_endpoint:
+        if not clean_endpoint.startswith("/"):
+            clean_endpoint = f"/{clean_endpoint}"
+        final_url = f"{safe_base_url.rstrip('/')}{clean_endpoint}"
+    else:
+        final_url = safe_base_url
 
     # 可选：如果是内网 IP，打印审计日志（无需拦截）
     if is_private_ip(parsed.hostname):
@@ -164,44 +246,47 @@ async def handle_url(url):
         # 使用 sanitize_url 强行重写域名部分
         target_url = sanitize_url(url,force_netloc=f"{HOST}:{PORT}")
         
+        # 回连本服务器：自签名 https 场景跳过 TLS 校验
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(target_url, timeout=10) as response:
+                async with session.get(target_url, timeout=10, ssl=False) as response:
                     response.raise_for_status()
                     return await response.read(), ext
             except Exception as e:
-                raise RuntimeError(f"内部文件读取失败: {e}")
+                raise RuntimeError(f"[Error] Failed to read the internal file: {e}. Verify the exact path with list/glob tools, then retry.")
 
     # --- 2. 外部公网 URL 爬取逻辑 ---
     else:
-        # A. SSRF 安全检查 (逻辑保持不变)
+        # A. SSRF 安全检查（受"网络访问控制"开关门控：文件链仅认「允许局域网URL」）
+        internal_ok = False
         if is_private_ip(parsed_url.hostname):
-            raise PermissionError(f"安全拒绝: 不允许访问内部网络地址 ({parsed_url.hostname})")
-
-        # B. Robots.txt 检查
-        if not await check_robots_txt(url):
+            if not await ssrf_gate(parsed_url.hostname, 'file'):
+                raise PermissionError(f"安全拒绝: 不允许访问内部网络地址 ({parsed_url.hostname}){NET_BLOCK_HINT}")
+            internal_ok = True
+        # B. Robots.txt 检查（放行的内部源跳过）
+        elif not await check_robots_txt(url):
             raise PermissionError(f"合规拒绝: robots.txt 禁止访问")
 
-        # C. 【核心改动】使用 sanitize_url 清洗并生成全新的 safe_url
+        # D. 执行外部请求（开关放行内部源时同走此路，不再谎称"外部"）
         # 这会切断扫描器对原始 url 变量的追踪
         safe_url = sanitize_url(url)
 
-        # D. 执行外部请求
+        # E. 执行请求
         async with aiohttp.ClientSession() as session:
             headers = {'User-Agent': USER_AGENT}
             try:
-                # 传入 safe_url，安全工具会认为该变量是“已清洗”的
-                async with session.get(safe_url, headers=headers, timeout=30) as response:
+                # 传入 safe_url，安全工具会认为该变量是“已清洗”的；门控放行的内部源豁免 TLS 校验
+                async with session.get(safe_url, headers=headers, timeout=30, ssl=(False if internal_ok else None)) as response:
                     response.raise_for_status()
                     content = await response.read()
                     return content, ext
             except Exception as e:
-                raise RuntimeError(f"外部 URL 下载失败: {e}")
+                raise RuntimeError(f"[Error] Download failed: {e}. The URL may be blocked or offline - try another source; do not retry endlessly.")
                                
 async def handle_local_file(file_path):
     """异步处理本地文件"""
     if not os.path.exists(file_path):
-        raise FileNotFoundError(f"文件不存在: {file_path}")
+        raise FileNotFoundError(f"[Error] File not found: {file_path}. Verify the exact path with list/glob tools, then retry.")
     loop = asyncio.get_event_loop()
     content = await loop.run_in_executor(None, _read_file, file_path)
     ext = os.path.splitext(file_path)[1].lstrip('.').lower()
@@ -659,14 +744,17 @@ def _process_doc(content):
             os.unlink(tmp_path)
 
 async def get_file_content(file_url):
-    """异步获取文件内容（增加编码异常处理）"""
+    """异步获取文件内容（获取与解析分别标注错误，互不顶替）"""
+    # 获取阶段的错误（SSRF/下载/文件不存在等）保留自身标签直接上抛
+    content, ext = await get_content(file_url)
     try:
-        content, ext = await get_content(file_url)
         if ext in office_extensions:
             return await handle_office_document(content, ext)
         return decode_text(content)
+    except NotImplementedError:
+        raise
     except Exception as e:
-        return f"文件解析错误: {str(e)}"
+        return f"[Error] Failed to parse this file: {e}. The file may be corrupt or an unsupported variant - try another source; do not retry the identical URL."
 
 async def get_files_content(files_path_list):
     """异步获取所有文件内容并拼接（增加错误隔离）"""
@@ -675,9 +763,9 @@ async def get_files_content(files_path_list):
     results = []
     for fp, content in zip(files_path_list, contents):
         if isinstance(content, Exception):
-            results.append(f"文件 {fp} 解析失败: {str(content)}")
+            results.append(f"File {fp} could not be parsed: {content}. Continue with the other files.")
         else:
-            results.append(f"文件 {fp} 内容：\n{content}")
+            results.append(f"--- Content of {fp} ---\n{content}")
     return "\n\n".join(results)
 
 async def get_files_json(files_list):
@@ -713,7 +801,7 @@ file_tool = {
     "type": "function",
     "function": {
         "name": "get_file_content",
-        "description": f"获取给定的文件URL中的内容，无论是公网URL还是服务器内部URL（内部URL只支持查看/uploaded_files路由下的文件），由于工具调用结果会被缓存在服务器中，本工具也可以通过工具调用结果的URL用来查看工具调用结果，支持格式：{', '.join(ALLOWED_EXTENSIONS)}",
+        "description": f"获取给定的文件URL中的内容，无论是公网URL还是服务器内部URL（内部URL默认仅支持/uploaded_files路由；在设置开启「网络访问控制-允许局域网URL」后可访问局域网URL），由于工具调用结果会被缓存在服务器中，本工具也可以通过工具调用结果的URL用来查看工具调用结果，支持格式：{', '.join(ALLOWED_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -731,7 +819,7 @@ image_tool = {
     "type": "function",
     "function": {
         "name": "get_image_content",
-        "description": f"获取给定图片的内容，输入可以是公网URL、服务器内部URL（内部URL只支持查看/uploaded_files路由下的图片）或本机本地文件路径。本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "description": f"获取给定图片的内容，输入可以是公网URL、服务器内部URL（默认仅支持/uploaded_files路由；在设置开启「网络访问控制」放行开关后支持本机或局域网URL）或本机本地文件路径。本地路径请使用当前操作系统的原生风格书写（Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png），支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -802,7 +890,7 @@ analyze_images_tool = {
                     "items": {
                         "type": "string"
                     },
-                    "description": "图片URL或本机本地文件路径组成的列表，每个元素的格式要求与analyze_image相同（公网URL、服务器内部URL（仅支持/uploaded_files路由）或本机原生风格路径，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
+                    "description": "图片URL或本机本地文件路径组成的列表，每个元素的格式要求与analyze_image相同（公网URL、服务器内部URL（默认仅支持/uploaded_files路由，开启设置的网络放行开关后可用本机或局域网URL）或本机原生风格路径，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
                 },
                 "prompt": {
                     "type": "string",

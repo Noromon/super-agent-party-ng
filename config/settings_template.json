@@ -192,6 +192,18 @@
         "enabled": true
       }
     },
+    "contextManagement": {
+      "enabled": true,
+      "contextWindow": 32000,
+      "compactRatio": 0.8,
+      "keepRecentTools": 4,
+      "keepRecentDialog": 12,
+      "autoAgentCompact": true
+    },
+    "networkAccessSettings": {
+      "allowLocalEquivalentUrls": false,
+      "allowLanUrls": false
+    },
     "acpSettings": {
       "agent": "claude",          
       "permissionMode": "default", 

@@ -572,6 +572,11 @@ let vue_data = {
     },
     abortController: null, // 用于中断请求的控制器
     isSending: false, // 是否正在发送
+    contextStats: {},
+    ctxPanelVisible: false,
+    todoStats: {},
+    todoHover: false,
+    todoPanelPinned: false,
     showAddDialog: false,
     modelProviders: [],
     // 更新相关

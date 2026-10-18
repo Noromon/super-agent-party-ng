@@ -7,7 +7,8 @@ from langchain_community.tools import DuckDuckGoSearchResults
 import requests
 from tavily import TavilyClient
 from py.get_setting import load_settings
-from py.load_files import check_robots_txt
+from py.load_files import check_robots_txt, is_private_ip
+from urllib.parse import urlparse
 
 async def DDGsearch(query):
     settings = await load_settings()
@@ -19,14 +20,14 @@ async def DDGsearch(query):
             return results
         except Exception as e:
             print(f"An error occurred: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         # 使用默认executor在单独线程中执行同步操作
         return await asyncio.get_event_loop().run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Event loop error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 duckduckgo_tool = {
     "type": "function",
@@ -133,7 +134,7 @@ async def bochaai_search(query):
         api_key = settings['webSearch'].get('bochaai_api_key', "")
         
         if not api_key:
-            return "API key未配置"
+            return "[Error] This search engine is not configured by the user. Choose a different search tool - the missing API key is not your failure."
 
         url = "https://api.bochaai.com/v1/web-search"
         headers = {
@@ -171,17 +172,17 @@ async def bochaai_search(query):
                 
                 return json.dumps(formatted_results, indent=2, ensure_ascii=False)
             else:
-                return f"请求失败，状态码：{response.status_code}，响应内容：{response.text}"
+                return f"[Error] Request failed (status {response.status_code}): {response.text[:200]}. Retry with a shorter query or try another search tool."
         except Exception as e:
             print(f"博查得搜索错误: {str(e)}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"异步执行错误: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 bochaai_tool = {
     "type": "function",
@@ -215,14 +216,14 @@ async def Tavily_search(query):
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Tavily search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 tavily_tool = {
     "type": "function",
@@ -256,14 +257,14 @@ async def Bing_search(query):
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Bing search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 
 bing_tool = {
@@ -298,14 +299,14 @@ async def Google_search(query):
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Google search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 
 google_tool = {
@@ -339,14 +340,14 @@ async def Brave_search(query):
             return response
         except Exception as e:
             print(f"Brave search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 brave_tool = {
     "type": "function",
@@ -385,14 +386,14 @@ async def Exa_search(query):
                 return response
         except Exception as e:
             print(f"Exa search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 exa_tool = {
     "type": "function", 
@@ -425,14 +426,14 @@ async def Serper_search(query):
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
             print(f"Serper search error: {e}")
-            return ""
+            return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
         print(f"Async execution error: {e}")
-        return ""
+        return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 serper_tool = {
     "type": "function",
@@ -469,13 +470,13 @@ async def jina_crawler(original_url):
             if response.status_code == 200:
                 return response.text
             else:
-                return f"获取{original_url}网页信息失败，状态码：{response.status_code}"
+                return f"[Fetch failed] Could not fetch {original_url} (status {response.status_code}). The page may be blocked or moved - try another source or fetcher; do not retry the identical URL."
         except requests.RequestException as e:
-            return f"获取{original_url}网页信息失败，错误信息：{str(e)}"
+            return f"[Fetch failed] Could not fetch {original_url}: {e}. A local crawler service being unreachable is not your task failing - fall back to another fetcher/source."
 
     try:
         if not await check_robots_txt(original_url):
-            raise PermissionError(f"合规拒绝: 目标网站禁止抓取")
+            raise PermissionError(f"[Blocked] robots.txt forbids crawling this URL. Pick a different source; do not retry this URL.")
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)
     except Exception as e:
@@ -538,11 +539,11 @@ async def Crawl4Ai_search(original_url):
             result = tester.submit_and_wait(request, headers=headers)
             return result['result']['markdown']
         except Exception as e:
-            return f"获取{original_url}网页信息失败，错误信息：{str(e)}"
+            return f"[Fetch failed] Could not fetch {original_url}: {e}. A local crawler service being unreachable is not your task failing - fall back to another fetcher/source."
 
     try:
         if not await check_robots_txt(original_url):
-            raise PermissionError(f"合规拒绝: 目标网站禁止抓取")
+            raise PermissionError(f"[Blocked] robots.txt forbids crawling this URL. Pick a different source; do not retry this URL.")
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
@@ -840,7 +841,7 @@ async def firecrawl_search(original_url: str, query: str = None) -> str:
         # 如果是官方API，检查robots.txt
         if 'api.firecrawl.dev' in base_url:
             if not await check_robots_txt(original_url):
-                raise PermissionError(f"合规拒绝: 目标网站禁止抓取")
+                raise PermissionError(f"[Blocked] robots.txt forbids crawling this URL. Pick a different source; do not retry this URL.")
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)
@@ -884,13 +885,15 @@ async def simple_fetch(url):
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
-            response = requests.get(url, headers=headers, timeout=30)
+            # 内网/本机服务多为自签证书，跳过 TLS 校验；公网保持完整校验
+            verify_tls = not is_private_ip(urlparse(url).hostname)
+            response = requests.get(url, headers=headers, timeout=30, verify=verify_tls)
             if response.status_code == 200:
                 return response.text
             else:
-                return None, f"获取{url}网页信息失败，状态码：{response.status_code}"
+                return None, f"[Fetch failed] Could not fetch {url} (status {response.status_code}). Try another source or fetcher; do not retry the identical URL."
         except requests.RequestException as e:
-            return None, f"获取{url}网页信息失败，错误信息：{str(e)}"
+            return None, f"[Fetch failed] Could not fetch {url}: {e}. Try another source or fetcher; do not retry the identical URL."
     
     def clean_and_extract(html_content):
         """提取并清洗HTML内容，返回结构化数据"""
@@ -952,7 +955,7 @@ async def simple_fetch(url):
         if not await check_robots_txt(url):
             return {
                 'error': 'PermissionError',
-                'message': '合规拒绝: 目标网站禁止抓取'
+                'message': '[Blocked] robots.txt forbids crawling this URL. Pick a different source; do not retry this URL.'
             }
         
         loop = asyncio.get_event_loop()
@@ -971,7 +974,7 @@ async def simple_fetch(url):
         if not structured_data or not structured_data['sections']:
             return {
                 'error': 'ParseError',
-                'message': '无法从页面中提取有效内容'
+                'message': 'No static text could be extracted (the page may be JavaScript-rendered). Try a crawler-based fetch tool for this URL; do not retry this tool unchanged.'
             }
         
         return structured_data
@@ -1025,15 +1028,15 @@ async def markdown_new(original_url):
                 # markdown.new 默认直接返回纯文本的 markdown 内容
                 return response.text
             else:
-                return f"获取{original_url}网页信息失败，状态码：{response.status_code}"
+                return f"[Fetch failed] Could not fetch {original_url} (status {response.status_code}). The page may be blocked or moved - try another source or fetcher; do not retry the identical URL."
                 
         except requests.RequestException as e:
-            return f"获取{original_url}网页信息失败，错误信息：{str(e)}"
+            return f"[Fetch failed] Could not fetch {original_url}: {e}. A local crawler service being unreachable is not your task failing - fall back to another fetcher/source."
 
     try:
         # 检查 robots.txt 合规性（保持与你原有逻辑一致）
         if not await check_robots_txt(original_url):
-            raise PermissionError(f"合规拒绝: 目标网站禁止抓取")
+            raise PermissionError(f"[Blocked] robots.txt forbids crawling this URL. Pick a different source; do not retry this URL.")
             
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)

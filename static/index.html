@@ -1856,10 +1856,87 @@ function updateElement(el, rawMarkdown, formatFn) {
                       </el-tooltip>
                       <!--展开收起按钮-->
                       <el-tooltip :content="t('moreButton')" placement="top">
-                        <el-button v-if="!isCapsuleMode" @click="showMoreButtonDialog = true" class="icon-btn collapse-btn" type="default" circle>
+                        <el-button v-if="!isCapsuleMode" @click="showMoreButtonDialog = true" class="icon-btn collapsible-btn" circle>
                           <i class="fa-solid fa-ellipsis"></i>
                         </el-button>
                       </el-tooltip>
+
+                      <!-- 上下文占用监控 -->
+                      <div v-if="ctxUsage()" class="ctx-monitor-wrap">
+                        <el-tooltip :content="t('contextUsage') + ' ' + ctxPct() + '%'" placement="top">
+                          <svg class="ctx-ring" :class="ctxColorClass()" viewBox="0 0 36 36" @click="ctxPanelVisible = !ctxPanelVisible">
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--el-border-color)" stroke-width="3.5"/>
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" stroke-width="3.5"
+                                    stroke-linecap="round" :stroke-dasharray="(ctxPct() * 0.974) + ' 97.4'" transform="rotate(-90 18 18)"/>
+                            <text x="18" y="21" text-anchor="middle" font-size="10" fill="currentColor">{{ ctxPct() }}</text>
+                          </svg>
+                        </el-tooltip>
+                        <teleport to="body">
+                          <div v-if="ctxPanelVisible" class="ctx-backdrop" @click="ctxPanelVisible = false"></div>
+                          <div v-if="ctxPanelVisible" class="ctx-panel" @click.stop>
+                            <div class="ctx-panel-header">
+                              <span>{{ t('contextUsage') }}</span>
+                              <i class="fa-solid fa-xmark" @click="ctxPanelVisible = false"></i>
+                            </div>
+                            <div class="ctx-panel-total">
+                              <b>{{ fmtTk(ctxUsage().prompt_tokens || ctxUsage().est_total) }}</b> / {{ fmtTk(ctxUsage().window) }}
+                              ({{ ctxPct() }}%)
+                              <span class="ctx-badge">{{ ctxUsage().prompt_tokens ? t('contextPanelMeasured') : t('contextPanelEst') }}</span>
+                            </div>
+                            <div class="ctx-panel-sub" v-if="ctxUsage().peak_prompt_tokens">
+                              {{ t('contextPanelPeak') }}: {{ fmtTk(ctxUsage().peak_prompt_tokens) }}
+                              · compact {{ fmtTk(ctxUsage().budget) }}
+                            </div>
+                            <div class="ctx-seg" v-for="seg in [
+                                { k: 'system', l: t('ctxSegSystem') },
+                                { k: 'tools_schema', l: t('ctxSegToolsSchema') },
+                                { k: 'history_user', l: t('ctxSegHistoryUser') },
+                                { k: 'history_assistant', l: t('ctxSegHistoryAssistant') },
+                                { k: 'tool_results', l: t('ctxSegToolResults') },
+                                { k: 'current_user', l: t('ctxSegCurrentUser') }
+                              ]" :key="seg.k">
+                              <div class="ctx-seg-label"><span>{{ seg.l }}</span><span>{{ fmtTk((ctxUsage().breakdown || {})[seg.k]) }}</span></div>
+                              <div class="ctx-seg-bar"><div class="ctx-seg-fill" :style="{ width: Math.min(100, ((ctxUsage().breakdown || {})[seg.k] || 0) / ctxUsage().window * 100) + '%' }"></div></div>
+                            </div>
+                            <div class="ctx-panel-actions">
+                              <el-button size="small" type="primary" plain @click="compactNow">{{ t('contextCompactNow') }}</el-button>
+                            </div>
+                          </div>
+                        </teleport>
+                      </div>
+
+                      <!-- 任务进度监控 -->
+                      <div v-if="todoUsage() && todoUsage().total > 0" class="ctx-monitor-wrap"
+                           @mouseenter="todoHover = true" @mouseleave="todoHover = false">
+                        <el-tooltip :content="t('todoPanelTitle') + ' ' + todoUsage().done + '/' + todoUsage().total" placement="top">
+                          <svg class="ctx-ring" :class="todoColorClass()" viewBox="0 0 36 36" @click="todoPanelPinned = !todoPanelPinned">
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--el-border-color)" stroke-width="3.5"/>
+                            <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" stroke-width="3.5"
+                                    stroke-linecap="round" :stroke-dasharray="(todoUsage().total ? (todoUsage().done / todoUsage().total * 97.4) : 0) + ' 97.4'" transform="rotate(-90 18 18)"/>
+                            <text x="18" y="21" text-anchor="middle" font-size="9" fill="currentColor">{{ todoUsage().done }}/{{ todoUsage().total }}</text>
+                          </svg>
+                        </el-tooltip>
+                        <teleport to="body">
+                          <div v-if="todoPanelPinned" class="ctx-backdrop" @click="todoPanelPinned = false"></div>
+                          <div v-if="todoHover || todoPanelPinned" class="ctx-panel todo-panel" @click.stop>
+                            <div class="ctx-panel-header">
+                              <span>{{ t('todoPanelTitle') }}</span>
+                              <i v-if="todoPanelPinned" class="fa-solid fa-xmark" @click="todoPanelPinned = false"></i>
+                            </div>
+                            <div class="ctx-panel-total">
+                              {{ t('todoPanelDone') }} <b>{{ todoUsage().done }}</b> / {{ t('todoPanelTotal') }} {{ todoUsage().total }}
+                            </div>
+                            <div class="todo-list">
+                              <div v-for="item in todoUsage().items" :key="item.id" class="todo-row" :class="{ 'todo-done': item.status === 'done' }">
+                                <span class="todo-icon">{{ item.status === 'done' ? '✅' : '⏳' }}</span>
+                                <span class="todo-dot" :style="{ background: item.priority === 'high' ? '#f56c6c' : (item.priority === 'low' ? '#67c23a' : '#e6a23c') }"></span>
+                                <span class="todo-text">{{ item.content }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </teleport>
+                      </div>
+
 
 
                       <el-tooltip :content="isSending ? t('stopGenerating') : t('sendMessage')" placement="top" class="send-btn-container">
@@ -6245,6 +6322,9 @@ function updateElement(el, rawMarkdown, formatFn) {
                           show-input
                           @input="autoSaveSettings"
                         />
+                        <div style="font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5;">
+                          {{ t('outputLengthHint') }}
+                        </div>
                       </el-form-item>
                       <el-form-item :label="t('conversationRounds')" class="form-item-align">
                         <el-slider
@@ -6255,6 +6335,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                           show-input
                           @input="autoSaveSettings"
                         />
+                      </el-form-item>
+                      <el-form-item :label="t('ctxMgmtEnabled')" class="form-item-align">
+                        <el-switch v-model="settings.contextManagement.enabled" @change="autoSaveSettings" />
+                      </el-form-item>
+                      <el-form-item :label="t('ctxWindow')" class="form-item-align">
+                        <el-input-number v-model="settings.contextManagement.contextWindow" :min="4096" :max="10485760" :step="1024" controls-position="right" @change="autoSaveSettings" style="width: 100%;" />
+                      </el-form-item>
+                      <el-form-item :label="t('ctxCompactRatio')" class="form-item-align">
+                        <el-slider v-model="settings.contextManagement.compactRatio" :min="0.4" :max="0.95" :step="0.05" show-input :show-input-controls="false" @input="autoSaveSettings" />
+                      </el-form-item>
+                      <el-form-item :label="t('ctxAutoAgentCompact')" class="form-item-align">
+                        <el-switch v-model="settings.contextManagement.autoAgentCompact" @change="autoSaveSettings" />
+                      </el-form-item>
+                      <el-form-item :label="t('netAllowLocalUrls')" class="form-item-align">
+                        <el-switch v-model="settings.networkAccessSettings.allowLocalEquivalentUrls" @change="autoSaveSettings" />
+                      </el-form-item>
+                      <el-form-item :label="t('netAllowLanUrls')" class="form-item-align">
+                        <el-switch v-model="settings.networkAccessSettings.allowLanUrls" @change="autoSaveSettings" />
                       </el-form-item>
                       <el-form-item :label="t('reasoningEffort')" class="form-item-align">
                         <el-select

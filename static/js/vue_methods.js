@@ -264,7 +264,8 @@ let vue_methods = {
         }
     }
     await this.autoSaveSettings();
-    await this.saveConversations();
+    this.markConvDirty(this.conversationId);
+    await this.flushDirtyConversations();
     console.log("delete message");
   },
 
@@ -719,7 +720,8 @@ let vue_methods = {
         this.draftConversationGroupId = targetGroupId;
         this.activeConversationGroupId = targetGroupId;
       }
-      await this.saveConversations();
+      this.markConvDirty(convId);
+      await this.flushDirtyConversations();
     },
     openDeleteGroupDialog(group) {
       if (!group?.id || group.id === 'default') return;
@@ -963,7 +965,13 @@ let vue_methods = {
         this.conversationId = convId;
         this.messages = [...conversation.messages];
         this.fileLinks = conversation.fileLinks;
-        this.mainAgent = conversation.mainAgent;
+        const _agent = conversation.mainAgent;
+        if (_agent === 'super-model' || (this.agents && Object.prototype.hasOwnProperty.call(this.agents, _agent))) {
+          this.mainAgent = _agent;
+        } else {
+          console.warn(`[mainAgent] 会话记录的 agent "${_agent}" 不存在，已回退 super-model`);
+          this.mainAgent = 'super-model';
+        }
         this.showHistoryDialog = false;
         this.system_prompt = conversation.system_prompt?conversation.system_prompt:" ";
         this.draftConversationGroupId = conversation.groupId || 'default';
@@ -1866,6 +1874,9 @@ let vue_methods = {
         console.log('WebSocket connection established');
         stopHeartbeat(); // 防止重复心跳
         startHeartbeat();
+        if (!this._covsSaveTimer) {
+          this._covsSaveTimer = setInterval(() => { this.flushDirtyConversations(); }, 30000);
+        }
       };
 
       // 接收消息
@@ -1894,6 +1905,8 @@ let vue_methods = {
             temperature: data.data.temperature || 0.7,
             max_tokens: data.data.max_tokens || 4096,
             max_rounds: data.data.max_rounds || 0,
+            contextManagement: data.data.contextManagement || { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 4, keepRecentDialog: 12, autoAgentCompact: true },
+            networkAccessSettings: data.data.networkAccessSettings || { allowLocalEquivalentUrls: false, allowLanUrls: false },
             selectedProvider: data.data.selectedProvider || '',
             top_p: data.data.top_p || 1,
             reasoning_effort: data.data.reasoning_effort || null,
@@ -1978,6 +1991,8 @@ let vue_methods = {
             temperature: data.data.temperature || 0.7,
             max_tokens: data.data.max_tokens || 4096,
             max_rounds: data.data.max_rounds || 0,
+            contextManagement: data.data.contextManagement || { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 4, keepRecentDialog: 12, autoAgentCompact: true },
+            networkAccessSettings: data.data.networkAccessSettings || { allowLocalEquivalentUrls: false, allowLanUrls: false },
             selectedProvider: data.data.selectedProvider || '',
             top_p: data.data.top_p || 1,
             reasoning_effort: data.data.reasoning_effort || null,
@@ -1994,6 +2009,9 @@ let vue_methods = {
             this.conversations = data.data.conversations || this.conversations;
             this.conversationGroups = data.data.conversationGroups || this.conversationGroups;
             this.conversationId = data.data.conversationId || this.conversationId;
+          } else if (Array.isArray(data.data.conversations)) {
+            // 重连：与服务器副本按 id+timestamp 双向合并，本地未落盘的会话保留并补推
+            this.mergeRemoteConversations(data.data.conversations);
           }
           this.agents = data.data.agents || this.agents;
           this.mainAgent = data.data.mainAgent || this.mainAgent;
@@ -2403,12 +2421,137 @@ let vue_methods = {
     // ==========================================
     // 1. 用户动作入口与调度函数（可直接替换）
     // ==========================================
+    updateTodoStats(evt) {
+      const k = this.stringifyEntityId(this.conversationId ?? 'draft');
+      this.todoStats = { ...this.todoStats, [k]: evt };
+    },
+    todoUsage() {
+      return this.todoStats[this.stringifyEntityId(this.conversationId ?? 'draft')] || null;
+    },
+    todoColorClass() {
+      const u = this.todoUsage();
+      if (!u || !u.total) return 'ctx-green';
+      const r = u.done / u.total;
+      return r >= 1 ? 'ctx-green' : 'ctx-orange';
+    },
+    updateContextStats(evt) {
+      const k = this.stringifyEntityId(this.conversationId ?? 'draft');
+      this.contextStats = { ...this.contextStats, [k]: { ...evt, ts: Date.now() } };
+      if ((this.conversationId ?? null) === null && evt) {
+        const draft = this.contextStats.draft;
+        delete this.contextStats.draft;
+        this.contextStats = { ...this.contextStats };
+        if (draft) setTimeout(() => {
+          const k2 = this.stringifyEntityId(this.conversationId);
+          if (k2 && !this.contextStats[k2]) { this.contextStats = { ...this.contextStats, [k2]: draft }; }
+        }, 500);
+      }
+    },
+    ctxUsage() {
+      return this.contextStats[this.stringifyEntityId(this.conversationId ?? 'draft')] || null;
+    },
+    fmtTk(n) {
+      if (n === null || n === undefined) return '-';
+      return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+    },
+    ctxPct() {
+      const u = this.ctxUsage();
+      if (!u || !u.window) return 0;
+      const used = u.prompt_tokens || u.est_total || 0;
+      return Math.min(100, Math.round(used / u.window * 100));
+    },
+    ctxColorClass() {
+      const p = this.ctxPct();
+      return p >= 85 ? 'ctx-red' : (p >= 60 ? 'ctx-orange' : 'ctx-green');
+    },
+    compactNow() {
+      this.ctxPanelVisible = false;
+      this.handleCompactCommand(false);
+    },
+    applyContextCompact(evt) {
+      // 上下文压缩落账：system + 摘要卡 + 最近若干条展示消息
+      const sysMsg = this.messages.find(m => m.role === 'system');
+      const nonSys = this.messages.filter(m => m.role !== 'system');
+      const kept = nonSys.slice(-6);
+      const summaryText = evt.summary || '';
+      const summaryMsg = {
+        id: Date.now() + Math.random(),
+        role: 'assistant',
+        content: `🗜️ ${this.t('compact_card') || '上下文已压缩'} (${evt.compacted_count || 0})\n\n${summaryText}`,
+        is_compact_summary: true,
+        backend_content: [{
+          role: 'user',
+          content: `【对话摘要·已压缩】\n${summaryText}\n（以上为本会话早前内容的压缩摘要，视为已发生且已确认的事实；不要重做其中已完成的动作，直接基于它继续当前任务。）`
+        }]
+      };
+      const rebuilt = [];
+      if (sysMsg) rebuilt.push(sysMsg);
+      rebuilt.push(summaryMsg, ...kept);
+      this.messages = rebuilt;
+      this.$nextTick(() => this.requestScrollToBottom());
+      this.markConvDirty(this.conversationId);
+      this.flushDirtyConversations();
+    },
+
+    async handleCompactCommand(focus) {
+      const backendMsgs = [];
+      for (const msg of this.messages) {
+        if (msg.role === 'system') {
+          backendMsgs.push({ role: 'system', content: String(msg.pure_content ?? msg.content ?? '') });
+          continue;
+        }
+        if (msg.role === 'assistant' && msg.backend_content && msg.backend_content.length > 0) {
+          for (const m of msg.backend_content) {
+            if ((m.content && String(m.content).trim() !== '') || (m.tool_calls && m.tool_calls.length > 0) || m.role === 'tool') {
+              backendMsgs.push({ role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id, name: m.name });
+            }
+          }
+          continue;
+        }
+        const text = (msg.pure_content ?? msg.content ?? '') + (msg.fileLinks_content ?? '');
+        if (String(text).trim()) {
+          backendMsgs.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: text });
+        }
+      }
+      if (backendMsgs.length < 6) {
+        showNotification(this.t('compact_no_need') || '当前会话较短，无需压缩', 'info');
+        return;
+      }
+      showNotification(this.t('compact_running') || '正在压缩上下文…', 'info');
+      try {
+        const resp = await fetch('/api/compact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: backendMsgs, focus: focus || '', conversation_id: this.conversationId })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          this.applyContextCompact(data);
+          showNotification(`${this.t('compact_done') || '上下文已压缩'} (${data.compacted_count})`, 'success');
+        } else {
+          showNotification(this.t('compact_no_need') || '当前会话较短，无需压缩', 'info');
+        }
+      } catch (e) {
+        showNotification(`${this.t('compact_failed') || '压缩失败'}: ${e.message}`, 'error');
+      }
+    },
+
     async sendMessage(role = 'user') {
         // [XMPP Bridge] 扩展注入的图片附件（已上传到 uploaded_files，形如 [{path,name,type}]）
         const hasExtensionImages = Array.isArray(this.extensionImageLinks) && this.extensionImageLinks.length > 0;
         // 基础校验
         if (!this.userInput.trim() && (!this.files || this.files.length === 0) && (!this.images || this.images.length === 0) && !hasExtensionImages) return;
         if (this.isTyping) return;
+        // /compact 指令：手动压缩当前会话上下文，不进入常规发送流程
+        {
+            const _cmd = this.userInput.trim();
+            if (_cmd === '/compact' || _cmd.startsWith('/compact ')) {
+                const _focus = _cmd.slice('/compact'.length).trim();
+                this.userInput = '';
+                this.handleCompactCommand(_focus);
+                return;
+            }
+        }
         if (this.CLISettings.enabled) {
             const pathToCheck = this.CLISettings.cc_path;
 
@@ -2597,7 +2740,7 @@ let vue_methods = {
             this.isSending = false;
             this.abortController = null;
             await this.autoSaveSettings();
-            await this.saveConversations();
+            await this.flushDirtyConversations();
         }
     },
 
@@ -2845,6 +2988,19 @@ let vue_methods = {
                         const jsonStr = eventData.slice(6).trim();
                         if (jsonStr === '[DONE]') break;
                         const parsed = JSON.parse(jsonStr);
+                        // 上下文管理：服务端自动压缩事件 -> 前端替换历史落账
+                        if (parsed.type === 'context_compact') {
+                            this.applyContextCompact(parsed);
+                            continue;
+                        }
+                        if (parsed.type === 'context_usage') {
+                            this.updateContextStats(parsed);
+                            continue;
+                        }
+                        if (parsed.type === 'todo_stats') {
+                            this.updateTodoStats(parsed);
+                            continue;
+                        }
                         const delta = parsed.choices?.[0]?.delta;
                         if (!delta) continue;
 
@@ -3118,6 +3274,15 @@ let vue_methods = {
                 const b = getBlock('error', 'err', 'System Error');
                 b.content = this.truncateDisplayContent(error.message);
                 if (currentMsg) {
+                    if (Array.isArray(currentMsg.displayBlocks)) {
+                        if (!currentMsg.displayBlocks.some(bl => bl && bl.type === 'error')) {
+                            currentMsg.displayBlocks.push(b);
+                        }
+                    } else {
+                        currentMsg.displayBlocks = [b];
+                    }
+                }
+                if (currentMsg) {
                     const fallbackText = 'response error';
                     if (!currentMsg.pure_content && currentMsg.backend_content.length <= 1) {
                         currentMsg.pure_content = fallbackText;
@@ -3166,19 +3331,10 @@ let vue_methods = {
                     conv.groupId = conv.groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
                 }
             }
+            this.markConvDirty(this.conversationId);
 
-            // 清理旧消息，防止 messages 数组无限增长
-            if (this.messages.length > MAX_MESSAGES_COUNT) {
-                const removed = this.messages.splice(0, this.messages.length - MAX_MESSAGES_COUNT);
-                removed.forEach(msg => {
-                    msg.content = '';
-                    msg.pure_content = '';
-                    msg.displayBlocks = [];
-                    msg.backend_content = [];
-                    msg.ttsChunks = [];
-                    msg.audioChunks = [];
-                });
-            }
+            // 历史全量保留：旧消息不再截断/掏空（渲染由 MAX_RENDERED_BLOCKS 分块虚拟化，
+            // 上下文体积由服务端 contextManagement 管线负责）
 
             // 截断后端消息中过长的 tool content，保护 AI 上下文
             if (currentMsg && currentMsg.backend_content) {
@@ -3209,7 +3365,8 @@ let vue_methods = {
                 });
             }
 
-            this.saveConversations();
+            this.markConvDirty(this.conversationId);
+            this.flushDirtyConversations();
 
             // 【修复】流完成后强制广播最终消息状态，确保插件收到完整回复
             // 即使流末尾的 chunk 调用因 WS 断线被暂存，此处也会补发或排队
@@ -3910,6 +4067,18 @@ let vue_methods = {
                             if (jsonStr === '[DONE]') { streamDone = true; break; }
                             try {
                                 const parsed = JSON.parse(jsonStr);
+                                if (parsed.type === 'context_compact') {
+                                    this.applyContextCompact(parsed);
+                                    continue;
+                                }
+                                if (parsed.type === 'context_usage') {
+                                    this.updateContextStats(parsed);
+                                    continue;
+                                }
+                                if (parsed.type === 'todo_stats') {
+                                    this.updateTodoStats(parsed);
+                                    continue;
+                                }
                                 const delta = parsed.choices?.[0]?.delta;
                                 if (!delta) continue;
 
@@ -4035,6 +4204,24 @@ let vue_methods = {
       if (this.abortController) {
 
         this.abortController.abort();
+      }
+      // 中止配对清理：给最后一条 assistant 中未闭合的 tool_calls 补中断存根（防服务端 Sanitizer 丢弃整对）
+      for (let mi = this.messages.length - 1; mi >= 0; mi--) {
+        const m = this.messages[mi];
+        if (m.role !== 'assistant' || !Array.isArray(m.backend_content) || m.backend_content.length === 0) continue;
+        const bc = m.backend_content;
+        const pending = [];
+        bc.forEach((b, bi) => {
+          if (b.role === 'assistant' && Array.isArray(b.tool_calls)) {
+            b.tool_calls.forEach(tc => {
+              if (!bc.some((t, ti) => ti > bi && t.role === 'tool' && t.tool_call_id === tc.id)) {
+                pending.push({ id: tc.id, name: (tc.function && tc.function.name) || 'tool' });
+              }
+            });
+          }
+        });
+        pending.forEach(p => bc.push({ role: 'tool', tool_call_id: p.id, name: p.name, content: '[interrupted by user]' }));
+        break;
       }
       this.isThinkOpen = false;
       this.isSending = false;
@@ -4169,6 +4356,74 @@ let vue_methods = {
       });
     },
 
+    markConvDirty(convId) {
+      if (convId === null || convId === undefined) return;
+      if (!this._covsDirty) this._covsDirty = new Set();
+      this._covsDirty.add(this.stringifyEntityId(convId));
+    },
+
+    sanitizeConversationForSave(conv) {
+      return {
+        ...conv,
+        messages: (conv.messages || []).map(msg => {
+          const { audioChunks, omniAudioChunks, ttsQueue, isPlaying, cur_audioDatas, ...rest } = msg;
+          return { ...rest, audioChunks: [], omniAudioChunks: [], currentChunk: 0, omniCurrentTime: 0, isPlaying: false };
+        })
+      };
+    },
+
+    flushDirtyConversations() {
+      if (this._covsFlushing) return Promise.resolve();
+      if (!this._covsDirty || this._covsDirty.size === 0) return Promise.resolve();
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return Promise.resolve();
+      const ids = Array.from(this._covsDirty);
+      const payload = [];
+      for (const id of ids) {
+        const conv = this.conversations.find(c => this.stringifyEntityId(c.id) === id);
+        if (conv) payload.push(this.sanitizeConversationForSave(conv));
+        this._covsDirty.delete(id);
+      }
+      if (!payload.length) return Promise.resolve();
+      this._covsFlushing = true;
+      const correlationId = uuid.v4();
+      return new Promise((resolve) => {
+        const finish = (acked) => {
+          this._covsFlushing = false;
+          try { this.ws.removeEventListener('message', handler); } catch (e) {}
+          clearTimeout(timer);
+          if (!acked) ids.forEach(id => this._covsDirty.add(id));
+          if (this._covsDirty.size > 0) setTimeout(() => this.flushDirtyConversations(), 2000);
+          resolve();
+        };
+        const handler = (event) => {
+          let response; try { response = JSON.parse(event.data); } catch (e) { return; }
+          if (response.type === 'conversations_delta_saved' && response.correlationId === correlationId) finish(true);
+        };
+        const timer = setTimeout(() => finish(false), 20000);
+        this.ws.addEventListener('message', handler);
+        try {
+          this.ws.send(JSON.stringify({ type: 'save_conversations_delta', data: { conversations: payload }, correlationId }));
+        } catch (e) { finish(false); }
+      });
+    },
+
+    mergeRemoteConversations(remote) {
+      const key = (id) => this.stringifyEntityId(id);
+      if (!this._covsDirty) this._covsDirty = new Set();
+      const localById = new Map(this.conversations.map(c => [key(c.id), c]));
+      const remoteKeys = new Set(remote.map(c => key(c.id)));
+      const merged = remote.map(rc => {
+        const lc = localById.get(key(rc.id));
+        if (lc && (this._covsDirty.has(key(rc.id)) || (lc.timestamp || 0) > (rc.timestamp || 0))) return lc;
+        return rc;
+      });
+      for (const lc of this.conversations) {
+        if (!remoteKeys.has(key(lc.id))) merged.unshift(lc);
+      }
+      this.conversations = merged;
+      if (this._covsDirty.size > 0) this.flushDirtyConversations();
+    },
+
     getSanitizedConversations() {
       // 使用 map 创建新数组，不影响原始的内存数据
       return this.conversations.map(conv => ({
@@ -4222,6 +4477,8 @@ let vue_methods = {
           if (response.type === 'conversations_saved' && 
               response.correlationId === correlationId) {
             this.ws.removeEventListener('message', handler);
+            clearTimeout(timeout);
+            if (this._covsDirty) this._covsDirty.clear();
             resolve();
           }
           
@@ -11443,7 +11700,7 @@ async deleteGaussSceneOption(sceneId) {
       this.conversations = this.conversations.filter(conv => 
         conv.timestamp && conv.timestamp >= oneWeekAgo
       );
-      if (this.conversations == []){
+      if (this.conversations.length === 0){
         this.conversationId = null; // 清空当前对话ID
       }
       
