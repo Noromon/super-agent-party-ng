@@ -12421,6 +12421,39 @@ pre.sp-content.sp-code {
   align-items: center;
   margin: 0 6px;
 }
+.ctx-hover-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  pointer-events: none;
+  z-index: 2000;
+  min-width: max-content;
+  background: var(--el-bg-color, #fff);
+  border: 1px solid var(--el-border-color, #dcdfe6);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--el-text-color-primary, #303133);
+}
+.ctx-hover-pop .ctx-pop-title {
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--el-text-color-secondary, #909399);
+}
+.ctx-hover-pop.ctx-pop-wide {
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 320px;
+  overflow: hidden;
+}
+.ctx-hover-pop.ctx-pop-wide .todo-row { padding: 2px 0; }
+.form-item-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+  line-height: 1.5;
+  margin-top: 4px;
+}
 .ctx-ring {
   width: 34px;
   height: 34px;

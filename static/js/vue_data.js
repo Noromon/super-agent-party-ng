@@ -574,6 +574,7 @@ let vue_data = {
     isSending: false, // 是否正在发送
     contextStats: {},
     ctxPanelVisible: false,
+    ctxHover: false,
     todoStats: {},
     todoHover: false,
     todoPanelPinned: false,
@@ -1750,6 +1751,10 @@ let vue_data = {
       memoryLimit: 10,
       userName:'user',
       genericSystemPrompt: '{{char}}必须使用{{user}}使用的语言与之交流，例如：当{{user}}使用中文时，你也必须尽可能地使用中文！当{{user}}使用英文时，你也必须尽可能地使用英文！包括交代旁白等文字也是同理！',
+    },
+    llmGuardSettings: {
+      enabled: true,
+      debounceSeconds: 20,
     },
     textFiles: [],
     imageFiles: [],

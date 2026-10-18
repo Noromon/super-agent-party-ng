@@ -1951,6 +1951,7 @@ let vue_methods = {
           this.a2aServers = data.data.a2aServers || this.a2aServers;
           this.memories = data.data.memories || this.memories;
           this.memorySettings = data.data.memorySettings || this.memorySettings;
+          this.llmGuardSettings = data.data.llmGuardSettings || this.llmGuardSettings;
           this.text2imgSettings = data.data.text2imgSettings || this.text2imgSettings;
           this.asrSettings = data.data.asrSettings || this.asrSettings;
           this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
@@ -2085,6 +2086,7 @@ let vue_methods = {
           this.a2aServers = data.data.a2aServers || this.a2aServers;
           this.memories = data.data.memories || this.memories;
           this.memorySettings = data.data.memorySettings || this.memorySettings;
+          this.llmGuardSettings = data.data.llmGuardSettings || this.llmGuardSettings;
           this.text2imgSettings = data.data.text2imgSettings || this.text2imgSettings;
           this.asrSettings = data.data.asrSettings || this.asrSettings;
           this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
@@ -4309,6 +4311,7 @@ let vue_methods = {
           isdocker: this.isdocker,
           memories: this.memories,
           memorySettings: this.memorySettings,
+          llmGuardSettings: this.llmGuardSettings,
           text2imgSettings: this.text2imgSettings,
           asrSettings: this.asrSettings,
           ttsSettings: this.ttsSettings,

@@ -12,6 +12,7 @@ import errno
 from py.cli_tool import read_file_tool_local
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
+from py import llm_gate
 import shortuuid
 os.environ["MEM0_TELEMETRY"] = "False"
 parser = argparse.ArgumentParser(description="Run the ASGI application server.")
@@ -3576,7 +3577,6 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
     try:
-        from mem0 import Memory
         global mcp_client_list, HA_client, ChromeMCP_client, sql_client
         
         # 设置对话上下文，供 review_image 等工具使用
@@ -3873,35 +3873,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     break
             if cur_memory and cur_memory["providerId"]:
                 print("长期记忆启用")
-                config={
-                    "embedder": {
-                        "provider": 'openai',
-                        "config": {
-                            "model": cur_memory['model'],
-                            "api_key": cur_memory['api_key'],
-                            "openai_base_url":cur_memory["base_url"],
-                            "embedding_dims":cur_memory.get("embedding_dims", 1024)
-                        },
-                    },
-                    "llm": {
-                        "provider": 'openai',
-                        "config": {
-                            "model": settings['model'],
-                            "api_key": settings['api_key'],
-                            "openai_base_url":settings["base_url"]
-                        }
-                    },
-                    "vector_store": {
-                        "provider": "faiss",
-                        "config": {
-                            "collection_name": "agent-party",
-                            "path": os.path.join(MEMORY_CACHE_DIR,memoryId),
-                            "distance_strategy": "euclidean",
-                            "embedding_model_dims": cur_memory.get("embedding_dims", 1024)
-                        }
-                    }
-                }
-                m0 = Memory.from_config(config)
+                m0 = llm_gate.get_mem0_instance(memoryId, cur_memory, settings)
                 print("长期记忆配置加载完成")
         open_tag = "<think>"
         close_tag = "</think>"
@@ -4221,6 +4193,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 }
                 return f"data: {json.dumps(chunk)}\n\n"
             try:
+                llm_gate.enter()
                 usage_info = None
                 _ctx_peak = 0
                 extra = {}
@@ -5970,37 +5943,21 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     print("记忆更新任务开始提交")
                     messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
                     infer = cur_memory.get('infer', False) or False
-                    
-                    def run_task():
-                        import asyncio  # ← 在这里导入！
-                        import traceback
-                        
-                        async def add():
-                            loop = asyncio.get_running_loop()
-                            with ThreadPoolExecutor() as executor:
-                                metadata = {
-                                    "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                }
-                                func = partial(m0.add, user_id=memoryId, metadata=metadata, infer=infer)
-                                await loop.run_in_executor(executor, func, messages)
-                                print("记忆更新完成")
-                        
-                        try:
-                            loop = asyncio.get_running_loop()
-                            task = asyncio.create_task(add())
-                            task.add_done_callback(
-                                lambda t: print(f"任务异常: {t.exception()}") if t.exception() else None
-                            )
-                        except RuntimeError:
-                            # 没有运行的事件循环
-                            asyncio.run(add())
-                        except Exception as e:
-                            print(f"run_task 异常: {e}")
-                            traceback.print_exc()
-                    
-                    import threading
-                    thread = threading.Thread(target=run_task, daemon=True)
-                    thread.start()
+                    _m0_job = m0
+                    _mid = memoryId
+                    _job_msgs = messages
+
+                    def _mem_job():
+                        metadata = {
+                            "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                        _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
+
+                    llm_gate.submit_memory_job(
+                        _mid, _mem_job, name="mem0-add",
+                        debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
+                                 if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
+                        wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
                     print("记忆更新任务已提交到后台线程")
 
                 return
@@ -6021,6 +5978,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 yield f"data: {json.dumps(error_chunk)}\n\n"
                 yield "data: [DONE]\n\n"  # 确保最终结束
                 return
+            finally:
+                llm_gate.leave()
         
         # 检查是否启用断点续传
         enable_stream_resume = settings.get('enableStreamResume', True)
@@ -6084,7 +6043,6 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         )
 
 async def generate_complete_response(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
-    from mem0 import Memory
     global mcp_client_list,HA_client,ChromeMCP_client,sql_client
     
     # 设置对话上下文，供 review_image 等工具使用
@@ -6257,35 +6215,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 break
         if cur_memory and cur_memory["providerId"]:
             print("长期记忆启用")
-            config={
-                "embedder": {
-                    "provider": 'openai',
-                    "config": {
-                        "model": cur_memory['model'],
-                        "api_key": cur_memory['api_key'],
-                        "openai_base_url":cur_memory["base_url"],
-                        "embedding_dims":cur_memory.get("embedding_dims", 1024)
-                    },
-                },
-                "llm": {
-                    "provider": 'openai',
-                    "config": {
-                        "model": settings['model'],
-                        "api_key": settings['api_key'],
-                        "openai_base_url":settings["base_url"]
-                    }
-                },
-                "vector_store": {
-                    "provider": "faiss",
-                    "config": {
-                        "collection_name": "agent-party",
-                        "path": os.path.join(MEMORY_CACHE_DIR,memoryId),
-                        "distance_strategy": "euclidean",
-                        "embedding_model_dims": cur_memory.get("embedding_dims", 1024)
-                    }
-                }
-            }
-            m0 = Memory.from_config(config)
+            m0 = llm_gate.get_mem0_instance(memoryId, cur_memory, settings)
     images = await images_in_messages(request.messages,fastapi_base_url)
     request.messages = await message_without_images(request.messages)
     open_tag = "<think>"
@@ -7156,20 +7086,23 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
         if m0:
             messages=f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}"
-            executor = ThreadPoolExecutor()
             infer = cur_memory.get('infer') or False
-            async def add():
-                loop = asyncio.get_event_loop()
-                # 绑定 user_id 关键字参数
+            _m0_job = m0
+            _mid = memoryId
+            _job_msgs = messages
+
+            def _mem_job():
                 metadata = {
                     "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                func = partial(m0.add, user_id=memoryId,metadata=metadata,infer=infer)
-                # 传递 messages 作为位置参数
-                await loop.run_in_executor(executor, func, messages)
+                _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
                 print("知识库更新完成")
 
-            asyncio.create_task(add())
+            llm_gate.submit_memory_job(
+                _mid, _mem_job, name="mem0-add-complete",
+                debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
+                         if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
+                wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(
