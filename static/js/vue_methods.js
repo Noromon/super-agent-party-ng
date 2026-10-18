@@ -2503,10 +2503,15 @@ let vue_methods = {
           continue;
         }
         if (msg.role === 'assistant' && msg.backend_content && msg.backend_content.length > 0) {
+          const startIdx = backendMsgs.length;
           for (const m of msg.backend_content) {
             if ((m.content && String(m.content).trim() !== '') || (m.tool_calls && m.tool_calls.length > 0) || m.role === 'tool') {
               backendMsgs.push({ role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id, name: m.name });
             }
+          }
+          if (backendMsgs.length === startIdx) {
+            const body = String((msg.pure_content ?? msg.content ?? '') + (msg.fileLinks_content ?? ''));
+            if (body.trim()) backendMsgs.push({ role: 'assistant', content: body });
           }
           continue;
         }
@@ -2789,11 +2794,15 @@ let vue_methods = {
                 }
 
                 if (msg.role === 'assistant' && msg.backend_content && msg.backend_content.length > 0) {
-                    return msg.backend_content.filter(m => 
+                    const kept = msg.backend_content.filter(m => 
                         (m.content && String(m.content).trim() !== '') || 
                         (m.tool_calls && m.tool_calls.length > 0) || 
                         m.role === 'tool'
                     );
+                    if (kept.length > 0) return kept;
+                    const body = String((msg.pure_content ?? msg.content ?? '') + (msg.fileLinks_content ?? ''));
+                    if (body.trim()) return [{ role: 'assistant', content: body }];
+                    return kept;
                 }
                 
                 let apiRole = msg.role === 'system' ? 'system' : (msg.role === 'assistant' ? 'assistant' : 'user');
@@ -3009,6 +3018,7 @@ let vue_methods = {
                         // 断点续传：捕获 stream_id（后端首帧携带）
                         if (delta.stream_id && !_streamId) {
                             _streamId = delta.stream_id;
+                            this._currentStreamId = _streamId;
                             continue;
                         }
                         _chunkIndex++;
@@ -3338,6 +3348,9 @@ let vue_methods = {
             // 历史全量保留：旧消息不再截断/掏空（渲染由 MAX_RENDERED_BLOCKS 分块虚拟化，
             // 上下文体积由服务端 contextManagement 管线负责）
 
+            // 正文写回：pure_content → backend_content 尾项 + content（防 LLM 侧整条消失）
+            if (currentMsg) this._syncAssistantBody(currentMsg);
+
             // 截断后端消息中过长的 tool content，保护 AI 上下文
             if (currentMsg && currentMsg.backend_content) {
                 const AI_MAX_TOOL_LENGTH = 15000;
@@ -3549,7 +3562,8 @@ let vue_methods = {
                 body: JSON.stringify({ 
                     tool_name: name, 
                     tool_params: params,
-                    approval_type: type 
+                    approval_type: type,
+                    stream_id: this._currentStreamId || null
                 })
             });
             const json = await res.json();
@@ -4202,7 +4216,38 @@ let vue_methods = {
         return null;
     },
 
+    // 将 pure_content 正文写回 backend_content 尾部 assistant 空项与 content 字段。
+    // SSE 文本流只写 pure_content，导致 backend_content（LLM 可见链）正文缺失，
+    // prepareMessages 过滤空项后整条消息从请求中消失（历史遗忘根因）。
+    _syncAssistantBody(msg) {
+      if (!msg || msg.role !== 'assistant') return;
+      const body = msg.pure_content ?? '';
+      if (!String(body).trim()) return;
+      if (!Array.isArray(msg.backend_content)) return;
+      if (msg.backend_content.length === 0) {
+        msg.backend_content.push({ role: 'assistant', content: body });
+      } else {
+        let target = null;
+        for (let i = msg.backend_content.length - 1; i >= 0; i--) {
+          const it = msg.backend_content[i];
+          if (it.role === 'assistant' && !(it.tool_calls && it.tool_calls.length)) { target = it; break; }
+          if (it.role !== 'assistant') break;
+        }
+        if (target) {
+          if (!String(target.content ?? '').trim()) target.content = body;
+        } else {
+          msg.backend_content.push({ role: 'assistant', content: body });
+        }
+      }
+      if (!String(msg.content ?? '').trim()) msg.content = body;
+    },
+
     stopGenerate() {
+      // 安全围栏：先取消后端生产者流（阻止取消后继续工具调度/后续轮次），再断开本地读取
+      if (this._currentStreamId) {
+        try { fetch(`/v1/streams/cancel/${this._currentStreamId}`, { method: 'POST' }).catch(() => {}); } catch (e) {}
+        this._currentStreamId = null;
+      }
       if (this.abortController) {
 
         this.abortController.abort();
@@ -4223,6 +4268,7 @@ let vue_methods = {
           }
         });
         pending.forEach(p => bc.push({ role: 'tool', tool_call_id: p.id, name: p.name, content: '[interrupted by user]' }));
+        this._syncAssistantBody(m);
         break;
       }
       this.isThinkOpen = false;

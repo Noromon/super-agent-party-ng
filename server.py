@@ -1197,6 +1197,19 @@ mcp_call_results: Dict[str, asyncio.Future] = {}
 _active_streams: Dict[str, dict] = {}
 _active_streams_lock = asyncio.Lock()
 
+# 生产者任务通过该 ContextVar 携带自身 stream entry，供 stream_generator
+# 在每次工具调度/新一轮 LLM 调用前检查用户是否已点击停止（围栏：
+# 取消后不得再产生任何工具副作用）
+_current_stream_entry: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
+    "_current_stream_entry", default=None
+)
+
+
+def _stream_cancelled() -> bool:
+    entry = _current_stream_entry.get()
+    return bool(entry and entry.get("cancelled"))
+
+
 async def _stream_producer_wrapper(stream_id: str, gen):
     """
     包装原始 stream_generator，作为生产者：
@@ -1205,6 +1218,7 @@ async def _stream_producer_wrapper(stream_id: str, gen):
     - 捕获 GeneratorExit，确保消费者断开不会终止生产者
     """
     entry = _active_streams[stream_id]
+    _current_stream_entry.set(entry)
     try:
         async for sse_chunk in gen:
             entry["buffer"].append(sse_chunk)
@@ -4722,6 +4736,11 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 if tools:
                     extra['tools'] = tools
 
+                if _stream_cancelled():
+                    print("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
+                    yield "data: [DONE]\n\n"
+                    return
+
                 response = await client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
@@ -5140,6 +5159,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     }
                                 results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
                             else:
+                                if _stream_cancelled():
+                                    print(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
+                                    yield "data: [DONE]\n\n"
+                                    return
                                 try:
                                     await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
                                     results = await dispatch_tool(response_content.name, args_dict, settings)
@@ -5622,6 +5645,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     full_content = ""
                     if tools and not force_no_tools:
                         extra['tools'] = tools
+                    if _stream_cancelled():
+                        print("[Cancel] 流已被用户取消，工具后续轮次终止")
+                        yield "data: [DONE]\n\n"
+                        return
                     response = await client.chat.completions.create(
                         model=model,
                         messages=msg,  # 添加图片信息到消息
@@ -5991,6 +6018,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 "buffer": [],
                 "done": False,
                 "error": None,
+                "cancelled": False,
                 "created_at": time.time(),
                 "consumer_count": 1,
                 "task": None,
@@ -7118,7 +7146,15 @@ async def execute_tool_manually(request: Request):
     tool_name = data.get("tool_name")
     tool_params = data.get("tool_params")
     approval_type = data.get("approval_type") # 'once' 或 'always'
-    
+
+    # 安全围栏：所属生成流已被用户取消时，拒绝执行审批工具
+    _appr_stream_id = data.get("stream_id")
+    if _appr_stream_id:
+        _appr_entry = _active_streams.get(_appr_stream_id)
+        if _appr_entry and _appr_entry.get("cancelled"):
+            print(f"[Cancel] 拒绝执行工具 {tool_name}：其生成流 {_appr_stream_id} 已被取消")
+            return {"result": "[Cancelled] 该工具所属的生成已被用户取消，拒绝执行"}
+
     # 获取当前配置
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
@@ -7775,6 +7811,27 @@ class StreamResumeRequest(BaseModel):
     stream_id: str
     from_index: int = 0
 
+
+@app.post("/v1/streams/cancel/{stream_id}")
+async def cancel_stream_endpoint(stream_id: str):
+    """用户点击停止生成时调用：标记取消并取消生产者任务。
+
+    围栏语义：取消后 stream_generator 在每次工具调度与后续 LLM 轮次前
+    检查 cancelled 并立即终止，不再产生任何工具副作用。
+    """
+    async with _active_streams_lock:
+        entry = _active_streams.get(stream_id)
+        if not entry:
+            return JSONResponse(status_code=404, content={"cancelled": False, "stream_id": stream_id})
+        entry["cancelled"] = True
+        entry["done"] = True
+    task = entry.get("task")
+    if task and not task.done():
+        task.cancel()
+    logger.info(f"Stream {stream_id} cancelled by user")
+    return {"cancelled": True, "stream_id": stream_id}
+
+
 @app.post("/v1/chat/resume")
 async def resume_stream_endpoint(req: StreamResumeRequest):
     """
@@ -7789,6 +7846,11 @@ async def resume_stream_endpoint(req: StreamResumeRequest):
         return JSONResponse(
             status_code=404,
             content={"error": "Stream not found or expired", "stream_id": stream_id}
+        )
+    if entry.get("cancelled"):
+        return JSONResponse(
+            status_code=410,
+            content={"error": "Stream was cancelled by user", "stream_id": stream_id}
         )
 
     # 增加消费者计数
