@@ -203,3 +203,6 @@ nodejs/
 
 .agent/
 vts_token.txt
+# re-ignore caches under tests/ (last match wins)
+tests/__pycache__/
+.pytest_cache/
