@@ -183,6 +183,8 @@ super-agent-data/
 botpy.log*
 build.bat
 test*
+!tests/**
+!tests/
 wxauto*
 
 static/ext/*
