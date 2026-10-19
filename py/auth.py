@@ -21,6 +21,9 @@ TOKEN_FILE_NAME = ".session_token"
 
 # Populated at import; file is written by lifespan once USER_DATA_DIR exists.
 SESSION_TOKEN = os.environ.get("SAP_SESSION_TOKEN") or secrets.token_urlsafe(24)
+# Machine token: stable identity for local non-browser clients (node
+# extensions, headless API consumers); persisted, survives restarts.
+MACHINE_TOKEN = os.environ.get("SAP_MACHINE_TOKEN") or ""
 DISABLED = os.environ.get("SAP_DISABLE_TOKEN", "") == "1"
 
 EXEMPT_PREFIXES = (
@@ -33,11 +36,20 @@ EXEMPT_PREFIXES = (
 )
 
 
+def _token_match(got: str) -> bool:
+    if not got:
+        return False
+    for valid in (SESSION_TOKEN, MACHINE_TOKEN):
+        if valid and secrets.compare_digest(got, valid):
+            return True
+    return False
+
+
 def token_ok(request) -> bool:
     got = request.headers.get(HEADER) or ""
     if not got:
         got = request.cookies.get(COOKIE, "")
-    return bool(got) and secrets.compare_digest(got, SESSION_TOKEN)
+    return _token_match(got)
 
 
 def origin_ok(request) -> bool:
@@ -87,7 +99,7 @@ def ws_auth_ok(websocket) -> bool:
     got = websocket.query_params.get("sap_token") or ""
     if not got:
         got = websocket.cookies.get(COOKIE, "")
-    return bool(got) and secrets.compare_digest(got, SESSION_TOKEN)
+    return _token_match(got)
 
 
 def is_exempt(path: str) -> bool:
@@ -129,3 +141,27 @@ def write_token_file(data_dir) -> str:
     except OSError:
         pass
     return path
+
+
+def ensure_machine_token(data_dir) -> str:
+    """Load or first-run-generate the persistent local machine token."""
+    global MACHINE_TOKEN
+    if MACHINE_TOKEN:
+        return MACHINE_TOKEN
+    path = os.path.join(str(data_dir), ".machine_token")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                stored = f.read().strip()
+            if stored:
+                MACHINE_TOKEN = stored
+                return MACHINE_TOKEN
+    except OSError:
+        pass
+    MACHINE_TOKEN = secrets.token_urlsafe(32)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(MACHINE_TOKEN)
+    except OSError:
+        pass
+    return MACHINE_TOKEN

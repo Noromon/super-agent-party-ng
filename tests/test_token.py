@@ -80,3 +80,36 @@ class TestTokenKernel:
         finally:
             s.close()
         assert b"101" in data.split(b"\r\n", 1)[0], repr(data[:80])
+
+
+def machine_tok(sap):
+    return (sap.data_dir / ".machine_token").read_text(encoding="utf-8").strip()
+
+
+class TestMachineToken:
+    def test_http_with_machine_token_header(self, sap):
+        r = requests.get(f"{sap}/get_file_content", params={"file_url": "nope.txt"},
+                         headers={"X-SAP-Token": machine_tok(sap)}, timeout=10)
+        assert r.status_code not in (401, 403)
+
+    def test_wrong_token_still_401(self, sap):
+        r = requests.get(f"{sap}/get_file_content", params={"file_url": "x"},
+                         headers={"X-SAP-Token": machine_tok(sap) + "x"}, timeout=10)
+        assert r.status_code == 401
+
+    def test_ws_handshake_with_machine_token(self, sap):
+        p = port_of(sap)
+        s = socket.create_connection(("127.0.0.1", p), timeout=10)
+        try:
+            s.sendall((f"GET /ws?sap_token={machine_tok(sap)} HTTP/1.1\r\nHost: 127.0.0.1:{p}\r\n"
+                       "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                       "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                       "Sec-WebSocket-Version: 13\r\n\r\n").encode())
+            data = s.recv(400)
+        finally:
+            s.close()
+        assert b"101" in data.split(b"\r\n", 1)[0], repr(data[:80])
+
+    def test_machine_token_persisted_stable(self, sap):
+        m1 = machine_tok(sap)
+        assert len(m1) >= 20 and m1 != tok(sap)

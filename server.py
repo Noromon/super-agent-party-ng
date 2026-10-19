@@ -667,6 +667,7 @@ from py.node_runner import node_mgr
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sap_auth.write_token_file(USER_DATA_DIR)
+    sap_auth.ensure_machine_token(USER_DATA_DIR)
     # --- [核心防御] 立即清理系统环境变量中的 SOCKS 代理，防止 httpx 崩溃 ---
     for env_key in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
         val = os.environ.get(env_key, "")
