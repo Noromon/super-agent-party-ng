@@ -11120,6 +11120,7 @@ class BotContainer:
     _telegram = None
     _wecom = None
     _wechat = None
+    _xmpp = None
 
 
     @classmethod
@@ -11177,6 +11178,13 @@ class BotContainer:
             from py.wechat_bot_manager import WeChatBotManager
             cls._wechat = WeChatBotManager()
         return cls._wechat
+
+    @classmethod
+    def get_xmpp(cls):
+        if cls._xmpp is None:
+            from py.xmpp_bot_manager import XmppBotManager
+            cls._xmpp = XmppBotManager()
+        return cls._xmpp
 
 # ==========================================
 # 1. QQ 机器人全量路由
@@ -11479,6 +11487,53 @@ async def reload_telegram_bot(config_data: dict):
         await asyncio.sleep(1)
         manager.start_bot(config)
         return {"success": True, "message": "Telegram 机器人已重新加载", "config_changed": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+
+# ==========================================
+# 2.5 XMPP 机器人全量路由（第九通道）
+# ==========================================
+
+@app.post("/start_xmpp_bot")
+async def start_xmpp_bot(config_data: dict):
+    try:
+        from py.xmpp_bot_manager import XmppBotConfig
+        config = XmppBotConfig(**config_data)
+        BotContainer.get_xmpp().start_bot(config)
+        return {"success": True, "message": "XMPP 机器人已成功启动", "environment": "thread-based"}
+    except Exception as e:
+        logger.error(f"启动 XMPP 机器人失败: {e}")
+        return JSONResponse(status_code=400, content={"success": False, "message": f"启动失败: {str(e)}", "error_type": "startup_error"})
+
+@app.post("/stop_xmpp_bot")
+async def stop_xmpp_bot():
+    try:
+        if BotContainer._xmpp:
+            BotContainer.get_xmpp().stop_bot()
+        return {"success": True, "message": "XMPP 机器人已停止"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+
+@app.get("/xmpp_bot_status")
+async def xmpp_bot_status():
+    if BotContainer._xmpp is None:
+        return {"is_running": False}
+    status = BotContainer.get_xmpp().get_status()
+    if status.get("startup_error") and not status.get("is_running"):
+        status["error_message"] = f"启动失败: {status['startup_error']}"
+    return status
+
+@app.post("/reload_xmpp_bot")
+async def reload_xmpp_bot(config_data: dict):
+    try:
+        from py.xmpp_bot_manager import XmppBotConfig
+        config = XmppBotConfig(**config_data)
+        manager = BotContainer.get_xmpp()
+        manager.stop_bot()
+        await asyncio.sleep(1)
+        manager.start_bot(config)
+        return {"success": True, "message": "XMPP 机器人已重新加载", "config_changed": True}
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
 
@@ -11925,6 +11980,20 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 print("WebSocket Sync: Telegram 机器人行为配置已同步")
     except Exception as e:
         print(f"WebSocket Sync Error (Telegram): {e}")
+
+    # 4.5 --- 同步 XMPP ---
+    try:
+        if BotContainer._xmpp is not None:
+            mgr = BotContainer.get_xmpp()
+            if mgr.is_running:
+                from py.xmpp_bot_manager import XmppBotConfig
+                config_data = settings_dict.get("xmppBotConfig", {})
+                config_data["behaviorSettings"] = behavior_data
+                new_config = XmppBotConfig(**config_data)
+                mgr.update_behavior_config(new_config)
+                print("WebSocket Sync: XMPP 机器人行为配置已同步")
+    except Exception as e:
+        print(f"WebSocket Sync Error (XMPP): {e}")
 
     # 5. --- 同步 Slack ---
     try:

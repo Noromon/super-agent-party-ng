@@ -1921,6 +1921,7 @@ let vue_methods = {
           this.dingtalkBotConfig = data.data.dingtalkBotConfig || this.dingtalkBotConfig;
           this.discordBotConfig = data.data.discordBotConfig || this.discordBotConfig;
           this.telegramBotConfig = data.data.telegramBotConfig || this.telegramBotConfig;
+          this.xmppBotConfig = data.data.xmppBotConfig || this.xmppBotConfig;
           this.slackBotConfig = data.data.slackBotConfig || this.slackBotConfig;
           this.targetLangSelected = data.data.targetLangSelected || this.targetLangSelected;
           this.BotConfig = data.data.BotConfig || this.BotConfig;
@@ -2023,6 +2024,7 @@ let vue_methods = {
           this.dingtalkBotConfig = data.data.dingtalkBotConfig || this.dingtalkBotConfig;
           this.discordBotConfig = data.data.discordBotConfig || this.discordBotConfig;
           this.telegramBotConfig = data.data.telegramBotConfig || this.telegramBotConfig;
+          this.xmppBotConfig = data.data.xmppBotConfig || this.xmppBotConfig;
           this.slackBotConfig = data.data.slackBotConfig || this.slackBotConfig;
           this.targetLangSelected = data.data.targetLangSelected || this.targetLangSelected;
           this.allBriefly = data.data.allBriefly || this.allBriefly;
@@ -2123,6 +2125,7 @@ let vue_methods = {
           this.checkQQBotStatus(); 
           this.checkFeishuBotStatus();
           this.checkTelegramBotStatus();
+          this.checkXmppBotStatus();
           this.checkDiscordBotStatus();
           this.checkLiveStatus();
           this.fetchRemotePlugins();
@@ -4315,6 +4318,7 @@ let vue_methods = {
           discordBotConfig: this.discordBotConfig,
           slackBotConfig: this.slackBotConfig,
           telegramBotConfig: this.telegramBotConfig,
+          xmppBotConfig: this.xmppBotConfig,
           targetLangSelected: this.targetLangSelected,
           allBriefly: this.allBriefly,
           isForceScrollToBottom: this.isForceScrollToBottom,
@@ -7376,6 +7380,88 @@ async checkTelegramBotStatus() {
 },
 handleCreateTelegramSeparator(val) {
   this.telegramBotConfig.separators.push(val);
+},
+
+/* ------- XMPP 机器人（收编版第九通道） ------- */
+async startXmppBot() {
+  this.isXmppStarting = true;
+  try {
+    showNotification('正在连接 XMPP 服务器...', 'info');
+    const res = await fetch('/start_xmpp_bot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(this.xmppBotConfig)
+    });
+    const json = await res.json();
+    if (json.success) {
+      this.isXmppBotRunning = true;
+      showNotification('XMPP 机器人启动成功', 'success');
+    } else {
+      showNotification(`启动失败：${json.message}`, 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误或服务器未响应', 'error');
+  } finally {
+    this.isXmppStarting = false;
+  }
+},
+async stopXmppBot() {
+  this.isXmppStopping = true;
+  try {
+    const res = await fetch('/stop_xmpp_bot', { method: 'POST' });
+    const json = await res.json();
+    if (json.success) {
+      this.isXmppBotRunning = false;
+      showNotification('XMPP 机器人已停止', 'success');
+    } else {
+      showNotification(`停止失败：${json.message}`, 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误或服务器未响应', 'error');
+  } finally {
+    this.isXmppStopping = false;
+  }
+},
+async reloadXmppBotConfig() {
+  this.isXmppReloading = true;
+  try {
+    const res = await fetch('/reload_xmpp_bot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(this.xmppBotConfig)
+    });
+    const json = await res.json();
+    if (json.success) {
+      showNotification('XMPP 机器人已重载', 'success');
+    } else {
+      showNotification(`重载失败：${json.message}`, 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误或服务器未响应', 'error');
+  } finally {
+    this.isXmppReloading = false;
+  }
+},
+async checkXmppBotStatus() {
+  try {
+    const res = await fetch('/xmpp_bot_status');
+    const st = await res.json();
+    this.isXmppBotRunning = st.is_running;
+  } catch (e) {
+    console.error('检查 XMPP 机器人状态失败', e);
+  }
+},
+async requestXmppBotStopIfRunning() {
+  try {
+    const res = await fetch('/xmpp_bot_status');
+    const st = await res.json();
+    if (st.is_running) await this.stopXmppBot();
+  } catch (e) {
+    console.error('检查或停止 XMPP 机器人失败:', e);
+  }
+},
+handleCreateXmppSeparator(val) {
+  this.xmppBotConfig.separators.push(val);
 },
 
 /* ------- Discord 机器人 ------- */

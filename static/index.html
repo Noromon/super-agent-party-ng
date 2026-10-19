@@ -2571,6 +2571,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                         <el-option :label="t('feishuBot')" value="feishu"></el-option>
                         <el-option :label="t('dingtalkBot')" value="dingtalk"></el-option>
                         <el-option :label="t('telegramBot')" value="telegram"></el-option>
+                        <el-option :label="t('xmppBot')" value="xmpp"></el-option>
                         <el-option :label="t('discordBot')" value="discord"></el-option>
                         <el-option :label="t('slackBot')" value="slack"></el-option>
                         <el-option :label="t('weComBot')" value="wecom"></el-option>
@@ -5633,6 +5634,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <el-option :label="t('feishuBot')" value="feishu"></el-option>
                             <el-option :label="t('dingtalkBot')" value="dingtalk"></el-option>
                             <el-option :label="t('telegramBot')" value="telegram"></el-option>
+                            <el-option :label="t('xmppBot')" value="xmpp"></el-option>
                             <el-option :label="t('discordBot')" value="discord"></el-option>
                             <el-option :label="t('slackBot')" value="slack"></el-option>
                             <el-option :label="t('weComBot')" value="wecom"></el-option>
@@ -13913,6 +13915,107 @@ function updateElement(el, rawMarkdown, formatFn) {
                                   class="full-width-input"
                                   @change="autoSaveSettings"
                                 />
+                              </el-form-item>
+                            </div>
+                          </div>
+                        </el-form>
+                      </el-tab-pane>
+
+                      <!-- XMPP 机器人子标签（收编版第九通道） -->
+                      <el-tab-pane :label="t('xmppBot')" name="xmpp">
+                        <el-form class="settings-form" :model="xmppBotConfig" label-position="top">
+                          <div class="tool-item">
+                            <div class="tool-header" style="display: flex; justify-content: space-between; align-items: center;">
+                              <span>
+                                <el-icon><i class="fa-solid fa-comment-dots"></i></el-icon>
+                                {{ t('xmpp_bot_config') }}
+                              </span>
+                              <div>
+                                <el-tooltip :content="t('start_bot')" placement="top">
+                                  <el-button type="primary" @click="startXmppBot"
+                                    :disabled="!isXmppBotConfigValid || isXmppBotRunning || isXmppStarting" circle>
+                                    <template v-if="isXmppStarting"><i class="fa-solid fa-spinner fa-spin"></i></template>
+                                    <template v-else><i class="fa-solid fa-play"></i></template>
+                                  </el-button>
+                                </el-tooltip>
+                                <el-tooltip :content="t('stop_bot')" placement="top">
+                                  <el-button type="danger" @click="stopXmppBot"
+                                    :disabled="!isXmppBotRunning || isXmppStopping" circle>
+                                    <template v-if="isXmppStopping"><i class="fa-solid fa-spinner fa-spin"></i></template>
+                                    <template v-else><i class="fa-solid fa-stop"></i></template>
+                                  </el-button>
+                                </el-tooltip>
+                                <el-tooltip :content="t('reload_bot')" placement="top">
+                                  <el-button @click="reloadXmppBotConfig"
+                                    :disabled="!isXmppBotRunning || isXmppReloading" circle>
+                                    <template v-if="isXmppReloading"><i class="fa-solid fa-rotate fa-spin"></i></template>
+                                    <template v-else><i class="fa-solid fa-rotate"></i></template>
+                                  </el-button>
+                                </el-tooltip>
+                              </div>
+                            </div>
+
+                            <div class="tool-content">
+                              <el-form-item :label="t('mainAgent')" required>
+                                <el-select v-model="xmppBotConfig.XmppAgent" @change="autoSaveSettings">
+                                  <el-option :label="t('defaultAgent')" value="super-model" />
+                                  <el-option v-for="(agent, id) in agents" :key="id" :label="agent.name" :value="id" />
+                                </el-select>
+                              </el-form-item>
+
+                              <el-form-item :label="t('separators')">
+                                <el-select v-model="xmppBotConfig.separators" multiple :reserve-keyword="false"
+                                  filterable allow-create @create="handleCreateXmppSeparator" @change="autoSaveSettings">
+                                  <el-option v-for="sep in filteredXmppSeparators" :key="sep.value"
+                                    :label="sep.label" :value="sep.value" />
+                                </el-select>
+                              </el-form-item>
+
+                              <el-form-item :label="t('conversationRounds')" class="form-item-align">
+                                <el-slider v-model="xmppBotConfig.memoryLimit" :min="0" :max="1000" :step="2"
+                                  show-input @input="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item :label="t('reasoningVisibleEnable')" class="form-item-align" label-position="left">
+                                <el-switch v-model="xmppBotConfig.reasoningVisible" @change="autoSaveSettings"></el-switch>
+                              </el-form-item>
+
+                              <el-form-item :label="t('quickRestartEnable')" class="form-item-align" label-position="left">
+                                <el-switch v-model="xmppBotConfig.quickRestart" @change="autoSaveSettings"></el-switch>
+                              </el-form-item>
+
+                              <el-form-item :label="t('wakeWord')">
+                                <el-input v-model="xmppBotConfig.wakeWord"
+                                  :placeholder="t('botWakeWordPlaceholder')" class="full-width-input"
+                                  @change="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item :label="t('behaviorTargetChatIds')">
+                                <el-select v-model="xmppBotConfig.behaviorTargetJids" multiple :reserve-keyword="false"
+                                  filterable allow-create default-first-option
+                                  :placeholder="t('enterChatIdPlaceholder')" class="full-width-input"
+                                  @change="autoSaveSettings">
+                                </el-select>
+                              </el-form-item>
+
+                              <el-form-item label="XMPP Username" required>
+                                <el-input v-model="xmppBotConfig.bot_username" :placeholder="t('enterXmppUsername')"
+                                  class="full-width-input" @change="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item label="XMPP Password" required>
+                                <el-input v-model="xmppBotConfig.bot_password" :placeholder="t('enterXmppPassword')"
+                                  show-password class="full-width-input" @change="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item label="XMPP Domain" required>
+                                <el-input v-model="xmppBotConfig.domain" :placeholder="t('enterXmppDomain')"
+                                  class="full-width-input" @change="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item label="Service URL">
+                                <el-input v-model="xmppBotConfig.service_url" :placeholder="t('enterXmppServiceUrl')"
+                                  class="full-width-input" @change="autoSaveSettings" />
                               </el-form-item>
                             </div>
                           </div>

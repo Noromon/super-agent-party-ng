@@ -861,6 +861,7 @@ const app = Vue.createApp({
       window.stopDingtalkBotHandler = this.requestDingtalkBotStopIfRunning;
       window.stopDiscordBotHandler = this.requestDiscordBotStopIfRunning;
       window.stopTelegramBotHandler = this.requestTelegramBotStopIfRunning;
+      window.stopXmppBotHandler = this.requestXmppBotStopIfRunning;
       window.stopSlackBotHandler = this.requestSlackBotStopIfRunning;
       window.stopWeComBotHandler = this.requestWeComBotStopIfRunning;
       window.electronAPI.onWindowState((_, state) => {
@@ -1039,6 +1040,7 @@ const app = Vue.createApp({
       delete window.stopDingtalkBotHandler;
       delete window.stopDiscordBotHandler;
       delete window.stopTelegramBotHandler;
+      delete window.stopXmppBotHandler;
       delete window.stopSlackBotHandler;
       delete window.stopWeComBotHandler;
     }
@@ -1598,6 +1600,20 @@ const app = Vue.createApp({
   },
     isTelegramBotConfigValid() {
       return this.telegramBotConfig.bot_token;
+    },
+    isXmppBotConfigValid() {
+      return !!(this.xmppBotConfig.bot_username && this.xmppBotConfig.bot_password && this.xmppBotConfig.domain);
+    },
+    filteredXmppSeparators() {
+      const current = this.xmppBotConfig.separators;
+      const defaults = this.defaultSeparators;
+      const custom = current
+        .filter(s => !defaults.some(d => d.value === s))
+        .map(s => ({
+          label: `(${this.formatSeparator(s)})`,
+          value: s
+        }));
+      return [...this.defaultSeparators, ...custom];
     },
     filteredTelegramSeparators() {
       const current = this.telegramBotConfig.separators;

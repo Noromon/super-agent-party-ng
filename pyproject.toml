@@ -31,6 +31,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "requests>=2.32.3",
     "shortuuid>=1.0.13",
+    "slixmpp>=1.10.0",
     "striprtf>=0.0.29",
     "tavily-python>=0.7.0",
     "tzlocal>=5.3.1",
