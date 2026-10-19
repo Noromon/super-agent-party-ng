@@ -21,6 +21,7 @@ class XmppBotConfig(BaseModel):
     bot_password: str
     domain: str = "localhost"
     service_url: str = "tcp://localhost:5222"
+    ignore_cert_hosts: List[str] = Field(default_factory=list)
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetJids: List[str] = Field(default_factory=list)
 
@@ -101,6 +102,7 @@ class XmppBotManager:
                 self.bot_client.bot_password = config.bot_password
                 self.bot_client.domain = config.domain
                 self.bot_client.service_url = config.service_url
+                self.bot_client.ignore_cert_hosts = config.ignore_cert_hosts or []
                 self.bot_client.config = config
                 self.bot_client._manager_ref = __import__("weakref").ref(self)
 
@@ -149,6 +151,11 @@ class XmppBotManager:
         logging.info("正在停止 XMPP 机器人...")
         self._stop_requested = True
         self.is_running = False
+        # "trust once" and queued cert reviews live only as long as this
+        # bot run (SAP restart or stop+start => fresh TOFU review).
+        from py import xmpp_trust
+        xmpp_trust.ONCE.clear()
+        xmpp_trust.PENDING.clear()
         if self.bot_client:
             self.bot_client._shutdown_requested = True
         if self.bot_thread and self.bot_thread.is_alive():
@@ -159,12 +166,14 @@ class XmppBotManager:
         self._stop_requested = False
 
     def get_status(self):
+        from py import xmpp_trust
         return {
             "is_running": self.is_running,
             "thread_alive": self.bot_thread.is_alive() if self.bot_thread else False,
             "session_ready": self.bot_client._is_ready if self.bot_client else False,
             "config": self.config.model_dump() if self.config else None,
             "startup_error": self._startup_error,
+            "pending_certs": xmpp_trust.PENDING.list(),
         }
 
     def update_behavior_config(self, config: XmppBotConfig):

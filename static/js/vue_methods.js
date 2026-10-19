@@ -7403,6 +7403,7 @@ async startXmppBot() {
     showNotification('网络错误或服务器未响应', 'error');
   } finally {
     this.isXmppStarting = false;
+    this.fetchXmppCertPending();
   }
 },
 async stopXmppBot() {
@@ -7420,6 +7421,7 @@ async stopXmppBot() {
     showNotification('网络错误或服务器未响应', 'error');
   } finally {
     this.isXmppStopping = false;
+    this.fetchXmppCertPending();
   }
 },
 async reloadXmppBotConfig() {
@@ -7440,6 +7442,7 @@ async reloadXmppBotConfig() {
     showNotification('网络错误或服务器未响应', 'error');
   } finally {
     this.isXmppReloading = false;
+    this.fetchXmppCertPending();
   }
 },
 async checkXmppBotStatus() {
@@ -7462,6 +7465,40 @@ async requestXmppBotStopIfRunning() {
 },
 handleCreateXmppSeparator(val) {
   this.xmppBotConfig.separators.push(val);
+},
+async fetchXmppCertPending() {
+  try {
+    const res = await fetch('/xmpp_cert_pending');
+    const json = await res.json();
+    this.xmppCertPending = json.pending || [];
+  } catch (e) {
+    this.xmppCertPending = [];
+  }
+},
+async xmppCertDecision(key, decision) {
+  try {
+    const res = await fetch('/xmpp_cert_decision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, decision })
+    });
+    const json = await res.json();
+    if (!json.success) {
+      showNotification(`证书决策失败：${json.message}`, 'error');
+      return;
+    }
+    await this.fetchXmppCertPending();
+    if (decision === 'once') showNotification('本次运行内信任该证书（重启后需重新确认）', 'info');
+    if (decision === 'always') showNotification('已永久信任该证书，正在重新启动机器人...', 'success');
+    if (decision !== 'reject') {
+      await this.startXmppBot();
+      await this.fetchXmppCertPending();
+    } else {
+      showNotification('已拒绝该证书', 'info');
+    }
+  } catch (e) {
+    showNotification('网络错误：证书决策未送达', 'error');
+  }
 },
 
 /* ------- Discord 机器人 ------- */

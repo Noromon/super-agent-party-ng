@@ -11517,12 +11517,34 @@ async def stop_xmpp_bot():
 
 @app.get("/xmpp_bot_status")
 async def xmpp_bot_status():
+    from py import xmpp_trust
     if BotContainer._xmpp is None:
-        return {"is_running": False}
+        return {"is_running": False, "pending_certs": xmpp_trust.PENDING.list()}
     status = BotContainer.get_xmpp().get_status()
     if status.get("startup_error") and not status.get("is_running"):
         status["error_message"] = f"启动失败: {status['startup_error']}"
     return status
+
+@app.get("/xmpp_cert_pending")
+async def xmpp_cert_pending():
+    from py import xmpp_trust
+    items = []
+    for it in xmpp_trust.PENDING.list():
+        it.pop("pem", None)  # 指纹与摘要足够审阅，不整段外发 PEM
+        items.append(it)
+    return {"pending": items}
+
+@app.post("/xmpp_cert_decision")
+async def xmpp_cert_decision(data: dict):
+    from py import xmpp_trust
+    key = str(data.get("key", ""))
+    decision = str(data.get("decision", ""))
+    if not key or decision not in ("reject", "once", "always"):
+        return JSONResponse(status_code=400, content={"success": False, "message": "需要 key 与 decision(reject|once|always)"})
+    handled = xmpp_trust.decide(key, decision)
+    if not handled:
+        return JSONResponse(status_code=404, content={"success": False, "message": "无对应待审证书"})
+    return {"success": True, "decision": decision}
 
 @app.post("/reload_xmpp_bot")
 async def reload_xmpp_bot(config_data: dict):

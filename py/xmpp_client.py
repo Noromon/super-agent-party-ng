@@ -24,6 +24,7 @@ from openai import AsyncOpenAI
 from slixmpp.xmlstream import ET
 
 from py.behavior_engine import BehaviorItem
+from py import xmpp_trust
 from py.auth import path_under
 from py.get_setting import (KB_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR,
                             get_port, load_settings)
@@ -50,6 +51,7 @@ class XmppClient:
         self.bot_password = ""
         self.domain = "localhost"
         self.service_url = "tcp://localhost:5222"
+        self.ignore_cert_hosts = []
         self.config = None
         self._is_ready = False
         self._manager_ref = None
@@ -70,13 +72,20 @@ class XmppClient:
             raise RuntimeError("XMPP 配置不完整（需要用户名/密码/域名）")
         jid = f"{self.bot_username}@{self.domain}"
         host, port, use_ssl = self._parse_service(self.service_url)  # fail before any I/O
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
+        # TLS verification is delegated to the application-level TOFU hook
+        # (ssl_cert); connector ssl=False lets every request carry its own ssl ctx.
+        self._tls_key = f"{host}:{port}"
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60),
+            connector=aiohttp.TCPConnector(ssl=False))
 
-        self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password)
+        self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password,
+                                       ssl_context=xmpp_trust.insecure_client_context())
         for plug in self.PLUGINS:
             self.xmpp.register_plugin(plug)  # disco(0030) / OOB(0066) / keepalive(0199)
         self.xmpp.auto_reconnect = True
         self.xmpp.add_event_handler("session_start", self._on_session_start)
+        self.xmpp.add_event_handler("ssl_cert", self._on_ssl_cert)
         self.xmpp.add_event_handler("message", self._on_message)
         self.xmpp.add_event_handler("disconnected", self._on_disconnected)
 
@@ -130,6 +139,39 @@ class XmppClient:
     def _on_disconnected(self, _event):
         self._is_ready = False
         logging.warning("XMPP bot 连接断开（slixmpp 将自动重连）")
+
+    # -------------------- TLS / TOFU --------------------
+    def _on_ssl_cert(self, pem):
+        """Application-level certificate enforcement (fail-closed)."""
+        try:
+            key = getattr(self, "_tls_key", "") or "?"
+            host = key.split(":")[0]
+            if xmpp_trust.host_allowed(host, self.ignore_cert_hosts):
+                logging.warning("XMPP TLS: %s 命中证书豁免白名单（用户显式配置）", key)
+                return
+            fp = xmpp_trust.fingerprint_pem(pem)
+            if xmpp_trust.get_store().check(key, fp) == "match":
+                return
+            if xmpp_trust.ONCE.is_granted(key):
+                return
+            xmpp_trust.PENDING.add(key, fp, pem)
+            logging.warning("XMPP 证书未获信任，已断开待审阅: %s %s", key, fp)
+            self.xmpp.disconnect()
+        except Exception:
+            logging.exception("XMPP ssl_cert 处理异常，按不可信处理")
+            try:
+                self.xmpp.disconnect()
+            except Exception:
+                pass
+
+    def _aio_ssl(self, url: str):
+        """Per-request ssl ctx for XEP-0363 PUTs: TOFU-known or whitelisted
+        hosts get a non-verifying context; everything else verifies normally."""
+        host = urlparse(url).hostname or ""
+        if (xmpp_trust.host_allowed(host, self.ignore_cert_hosts)
+                or xmpp_trust.get_store().knows_host(host)):
+            return xmpp_trust.insecure_client_context()
+        return True
 
     # -------------------- 消息入口 --------------------
     def _on_message(self, msg):
@@ -319,6 +361,7 @@ class XmppClient:
         with open(file_path, "rb") as f:
             data = f.read()
         async with self.session.put(put_url, data=data,
+                                    ssl=self._aio_ssl(put_url),
                                     headers={"Content-Type": "application/octet-stream"}) as resp:
             if resp.status not in (200, 201):
                 return None

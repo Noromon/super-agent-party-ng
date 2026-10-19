@@ -1571,11 +1571,13 @@ let vue_data = {
       domain: 'localhost',
       service_url: 'tcp://localhost:5222',
       behaviorTargetJids: [],
+      ignore_cert_hosts: [],
     },
     isXmppBotRunning: false,
     isXmppStarting: false,
     isXmppStopping: false,
     isXmppReloading: false,
+    xmppCertPending: [],
     discordBotConfig: {
       token: '',
       llm_model: 'super-model',

@@ -13955,6 +13955,24 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </div>
                             </div>
 
+                            <div v-if="xmppCertPending.length" class="tool-content"
+                                 style="border:1px solid var(--el-color-warning); border-radius:6px; padding:10px; margin-bottom:8px;">
+                              <div style="font-weight:bold; margin-bottom:6px;">{{ t('xmppCertPendingTitle') }}</div>
+                              <div v-for="cert in xmppCertPending" :key="cert.key" style="margin-bottom:10px;">
+                                <div style="font-size:13px;">
+                                  <b>{{ cert.key }}</b><br>
+                                  CN/Subject: {{ cert.subject }}<br>
+                                  {{ t('xmppCertValidity') }}: {{ cert.not_before }} → {{ cert.not_after }}<br>
+                                  <span style="word-break:break-all;">SHA-256: {{ cert.fingerprint }}</span>
+                                </div>
+                                <div style="margin-top:6px;">
+                                  <el-button size="small" @click="xmppCertDecision(cert.key, 'reject')">{{ t('xmppCertReject') }}</el-button>
+                                  <el-button size="small" type="warning" @click="xmppCertDecision(cert.key, 'once')">{{ t('xmppTrustOnce') }}</el-button>
+                                  <el-button size="small" type="primary" @click="xmppCertDecision(cert.key, 'always')">{{ t('xmppTrustAlways') }}</el-button>
+                                </div>
+                              </div>
+                            </div>
+
                             <div class="tool-content">
                               <el-form-item :label="t('mainAgent')" required>
                                 <el-select v-model="xmppBotConfig.XmppAgent" @change="autoSaveSettings">
@@ -14016,6 +14034,14 @@ function updateElement(el, rawMarkdown, formatFn) {
                               <el-form-item label="Service URL">
                                 <el-input v-model="xmppBotConfig.service_url" :placeholder="t('enterXmppServiceUrl')"
                                   class="full-width-input" @change="autoSaveSettings" />
+                              </el-form-item>
+
+                              <el-form-item :label="t('xmppIgnoreCertHosts')">
+                                <el-select v-model="xmppBotConfig.ignore_cert_hosts" multiple :reserve-keyword="false"
+                                  filterable allow-create default-first-option
+                                  :placeholder="t('xmppIgnoreCertHint')" class="full-width-input"
+                                  @change="autoSaveSettings">
+                                </el-select>
                               </el-form-item>
                             </div>
                           </div>
