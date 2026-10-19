@@ -22,6 +22,8 @@ from py.get_setting import get_port, load_settings
 from py.random_topic import get_random_topics
 
 # 配置模型
+from py import llm_gate
+
 class DingtalkBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     DingtalkAgent: str
@@ -179,6 +181,7 @@ class DingtalkClientLogic:
             print(f"图片处理异常: {e}")
         return None
 
+    @llm_gate.gated
     async def on_message(self, raw_data: dict, incoming_message: ChatbotMessage, handler: DingtalkInternalHandler):
         cid = incoming_message.conversation_id
         msg_type = incoming_message.message_type
@@ -392,6 +395,7 @@ class DingtalkClientLogic:
             print(f"钉钉获取Token异常: {e}")
         return None
     
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
         【终极全能版】自动识别 ID 类型并推送

@@ -21,6 +21,8 @@ from py.get_setting import get_port,load_settings
 # from py.image_host import upload_image_host
 
 # 定义请求体
+from py import llm_gate
+
 class QQBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     QQAgent: str
@@ -362,6 +364,7 @@ class MyClient(botpy.Client):
             return True
         except asyncio.TimeoutError:
             return False
+    @llm_gate.gated
     async def on_c2c_message_create(self, message: C2CMessage):
         if not self.is_running:
             return
@@ -630,6 +633,7 @@ class MyClient(botpy.Client):
         return clean.strip()
 
     
+    @llm_gate.gated
     async def on_group_at_message_create(self, message: GroupMessage):
         if not self.is_running:
             return

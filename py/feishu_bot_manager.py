@@ -20,6 +20,8 @@ from py.get_setting import convert_to_opus_simple, get_port, load_settings
 from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSettings
 from py.random_topic import get_random_topics
 # 飞书机器人配置模型
+from py import llm_gate
+
 class FeishuBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     FeishuAgent: str          # LLM模型名
@@ -481,6 +483,7 @@ class FeishuClient:
             if not self._shutdown_requested:
                 print(f"处理消息时发生异常: {e}")
 
+    @llm_gate.gated
     async def handle_message(self, data) -> None:
         """处理飞书消息的主函数"""
         # 1. 基础检查
@@ -779,6 +782,7 @@ class FeishuClient:
         except Exception as e:
             print(f"处理消息异常: {e}")
             await self._send_text(msg, f"机器人异常: {str(e)}")
+    @llm_gate.gated
     async def _send_omni_response(self, original_msg, audio_data: bytes, is_opus: bool):
         """发送 Omni 模型生成的音频 (支持语音气泡)"""
         try:
@@ -942,6 +946,7 @@ class FeishuClient:
         return buffer.strip()
 
 
+    @llm_gate.gated
     async def _send_voice(self, original_msg, text):
         """发送语音消息（opus专用版本）"""
         try:
@@ -1189,6 +1194,7 @@ class FeishuClient:
         text = re.sub(r'<.*?>', '', text)
         return text.strip()
     
+    @llm_gate.gated
     async def _send_text(self, original_msg, text):
         """发送文本消息（使用富文本 Post 格式以支持 Markdown）"""
         print("发送文本消息", text)
@@ -1254,6 +1260,7 @@ class FeishuClient:
             import traceback
             print(traceback.format_exc())
                 
+    @llm_gate.gated
     async def _send_image(self, original_msg, image_url):
         """发送图片消息"""
         try:
@@ -1320,6 +1327,7 @@ class FeishuClient:
         except Exception as e:
             print(f"发送图片异常: {e}")
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
         回调函数：响应行为引擎的指令

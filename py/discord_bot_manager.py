@@ -19,6 +19,8 @@ from py.behavior_engine import BehaviorItem, BehaviorSettings,global_behavior_en
 from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 # ------------------ 配置模型 ------------------
+from py import llm_gate
+
 class DiscordBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     token: str
@@ -213,6 +215,7 @@ class DiscordClient(discord.Client):
             await msg.channel.send(f"处理消息失败：{e}")
 
     # ---------- 消息主处理 ----------
+    @llm_gate.gated
     async def _handle_message(self, msg: discord.Message):
         cid = msg.channel.id
         if cid not in self.memory:
@@ -505,6 +508,7 @@ class DiscordClient(discord.Client):
         except Exception as e:
             logging.exception(f"发送图片失败: {img_url}")
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
         回调函数：响应行为引擎的指令

@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from py.get_setting import get_port, load_settings
 
 # ------------------ 配置模型 (严格对齐) ------------------
+from py import llm_gate
+
 class SlackBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     bot_token: str
@@ -171,6 +173,7 @@ class SlackBotManager:
         return {"is_running": self.is_running}
 
     # ---------- 核心处理：1:1 复刻 Discord 逻辑 ----------
+    @llm_gate.gated
     async def _handle_message(self, event: dict, web_client: AsyncWebClient):
         cid = event["channel"]
         text = event.get("text", "").strip()
@@ -359,6 +362,7 @@ class SlackBotManager:
         logging.info("Slack 机器人: 行为配置已热更新，计时器已重置")
 
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: Any):
         """
         回调函数：响应行为引擎的主动触发指令

@@ -4,6 +4,8 @@ from openai import AsyncOpenAI
 from py.behavior_engine import BehaviorItem
 from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
+from py import llm_gate
+
 class TelegramClient:
     def __init__(self):
         self.TelegramAgent = "super-model"
@@ -172,6 +174,7 @@ class TelegramClient:
         await self._process_llm(chat_id, text, [], msg.get("message_id"))
 
     # -------------------- LLM 统一处理 --------------------
+    @llm_gate.gated
     async def _process_llm(self, chat_id: int, text: str, extra_content: List[dict], reply_to_msg_id: Optional[int]):
         if chat_id not in self.memoryList:
             self.memoryList[chat_id] = []
@@ -500,6 +503,7 @@ class TelegramClient:
         for m in re.finditer(r"!\[.*?\]\((https?://[^\s)]+)", full_text):
             state["image_cache"].append(m.group(1))
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
         回调函数：响应行为引擎的指令

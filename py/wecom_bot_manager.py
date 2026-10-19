@@ -19,6 +19,8 @@ from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSet
 from aibot import WSClient, WSClientOptions, generate_req_id
 
 # 企业微信机器人配置模型
+from py import llm_gate
+
 class WeComBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     WeComAgent: str           # LLM模型名
@@ -192,6 +194,7 @@ class WeComClient:
         @self.ws_client.on('message.voice')
         async def on_voice(frame): await self.handle_message(frame, "voice")
 
+    @llm_gate.gated
     async def handle_message(self, frame, msg_type) -> None:
         body = frame.get('body', {})
         chat_id = body.get('chatid', body.get('from', {}).get('userid', ''))
@@ -282,6 +285,7 @@ class WeComClient:
             logging.error(f"回复异常: {e}")
             await self.ws_client.reply_stream(frame, stream_id, f"机器人异常: {e}", True)
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """行为引擎触发主动发送"""
         logging.info(f"[WeComClient] 行为触发 -> {chat_id}")

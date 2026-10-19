@@ -27,6 +27,8 @@ except ImportError:
     logging.warning("尚未安装 wechatbot-sdk，请执行 pip install wechatbot-sdk")
 
 # 拦截控制台输出的终极杀器
+from py import llm_gate
+
 class StreamInterceptor:
     def __init__(self, original_stream, qr_callback, success_callback):
         self.original_stream = original_stream
@@ -375,6 +377,7 @@ class WeChatClient:
         self.last_active_chat_id = None
         global_behavior_engine.register_handler("wechat", self.execute_behavior_event)
 
+    @llm_gate.gated
     async def handle_message(self, msg) -> None:
         """处理微信消息（修复流式分段逻辑）"""
         if self._shutdown_requested: return
@@ -481,6 +484,7 @@ class WeChatClient:
     async def _send_text(self, msg, text):
         if hasattr(self.bot, 'reply'): await self.bot.reply(msg, text)
 
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
         """
         [优化版] 响应行为引擎的主动推送指令

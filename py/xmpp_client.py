@@ -35,6 +35,8 @@ SIMS_NS = "urn:xmpp:sims:1"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 
 
+from py import llm_gate
+
 class XmppClient:
     PLUGINS = ("xep_0030", "xep_0066", "xep_0199")
 
@@ -528,6 +530,7 @@ class XmppClient:
         return uris[:4], text
 
     # -------------------- LLM 内核（/v1 自调用，全 agent 能力） --------------------
+    @llm_gate.gated
     async def _process_llm(self, chat_jid: str, text: str, extra_content: List[dict]):
         if chat_jid not in self.memoryList:
             self.memoryList[chat_jid] = await self._restore_conv(chat_jid)
@@ -752,6 +755,7 @@ class XmppClient:
         msg.send()
 
     # -------------------- 行为引擎（主动事件） --------------------
+    @llm_gate.gated
     async def execute_behavior_event(self, chat_jid: str, behavior_item: BehaviorItem):
         prompt_content = await self._resolve_behavior_prompt(behavior_item)
         if not prompt_content:

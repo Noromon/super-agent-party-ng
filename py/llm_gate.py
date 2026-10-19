@@ -59,6 +59,28 @@ async def gate():
         leave()
 
 
+def gated(fn):
+    """T-5: decorator form of gate() for whole-coroutine coverage.
+
+    One-line opt-in above an `async def` that talks to the LLM backend;
+    zero-indent surgery. NOT for async generator functions (use gate()).
+    """
+    import functools
+    import inspect
+    if inspect.isasyncgenfunction(fn):
+        raise TypeError(f"llm_gate.gated cannot wrap async generator: {fn.__name__}")
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        enter()
+        try:
+            return await fn(*args, **kwargs)
+        finally:
+            leave()
+
+    return wrapper
+
+
 def wait_chat_idle(timeout=600.0, poll=1.5):
     end = time.time() + timeout
     while time.time() < end:

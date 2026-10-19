@@ -172,3 +172,38 @@ class TestGateBlindSpotClosure:
         body = _func_src("_extract_group_memories")
         assert "llm_gate.enter()" not in body
         assert "llm_gate.gate()" not in body
+        assert "@llm_gate.gated" not in body
+
+    def test_all_py_direct_creates_gated(self):
+        """Global ratchet: every chat.completions.create under py/ must sit in
+        a gated chain (decorator or gate() in any enclosing function).
+        New LLM exits must gate themselves or get an explicit exemption."""
+        import ast as _ast
+        exempt_funcs = {"agent_tool_call"}  # self-call via /v1 (parent gated)
+        markers = ("@llm_gate.gated", "llm_gate.gate()")
+        bad = []
+        for path in sorted((ROOT / "py").glob("*.py")):
+            if path.name == "llm_gate.py":
+                continue
+            src = path.read_text(encoding="utf-8-sig")
+            tree = _ast.parse(src)
+            funcs = [n for n in _ast.walk(tree)
+                     if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))]
+            for node in _ast.walk(tree):
+                if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
+                        and node.func.attr == "create"):
+                    chain = [g for g in funcs if g.lineno <= node.lineno <= g.end_lineno]
+                    if not chain:
+                        bad.append((path.name, "<module>", node.lineno))
+                        continue
+                    ok = False
+                    for g in chain:
+                        seg = _ast.get_source_segment(src, g) or ""
+                        lines_above = src.splitlines()[: g.lineno - 1]
+                        tail = lines_above[-3:]  # decorator zone above def
+                        if any(m in seg for m in markers) or any(m in " ".join(tail) for m in markers):
+                            ok = True
+                            break
+                    if not ok and chain[0].name not in exempt_funcs:
+                        bad.append((path.name, chain[0].name, node.lineno))
+        assert not bad, f"ungated direct LLM exits: {bad}"
