@@ -43,6 +43,10 @@ def make_client():
     c._manager_ref = None
     c._ready_callback = None
     c.session = None
+    c.ignore_cert_hosts = []
+    c.extra_outbound_dirs = []
+    c.tools_mode = "inherit"
+    c.tools_list = []
     c.sent = []
 
     async def fake_send(jid, text):
@@ -160,6 +164,123 @@ class TestCommandRouting:
         c._process_llm = lambda *a, **k: asyncio.sleep(0)
         out = self._run(msg(body="普通消息"), c)
         assert out == []  # gated, no LLM, no reply
+
+
+class TestMobileLayer:
+    """WP1 inline / tools override / persistence helpers."""
+
+    def test_inline_remote_images_replaces_and_notifies(self, monkeypatch):
+        c = make_client()
+
+        async def fake_dl(url):
+            return "data:image/png;base64,QUJD" if "good" in url else None
+        monkeypatch.setattr(c, "_download_as_data_uri", fake_dl)
+        content = [
+            {"type": "image_url", "image_url": {"url": "https://good/x.png"}},
+            {"type": "image_url", "image_url": {"url": "https://bad/y.png"}},
+            {"type": "text", "text": "附言"},
+        ]
+        out = asyncio.run(c._inline_remote_images(content))
+        assert out[0]["image_url"]["url"].startswith("data:image/png")
+        assert out[1]["type"] == "text" and "原始URL" in out[1]["text"]
+        assert out[2]["text"] == "附言"
+
+    def test_download_as_data_uri_structure(self):
+        c = make_client()
+        body = b"\x89PNG fake image bytes"
+
+        class FakeContent:
+            async def read(self, _n):
+                return body
+
+        class FakeResp:
+            status = 200
+            headers = {"Content-Type": "image/png; charset=x"}
+            content = FakeContent()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeSession:
+            def get(self, url, ssl=None):
+                return FakeResp()
+        c.session = FakeSession()
+        uri = asyncio.run(c._download_as_data_uri("https://files.local/x.png"))
+        assert uri.startswith("data:image/png;base64,")
+        import base64 as b64m
+        assert b64m.b64decode(uri.split(",", 1)[1]) == body
+
+    def test_download_oversize_rejected(self):
+        c = make_client()
+
+        class FakeContent:
+            async def read(self, _n):
+                return b"A" * (20 * 1024 * 1024 + 2)
+
+        class FakeResp:
+            status = 200
+            headers = {"Content-Type": "image/png"}
+            content = FakeContent()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeSession:
+            def get(self, url, ssl=None):
+                return FakeResp()
+        c.session = FakeSession()
+        assert asyncio.run(c._download_as_data_uri("https://files.local/big.png")) is None
+
+    def test_tools_override_modes(self):
+        c = make_client()
+        c.tools_mode, c.tools_list = "inherit", ["a"]
+        assert c._tools_override() == {}
+        c.tools_mode = "whitelist"
+        assert c._tools_override() == {"enable_tools": ["a"]}
+        c.tools_mode = "blacklist"
+        assert c._tools_override() == {"disable_tools": ["a"]}
+        c.tools_mode, c.tools_list = "whitelist", []
+        assert c._tools_override() == {}
+
+    def test_restore_persist_and_new(self, monkeypatch):
+        from py import get_setting as gs_mod
+        c = make_client()
+        saved = []
+
+        async def fake_load(cid):
+            assert cid == "bot:xmpp:jid@x"
+            return [{"role": "user", "content": "history"}]
+
+        async def fake_save(cid, msgs):
+            saved.append((cid, list(msgs)))
+        monkeypatch.setattr(gs_mod, "load_bot_conv", fake_load)
+        monkeypatch.setattr(gs_mod, "save_bot_conv", fake_save)
+        restored = asyncio.run(c._restore_conv("jid@x"))
+        assert restored[0]["content"] == "history"
+        c.memoryList["jid@x"] = [{"role": "user", "content": "new"}]
+        asyncio.run(c._persist_conv("jid@x"))
+        assert saved[-1][0] == "bot:xmpp:jid@x" and len(saved[-1][1]) == 1
+        # /new must persist the cleared history too
+        asyncio.run(c._handle_message(msg(body="/new", frm="jid@x/res")))
+        assert saved[-1][1] == []
+
+    def test_fence_roots_include_workspace_and_extra(self, monkeypatch):
+        c = make_client()
+        c.extra_outbound_dirs = [r"Z:\artifacts", "  "]
+
+        async def fake_settings():
+            return {"CLISettings": {"cc_path": r"D:\project-x"}}
+        monkeypatch.setattr("py.xmpp_client.load_settings", fake_settings)
+        roots = asyncio.run(c._fence_roots())
+        assert r"Z:\artifacts" in roots and r"D:\project-x" in roots
+        assert __import__("os").getcwd() in roots
+        assert "" not in roots
 
 
 class TestIncomingImages:

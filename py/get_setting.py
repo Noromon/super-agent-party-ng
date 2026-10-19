@@ -275,7 +275,7 @@ async def _sync_rows(db, conversations):
     for conv in conversations:
         if isinstance(conv, dict) and conv.get("id") is not None:
             snap[str(conv["id"])] = json.dumps(conv, ensure_ascii=False)
-    async with db.execute('SELECT conv_id FROM conversation_rows') as cur:
+    async with db.execute("SELECT conv_id FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%'") as cur:
         existing = {r[0] for r in await cur.fetchall()}
     now = time.time()
     for cid, blob in snap.items():
@@ -588,3 +588,117 @@ async def save_covs(settings):
             except Exception:
                 logging.getLogger(__name__).warning("conversation_rows shadow sync failed (blob unaffected)", exc_info=True)
     _COVS_DEGRADED = False
+
+# ----------------- 7. bot 渠道会话（"手机"行级存储，bot: 前缀命名空间） -----------------
+# 与主会话 blob 完全隔离：blob 不含 bot 会话，_sync_rows 也不碰 bot: 行。
+
+BOT_CONV_PREFIX = "bot:"
+_BOT_CONV_LOCK = asyncio.Lock()
+
+
+async def save_bot_conv(conv_id, messages):
+    if not str(conv_id).startswith(BOT_CONV_PREFIX):
+        raise ValueError(f"bot 会话 id 必须以 {BOT_CONV_PREFIX} 开头: {conv_id!r}")
+    await init_covs_db()
+    async with _BOT_CONV_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                (str(conv_id), json.dumps(messages, ensure_ascii=False), time.time()))
+            await db.commit()
+
+
+async def load_bot_conv(conv_id):
+    await init_covs_db()
+    async with aiosqlite.connect(COVS_PATH) as db:
+        async with db.execute('SELECT data FROM conversation_rows WHERE conv_id = ?',
+                              (str(conv_id),)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    try:
+        msgs = json.loads(row[0])
+        return msgs if isinstance(msgs, list) else None
+    except Exception:
+        return None
+
+
+async def list_bot_convs():
+    """[{conv_id, updated_at, count, last_text}] newest first."""
+    await init_covs_db()
+    out = []
+    async with aiosqlite.connect(COVS_PATH) as db:
+        async with db.execute(
+                "SELECT conv_id, data, updated_at FROM conversation_rows "
+                "WHERE conv_id LIKE 'bot:%' ORDER BY updated_at DESC") as cur:
+            async for conv_id, data, updated_at in cur:
+                try:
+                    msgs = json.loads(data)
+                except Exception:
+                    msgs = []
+                if not isinstance(msgs, list):
+                    msgs = []
+                out.append({"conv_id": conv_id, "updated_at": updated_at,
+                            "count": len(msgs), "last_text": _last_text_preview(msgs)})
+    return out
+
+
+async def delete_bot_conv(conv_id):
+    conv_id = str(conv_id)
+    if not conv_id.startswith(BOT_CONV_PREFIX):
+        raise ValueError(f"bot 会话 id 必须以 {BOT_CONV_PREFIX} 开头: {conv_id!r}")
+    await init_covs_db()
+    async with _BOT_CONV_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            await db.execute('DELETE FROM conversation_rows WHERE conv_id = ?', (conv_id,))
+            await db.commit()
+
+
+def _msg_text(msg):
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                return str(part["text"])
+    return ""
+
+
+def _last_text_preview(msgs):
+    for msg in reversed(msgs):
+        if isinstance(msg, dict) and _msg_text(msg).strip():
+            return _msg_text(msg).strip()[:120]
+    return ""
+
+
+def redact_messages_for_view(messages):
+    """API payload safety: data-URI images -> placeholder, long strings -> cut."""
+    def red_str(s):
+        if s.startswith("data:") and len(s) > 64:
+            return f"[data-uri {len(s)} bytes]"
+        if len(s) > 4000:
+            return s[:1800] + "\n…\n" + s[-600:]
+        return s
+
+    def red_part(part):
+        if not isinstance(part, dict):
+            return part
+        part = dict(part)
+        if part.get("type") == "image_url" and isinstance(part.get("image_url"), dict):
+            part["image_url"] = {"url": red_str(str(part["image_url"].get("url", "")))}
+        if part.get("type") == "text" and isinstance(part.get("text"), str):
+            part["text"] = red_str(part["text"])
+        return part
+
+    out = []
+    for msg in messages if isinstance(messages, list) else []:
+        if not isinstance(msg, dict):
+            continue
+        msg = dict(msg)
+        if isinstance(msg.get("content"), str):
+            msg["content"] = red_str(msg["content"])
+        elif isinstance(msg.get("content"), list):
+            msg["content"] = [red_part(p) for p in msg["content"]]
+        out.append(msg)
+    return out

@@ -13973,6 +13973,65 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </div>
                             </div>
 
+                            <div class="tool-content" style="margin-bottom:8px;">
+                              <el-form-item :label="t('xmppToolsMode')">
+                                <el-select v-model="xmppBotConfig.tools_mode" class="full-width-input"
+                                  @change="autoSaveSettings">
+                                  <el-option :label="t('xmppToolsInherit')" value="inherit" />
+                                  <el-option :label="t('xmppToolsWhitelist')" value="whitelist" />
+                                  <el-option :label="t('xmppToolsBlacklist')" value="blacklist" />
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item v-if="xmppBotConfig.tools_mode !== 'inherit'" :label="t('xmppToolsList')">
+                                <el-select v-model="xmppBotConfig.tools_list" multiple filterable
+                                  :reserve-keyword="false" class="full-width-input" @change="autoSaveSettings">
+                                  <el-option v-for="(v, k) in toolsSettings" :key="k" :label="k" :value="k" />
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item :label="t('xmppExtraOutboundDirs')">
+                                <el-select v-model="xmppBotConfig.extra_outbound_dirs" multiple allow-create filterable
+                                  default-first-option :reserve-keyword="false" :placeholder="t('xmppExtraOutboundHint')"
+                                  class="full-width-input" @change="autoSaveSettings">
+                                </el-select>
+                              </el-form-item>
+                              <el-form-item :label="t('xmppEnvShortcuts')">
+                                <el-button size="small" @click="openEnvPage('toolkit')">{{ t('xmppEnvTools') }}</el-button>
+                                <el-button size="small" @click="openEnvPage('role')">{{ t('xmppEnvAgents') }}</el-button>
+                                <el-button size="small" @click="openEnvPage('model-config')">{{ t('xmppEnvModels') }}</el-button>
+                                <el-button size="small" @click="openEnvPage('system')">{{ t('xmppEnvSystem') }}</el-button>
+                              </el-form-item>
+                            </div>
+
+                            <div class="tool-content" style="margin-bottom:8px;">
+                              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <b>{{ t('xmppSessionsTitle') }}</b>
+                                <el-button size="small" @click="fetchBotConversations">{{ t('xmppSessionsRefresh') }}</el-button>
+                              </div>
+                              <div v-if="!xmppBotSessions.length" style="color:#999; font-size:13px;">{{ t('xmppSessionsEmpty') }}</div>
+                              <div v-for="s in xmppBotSessions" :key="s.conv_id"
+                                   style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #8883; font-size:13px;">
+                                <span style="min-width:150px; font-weight:bold;">{{ s.peer }}
+                                  <el-tag v-if="s.live" size="small" type="success">live</el-tag>
+                                </span>
+                                <span style="min-width:60px;">{{ s.count }} msg</span>
+                                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#999;">{{ s.last_text }}</span>
+                                <span style="color:#999; white-space:nowrap;">{{ formatBotTime(s.updated_at) }}</span>
+                                <el-button size="small" @click="openBotConversation(s)">{{ t('xmppSessionOpen') }}</el-button>
+                                <el-button size="small" @click="clearBotConversation(s.conv_id)">{{ t('xmppSessionClear') }}</el-button>
+                                <el-button size="small" type="danger" @click="deleteBotConversation(s.conv_id)">{{ t('xmppSessionDelete') }}</el-button>
+                              </div>
+                            </div>
+
+                            <el-dialog v-model="xmppSessionOpen" :title="'📱 ' + xmppSessionTitle" width="640px" append-to-body>
+                              <div style="max-height:60vh; overflow-y:auto;">
+                                <div v-for="(m, i) in xmppSessionDetail" :key="i"
+                                     :style="'margin:6px 0; padding:8px 10px; border-radius:8px; font-size:13px; white-space:pre-wrap; word-break:break-word;'
+                                             + (m.role==='user' ? '; background:var(--el-color-primary-light-8)' : '; background:var(--el-fill-color)')">
+                                  <b style="font-size:11px; color:#999;">{{ m.role }}</b><br>{{ botMsgText(m) }}
+                                </div>
+                              </div>
+                            </el-dialog>
+
                             <div class="tool-content">
                               <el-form-item :label="t('mainAgent')" required>
                                 <el-select v-model="xmppBotConfig.XmppAgent" @change="autoSaveSettings">

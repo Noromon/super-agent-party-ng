@@ -7475,6 +7475,83 @@ async fetchXmppCertPending() {
     this.xmppCertPending = [];
   }
 },
+async fetchBotConversations() {
+  try {
+    const res = await fetch('/bot_conversations');
+    const json = await res.json();
+    this.xmppBotSessions = json.conversations || [];
+  } catch (e) {
+    this.xmppBotSessions = [];
+  }
+},
+async openBotConversation(c) {
+  try {
+    const res = await fetch('/bot_conversation?id=' + encodeURIComponent(c.conv_id));
+    const json = await res.json();
+    if (json.success) {
+      this.xmppSessionDetail = json.messages || [];
+      this.xmppSessionTitle = c.peer || c.conv_id;
+      this.xmppSessionOpen = true;
+    } else {
+      showNotification(json.message || '会话读取失败', 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误：会话读取失败', 'error');
+  }
+},
+async clearBotConversation(id) {
+  if (!window.confirm('清空该 bot 会话的历史记录？')) return;
+  try {
+    const res = await fetch('/bot_conversation/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const json = await res.json();
+    if (json.success) {
+      showNotification('会话已清空', 'success');
+      if (this.xmppSessionTitle && ('bot:xmpp:' + this.xmppSessionTitle) === id) {
+        this.xmppSessionDetail = [];
+      }
+      this.fetchBotConversations();
+    } else {
+      showNotification(json.message || '清空失败', 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误', 'error');
+  }
+},
+async deleteBotConversation(id) {
+  if (!window.confirm('删除该 bot 会话？（不可恢复）')) return;
+  try {
+    const res = await fetch('/bot_conversation?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    const json = await res.json();
+    if (json.success) {
+      showNotification('会话已删除', 'success');
+      this.fetchBotConversations();
+    } else {
+      showNotification(json.message || '删除失败', 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误', 'error');
+  }
+},
+openEnvPage(menu) {
+  this.activeMenu = menu;
+},
+formatBotTime(ts) {
+  if (!ts) return '';
+  try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return String(ts); }
+},
+botMsgText(msg) {
+  const c = msg && msg.content;
+  if (typeof c === 'string') return c.length > 800 ? c.slice(0, 800) + '…' : c;
+  if (Array.isArray(c)) {
+    return c.map(p => (p && p.type === 'text' ? p.text
+      : (p && p.type === 'image_url' ? '[图片]' : ''))).filter(Boolean).join(' ');
+  }
+  return '';
+},
 async xmppCertDecision(key, decision) {
   try {
     const res = await fetch('/xmpp_cert_decision', {

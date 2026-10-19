@@ -26,6 +26,7 @@ from slixmpp.xmlstream import ET
 from py.behavior_engine import BehaviorItem
 from py import xmpp_trust
 from py.auth import path_under
+from py import get_setting as gs_mod
 from py.get_setting import (KB_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR,
                             get_port, load_settings)
 
@@ -52,6 +53,9 @@ class XmppClient:
         self.domain = "localhost"
         self.service_url = "tcp://localhost:5222"
         self.ignore_cert_hosts = []
+        self.extra_outbound_dirs = []
+        self.tools_mode = "inherit"      # inherit | whitelist | blacklist
+        self.tools_list = []
         self.config = None
         self._is_ready = False
         self._manager_ref = None
@@ -77,7 +81,9 @@ class XmppClient:
         self._tls_key = f"{host}:{port}"
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=60),
-            connector=aiohttp.TCPConnector(ssl=False))
+            # ThreadedResolver: aiodns (slixmpp dep) skips hosts files and
+            # NetBIOS names — plain socket resolution is what users expect.
+            connector=aiohttp.TCPConnector(ssl=False, resolver=aiohttp.ThreadedResolver()))
 
         self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password,
                                        ssl_context=xmpp_trust.insecure_client_context())
@@ -173,6 +179,81 @@ class XmppClient:
             return xmpp_trust.insecure_client_context()
         return True
 
+    # -------------------- 会话持久化（"手机"行级存储） --------------------
+    @staticmethod
+    def _conv_key(chat_jid: str) -> str:
+        return f"bot:xmpp:{chat_jid}"
+
+    async def _restore_conv(self, chat_jid: str) -> list:
+        try:
+            saved = await gs_mod.load_bot_conv(self._conv_key(chat_jid))
+            if saved:
+                logging.info("XMPP 会话从持久化恢复: %s (%d 条)", chat_jid, len(saved))
+                return saved
+        except Exception:
+            logging.warning("XMPP 会话恢复失败（转纯内存模式）", exc_info=True)
+        return []
+
+    async def _persist_conv(self, chat_jid: str):
+        try:
+            await gs_mod.save_bot_conv(self._conv_key(chat_jid),
+                                       self.memoryList.get(chat_jid, []))
+        except Exception:
+            logging.warning("XMPP 会话持久化失败（本回合仅内存）", exc_info=True)
+
+    # -------------------- 收图内联（本地模型不会拉远程 url） --------------------
+    async def _download_as_data_uri(self, url: str):
+        try:
+            async with self.session.get(url, ssl=self._aio_ssl(url)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.content.read(20 * 1024 * 1024 + 1)
+                if len(data) > 20 * 1024 * 1024:
+                    return None
+                ctype = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
+                if not ctype.startswith("image/"):
+                    ctype = "image/jpeg"
+                # keep a copy in UPLOAD_FILES_DIR for traceability
+                try:
+                    fname = f"xmpp_in_{int(time.time() * 1000)}.{ctype.rsplit('/', 1)[-1]}"
+                    with open(os.path.join(UPLOAD_FILES_DIR, fname), "wb") as f:
+                        f.write(data)
+                except OSError:
+                    pass
+                return f"data:{ctype};base64," + base64.b64encode(data).decode()
+        except Exception as e:
+            logging.warning("XMPP 图片下载失败 %s: %s", url, e)
+            return None
+
+    async def _inline_remote_images(self, content):
+        """http(s) image parts -> downloaded base64 data URIs; failures keep
+        an explicit text notice instead of a url the model cannot open."""
+        if not isinstance(content, list):
+            return content
+        out = []
+        for part in content:
+            url = None
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                url = str((part.get("image_url") or {}).get("url", ""))
+            if url and url.lower().startswith(("http://", "https://")):
+                data_uri = await self._download_as_data_uri(url)
+                if data_uri:
+                    out.append({"type": "image_url", "image_url": {"url": data_uri}})
+                else:
+                    out.append({"type": "text", "text": f"[图片下载失败，原始URL: {url}]"})
+            else:
+                out.append(part)
+        return out
+
+    # -------------------- 工具环境分离（本渠道降级） --------------------
+    def _tools_override(self) -> dict:
+        lst = [t for t in (self.tools_list or []) if t]
+        if lst and self.tools_mode == "whitelist":
+            return {"enable_tools": lst}
+        if lst and self.tools_mode == "blacklist":
+            return {"disable_tools": lst}
+        return {}
+
     # -------------------- 消息入口 --------------------
     def _on_message(self, msg):
         try:
@@ -193,6 +274,7 @@ class XmppClient:
 
         if self.quickRestart and text in {"/restart", "/重启", "/new"}:
             self.memoryList[frm] = []
+            await self._persist_conv(frm)
             await self._send_text(frm, "对话记录已重置，开始新话题吧！")
             return
         if text.lower() == "/id":
@@ -228,9 +310,11 @@ class XmppClient:
 
     # -------------------- LLM 内核（/v1 自调用，全 agent 能力） --------------------
     async def _process_llm(self, chat_jid: str, text: str, extra_content: List[dict]):
-        self.memoryList.setdefault(chat_jid, [])
+        if chat_jid not in self.memoryList:
+            self.memoryList[chat_jid] = await self._restore_conv(chat_jid)
         self.asyncToolsID.setdefault(chat_jid, [])
         self.fileLinks.setdefault(chat_jid, [])
+        extra_content = await self._inline_remote_images(extra_content)
         user_msg = {"role": "user", "content": extra_content or text}
         self.memoryList[chat_jid].append(user_msg)
 
@@ -249,6 +333,7 @@ class XmppClient:
                     "fileLinks": self.fileLinks[chat_jid],
                     "is_app_bot": True,
                     "platform": "xmpp",
+                    **self._tools_override(),
                 },
             )
             async for chunk in stream:
@@ -286,6 +371,7 @@ class XmppClient:
                 self.memoryList[chat_jid].pop(0)
                 if self.memoryList[chat_jid]:
                     self.memoryList[chat_jid].pop(0)
+        await self._persist_conv(chat_jid)
 
         if out_buffer.strip():
             await self._send_text(chat_jid, out_buffer.strip())
@@ -323,15 +409,29 @@ class XmppClient:
         except Exception as e:
             logging.error(f"XMPP 发送失败: {e}")
 
-    def _fence_ok(self, path: str) -> bool:
-        return path_under(path, [UPLOAD_FILES_DIR, TOOL_TEMP_DIR, KB_DIR])
+    def _fence_ok(self, path: str, extra_roots=()) -> bool:
+        roots = [UPLOAD_FILES_DIR, TOOL_TEMP_DIR, KB_DIR] + [r for r in extra_roots if r]
+        return path_under(path, roots)
+
+    async def _fence_roots(self):
+        roots = [os.getcwd()]
+        roots += [str(d).strip() for d in (self.extra_outbound_dirs or []) if str(d).strip()]
+        try:
+            settings = await load_settings()
+            cc = str(((settings.get("CLISettings") or {}).get("cc_path") or "")).strip()
+            if cc:
+                roots.append(cc)
+        except Exception:
+            pass
+        return roots
 
     async def _send_local_images(self, chat_jid: str, full_text: str):
+        roots = await self._fence_roots()
         for m in re.finditer(r"([A-Za-z]:[\\/][^\s|\"'<>\[\]]+|/[^\s|\"'<>\[\]]+)"
                              r"(" + "|".join(re.escape(e) for e in IMAGE_EXTS) + r")",
                              full_text, re.IGNORECASE):
             raw = m.group(0)
-            if not self._fence_ok(raw):
+            if not self._fence_ok(raw, roots):
                 logging.warning("XMPP 拒绝外发围栏外路径: %s", raw)
                 continue
             if not os.path.isfile(raw):
@@ -426,7 +526,8 @@ class XmppClient:
         prompt_content = await self._resolve_behavior_prompt(behavior_item)
         if not prompt_content:
             return
-        self.memoryList.setdefault(chat_jid, [])
+        if chat_jid not in self.memoryList:
+            self.memoryList[chat_jid] = await self._restore_conv(chat_jid)
         instruction = f"[system]: {prompt_content}"
         messages = self.memoryList[chat_jid].copy() + [{"role": "user", "content": instruction}]
         self.memoryList[chat_jid].append({"role": "user", "content": instruction})
@@ -435,12 +536,14 @@ class XmppClient:
                                  base_url=f"http://127.0.0.1:{get_port()}/v1")
             resp = await client.chat.completions.create(
                 model=self.XmppAgent, messages=messages, stream=False,
-                extra_body={"is_app_bot": True, "platform": "xmpp"})
+                extra_body={"is_app_bot": True, "platform": "xmpp",
+                            **self._tools_override()})
             reply = (resp.choices[0].message.content or "").strip()
             if reply:
                 self.memoryList[chat_jid].append({"role": "assistant", "content": reply})
                 await self._send_text(chat_jid, reply)
                 await self._send_local_images(chat_jid, reply)
+                await self._persist_conv(chat_jid)
         except Exception as e:
             logging.error(f"XMPP 行为事件失败: {e}")
 

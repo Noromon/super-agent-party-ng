@@ -11546,6 +11546,65 @@ async def xmpp_cert_decision(data: dict):
         return JSONResponse(status_code=404, content={"success": False, "message": "无对应待审证书"})
     return {"success": True, "decision": decision}
 
+
+# ==========================================
+# 2.6 bot 渠道会话管理（"手机"：行级存储 bot:* 命名空间）
+# ==========================================
+
+def _bot_conv_meta(conv_id: str) -> dict:
+    rest = str(conv_id)[len("bot:"):]
+    channel, _, peer = rest.partition(":")
+    return {"channel": channel, "peer": peer or rest}
+
+@app.get("/bot_conversations")
+async def bot_conversations():
+    from py.get_setting import list_bot_convs
+    try:
+        items = await list_bot_convs()
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+    live = set()
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        live = {"bot:xmpp:%s" % k for k in (BotContainer._xmpp.bot_client.memoryList or {})}
+    for it in items:
+        it.update(_bot_conv_meta(it["conv_id"]))
+        it["live"] = it["conv_id"] in live
+    return {"success": True, "conversations": items}
+
+@app.get("/bot_conversation")
+async def bot_conversation(id: str):
+    from py.get_setting import load_bot_conv, redact_messages_for_view
+    if not str(id).startswith("bot:"):
+        return JSONResponse(status_code=400, content={"success": False, "message": "id 需以 bot: 开头"})
+    msgs = await load_bot_conv(id)
+    if msgs is None:
+        return JSONResponse(status_code=404, content={"success": False, "message": "会话不存在"})
+    return {"success": True, "conv_id": id, **_bot_conv_meta(id),
+            "messages": redact_messages_for_view(msgs)}
+
+@app.delete("/bot_conversation")
+async def delete_bot_conversation(id: str):
+    from py.get_setting import delete_bot_conv
+    try:
+        await delete_bot_conv(id)
+        return {"success": True}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
+
+@app.post("/bot_conversation/clear")
+async def clear_bot_conversation(data: dict):
+    from py.get_setting import save_bot_conv
+    conv_id = str(data.get("id", ""))
+    try:
+        await save_bot_conv(conv_id, [])
+        if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+            jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
+            if jid and jid in BotContainer._xmpp.bot_client.memoryList:
+                BotContainer._xmpp.bot_client.memoryList[jid] = []
+        return {"success": True}
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
+
 @app.post("/reload_xmpp_bot")
 async def reload_xmpp_bot(config_data: dict):
     try:

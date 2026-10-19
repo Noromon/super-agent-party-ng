@@ -39,7 +39,9 @@ def load_maps(db_path):
                 if isinstance(conv, dict) and conv.get("id") is not None:
                     blob_map[str(conv["id"])] = conv
         try:
-            for cid, data in con.execute("SELECT conv_id, data FROM conversation_rows"):
+            # bot:* rows are the phone-channel namespace, not blob shadows
+            for cid, data in con.execute(
+                    "SELECT conv_id, data FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%'"):
                 rows_map[cid] = json.loads(data)
         except sqlite3.OperationalError:
             pass  # shadow table absent -> everything blob-only

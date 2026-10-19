@@ -22,6 +22,9 @@ class XmppBotConfig(BaseModel):
     domain: str = "localhost"
     service_url: str = "tcp://localhost:5222"
     ignore_cert_hosts: List[str] = Field(default_factory=list)
+    extra_outbound_dirs: List[str] = Field(default_factory=list)
+    tools_mode: str = "inherit"          # inherit | whitelist | blacklist
+    tools_list: List[str] = Field(default_factory=list)
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetJids: List[str] = Field(default_factory=list)
 
@@ -103,6 +106,9 @@ class XmppBotManager:
                 self.bot_client.domain = config.domain
                 self.bot_client.service_url = config.service_url
                 self.bot_client.ignore_cert_hosts = config.ignore_cert_hosts or []
+                self.bot_client.extra_outbound_dirs = config.extra_outbound_dirs or []
+                self.bot_client.tools_mode = config.tools_mode or "inherit"
+                self.bot_client.tools_list = config.tools_list or []
                 self.bot_client.config = config
                 self.bot_client._manager_ref = __import__("weakref").ref(self)
 
