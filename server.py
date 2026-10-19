@@ -895,11 +895,18 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(autostart_im_bots())
 
+    # --- [T-4 流缓存 TTL 清扫] ---
+    stream_ttl_task = asyncio.create_task(_stream_ttl_loop())
+
     # --- [启动完成] ---
     yield
 
     # --- [关闭逻辑] ---
     print("System shutting down, cleaning up...")
+    try:
+        stream_ttl_task.cancel()
+    except Exception:
+        pass
 
     try:
         await asyncio.to_thread(sleep_guard.stop)
@@ -1292,6 +1299,13 @@ async def _stream_producer_wrapper(stream_id: str, gen):
         logger.error(f"Stream producer {stream_id} error: {e}")
     finally:
         entry["done"] = True
+        # T-4: 生产者退出统一排程兜底（消费者已全退时 30s 后清理；仍有消费者则由
+        # _release_consumer 归零时触发，TTL sweeper 为最终兜底）
+        if entry.get("consumer_count", 0) <= 0:
+            try:
+                asyncio.create_task(_cleanup_stream(stream_id, delay=30.0))
+            except RuntimeError:
+                pass
 
 
 async def _stream_consumer_generator(stream_id: str, from_index: int = 0):
@@ -1329,7 +1343,57 @@ async def _stream_consumer_generator(stream_id: str, from_index: int = 0):
     except asyncio.CancelledError:
         # 消费者被取消（客户端断开），不删除缓存，生产者继续
         pass
+    finally:
+        # T-4: 正常结束/断开/取消均释放本消费者的计数（初始 1 由此释放）
+        _release_consumer(stream_id)
 
+
+
+def _release_consumer(stream_id: str) -> None:
+    """T-4: 消费者退出统一释放（含 entry 创建时的初始计数）。
+    done 且计数归零 → 排程延迟清理（留重连窗口）。"""
+    entry = _active_streams.get(stream_id)
+    if not entry:
+        return
+    entry["consumer_count"] = max(0, entry.get("consumer_count", 0) - 1)
+    if entry.get("done") and entry["consumer_count"] <= 0:
+        try:
+            asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
+        except RuntimeError:
+            pass
+
+
+# T-4: 流缓存 TTL 兜底（created_at 此前写了没人读 = 无 TTL，长挂机线性泄漏）
+_STREAM_TTL_DONE = 1800.0
+_STREAM_TTL_HARD = 21600.0
+_STREAM_TTL_INTERVAL = 300.0
+
+
+def _stream_ttl_sweep(now: float = None, done_ttl: float = _STREAM_TTL_DONE,
+                      hard_ttl: float = _STREAM_TTL_HARD) -> list:
+    """TTL 清扫纯函数：done 且超过 done_ttl、或任意流超过 hard_ttl → 移除并取消生产者任务。"""
+    now = time.time() if now is None else now
+    reaped = []
+    for sid, entry in list(_active_streams.items()):
+        age = now - entry.get("created_at", now)
+        if (entry.get("done") and age > done_ttl) or age > hard_ttl:
+            task = entry.get("task")
+            if task and not task.done():
+                task.cancel()
+            _active_streams.pop(sid, None)
+            reaped.append(sid)
+    return reaped
+
+
+async def _stream_ttl_loop():
+    while True:
+        await asyncio.sleep(_STREAM_TTL_INTERVAL)
+        try:
+            reaped = _stream_ttl_sweep()
+            if reaped:
+                logger.warning(f"[T-4] TTL reaped {len(reaped)} stale streams: {reaped[:5]}")
+        except Exception as e:
+            logger.error(f"T-4 TTL sweep error: {e}")
 
 
 async def _cleanup_stream(stream_id: str, delay: float = 30.0):
@@ -1346,6 +1410,37 @@ async def _cleanup_stream(stream_id: str, delay: float = 30.0):
             _active_streams.pop(stream_id, None)
             logger.info(f"Stream {stream_id} cache cleaned up")
 
+
+
+# T-9/X-9: 审批信号结构化哨兵 —— 服务端专用前缀+哨兵字段，嗅探不再依赖
+# 子串匹配（工具正文夹带 approval_required 字面量不可误触发；loads 失败静默
+# 放行的同轮续跑漏洞一并废除）。
+_APPROVAL_PREFIX = '{"__sap_approval_v1__":1,'
+
+
+def _approval_payload(tool_name, tool_params, permission_mode, cwd) -> str:
+    return json.dumps({
+        "__sap_approval_v1__": 1,
+        "type": "approval_required",
+        "tool_name": tool_name,
+        "tool_params": tool_params,
+        "permission_mode": permission_mode,
+        "cwd": cwd,
+    }, ensure_ascii=False, separators=(",", ":"))
+
+
+def _is_approval_result(res) -> dict:
+    """命中返回审批 dict，否则 None。正文夹带字面量不会误触发（严格前缀）。"""
+    if not isinstance(res, str) or not res.startswith(_APPROVAL_PREFIX):
+        return None
+    try:
+        obj = json.loads(res)
+    except Exception:
+        return None
+    if isinstance(obj, dict) and obj.get("__sap_approval_v1__") == 1 \
+            and obj.get("type") == "approval_required":
+        return obj
+    return None
 
 
 async def call_node_extension_tool(ext_id: str, tool_name: str, tool_params: dict) -> str:
@@ -1694,13 +1789,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         if not is_allowed:
             # 返回前端特定的 JSON 结构，触发审批 UI
             print(f"[Permission] Blocked '{tool_name}', requesting approval.")
-            return json.dumps({
-                "type": "approval_required",
-                "tool_name": tool_name,
-                "tool_params": tool_params,
-                "permission_mode": permission_mode,
-                "cwd": cwd
-            }, ensure_ascii=False)
+            return _approval_payload(tool_name, tool_params, permission_mode, cwd)
 
     # ==================== 4. 常规工具处理逻辑 (原有代码) ====================
 
@@ -5306,14 +5395,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             )
 
                             # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
-                            if isinstance(results, str) and '"approval_required"' in results:
-                                try:
-                                    parsed_res = json.loads(results)
-                                    if parsed_res.get("type") == "approval_required":
-                                        pending_abort = True
-                                        break
-                                except Exception:
-                                    pass
+                            # T-9: 结构化哨兵判定（非子串嗅探），命中即断
+                            if _is_approval_result(results) is not None:
+                                pending_abort = True
+                                break
 
                         # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
                         append_missing_results(request.messages, assistant_tool_calls, acked_ids)
@@ -6832,14 +6917,10 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                         "role": "user",
                         "content": f"{response_content.name}工具结果：" + truncate_tool_result(tool_result_text, 8000),
                     })
-                    if isinstance(results, str) and '"approval_required"' in results:
-                        try:
-                            parsed_res = json.loads(results)
-                            if parsed_res.get("type") == "approval_required":
-                                ns_pending_abort = True
-                                break
-                        except Exception:
-                            pass
+                    # T-9: 结构化哨兵判定（与 stream 路径同源）
+                    if _is_approval_result(results) is not None:
+                        ns_pending_abort = True
+                        break
                 # 为未执行的调用补上说明性 tool 结果，保证成对闭合
                 append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
                 if ns_pending_abort:
@@ -7737,6 +7818,8 @@ async def cancel_stream_endpoint(stream_id: str):
     task = entry.get("task")
     if task and not task.done():
         task.cancel()
+    # T-4: cancel 后必须排程清理（count 门槛保护活跃消费者；未清者由 TTL sweeper 兜底）
+    asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
     logger.info(f"Stream {stream_id} cancelled by user")
     return {"cancelled": True, "stream_id": stream_id}
 
@@ -7770,10 +7853,8 @@ async def resume_stream_endpoint(req: StreamResumeRequest):
             async for chunk in _stream_consumer_generator(stream_id, from_index):
                 yield chunk
         finally:
-            entry["consumer_count"] = max(0, entry.get("consumer_count", 0) - 1)
-            # 如果生产者已完成且没有其他消费者，延迟清理
-            if entry["done"] and entry["consumer_count"] <= 0:
-                asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
+            # T-4: 统一经 helper 释放（与消费者计数语义同源）
+            _release_consumer(stream_id)
 
     return StreamingResponse(
         _resume_consumer(),

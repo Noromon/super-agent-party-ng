@@ -31,6 +31,8 @@ class TestToolFrameSingleSource:
         body = _slice("_ingestToolFrame(tool, delta, currentMsg")
         assert "currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId" in body
         assert "approval_required" in body
+        assert 'tool.content.startsWith(\'{"__sap_approval_v1__":1,\')' in body
+        assert 'tool.content.includes(\'"approval_required"\')' not in body
         assert "this.approvalMap[toolCallId] = approvalData" in body
         assert "approvalData._stream_id = this._currentStreamId || null" in body
         assert "this.asyncToolsID.splice(index, 1)" in body

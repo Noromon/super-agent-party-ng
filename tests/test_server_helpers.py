@@ -102,3 +102,82 @@ class TestAutostartPlan:
             fields = {s.target.id for s in cls.body
                       if isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)}
             assert "auto_connect" in fields, rel
+
+
+class TestStreamTtlSweep:
+    """T-4: _active_streams TTL backstop (created_at finally has a reader)."""
+
+    @pytest.fixture
+    def ns(self):
+        import logging
+        import time as _time
+        ns = _extract(["_stream_ttl_sweep", "_STREAM_TTL_DONE", "_STREAM_TTL_HARD"])
+        ns["time"] = _time
+        ns["logger"] = logging.getLogger("t")
+        return ns
+
+    @staticmethod
+    def _entry(done, age, task=None, now=1000.0):
+        return {"done": done, "created_at": now - age, "task": task,
+                "buffer": [], "consumer_count": 1}
+
+    def test_done_expired_reaped(self, ns):
+        ns["_active_streams"] = {"a": self._entry(True, 1900)}
+        assert ns["_stream_ttl_sweep"](now=1000.0) == ["a"]
+        assert "a" not in ns["_active_streams"]
+
+    def test_running_fresh_kept(self, ns):
+        ns["_active_streams"] = {"b": self._entry(False, 60)}
+        assert ns["_stream_ttl_sweep"](now=1000.0) == []
+
+    def test_done_but_fresh_kept(self, ns):
+        ns["_active_streams"] = {"c": self._entry(True, 60)}
+        assert ns["_stream_ttl_sweep"](now=1000.0) == []
+
+    def test_hard_ttl_reaps_running_and_cancels_task(self, ns):
+        class T:
+            cancelled = False
+            def done(self):
+                return False
+            def cancel(self):
+                self.cancelled = True
+        t = T()
+        ns["_active_streams"] = {"d": self._entry(False, 30 * 3600, task=t)}
+        assert ns["_stream_ttl_sweep"](now=1000.0) == ["d"]
+        assert t.cancelled
+
+    def test_release_helper_defined_and_used(self):
+        src = (ROOT / "server.py").read_text(encoding="utf-8")
+        assert src.count("_release_consumer(stream_id)") >= 2
+
+
+class TestApprovalSentinel:
+    """T-9/X-9: structured approval sentinel replaces substring sniffing."""
+
+    @pytest.fixture
+    def ns(self):
+        import json as _json
+        ns = _extract(["_approval_payload", "_is_approval_result", "_APPROVAL_PREFIX"])
+        ns.setdefault("json", _json)
+        return ns
+
+    def test_roundtrip(self, ns):
+        s = ns["_approval_payload"]("rm_tool", {"p": 1}, "ask", "/cwd")
+        assert s.startswith(ns["_APPROVAL_PREFIX"])
+        obj = ns["_is_approval_result"](s)
+        assert obj and obj["tool_name"] == "rm_tool"
+        assert obj["type"] == "approval_required"
+
+    def test_smuggled_literal_not_trigger(self, ns):
+        assert ns["_is_approval_result"]('{"note": "see approval_required docs"}') is None
+        assert ns["_is_approval_result"]('junk "approval_required" junk') is None
+
+    def test_prefix_spoof_wrong_type(self, ns):
+        assert ns["_is_approval_result"]('{"__sap_approval_v1__":1,"type":"other"}') is None
+
+    def test_prefix_then_broken_json(self, ns):
+        assert ns["_is_approval_result"]('{"__sap_approval_v1__":1,broken') is None
+
+    def test_non_string(self, ns):
+        assert ns["_is_approval_result"](None) is None
+        assert ns["_is_approval_result"](["x"]) is None

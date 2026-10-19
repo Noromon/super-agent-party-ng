@@ -4,7 +4,25 @@
 Same mock script, run through both engines; the LLM-visible chain (mock
 history) and final answer must match. Any RED here is a drift finding for M3b.
 """
+import ast
+from pathlib import Path
+
+import pytest
+
 from test_contract_sse import collect, post_chat, sse
+
+ROOT = Path(__file__).resolve().parent.parent
+SRC = (ROOT / "server.py").read_text(encoding="utf-8")
+
+
+def _func_src(name):
+    tree = ast.parse(SRC)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            seg = ast.get_source_segment(SRC, node)
+            assert seg
+            return seg
+    raise AssertionError(f"function not found: {name}")
 
 SCRIPT_TOOL_OK = [
     {"kind": "tool", "name": "list_files_tool_local",
@@ -81,3 +99,49 @@ class TestEngineParity:
         assert any("[Argument Error]" in r for r in tool_rows(c1)), "stream chain"
         assert any("[Argument Error]" in r for r in tool_rows(c2)), "complete chain"
         assert t2 == "bad args recovered"
+
+
+class TestDriftRadar:
+    """M3b groundwork: strict-xfail pins for known stream/complete drift.
+    When M3d fixes one, the test XPASSes and hard-fails the suite -> remove
+    the xfail marker (ratchet)."""
+
+    @pytest.mark.xfail(strict=True, reason="T-8: complete 路径无取消围栏/entry 注册，M3d 修")
+    def test_complete_has_cancel_fence(self):
+        src = _func_src("generate_complete_response")
+        assert "cancelled" in src
+
+    @pytest.mark.xfail(strict=True, reason="T-5: complete 路径无 llm_gate.enter 闸门（mem0 防撞盲区），M3d 修")
+    def test_complete_enters_llm_gate(self):
+        assert "llm_gate.enter()" in _func_src("generate_complete_response")
+
+    @pytest.mark.xfail(strict=True, reason="T-5: /simple_chat 绕过 llm_gate，M3d 修")
+    def test_simple_chat_enters_llm_gate(self):
+        assert "llm_gate.enter()" in _func_src("simple_chat_endpoint")
+
+    def test_stream_side_has_gate_and_fence(self):
+        # positive control: the stream engine already carries both
+        assert "llm_gate.enter()" in _func_src("stream_generator")
+        assert "_stream_cancelled" in _func_src("stream_generator")
+
+    def test_t4_consumer_release_wired(self):
+        assert "_release_consumer(stream_id)" in _func_src("_stream_consumer_generator")
+        assert "_release_consumer(stream_id)" in _func_src("resume_stream_endpoint")
+
+    def test_t4_cancel_schedules_cleanup(self):
+        assert "_cleanup_stream(" in _func_src("cancel_stream_endpoint")
+
+    def test_t4_producer_exit_schedules_cleanup(self):
+        assert "_cleanup_stream(" in _func_src("_stream_producer_wrapper")
+
+    def test_t4_ttl_loop_mounted(self):
+        assert "_stream_ttl_loop" in SRC
+        assert "stream_ttl_task" in _func_src("lifespan")
+
+    def test_t9_no_substring_sniffing_left(self):
+        assert "'\"approval_required\"' in results" not in SRC
+        assert "_is_approval_result(results)" in SRC
+
+    def test_t9_emit_site_uses_sentinel(self):
+        emit = _func_src("dispatch_tool")
+        assert "_approval_payload(tool_name, tool_params, permission_mode, cwd)" in emit

@@ -4157,7 +4157,7 @@ let vue_methods = {
         if (tool.type === 'tool_approval') {
             isApproval = true;
             try { approvalData = JSON.parse(tool.content); } catch (e) { }
-        } else if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.includes('"approval_required"')) {
+        } else if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.startsWith('{"__sap_approval_v1__":1,')) {
             try {
                 const temp = JSON.parse(tool.content);
                 if (temp.type === 'approval_required') { isApproval = true; approvalData = temp; }
