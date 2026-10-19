@@ -65,6 +65,7 @@ class StreamInterceptor:
 
 # 配置模型增加了 force_relogin 字段
 class WeChatBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     WeChatAgent: str = "super-model"
     memoryLimit: int = 30
     separators: List[str] =['。', '\n', '？', '！']

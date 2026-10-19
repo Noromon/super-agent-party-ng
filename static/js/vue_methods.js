@@ -7556,6 +7556,44 @@ async deleteBotConversation(id) {
     showNotification('网络错误', 'error');
   }
 },
+async newBotConversation(row) {
+  if (!window.confirm('归档当前会话并开启新会话？下一条入站消息将从空白开始（旧会话保留在归档中）。')) return;
+  try {
+    const res = await fetch('/bot_conversation/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: row.conv_id })
+    });
+    const json = await res.json();
+    if (json.success) {
+      showNotification(json.archive_id ? '已归档，下一条消息开启新会话' : '会话已是空白，无需归档', 'success');
+      this.fetchBotConversations();
+    } else {
+      showNotification(json.message || '操作失败', 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误', 'error');
+  }
+},
+async activateBotConversation(row) {
+  if (!window.confirm('将该归档会话置为 live？当前进行中的同对端会话会被归档，下一条入站消息接续此会话。')) return;
+  try {
+    const res = await fetch('/bot_conversation/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: row.conv_id, into: `bot:${row.channel}:${row.peer}` })
+    });
+    const json = await res.json();
+    if (json.success) {
+      showNotification('已置为 live，下一条入站消息将接续该会话', 'success');
+      this.fetchBotConversations();
+    } else {
+      showNotification(json.message || '操作失败', 'error');
+    }
+  } catch (e) {
+    showNotification('网络错误', 'error');
+  }
+},
 openEnvPage(menu) {
   this.activeMenu = menu;
 },

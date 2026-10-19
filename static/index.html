@@ -12735,6 +12735,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                                   </el-icon>{{ t('QQbotNotice') }}
                                 </el-link>
                               </span>
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="qqBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <!-- 启动按钮 -->
                                 <el-tooltip :content="t('start_bot')" placement="top">
@@ -12944,6 +12948,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="wechatBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <!-- 启动按钮 -->
                                 <el-tooltip :content="t('wechat_start_tooltip')" placement="top">
@@ -13176,6 +13184,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="feishuBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
@@ -13404,6 +13416,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="weComBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
@@ -13539,6 +13555,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 (启动/停止/重载) -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="dingtalkBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
@@ -13732,6 +13752,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="telegramBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
@@ -13930,6 +13954,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 <el-icon><i class="fa-solid fa-comment-dots"></i></el-icon>
                                 {{ t('xmpp_bot_config') }}
                               </span>
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="xmppBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button type="primary" @click="startXmppBot"
@@ -13995,12 +14023,12 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 </el-select>
                               </el-form-item>
                               <el-form-item :label="t('xmppImageResize')">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
-                                  <el-select v-model="xmppBotConfig.image_resize_mode" style="flex:1;" @change="autoSaveSettings">
-                                    <el-option :label="t('xmppResizeOff')" value="off" />
-                                    <el-option :label="t('xmppResizeFit')" value="fit" />
-                                    <el-option :label="t('xmppResizeDownscale')" value="downscale_only" />
-                                  </el-select>
+                                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
+                                  <el-radio-group v-model="xmppBotConfig.image_resize_mode" @change="autoSaveSettings">
+                                    <el-radio-button value="off">{{ t('xmppResizeOff') }}</el-radio-button>
+                                    <el-radio-button value="fit">{{ t('xmppResizeFit') }}</el-radio-button>
+                                    <el-radio-button value="downscale_only">{{ t('xmppResizeDownscale') }}</el-radio-button>
+                                  </el-radio-group>
                                   <el-input-number v-if="xmppBotConfig.image_resize_mode !== 'off'"
                                     v-model="xmppBotConfig.image_max_side" :min="256" :max="4096" :step="256"
                                     controls-position="right" @change="autoSaveSettings" />
@@ -14026,6 +14054,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                                   <template #default="{ row }">
                                     <b>{{ row.peer }}</b>
                                     <el-tag v-if="row.live" size="small" type="success">live</el-tag>
+                                    <el-tag v-if="row.archived" size="small" type="info">{{ t('xmppSessArchived') }}</el-tag>
                                   </template>
                                 </el-table-column>
                                 <el-table-column prop="count" label="Msg" width="60" />
@@ -14035,11 +14064,17 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 <el-table-column :label="t('xmppSessColTime')" width="110">
                                   <template #default="{ row }">{{ formatBotTime(row.updated_at) }}</template>
                                 </el-table-column>
-                                <el-table-column width="190" align="right">
+                                <el-table-column width="240" align="right">
                                   <template #default="{ row }">
-                                    <el-button size="small" @click="openBotConversation(row)">{{ t('xmppSessionOpen') }}</el-button>
-                                    <el-button size="small" @click="clearBotConversation(row.conv_id)">{{ t('xmppSessionClear') }}</el-button>
-                                    <el-button size="small" type="danger" @click="deleteBotConversation(row.conv_id)">{{ t('xmppSessionDelete') }}</el-button>
+                                    <div style="display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end;">
+                                      <el-button size="small" @click="openBotConversation(row)">{{ t('xmppSessionOpen') }}</el-button>
+                                      <el-button v-if="!row.archived" size="small" type="primary" plain
+                                                 @click="newBotConversation(row)">{{ t('xmppSessionNew') }}</el-button>
+                                      <el-button v-if="row.archived" size="small" type="warning"
+                                                 @click="activateBotConversation(row)">{{ t('xmppSessionActivate') }}</el-button>
+                                      <el-button v-if="!row.archived" size="small" @click="clearBotConversation(row.conv_id)">{{ t('xmppSessionClear') }}</el-button>
+                                      <el-button size="small" type="danger" @click="deleteBotConversation(row.conv_id)">{{ t('xmppSessionDelete') }}</el-button>
+                                    </div>
                                   </template>
                                 </el-table-column>
                               </el-table>
@@ -14150,6 +14185,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="discordBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
@@ -14343,6 +14382,10 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </span>
 
                               <!-- 按钮组 -->
+                              <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
+                                <el-switch v-model="slackBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
+                              </div>
                               <div>
                                 <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button

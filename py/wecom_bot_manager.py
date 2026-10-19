@@ -20,6 +20,7 @@ from aibot import WSClient, WSClientOptions, generate_req_id
 
 # 企业微信机器人配置模型
 class WeComBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     WeComAgent: str           # LLM模型名
     memoryLimit: int          # 记忆条数限制
     bot_id: str               # 企微机器人BotID (Webhook Key)

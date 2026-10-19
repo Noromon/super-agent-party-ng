@@ -639,7 +639,8 @@ async def list_bot_convs():
                 if not isinstance(msgs, list):
                     msgs = []
                 out.append({"conv_id": conv_id, "updated_at": updated_at,
-                            "count": len(msgs), "last_text": _last_text_preview(msgs)})
+                            "count": len(msgs), "last_text": _last_text_preview(msgs),
+                            "archived": "::" in conv_id})
     return out
 
 
@@ -651,6 +652,71 @@ async def delete_bot_conv(conv_id):
     async with _BOT_CONV_LOCK:
         async with aiosqlite.connect(COVS_PATH) as db:
             await db.execute('DELETE FROM conversation_rows WHERE conv_id = ?', (conv_id,))
+            await db.commit()
+
+
+async def archive_bot_conv(conv_id):
+    """Move the active row's content into a timestamped archive row and
+    clear the active one, so the next inbound message starts fresh.
+    Returns the new archive conv_id, or None when nothing to archive."""
+    conv_id = str(conv_id)
+    if not conv_id.startswith(BOT_CONV_PREFIX) or "::" in conv_id:
+        raise ValueError(f"需要活动 bot 会话 id（{BOT_CONV_PREFIX} 前缀且不含 ::）: {conv_id!r}")
+    await init_covs_db()
+    archive_id = f"{conv_id}::{int(time.time() * 1000)}"
+    async with _BOT_CONV_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            async with db.execute(
+                    'SELECT data, updated_at FROM conversation_rows WHERE conv_id = ?',
+                    (conv_id,)) as cur:
+                row = await cur.fetchone()
+            msgs = []
+            if row:
+                try:
+                    msgs = json.loads(row[0])
+                except Exception:
+                    msgs = []
+            if not isinstance(msgs, list) or not msgs:
+                return None
+            now = time.time()
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                (archive_id, json.dumps(msgs, ensure_ascii=False), row[1] if row else now))
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                (conv_id, "[]", now))
+            await db.commit()
+    return archive_id
+
+
+async def swap_bot_conv(conv_id_a, conv_id_b):
+    """Atomically exchange two bot rows' contents (activate an archive while
+    demoting the current active conversation into it)."""
+    a, b = str(conv_id_a), str(conv_id_b)
+    for cid in (a, b):
+        if not cid.startswith(BOT_CONV_PREFIX):
+            raise ValueError(f"bot 会话 id 必须以 {BOT_CONV_PREFIX} 开头: {cid!r}")
+    await init_covs_db()
+    async with _BOT_CONV_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            rows = {}
+            for cid in (a, b):
+                async with db.execute(
+                        'SELECT data, updated_at FROM conversation_rows WHERE conv_id = ?',
+                        (cid,)) as cur:
+                    rows[cid] = await cur.fetchone()
+            payload = {}
+            for cid in (a, b):
+                if rows[cid]:
+                    payload[cid] = (rows[cid][0], rows[cid][1])
+                else:
+                    payload[cid] = ("[]", time.time())
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                (a, payload[b][0], payload[b][1]))
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                (b, payload[a][0], payload[a][1]))
             await db.commit()
 
 

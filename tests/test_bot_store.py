@@ -94,6 +94,56 @@ class TestRedact:
         assert msgs[1]["content"].startswith("xxxx") and len(msgs[1]["content"]) == 9000
 
 
+class TestArchiveAndActivate:
+    def test_archive_moves_content_and_empties_active(self, tmp_path):
+        gs = load_gs(tmp_path)
+
+        async def scenario():
+            await gs.save_bot_conv("bot:xmpp:a@x", [{"role": "user", "content": "old"}])
+            aid = await gs.archive_bot_conv("bot:xmpp:a@x")
+            assert aid and aid.startswith("bot:xmpp:a@x::")
+            assert await gs.load_bot_conv(aid) == [{"role": "user", "content": "old"}]
+            assert await gs.load_bot_conv("bot:xmpp:a@x") == []
+            # empty active: nothing to archive
+            assert await gs.archive_bot_conv("bot:xmpp:a@x") is None
+            with pytest.raises(ValueError):
+                await gs.archive_bot_conv(aid)          # archive rows not re-archivable
+            with pytest.raises(ValueError):
+                await gs.archive_bot_conv("regular")
+        asyncio.run(scenario())
+
+    def test_swap_exchanges_contents_atomically(self, tmp_path):
+        gs = load_gs(tmp_path)
+
+        async def scenario():
+            await gs.save_bot_conv("bot:xmpp:a@x", [{"role": "user", "content": "live"}])
+            aid = await gs.archive_bot_conv("bot:xmpp:a@x")
+            await gs.save_bot_conv("bot:xmpp:a@x", [{"role": "user", "content": "fresh"}])
+            await gs.swap_bot_conv(aid, "bot:xmpp:a@x")
+            assert (await gs.load_bot_conv("bot:xmpp:a@x")) == [{"role": "user", "content": "live"}]
+            assert (await gs.load_bot_conv(aid)) == [{"role": "user", "content": "fresh"}]
+            with pytest.raises(ValueError):
+                await gs.swap_bot_conv("nope", "bot:xmpp:a@x")
+            # swapping with a nonexistent row treats it as empty
+            await gs.swap_bot_conv("bot:xmpp:ghost::9", "bot:xmpp:a@x")
+            assert await gs.load_bot_conv("bot:xmpp:a@x") == []
+        asyncio.run(scenario())
+
+    def test_list_marks_archived(self, tmp_path):
+        gs = load_gs(tmp_path)
+
+        async def scenario():
+            await gs.save_bot_conv("bot:xmpp:a@x", [{"role": "user", "content": "hi"}])
+            await gs.archive_bot_conv("bot:xmpp:a@x")
+            return await gs.list_bot_convs()
+        items = asyncio.run(scenario())
+        by_id = {it["conv_id"]: it for it in items}
+        act = by_id["bot:xmpp:a@x"]
+        assert act["archived"] is False
+        arch = [it for it in items if it["archived"]]
+        assert len(arch) == 1 and arch[0]["count"] == 1
+
+
 class TestReconcileExclusion:
     def test_bot_rows_invisible_to_three_way_audit(self, tmp_path):
         gs = load_gs(tmp_path)

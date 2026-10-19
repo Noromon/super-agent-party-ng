@@ -1465,6 +1465,7 @@ let vue_data = {
     },
     allBriefly:false,
     qqBotConfig: {
+      auto_connect: false,
       QQAgent:'super-model',
       memoryLimit: 30,
       appid: '',
@@ -1475,6 +1476,7 @@ let vue_data = {
       is_sandbox: false,
     },
     feishuBotConfig: {
+      auto_connect: false,
       FeishuAgent:'super-model',
       memoryLimit: 30,
       appid: '',
@@ -1492,6 +1494,7 @@ let vue_data = {
     isFeishuReloading: false,
 
     wechatBotConfig: {
+      auto_connect: false,
       WeChatAgent: 'super-model',
       memoryLimit: 30,
       separators:["。", "\n", "？", "！"],
@@ -1511,6 +1514,7 @@ let vue_data = {
     wechatStatusTimer: null, // 用来轮询状态的定时器
 
     weComBotConfig: {
+      auto_connect: false,
       WeComAgent: 'super-model',
       memoryLimit: 30,
       bot_id: '',
@@ -1534,6 +1538,7 @@ let vue_data = {
     
     // 钉钉配置对象 (一比一复刻飞书结构)
     dingtalkBotConfig: {
+      auto_connect: false,
       DingtalkAgent: 'super-model',
       memoryLimit: 30,
       appKey: '',     // 钉钉专用
@@ -1547,6 +1552,7 @@ let vue_data = {
     },
 
     telegramBotConfig: {
+      auto_connect: false,
       TelegramAgent: 'super-model',
       memoryLimit: 20,
       separators: ['。', '\n', '？', '！'],
@@ -1562,6 +1568,7 @@ let vue_data = {
     isTelegramStopping: false,
     isTelegramReloading: false,
     xmppBotConfig: {
+      auto_connect: false,
       XmppAgent: 'super-model',
       memoryLimit: 20,
       separators: ['。', '\n', '？', '！'],
@@ -1590,6 +1597,7 @@ let vue_data = {
     xmppSessionDetail: [],
     xmppSessionTitle: '',
     discordBotConfig: {
+      auto_connect: false,
       token: '',
       llm_model: 'super-model',
       memory_limit: 30,
@@ -1703,6 +1711,7 @@ let vue_data = {
 
     // Slack 配置对象
     slackBotConfig: {
+      auto_connect: false,
       bot_token: '',      // Slack 的 xoxb token
       app_token: '',      // Slack 的 xapp token (Socket Mode)
       llm_model: 'super-model',

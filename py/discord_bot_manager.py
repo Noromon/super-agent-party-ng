@@ -20,6 +20,7 @@ from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 # ------------------ 配置模型 ------------------
 class DiscordBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     token: str
     llm_model: str = "super-model"
     memory_limit: int = 10

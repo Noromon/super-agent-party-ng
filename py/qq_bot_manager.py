@@ -22,6 +22,7 @@ from py.get_setting import get_port,load_settings
 
 # 定义请求体
 class QQBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     QQAgent: str
     memoryLimit: int
     appid: str

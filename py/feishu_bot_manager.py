@@ -21,6 +21,7 @@ from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSet
 from py.random_topic import get_random_topics
 # 飞书机器人配置模型
 class FeishuBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     FeishuAgent: str          # LLM模型名
     memoryLimit: int          # 记忆条数限制
     appid: str                # 飞书APP_ID

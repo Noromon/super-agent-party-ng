@@ -11,6 +11,7 @@ from py.behavior_engine import BehaviorSettings
 
 
 class XmppBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     XmppAgent: str
     memoryLimit: int = 10
     separators: list[str] = Field(default_factory=lambda: ["。", "\n", "？", "！"])

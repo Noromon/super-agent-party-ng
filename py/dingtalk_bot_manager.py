@@ -23,6 +23,7 @@ from py.random_topic import get_random_topics
 
 # 配置模型
 class DingtalkBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     DingtalkAgent: str
     memoryLimit: int
     appKey: str

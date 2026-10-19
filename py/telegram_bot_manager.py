@@ -5,6 +5,7 @@ from py.behavior_engine import BehaviorSettings
 from py.telegram_client import TelegramClient
 
 class TelegramBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     TelegramAgent: str        # LLM 模型名
     memoryLimit: int
     separators: list[str]

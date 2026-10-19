@@ -877,6 +877,24 @@ async def lifespan(app: FastAPI):
     heartbeat_task = asyncio.create_task(heartbeat_loop())
     logger.info("WebSocket heartbeat task started")
 
+    # --- [IM bot 自动连接] ---
+    async def autostart_im_bots():
+        import importlib
+        getter_map = {key: getter for key, _m, _c, getter in BOT_AUTOSTART_TABLE}
+        for cfg_key, mod_name, cls_name in _bot_autostart_plan(settings):
+            async def _boot(cfg_key=cfg_key, mod_name=mod_name, cls_name=cls_name):
+                try:
+                    raw = dict((settings or {}).get(cfg_key) or {})
+                    cfg_cls = getattr(importlib.import_module(mod_name), cls_name)
+                    await asyncio.to_thread(getattr(BotContainer, getter_map[cfg_key])(),
+                                            cfg_cls(**raw))
+                    logger.info(f"IM 自动连接成功: {cfg_key}")
+                except Exception as e:
+                    logger.warning(f"IM 自动连接失败 {cfg_key}: {e}")
+            asyncio.create_task(_boot())
+
+    asyncio.create_task(autostart_im_bots())
+
     # --- [启动完成] ---
     yield
 
@@ -11124,6 +11142,28 @@ async def create_sticker_pack(
 # ==========================================
 # 机器人管理器延迟加载容器 (Lazy Container)
 # ==========================================
+# (settings key, config module, config class, BotContainer getter name)
+BOT_AUTOSTART_TABLE = (
+    ("qqBotConfig", "py.qq_bot_manager", "QQBotConfig", "get_qq"),
+    ("wechatBotConfig", "py.wechat_bot_manager", "WeChatBotConfig", "get_wechat"),
+    ("feishuBotConfig", "py.feishu_bot_manager", "FeishuBotConfig", "get_feishu"),
+    ("dingtalkBotConfig", "py.dingtalk_bot_manager", "DingtalkBotConfig", "get_dingtalk"),
+    ("discordBotConfig", "py.discord_bot_manager", "DiscordBotConfig", "get_discord"),
+    ("telegramBotConfig", "py.telegram_bot_manager", "TelegramBotConfig", "get_telegram"),
+    ("xmppBotConfig", "py.xmpp_bot_manager", "XmppBotConfig", "get_xmpp"),
+    ("slackBotConfig", "py.slack_bot_manager", "SlackBotConfig", "get_slack"),
+    ("weComBotConfig", "py.wecom_bot_manager", "WeComBotConfig", "get_wecom"),
+)
+
+
+def _bot_autostart_plan(settings_dict):
+    """Pure filter: channels whose saved config opts into auto_connect.
+    The lifespan boot loop executes the plan."""
+    return [(key, mod, cls) for key, mod, cls, _g in BOT_AUTOSTART_TABLE
+            if isinstance((settings_dict or {}).get(key), dict)
+            and (settings_dict or {}).get(key, {}).get("auto_connect")]
+
+
 class BotContainer:
     """管理所有机器人的单例，只有在第一次调用 get 方法时才会 import 对应的重型 SDK"""
     _qq = None
@@ -11568,7 +11608,10 @@ async def xmpp_cert_decision(data: dict):
 def _bot_conv_meta(conv_id: str) -> dict:
     rest = str(conv_id)[len("bot:"):]
     channel, _, peer = rest.partition(":")
-    return {"channel": channel, "peer": peer or rest}
+    archived = "::" in peer
+    if archived:
+        peer = peer.partition("::")[0]
+    return {"channel": channel, "peer": peer or rest, "archived": archived}
 
 @app.get("/bot_conversations")
 async def bot_conversations():
@@ -11618,6 +11661,37 @@ async def clear_bot_conversation(data: dict):
         return {"success": True}
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
+
+@app.post("/bot_conversation/new")
+async def new_bot_conversation(data: dict):
+    """Archive the active conversation; next inbound message starts fresh."""
+    from py.get_setting import archive_bot_conv
+    conv_id = str(data.get("id", ""))
+    try:
+        archive_id = await archive_bot_conv(conv_id)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
+        if jid and jid in BotContainer._xmpp.bot_client.memoryList:
+            BotContainer._xmpp.bot_client.memoryList[jid] = []
+    return {"success": True, "archive_id": archive_id}
+
+@app.post("/bot_conversation/activate")
+async def activate_bot_conversation(data: dict):
+    """Swap an archived conversation into the active slot (demoting the
+    current active one into the archive) — next message continues it."""
+    from py.get_setting import swap_bot_conv, load_bot_conv
+    archive_id, active_id = str(data.get("id", "")), str(data.get("into", ""))
+    try:
+        await swap_bot_conv(archive_id, active_id)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        jid = _bot_conv_meta(active_id)["peer"] if active_id.startswith("bot:xmpp:") else ""
+        if jid:
+            BotContainer._xmpp.bot_client.memoryList[jid] = await load_bot_conv(active_id) or []
+    return {"success": True}
 
 @app.post("/reload_xmpp_bot")
 async def reload_xmpp_bot(config_data: dict):

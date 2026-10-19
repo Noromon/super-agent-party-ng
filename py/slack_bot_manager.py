@@ -19,6 +19,7 @@ from py.get_setting import get_port, load_settings
 
 # ------------------ 配置模型 (严格对齐) ------------------
 class SlackBotConfig(BaseModel):
+    auto_connect: bool = False  # SAP 启动时自动连接
     bot_token: str
     app_token: str
     llm_model: str = "super-model"
