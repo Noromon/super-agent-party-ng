@@ -204,66 +204,79 @@ async def _copy_default_skills():
         logging.error(f"[Skills] 复制默认技能时发生错误: {e}", exc_info=True)
 
 # ----------------- 5. 初始化逻辑 -----------------
+_DB_INIT_LOCK = asyncio.Lock()
+_COVS_INIT_LOCK = asyncio.Lock()
+
+
+async def _try_wal(db):
+    # WAL 切换需要短暂独占；并发连接在场时失败可容忍（下次启动再切）
+    try:
+        await db.execute('PRAGMA journal_mode=WAL')
+    except Exception:
+        pass
+
 
 async def init_db():
     global _db_init_done
     if _db_init_done: return
-
-    async with aiosqlite.connect(DATABASE_PATH) as db:
-        await db.execute('PRAGMA journal_mode=WAL')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                id INTEGER PRIMARY KEY,
-                data TEXT NOT NULL
-            )
-        ''')
-        await db.commit()
-    _db_init_done = True
+    async with _DB_INIT_LOCK:
+        if _db_init_done: return
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            await _try_wal(db)
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY,
+                    data TEXT NOT NULL
+                )
+            ''')
+            await db.commit()
+        _db_init_done = True
 
 async def init_covs_db():
     global _covs_db_init_done
     if _covs_db_init_done: return
-    
-    Path(USER_DATA_DIR).mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(COVS_PATH) as db:
-        await db.execute('PRAGMA journal_mode=WAL')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                id INTEGER PRIMARY KEY,
-                data TEXT NOT NULL
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS group_memory (
-                id TEXT PRIMARY KEY,
-                group_id TEXT NOT NULL,
-                source_chat_id TEXT NOT NULL,
-                source_message_id TEXT,
-                memory_type TEXT NOT NULL,
-                content TEXT NOT NULL,
-                summary TEXT NOT NULL,
-                importance REAL NOT NULL DEFAULT 0.5,
-                status TEXT NOT NULL DEFAULT 'active',
-                version INTEGER NOT NULL DEFAULT 1,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                last_used_at INTEGER,
-                metadata_json TEXT
-            )
-        ''')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_group_status ON group_memory(group_id, status)')
-        await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_source_chat ON group_memory(source_chat_id)')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS turn_log (
-                conversation_id TEXT NOT NULL,
-                seq INTEGER NOT NULL,
-                msg TEXT NOT NULL,
-                created_at REAL,
-                PRIMARY KEY (conversation_id, seq)
-            )
-        ''')
-        await db.commit()
-    _covs_db_init_done = True
+    async with _COVS_INIT_LOCK:
+        if _covs_db_init_done: return
+        Path(USER_DATA_DIR).mkdir(parents=True, exist_ok=True)
+        async with aiosqlite.connect(COVS_PATH) as db:
+            await _try_wal(db)
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY,
+                    data TEXT NOT NULL
+                )
+            ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS group_memory (
+                    id TEXT PRIMARY KEY,
+                    group_id TEXT NOT NULL,
+                    source_chat_id TEXT NOT NULL,
+                    source_message_id TEXT,
+                    memory_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    importance REAL NOT NULL DEFAULT 0.5,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    last_used_at INTEGER,
+                    metadata_json TEXT
+                )
+            ''')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_group_status ON group_memory(group_id, status)')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_group_memory_source_chat ON group_memory(source_chat_id)')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS turn_log (
+                    conversation_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    msg TEXT NOT NULL,
+                    created_at REAL,
+                    PRIMARY KEY (conversation_id, seq)
+                )
+            ''')
+            await db.commit()
+        _covs_db_init_done = True
 
 # ----------------- 6. 业务功能函数 -----------------
 
