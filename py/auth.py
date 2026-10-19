@@ -92,11 +92,14 @@ def host_ok(request) -> bool:
 
 
 def ws_auth_ok(websocket) -> bool:
-    """WebSocket handshakes carry the cookie automatically; also accept
-    ?sap_token= for non-browser local clients."""
+    """WebSocket handshakes carry the cookie automatically; non-browser local
+    clients (node extensions, headless tools) send the X-SAP-Token header or
+    use ?sap_token= ."""
     if DISABLED:
         return True
     got = websocket.query_params.get("sap_token") or ""
+    if not got:
+        got = websocket.headers.get("x-sap-token") or ""
     if not got:
         got = websocket.cookies.get(COOKIE, "")
     return _token_match(got)

@@ -86,6 +86,36 @@ def machine_tok(sap):
     return (sap.data_dir / ".machine_token").read_text(encoding="utf-8").strip()
 
 
+def raw_ws_handshake(sap, path="/ws", extra_headers="", query=""):
+    p = port_of(sap)
+    s = socket.create_connection(("127.0.0.1", p), timeout=10)
+    try:
+        s.sendall((f"GET {path}{query} HTTP/1.1\r\nHost: 127.0.0.1:{p}\r\n"
+                   f"{extra_headers}"
+                   "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                   "Sec-WebSocket-Version: 13\r\n\r\n").encode())
+        return s.recv(400)
+    finally:
+        s.close()
+
+
+class TestWsHeaderAuth:
+    """Handshake must accept the X-SAP-Token header (xmpp-bridge style)."""
+
+    def test_handshake_with_session_header(self, sap):
+        data = raw_ws_handshake(sap, extra_headers=f"X-SAP-Token: {tok(sap)}\r\n")
+        assert b"101" in data.split(b"\r\n", 1)[0], repr(data[:80])
+
+    def test_handshake_with_machine_header(self, sap):
+        data = raw_ws_handshake(sap, extra_headers=f"X-SAP-Token: {machine_tok(sap)}\r\n")
+        assert b"101" in data.split(b"\r\n", 1)[0], repr(data[:80])
+
+    def test_handshake_with_bad_header_still_rejected(self, sap):
+        data = raw_ws_handshake(sap, extra_headers=f"X-SAP-Token: {machine_tok(sap)}x\r\n")
+        assert b"403" in data.split(b"\r\n", 1)[0], repr(data[:80])
+
+
 class TestMachineToken:
     def test_http_with_machine_token_header(self, sap):
         r = requests.get(f"{sap}/get_file_content", params={"file_url": "nope.txt"},
