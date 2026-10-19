@@ -66,12 +66,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": {"message": scenario.get("message", "mock boom")}})
             return
         if not body.get("stream"):
-            content = scenario.get("content", scenario.get("text", "mock nonstream reply"))
+            if scenario.get("kind") == "tool":
+                args = scenario.get("arguments_raw") or json.dumps(
+                    scenario.get("arguments", {}), ensure_ascii=False)
+                msg = {"role": "assistant",
+                       "content": scenario.get("assistant_content") or None,
+                       "tool_calls": [{"id": scenario.get("id", "call_mock_ns"),
+                                       "type": "function",
+                                       "function": {"name": scenario.get("name", "mock_tool"),
+                                                    "arguments": args}}]}
+                finish = "tool_calls"
+            else:
+                msg = {"role": "assistant",
+                       "content": scenario.get("content", scenario.get("text", "mock nonstream reply"))}
+                finish = "stop"
             self._json(200, {
                 "id": "chatcmpl-mock", "object": "chat.completion", "created": 0,
                 "model": body.get("model", "mock"),
-                "choices": [{"index": 0, "finish_reason": "stop",
-                             "message": {"role": "assistant", "content": content}}],
+                "choices": [{"index": 0, "finish_reason": finish, "message": msg}],
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             })
             return
@@ -111,7 +123,8 @@ class _Handler(BaseHTTPRequestHandler):
                     self._chunk({"content": text[mid:]})
                 self._chunk(finish="stop")
             elif kind == "tool":
-                args = json.dumps(scenario.get("arguments", {}), ensure_ascii=False)
+                args = scenario.get("arguments_raw") or json.dumps(
+                    scenario.get("arguments", {}), ensure_ascii=False)
                 tc_id = scenario.get("id", "call_mock_1")
                 name = scenario.get("name", "mock_tool")
                 a_id = scenario.get("assistant_content", "")

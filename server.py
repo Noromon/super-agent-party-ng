@@ -12,6 +12,8 @@ import errno
 from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
+from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
+                        arg_error_text, append_missing_results)
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
 from py import llm_gate
@@ -5074,7 +5076,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             print(response_content)
                             args_dict, arg_err = parse_tool_arguments(response_content.arguments)
                             if arg_err is not None:
-                                err_text = f"[Argument Error] {arg_err}，请使用合法的 JSON 参数重试该工具调用。"
+                                err_text = arg_error_text(arg_err)
                                 acked_ids.add(tool_call_id)
                                 reasoner_tool_events.append((f"{response_content.name}({response_content.arguments})", err_text))
                                 err_chunk = {
@@ -5159,10 +5161,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     results = await dispatch_tool(response_content.name, args_dict, settings)
                                     await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
                                 except Exception as e:
-                                    results = f"[Tool Execution Error] {type(e).__name__}: {e}"
+                                    results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
 
                             if results is None:
-                                none_text = "[Error] 该工具调用未获得可用结果（工具未注册或不可用），请改用工具列表中的真实工具。"
+                                none_text = NONE_TEXT
                                 none_chunk = {
                                     "choices": [{
                                         "delta": {
@@ -5281,14 +5283,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     pass
 
                         # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
-                        for _tc_meta in assistant_tool_calls:
-                            if _tc_meta["id"] not in acked_ids:
-                                request.messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": _tc_meta["id"],
-                                    "name": _tc_meta["function"]["name"],
-                                    "content": "[Skipped] 未执行：同一轮中前面的工具调用正在等待用户审批，或流程被中断。",
-                                })
+                        append_missing_results(request.messages, assistant_tool_calls, acked_ids)
 
 
                         # =========================================================================
@@ -6746,7 +6741,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     print(response_content.name)
                     args_dict, arg_err = parse_tool_arguments(_tc.function.arguments)
                     if arg_err is not None:
-                        err_text = f"[Argument Error] {arg_err}，请使用合法的 JSON 参数重试该工具调用。"
+                        err_text = arg_error_text(arg_err)
                         ns_acked_ids.add(tool_call_id)
                         reasoner_messages.append({
                             "role": "assistant",
@@ -6767,7 +6762,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                     try:
                         results = await dispatch_tool(response_content.name, args_dict, settings)
                     except Exception as e:
-                        results = f"[Tool Execution Error] {type(e).__name__}: {e}"
+                        results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
                     if isinstance(results, AsyncIterator):
                         buffer = []
                         async for chunk in results:
@@ -6779,7 +6774,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": response_content.name,
-                            "content": "[Error] 该工具调用未获得可用结果（工具未注册或不可用），请改用工具列表中的真实工具。",
+                            "content": NONE_TEXT,
                         })
                         ns_pending_abort = True
                         break
@@ -6813,14 +6808,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                         except Exception:
                             pass
                 # 为未执行的调用补上说明性 tool 结果，保证成对闭合
-                for _tc_meta in ns_tool_calls_meta:
-                    if _tc_meta["id"] not in ns_acked_ids:
-                        request.messages.append({
-                            "role": "tool",
-                            "tool_call_id": _tc_meta["id"],
-                            "name": _tc_meta["function"]["name"],
-                            "content": "[Skipped] 未执行：同一轮中前面的工具调用正在等待用户审批，或流程被中断。",
-                        })
+                append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
                 if ns_pending_abort:
                     break
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
