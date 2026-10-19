@@ -101,6 +101,26 @@ def is_exempt(path: str) -> bool:
     return False
 
 
+def path_under(path, roots) -> bool:
+    """Realpath containment (X-6/X-7): candidate must live inside one of roots."""
+    import os
+    try:
+        rp = os.path.realpath(str(path))
+    except Exception:
+        return False
+    for r in roots:
+        try:
+            rr = os.path.realpath(str(r))
+        except Exception:
+            continue
+        try:
+            if os.path.commonpath([rp, rr]) == rr:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def write_token_file(data_dir) -> str:
     path = os.path.join(str(data_dir), TOKEN_FILE_NAME)
     try:

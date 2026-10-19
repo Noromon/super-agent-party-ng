@@ -10404,8 +10404,15 @@ async def load_file_endpoint(request: Request, files: List[UploadFile] = File(No
 
         elif 'application/json' in content_type:
             data = await request.json()
+            _allowed_roots = [UPLOAD_FILES_DIR, TOOL_TEMP_DIR, USER_DATA_DIR]
+            _cc = (await load_settings()).get("CLISettings", {}).get("cc_path")
+            if _cc:
+                _allowed_roots.append(_cc)
             for file_info in data.get("files", []):
                 file_path = file_info.get("path")
+                if not sap_auth.path_under(file_path, _allowed_roots):
+                    return JSONResponse(status_code=403,
+                                        content={"success": False, "detail": "path not in allowed roots"})
                 file_name = file_info.get("name", os.path.basename(file_path))
                 file_extension = os.path.splitext(file_name)[1]
                 
@@ -10445,8 +10452,10 @@ async def delete_file_endpoint(request: Request):
     data = await request.json()
     file_name = data.get("fileName")
     file_path = os.path.join(UPLOAD_FILES_DIR, file_name)
+    if not sap_auth.path_under(file_path, [UPLOAD_FILES_DIR]):
+        raise HTTPException(status_code=403, detail="path outside uploads dir")
     try:
-        if os.path.exists(file_path):
+        if os.path.isfile(file_path):
             os.remove(file_path)
             return JSONResponse(content={"success": True})
         else:
@@ -10463,8 +10472,11 @@ async def delete_files_endpoint(req: FileNames):
     errors = []
     for name in req.fileNames:
         path = os.path.join(UPLOAD_FILES_DIR, name)
+        if not sap_auth.path_under(path, [UPLOAD_FILES_DIR]):
+            errors.append(f"{name}: path outside uploads dir")
+            continue
         try:
-            if os.path.exists(path):
+            if os.path.isfile(path):
                 os.remove(path)
                 success_files.append(name)
             else:
@@ -10961,6 +10973,8 @@ async def update_storage_endpoint(request: Request):
 @app.get("/get_file_content")
 async def get_file_content_endpoint(file_url: str):
     file_path = os.path.join(UPLOAD_FILES_DIR, file_url)
+    if not sap_auth.path_under(file_path, [UPLOAD_FILES_DIR]):
+        raise HTTPException(status_code=403, detail="path outside uploads dir")
     content = await get_file_content(file_path)
     return JSONResponse(content={"content": content})
 
@@ -11579,9 +11593,10 @@ async def add_workflow(file: UploadFile = File(...), workflow_data: str = Form(.
 @app.delete("/delete_workflow/{filename}")
 async def delete_workflow(filename: str):
     file_path = os.path.join(UPLOAD_FILES_DIR, filename + ".json")
-    
+    if not sap_auth.path_under(file_path, [UPLOAD_FILES_DIR]):
+        raise HTTPException(status_code=403, detail="path outside uploads dir")
     # 检查文件是否存在
-    if not os.path.exists(file_path):
+    if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     # 删除文件
