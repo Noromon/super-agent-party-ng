@@ -522,7 +522,7 @@ async def acpx_agent(
     settings = await _load_acp_settings()
 
     final_agent = agent_name or settings["agent"]
-    final_mode = mode or settings["permissionMode"]
+    final_mode = settings["permissionMode"]  # X-9: 忽略 LLM 传入的 mode，只信服务端配置
     final_cwd = cwd or settings["cc_path"] or os.getcwd()
 
     # Environment variables

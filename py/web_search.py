@@ -880,6 +880,10 @@ async def simple_fetch(url):
     改进的网页抓取工具，返回结构化的清洗后内容
     支持抓取内网和外网页面
     """
+    from py.net_guard import url_public_ok
+    if not url_public_ok(url, allow_loopback=True):
+        return None, "[Fetch blocked] 私网/保留地址目标已被 SSRF 防护拒绝，请改用公网地址或本机地址。"
+
     def sync_fetch():
         try:
             headers = {

@@ -8071,9 +8071,10 @@ def sanitize_proxy_url(input_url: str) -> str:
     if parsed.fragment:
         safe_url += f"#{parsed.fragment}"
 
-    # 4. 内网审计
-    if is_private_ip(parsed.hostname):
-        logger.warning(f"Internal access detected: {safe_url}")
+    # 4. 内网拦截 (M2/X-8): loopback 放行（本机服务是生态刚需），私网/保留/元数据拒绝
+    from py.net_guard import url_public_ok
+    if not url_public_ok(safe_url, allow_loopback=True):
+        raise HTTPException(status_code=403, detail="blocked target (private/reserved address)")
 
     return safe_url
 
