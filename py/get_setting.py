@@ -232,6 +232,52 @@ async def init_db():
             await db.commit()
         _db_init_done = True
 
+async def _backfill_rows(db):
+    """M4b shadow store: one-time row-level expansion when conversation_rows
+    is still empty but the legacy blob already holds conversations."""
+    try:
+        async with db.execute('SELECT COUNT(*) FROM conversation_rows') as cur:
+            n_rows = (await cur.fetchone())[0]
+        if n_rows:
+            return
+        async with db.execute('SELECT data FROM settings WHERE id = 1') as cur:
+            row = await cur.fetchone()
+        if not row:
+            return
+        blob = json.loads(row[0])
+        now = time.time()
+        n = 0
+        for conv in (blob.get("conversations") or []):
+            if isinstance(conv, dict) and conv.get("id") is not None:
+                await db.execute(
+                    'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+                    (str(conv["id"]), json.dumps(conv, ensure_ascii=False), now))
+                n += 1
+        if n:
+            logging.getLogger(__name__).info("conversation_rows backfilled from blob: %d rows", n)
+    except Exception:
+        logging.getLogger(__name__).warning("conversation_rows backfill failed (blob remains source of truth)", exc_info=True)
+
+
+async def _sync_rows(db, conversations):
+    """Align conversation_rows with the blob snapshot: upsert present ids,
+    delete vanished ones. Shadow-only: callers must not let failures escape."""
+    snap = {}
+    for conv in conversations:
+        if isinstance(conv, dict) and conv.get("id") is not None:
+            snap[str(conv["id"])] = json.dumps(conv, ensure_ascii=False)
+    async with db.execute('SELECT conv_id FROM conversation_rows') as cur:
+        existing = {r[0] for r in await cur.fetchall()}
+    now = time.time()
+    for cid, blob in snap.items():
+        await db.execute(
+            'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
+            (cid, blob, now))
+    for cid in existing - set(snap):
+        await db.execute('DELETE FROM conversation_rows WHERE conv_id = ?', (cid,))
+    return len(snap), len(existing)
+
+
 async def init_covs_db():
     global _covs_db_init_done
     if _covs_db_init_done: return
@@ -275,6 +321,14 @@ async def init_covs_db():
                     PRIMARY KEY (conversation_id, seq)
                 )
             ''')
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS conversation_rows (
+                    conv_id TEXT PRIMARY KEY,
+                    data TEXT NOT NULL,
+                    updated_at REAL
+                )
+            ''')
+            await _backfill_rows(db)
             await db.commit()
         _covs_db_init_done = True
 
@@ -511,9 +565,16 @@ async def save_covs(settings):
     global _COVS_DEGRADED
     if _COVS_DEGRADED and not settings.get("conversations"):
         raise RuntimeError("covs save refused: 上次读取失败，拒绝用空会话库覆盖（坏数据已隔离备份）")
+    await init_covs_db()
     data = json.dumps(settings, ensure_ascii=False, indent=2)
     async with _COVS_LOCK:
         async with aiosqlite.connect(COVS_PATH) as db:
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
             await db.commit()
+            try:
+                # M4b shadow double-write: blob stays source of truth
+                await _sync_rows(db, settings.get("conversations") or [])
+                await db.commit()
+            except Exception:
+                logging.getLogger(__name__).warning("conversation_rows shadow sync failed (blob unaffected)", exc_info=True)
     _COVS_DEGRADED = False
