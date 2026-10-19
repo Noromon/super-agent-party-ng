@@ -10,6 +10,15 @@ import aiosqlite
 from pathlib import Path
 from appdirs import user_data_dir
 
+try:
+    from py import secret_box
+except Exception:  # standalone importlib load (tests): resolve next to this file
+    import importlib.util as _ilu
+    _sb_spec = _ilu.spec_from_file_location(
+        "secret_box", os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_box.py"))
+    secret_box = _ilu.module_from_spec(_sb_spec)
+    _sb_spec.loader.exec_module(secret_box)
+
 # ----------------- 1. 基础环境检测 (极速版) -----------------
 APP_NAME = "Super-Agent-Party"
 HOST = None
@@ -517,7 +526,7 @@ async def load_settings():
                     asyncio.create_task(save_settings(user_settings))
                 if not parse_ok:
                     return defaults if not IS_DOCKER else {**defaults, "isdocker": True}
-                return user_settings
+                return secret_box.decrypt_settings(user_settings)
             else:
                 if IS_DOCKER:
                     defaults["isdocker"] = True
@@ -528,7 +537,8 @@ async def save_settings(settings):
     # D-2 护栏：会话不属于主配置；用副本 pop，不改动调用方内存对象
     if "conversations" in settings:
         settings = {k: v for k, v in settings.items() if k != "conversations"}
-    data = json.dumps(settings, ensure_ascii=False, indent=2)
+    # M4c/X-12: 敏感字段 DPAPI 封装后落盘（内存对象保持明文）
+    data = json.dumps(secret_box.encrypt_settings(settings), ensure_ascii=False, indent=2)
     async with _SETTINGS_LOCK:
         async with aiosqlite.connect(DATABASE_PATH) as db:
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
