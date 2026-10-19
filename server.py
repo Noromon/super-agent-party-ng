@@ -6122,7 +6122,32 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             content={"error": str(e)},
         )
 
-async def generate_complete_response(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
+async def generate_complete_response(*args, **kwargs):
+    """T-8/T-5: complete 路径统一闸门+取消围栏入口层（与 stream 共用
+    _active_streams/cancel 端点/llm_gate 基建）。实现体在 _generate_complete_impl。"""
+    complete_stream_id = str(uuid.uuid4())
+    entry = {
+        "buffer": [], "done": False, "error": None, "cancelled": False,
+        "created_at": time.time(), "consumer_count": 0, "task": None,
+        "kind": "complete",
+    }
+    async with _active_streams_lock:
+        _active_streams[complete_stream_id] = entry
+    _current_stream_entry.set(entry)
+    llm_gate.enter()
+    try:
+        return await _generate_complete_impl(*args, **kwargs)
+    finally:
+        llm_gate.leave()
+        async with _active_streams_lock:
+            entry["done"] = True
+            if entry.get("consumer_count", 0) <= 0:
+                _active_streams.pop(complete_stream_id, None)
+            else:
+                asyncio.create_task(_cleanup_stream(complete_stream_id, delay=5.0))
+
+
+async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
     global mcp_client_list,HA_client,ChromeMCP_client,sql_client
     
     # 设置对话上下文，供 review_image 等工具使用
@@ -6825,6 +6850,10 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
         ns_force_no_tools = False
         while response.choices[0].message.tool_calls or search_not_done:
             _ns_loop_count += 1
+            # T-8: 取消围栏——后续 LLM 轮次前检查（cancel 端点可停不可停工具链的漏洞封堵）
+            _cur_entry = _current_stream_entry.get()
+            if _cur_entry and _cur_entry.get("cancelled"):
+                break
             if response.choices[0].message.tool_calls and _ns_loop_count > _ns_max_iterations:
                 print(f"[LoopCap] 非流式工具调用迭代上限({_ns_max_iterations})，强制模型收尾")
                 request.messages.append({
@@ -6854,6 +6883,11 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                 ns_pending_abort = False
                 ns_acked_ids = set()
                 for _ti, _tc in enumerate(assistant_message.tool_calls):
+                    # T-8: 取消围栏——取消后不再调度任何工具
+                    _cur_entry = _current_stream_entry.get()
+                    if _cur_entry and _cur_entry.get("cancelled"):
+                        ns_pending_abort = True
+                        break
                     tool_call_id = ns_tool_calls_meta[_ti]["id"]
                     response_content = _tc.function
                     print(response_content.name)
@@ -7906,23 +7940,34 @@ async def simple_chat_endpoint(request: ChatRequest):
         for key, value in fast_config.items():
             current_settings[key] = value
 
-    # --------------- 调用大模型 ---------------
-    response = await fast_client.chat.completions.create(
-        model=current_settings['model'],
-        messages=request.messages,
-        stream=request.stream,
-        temperature=request.temperature or settings.get('temperature', 0.7),
-    )
+    # --------------- 调用大模型（T-5: 入 llm_gate 闸门，mem0 防撞不再失明） ---------------
+    llm_gate.enter()
+    try:
+        response = await fast_client.chat.completions.create(
+            model=current_settings['model'],
+            messages=request.messages,
+            stream=request.stream,
+            temperature=request.temperature or settings.get('temperature', 0.7),
+        )
+    except BaseException:
+        llm_gate.leave()
+        raise
 
     # --------------- 非流式：一次性返回 JSON ---------------
     if not request.stream:
         # 注意：openai 返回的是 ChatCompletion 对象
-        return JSONResponse(content=response.model_dump())
+        try:
+            return JSONResponse(content=response.model_dump())
+        finally:
+            llm_gate.leave()
 
     # --------------- 流式：保持原来的 StreamingResponse ---------------
     async def openai_raw_stream():
-        async for chunk in response:
-            yield chunk.model_dump_json() + '\n'
+        try:
+            async for chunk in response:
+                yield chunk.model_dump_json() + '\n'
+        finally:
+            llm_gate.leave()
         # 不发送 [DONE]
 
     return StreamingResponse(

@@ -7,8 +7,6 @@ history) and final answer must match. Any RED here is a drift finding for M3b.
 import ast
 from pathlib import Path
 
-import pytest
-
 from test_contract_sse import collect, post_chat, sse
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -106,18 +104,22 @@ class TestDriftRadar:
     When M3d fixes one, the test XPASSes and hard-fails the suite -> remove
     the xfail marker (ratchet)."""
 
-    @pytest.mark.xfail(strict=True, reason="T-8: complete 路径无取消围栏/entry 注册，M3d 修")
     def test_complete_has_cancel_fence(self):
-        src = _func_src("generate_complete_response")
-        assert "cancelled" in src
+        # M3d: fence lives in the impl body, entry (cancelled flag) in the wrapper
+        wrapper = _func_src("generate_complete_response")
+        assert '"cancelled": False' in wrapper
+        assert "_current_stream_entry.set(entry)" in wrapper
+        impl = _func_src("_generate_complete_impl")
+        assert impl.count('_cur_entry.get("cancelled")') >= 2
+        assert "ns_pending_abort = True" in impl
 
-    @pytest.mark.xfail(strict=True, reason="T-5: complete 路径无 llm_gate.enter 闸门（mem0 防撞盲区），M3d 修")
     def test_complete_enters_llm_gate(self):
         assert "llm_gate.enter()" in _func_src("generate_complete_response")
+        assert "llm_gate.leave()" in _func_src("generate_complete_response")
 
-    @pytest.mark.xfail(strict=True, reason="T-5: /simple_chat 绕过 llm_gate，M3d 修")
     def test_simple_chat_enters_llm_gate(self):
         assert "llm_gate.enter()" in _func_src("simple_chat_endpoint")
+        assert "llm_gate.leave()" in _func_src("simple_chat_endpoint")
 
     def test_stream_side_has_gate_and_fence(self):
         # positive control: the stream engine already carries both
