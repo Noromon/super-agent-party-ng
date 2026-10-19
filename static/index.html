@@ -1867,21 +1867,21 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       <!-- 上下文占用监控 -->
                       <div v-if="ctxUsage()" class="ctx-monitor-wrap"
-                           @mouseenter="ctxHover = true" @mouseleave="ctxHover = false">
+                           @mouseenter="showCtxHover($event)" @mouseleave="ctxHover = false">
                         <svg class="ctx-ring" :class="ctxColorClass()" viewBox="0 0 36 36" @click="ctxPanelVisible = !ctxPanelVisible">
                           <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--el-border-color)" stroke-width="3.5"/>
                           <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" stroke-width="3.5"
                                   stroke-linecap="round" :stroke-dasharray="(ctxPct() * 0.974) + ' 97.4'" transform="rotate(-90 18 18)"/>
                           <text x="18" y="21" text-anchor="middle" font-size="10" fill="currentColor">{{ ctxPct() }}</text>
                         </svg>
-                        <div v-if="ctxHover && !ctxPanelVisible" class="ctx-hover-pop">
+                        <teleport to="body">
+                        <div v-if="ctxHover && !ctxPanelVisible" class="ctx-hover-pop" :style="ctxPopStyle">
                           <div class="ctx-pop-title">{{ t('contextUsage') }}</div>
                           <div><b>{{ fmtTk(ctxUsage().prompt_tokens || ctxUsage().est_total) }}</b> / {{ fmtTk(ctxUsage().window) }} ({{ ctxPct() }}%)
                             <span class="ctx-badge">{{ ctxUsage().prompt_tokens ? t('contextPanelMeasured') : t('contextPanelEst') }}</span>
                           </div>
                         </div>
-                        <teleport to="body">
-                          <div v-if="ctxPanelVisible" class="ctx-backdrop" @click="ctxPanelVisible = false"></div>
+                        <div v-if="ctxPanelVisible" class="ctx-backdrop" @click="ctxPanelVisible = false"></div>
                           <div v-if="ctxPanelVisible" class="ctx-panel" @click.stop>
                             <div class="ctx-panel-header">
                               <span>{{ t('contextUsage') }}</span>
@@ -1916,14 +1916,15 @@ function updateElement(el, rawMarkdown, formatFn) {
 
                       <!-- 任务进度监控 -->
                       <div v-if="todoUsage() && todoUsage().total > 0" class="ctx-monitor-wrap"
-                           @mouseenter="todoHover = true" @mouseleave="todoHover = false">
+                           @mouseenter="showTodoHover($event)" @mouseleave="todoHover = false">
                         <svg class="ctx-ring" :class="todoColorClass()" viewBox="0 0 36 36" @click="todoPanelPinned = !todoPanelPinned">
                           <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--el-border-color)" stroke-width="3.5"/>
                           <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" stroke-width="3.5"
                                   stroke-linecap="round" :stroke-dasharray="(todoUsage().total ? (todoUsage().done / todoUsage().total * 97.4) : 0) + ' 97.4'" transform="rotate(-90 18 18)"/>
                           <text x="18" y="21" text-anchor="middle" font-size="9" fill="currentColor">{{ todoUsage().done }}/{{ todoUsage().total }}</text>
                         </svg>
-                        <div v-if="todoHover && !todoPanelPinned" class="ctx-hover-pop ctx-pop-wide">
+                        <teleport to="body">
+                        <div v-if="todoHover && !todoPanelPinned" class="ctx-hover-pop ctx-pop-wide" :style="todoPopStyle">
                           <div class="ctx-pop-title">{{ t('todoPanelTitle') }} · {{ todoUsage().done }}/{{ todoUsage().total }}</div>
                           <div v-for="item in todoUsage().items" :key="'h'+item.id" class="todo-row" :class="{ 'todo-done': item.status === 'done' }">
                             <span class="todo-icon">{{ item.status === 'done' ? '✅' : '⏳' }}</span>
@@ -1931,8 +1932,7 @@ function updateElement(el, rawMarkdown, formatFn) {
                             <span class="todo-text">{{ item.content }}</span>
                           </div>
                         </div>
-                        <teleport to="body">
-                          <div v-if="todoPanelPinned" class="ctx-backdrop" @click="todoPanelPinned = false"></div>
+                        <div v-if="todoPanelPinned" class="ctx-backdrop" @click="todoPanelPinned = false"></div>
                           <div v-if="todoPanelPinned" class="ctx-panel todo-panel" @click.stop>
                             <div class="ctx-panel-header">
                               <span>{{ t('todoPanelTitle') }}</span>
@@ -14002,24 +14002,34 @@ function updateElement(el, rawMarkdown, formatFn) {
                               </el-form-item>
                             </div>
 
-                            <div class="tool-content" style="margin-bottom:8px;">
+                            <div class="tool-content" style="margin-bottom:8px; overflow:hidden;">
                               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                 <b>{{ t('xmppSessionsTitle') }}</b>
                                 <el-button size="small" @click="fetchBotConversations">{{ t('xmppSessionsRefresh') }}</el-button>
                               </div>
                               <div v-if="!xmppBotSessions.length" style="color:#999; font-size:13px;">{{ t('xmppSessionsEmpty') }}</div>
-                              <div v-for="s in xmppBotSessions" :key="s.conv_id"
-                                   style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px dashed #8883; font-size:13px;">
-                                <span style="min-width:150px; font-weight:bold;">{{ s.peer }}
-                                  <el-tag v-if="s.live" size="small" type="success">live</el-tag>
-                                </span>
-                                <span style="min-width:60px;">{{ s.count }} msg</span>
-                                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#999;">{{ s.last_text }}</span>
-                                <span style="color:#999; white-space:nowrap;">{{ formatBotTime(s.updated_at) }}</span>
-                                <el-button size="small" @click="openBotConversation(s)">{{ t('xmppSessionOpen') }}</el-button>
-                                <el-button size="small" @click="clearBotConversation(s.conv_id)">{{ t('xmppSessionClear') }}</el-button>
-                                <el-button size="small" type="danger" @click="deleteBotConversation(s.conv_id)">{{ t('xmppSessionDelete') }}</el-button>
-                              </div>
+                              <el-table v-else :data="xmppBotSessions" size="small" style="width:100%;" max-height="280">
+                                <el-table-column :label="t('xmppSessColPeer')" min-width="140">
+                                  <template #default="{ row }">
+                                    <b>{{ row.peer }}</b>
+                                    <el-tag v-if="row.live" size="small" type="success">live</el-tag>
+                                  </template>
+                                </el-table-column>
+                                <el-table-column prop="count" label="Msg" width="60" />
+                                <el-table-column :label="t('xmppSessColLast')" min-width="110" show-overflow-tooltip>
+                                  <template #default="{ row }">{{ row.last_text }}</template>
+                                </el-table-column>
+                                <el-table-column :label="t('xmppSessColTime')" width="110">
+                                  <template #default="{ row }">{{ formatBotTime(row.updated_at) }}</template>
+                                </el-table-column>
+                                <el-table-column width="190" align="right">
+                                  <template #default="{ row }">
+                                    <el-button size="small" @click="openBotConversation(row)">{{ t('xmppSessionOpen') }}</el-button>
+                                    <el-button size="small" @click="clearBotConversation(row.conv_id)">{{ t('xmppSessionClear') }}</el-button>
+                                    <el-button size="small" type="danger" @click="deleteBotConversation(row.conv_id)">{{ t('xmppSessionDelete') }}</el-button>
+                                  </template>
+                                </el-table-column>
+                              </el-table>
                             </div>
 
                             <el-dialog v-model="xmppSessionOpen" :title="'📱 ' + xmppSessionTitle" width="640px" append-to-body>

@@ -12422,11 +12422,11 @@ pre.sp-content.sp-code {
   margin: 0 6px;
 }
 .ctx-hover-pop {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
+  /* teleported to body; anchored via inline fixed coords (showCtxHover) so
+     no ancestor stacking context or overflow can clip/cover it */
+  position: fixed;
   pointer-events: none;
-  z-index: 2000;
+  z-index: 3000;
   min-width: max-content;
   background: var(--el-bg-color, #fff);
   border: 1px solid var(--el-border-color, #dcdfe6);

@@ -21,6 +21,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 import pytest
 from pydantic import ValidationError
 
+import py.xmpp_client as xc
 from py.xmpp_bot_manager import XmppBotConfig
 from py.xmpp_client import XmppClient
 
@@ -173,7 +174,7 @@ class TestMobileLayer:
         c = make_client()
 
         async def fake_dl(url):
-            return "data:image/png;base64,QUJD" if "good" in url else None
+            return ("data:image/png;base64,QUJD", "saved.png") if "good" in url else (None, None)
         monkeypatch.setattr(c, "_download_as_data_uri", fake_dl)
         content = [
             {"type": "image_url", "image_url": {"url": "https://good/x.png"}},
@@ -208,7 +209,7 @@ class TestMobileLayer:
             def get(self, url, ssl=None):
                 return FakeResp()
         c.session = FakeSession()
-        uri = asyncio.run(c._download_as_data_uri("https://files.local/x.png"))
+        uri, _fname = asyncio.run(c._download_as_data_uri("http://files.local/x.png"))
         assert uri.startswith("data:image/png;base64,")
         import base64 as b64m
         assert b64m.b64decode(uri.split(",", 1)[1]) == body
@@ -235,7 +236,8 @@ class TestMobileLayer:
             def get(self, url, ssl=None):
                 return FakeResp()
         c.session = FakeSession()
-        assert asyncio.run(c._download_as_data_uri("https://files.local/big.png")) is None
+        uri, fname = asyncio.run(c._download_as_data_uri("http://files.local/big.png"))
+        assert uri is None and fname is None
 
     def test_tools_override_modes(self):
         c = make_client()
@@ -287,12 +289,122 @@ class TestIncomingImages:
     def test_oob_urls_and_inline_base64(self):
         c = make_client()
         m = msg(body="看这个", oob={"urls": ["https://x/y.png", "ftp://skip"]})
-        uris = c._extract_incoming_images(m, "看这个")
+        uris, _kept = c._extract_incoming_images(m, "看这个")
         assert uris == ["https://x/y.png"]
         b64 = "data:image/png;base64," + ("A" * 300)
         m2 = msg(body=f"图 {b64} 结束")
-        uris2 = c._extract_incoming_images(m2, m2["body"])
+        uris2, _kept2 = c._extract_incoming_images(m2, m2["body"])
         assert uris2 == [b64]
+
+
+class TestBodyUrlExtraction:
+    def test_body_links_extracted_and_stripped(self):
+        c = make_client()
+        text = ("看图 https://upload.example.invalid:7443/httpfileupload/ABC/zb2rh.jpg "
+                "还有 https://x.example/y.png?v=2 普通 https://example.com/page 链接")
+        uris, cleaned = c._extract_incoming_images(FakeMsg(body=""), text)
+        assert uris == ["https://upload.example.invalid:7443/httpfileupload/ABC/zb2rh.jpg",
+                        "https://x.example/y.png?v=2"]
+        assert "httpfileupload" not in cleaned and "y.png" not in cleaned
+        assert "example.com/page" in cleaned and "看图" in cleaned
+
+    def test_oob_and_body_dedupe(self):
+        c = make_client()
+        url = "https://u.local/a.jpg"
+        msg = FakeMsg(body=url)
+        msg["oob"] = {"urls": [url]}
+        uris, cleaned = c._extract_incoming_images(msg, url)
+        assert uris == [url] and cleaned == ""
+
+    def test_data_uri_extracted_and_stripped(self):
+        c = make_client()
+        b64 = "data:image/png;base64," + "A" * 300
+        uris, cleaned = c._extract_incoming_images(FakeMsg(body=""), f"前 {b64} 后")
+        assert len(uris) == 1 and uris[0].startswith("data:image/png")
+        assert "base64" not in cleaned and "前" in cleaned and "后" in cleaned
+
+
+class TestTlsGate:
+    def _fake_conn(self, monkeypatch, der=b"FAKE-DER", fail=False):
+        import hashlib
+
+        class _SslObj:
+            def getpeercert(self, _binary):
+                return der
+
+        class _Writer:
+            def get_extra_info(self, name):
+                return _SslObj() if name == "ssl_object" else None
+
+            def close(self):
+                pass
+
+        async def fake_open(*a, **kw):
+            if fail:
+                raise OSError("connection refused")
+            return None, _Writer()
+        monkeypatch.setattr(xc.asyncio, "open_connection", fake_open)
+        return "sha256:" + hashlib.sha256(der).hexdigest()
+
+    def test_plain_http_passes(self):
+        c = make_client()
+        assert asyncio.run(c._gate_https("http://whatever/x.png")) is True
+
+    def test_whitelist_and_host_trust_short_circuit(self, monkeypatch):
+        c = make_client()
+
+        async def boom(*a, **kw):
+            raise AssertionError("must not probe")
+        monkeypatch.setattr(xc.asyncio, "open_connection", boom)
+        c.ignore_cert_hosts = ["files.local"]
+        assert asyncio.run(c._gate_https("https://files.local:7443/a.jpg")) is True
+        from py import xmpp_trust as xt
+        xt.get_store().trust("upload.local:443", "sha256:whatever")
+        assert asyncio.run(c._gate_https("https://upload.local/a.jpg")) is True
+
+    def test_probe_failure_refuses(self, monkeypatch):
+        c = make_client()
+        self._fake_conn(monkeypatch, fail=True)
+        assert asyncio.run(c._gate_https("https://newhost.local:7443/a.jpg")) is False
+
+    def test_unknown_cert_queued_for_review(self, monkeypatch):
+        from py import xmpp_trust as xt
+        c = make_client()
+        xt.PENDING.clear()
+        self._fake_conn(monkeypatch)
+        assert asyncio.run(c._gate_https("https://stranger.local:7443/a.jpg")) is False
+        keys = [it["key"] for it in xt.PENDING.list()]
+        assert "stranger.local:7443" in keys
+
+    def test_matching_fingerprint_passes(self, monkeypatch):
+        from py import xmpp_trust as xt
+        c = make_client()
+        fp = self._fake_conn(monkeypatch)
+        xt.get_store().trust("known2.local:7443", fp)
+        assert asyncio.run(c._gate_https("https://known2.local:7443/a.jpg")) is True
+
+
+class TestRedactMediaForStore:
+    def test_image_replaced_with_filename_marker(self):
+        c = make_client()
+        content = [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * 400},
+             "_saved": "xmpp_in_1.png"},
+            {"type": "text", "text": "原话在此"},
+        ]
+        m = c._redact_media_for_store(content)
+        assert m["role"] == "user"
+        assert m["content"].startswith("[用户发送了图片，已存文件: xmpp_in_1.png]")
+        assert "原话在此" in m["content"] and "base64" not in m["content"]
+
+    def test_image_without_saved_name_and_pure_text(self):
+        c = make_client()
+        m = c._redact_media_for_store(
+            [{"type": "image_url", "image_url": {"url": "data:x"}, "_saved": ""}])
+        assert m["content"] == "[用户发送了图片]"
+        m2 = c._redact_media_for_store([{"type": "text", "text": "hi"}])
+        assert m2["content"] == "hi"
+        assert c._redact_media_for_store("plain") == {"role": "user", "content": "plain"}
 
 
 class TestRunConstruction:

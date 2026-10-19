@@ -50,6 +50,15 @@ from urllib.parse import urljoin
 USER_AGENT = "Mozilla/5.0 (compatible; MyOpenSourceBot/1.0)"
 ROBOTS_CACHE = {} # 缓存 robots.txt 避免重复请求
 
+
+def _make_session(**kwargs) -> aiohttp.ClientSession:
+    """Shared session factory routing DNS through the system resolver:
+    when slixmpp is installed its aiodns dependency hijacks aiohttp's default
+    resolver, and aiodns ignores hosts files and NetBIOS names — local
+    hostname URLs then die with 'Could not contact DNS servers'."""
+    connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    return aiohttp.ClientSession(connector=connector, **kwargs)
+
 def is_private_ip(hostname):
     """检测是否为私有/内网IP，放行代理软件的 Fake-IP"""
     if not hostname:
@@ -175,7 +184,7 @@ async def check_robots_txt(url):
     robots_url = urljoin(base_url, "/robots.txt")
     rp = RobotFileParser()
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _make_session() as session:
             async with session.get(robots_url, timeout=5) as resp:
                 if resp.status == 200:
                     text_data = await resp.text()
@@ -247,7 +256,7 @@ async def handle_url(url):
         target_url = sanitize_url(url,force_netloc=f"{HOST}:{PORT}")
         
         # 回连本服务器：自签名 https 场景跳过 TLS 校验
-        async with aiohttp.ClientSession() as session:
+        async with _make_session() as session:
             try:
                 async with session.get(target_url, timeout=10, ssl=False) as response:
                     response.raise_for_status()
@@ -272,7 +281,7 @@ async def handle_url(url):
         safe_url = sanitize_url(url)
 
         # E. 执行请求
-        async with aiohttp.ClientSession() as session:
+        async with _make_session() as session:
             headers = {'User-Agent': USER_AGENT}
             try:
                 # 传入 safe_url，安全工具会认为该变量是“已清洗”的；门控放行的内部源豁免 TLS 校验

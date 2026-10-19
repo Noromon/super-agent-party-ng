@@ -2469,6 +2469,26 @@ let vue_methods = {
       const p = this.ctxPct();
       return p >= 85 ? 'ctx-red' : (p >= 60 ? 'ctx-orange' : 'ctx-green');
     },
+    showCtxHover(e) {
+      const r = e.currentTarget.getBoundingClientRect();
+      this.ctxPopStyle = {
+        position: 'fixed',
+        bottom: (window.innerHeight - r.top + 8) + 'px',
+        right: (window.innerWidth - r.right) + 'px',
+        zIndex: 3000,
+      };
+      this.ctxHover = true;
+    },
+    showTodoHover(e) {
+      const r = e.currentTarget.getBoundingClientRect();
+      this.todoPopStyle = {
+        position: 'fixed',
+        bottom: (window.innerHeight - r.top + 8) + 'px',
+        right: (window.innerWidth - r.right) + 'px',
+        zIndex: 3000,
+      };
+      this.todoHover = true;
+    },
     compactNow() {
       this.ctxPanelVisible = false;
       this.handleCompactCommand(false);

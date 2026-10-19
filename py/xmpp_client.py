@@ -179,6 +179,44 @@ class XmppClient:
             return xmpp_trust.insecure_client_context()
         return True
 
+    async def _gate_https(self, url: str) -> bool:
+        """TOFU gate for ad-hoc HTTPS endpoints (file upload/download host).
+        Whitelisted or already-trusted hosts pass; an unknown certificate is
+        probed and queued into the same review store as the XMPP connection,
+        and the request is refused until reviewed."""
+        u = urlparse(url)
+        if u.scheme != "https":
+            return True
+        host, port = u.hostname or "", u.port or 443
+        key = f"{host}:{port}"
+        if xmpp_trust.host_allowed(host, self.ignore_cert_hosts):
+            return True
+        # host-level trust carries to sibling ports on the same machine
+        # (Typical: prosody 5222 + http-upload 7443 share one self-signed cert)
+        if xmpp_trust.get_store().knows_host(host):
+            return True
+        try:
+            _r, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port,
+                                        ssl=xmpp_trust.insecure_client_context()), 10)
+            try:
+                der = writer.get_extra_info("ssl_object").getpeercert(True)
+                pem = ("-----BEGIN CERTIFICATE-----\n"
+                       + base64.encodebytes(der).decode()
+                       + "-----END CERTIFICATE-----\n")
+            finally:
+                writer.close()
+            fp = xmpp_trust.fingerprint_pem(pem)
+        except Exception as e:
+            logging.warning("XMPP TLS 探测失败 %s: %s", key, e)
+            return False
+        if (xmpp_trust.get_store().check(key, fp) == "match"
+                or xmpp_trust.ONCE.is_granted(key)):
+            return True
+        xmpp_trust.PENDING.add(key, fp, pem)
+        logging.warning("XMPP 文件主机证书待审阅: %s %s", key, fp)
+        return False
+
     # -------------------- 会话持久化（"手机"行级存储） --------------------
     @staticmethod
     def _conv_key(chat_jid: str) -> str:
@@ -203,27 +241,31 @@ class XmppClient:
 
     # -------------------- 收图内联（本地模型不会拉远程 url） --------------------
     async def _download_as_data_uri(self, url: str):
+        """Returns (data_uri, saved_filename); (None, None) on any refusal."""
+        if not await self._gate_https(url):
+            return None, None
         try:
             async with self.session.get(url, ssl=self._aio_ssl(url)) as resp:
                 if resp.status != 200:
-                    return None
+                    return None, None
                 data = await resp.content.read(20 * 1024 * 1024 + 1)
                 if len(data) > 20 * 1024 * 1024:
-                    return None
+                    return None, None
                 ctype = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
                 if not ctype.startswith("image/"):
                     ctype = "image/jpeg"
-                # keep a copy in UPLOAD_FILES_DIR for traceability
+                # keep a copy in UPLOAD_FILES_DIR so tools/history can re-open it
+                fname = None
                 try:
                     fname = f"xmpp_in_{int(time.time() * 1000)}.{ctype.rsplit('/', 1)[-1]}"
                     with open(os.path.join(UPLOAD_FILES_DIR, fname), "wb") as f:
                         f.write(data)
                 except OSError:
-                    pass
-                return f"data:{ctype};base64," + base64.b64encode(data).decode()
+                    fname = None
+                return f"data:{ctype};base64," + base64.b64encode(data).decode(), fname
         except Exception as e:
             logging.warning("XMPP 图片下载失败 %s: %s", url, e)
-            return None
+            return None, None
 
     async def _inline_remote_images(self, content):
         """http(s) image parts -> downloaded base64 data URIs; failures keep
@@ -236,14 +278,38 @@ class XmppClient:
             if isinstance(part, dict) and part.get("type") == "image_url":
                 url = str((part.get("image_url") or {}).get("url", ""))
             if url and url.lower().startswith(("http://", "https://")):
-                data_uri = await self._download_as_data_uri(url)
+                data_uri, fname = await self._download_as_data_uri(url)
                 if data_uri:
-                    out.append({"type": "image_url", "image_url": {"url": data_uri}})
+                    out.append({"type": "image_url", "image_url": {"url": data_uri},
+                                "_saved": fname or ""})
                 else:
-                    out.append({"type": "text", "text": f"[图片下载失败，原始URL: {url}]"})
+                    out.append({"type": "text", "text":
+                                f"[图片下载失败；若为自签名主机请先在 SAP 设置→XMPP 卡片完成证书信任。原始URL: {url}]"})
             else:
                 out.append(part)
         return out
+
+    @staticmethod
+    def _redact_media_for_store(content, text: str = "") -> dict:
+        """DB/history copy of a multimodal turn: heavy base64 dropped, short
+        marker kept (with the saved filename so tools can re-open the image).
+        The full data URI only ever lives in the live request."""
+        if not isinstance(content, list):
+            return {"role": "user", "content": content}
+        parts, names = [], []
+        for p in content:
+            if isinstance(p, dict) and p.get("type") == "image_url":
+                if p.get("_saved"):
+                    names.append(p["_saved"])
+                continue
+            parts.append(p)
+        txt = " ".join(x.get("text", "") for x in parts
+                       if isinstance(x, dict) and x.get("type") == "text").strip()
+        body = txt or text or ""
+        if len(parts) < len(content):  # images were dropped
+            tag = "[用户发送了图片" + (f"，已存文件: {', '.join(names)}" if names else "") + "]"
+            body = f"{tag} {body}".strip()
+        return {"role": "user", "content": body or "[图片消息]"}
 
     # -------------------- 工具环境分离（本渠道降级） --------------------
     def _tools_override(self) -> dict:
@@ -286,7 +352,7 @@ class XmppClient:
         if self.wakeWord and self.wakeWord not in text:
             return
 
-        images = self._extract_incoming_images(msg, text)
+        images, text = self._extract_incoming_images(msg, text)
         if images:
             content = [{"type": "image_url", "image_url": {"url": uri}} for uri in images]
             content.append({"type": "text", "text": text or "用户发送了一张图片"})
@@ -294,7 +360,16 @@ class XmppClient:
         else:
             await self._process_llm(frm, text, [])
 
-    def _extract_incoming_images(self, msg, text) -> List[str]:
+    _IMG_URL_RE = re.compile(
+        r"https?://[^\s<>\"'\)\]]+"
+        r"(?:\.(?:jpg|jpeg|png|gif|webp|bmp)(?:\?[^\s<>\"'\)\]]*)?|/httpfileupload[^\s<>\"'\)\]]*)",
+        re.IGNORECASE)
+
+    def _extract_incoming_images(self, msg, text):
+        """Collect image URIs (OOB extension, body text, inline base64).
+        Many mobile clients embed upload links in the plain body instead of
+        XEP-0066 — body links are stripped so the model never sees raw urls
+        it cannot resolve; the download+inline pipeline handles them."""
         uris: List[str] = []
         try:  # XEP-0066 OOB
             oob = msg.get("oob", None)
@@ -304,9 +379,16 @@ class XmppClient:
                         uris.append(url)
         except Exception:
             pass
-        for m in re.finditer(r"data:image/(\w+);base64,([A-Za-z0-9+/=]{200,})", text):
+        if text:
+            for m in self._IMG_URL_RE.finditer(text):
+                if m.group(0) not in uris:
+                    uris.append(m.group(0))
+                text = text.replace(m.group(0), " ")
+        for m in re.finditer(r"data:image/(\w+);base64,([A-Za-z0-9+/=]{200,})", text or ""):
             uris.append(m.group(0))
-        return uris[:4]
+            text = text.replace(m.group(0), " ")
+        text = re.sub(r"\s{2,}", " ", text or "").strip()
+        return uris[:4], text
 
     # -------------------- LLM 内核（/v1 自调用，全 agent 能力） --------------------
     async def _process_llm(self, chat_jid: str, text: str, extra_content: List[dict]):
@@ -315,8 +397,15 @@ class XmppClient:
         self.asyncToolsID.setdefault(chat_jid, [])
         self.fileLinks.setdefault(chat_jid, [])
         extra_content = await self._inline_remote_images(extra_content)
-        user_msg = {"role": "user", "content": extra_content or text}
-        self.memoryList[chat_jid].append(user_msg)
+        if extra_content:
+            store_msg = self._redact_media_for_store(extra_content)
+            send_content = [{k: v for k, v in p.items() if k != "_saved"}
+                            if isinstance(p, dict) else p for p in extra_content]
+            user_msg = {"role": "user", "content": send_content}
+        else:
+            user_msg = store_msg = {"role": "user", "content": text}
+        self.memoryList[chat_jid].append(store_msg)
+        history = [*self.memoryList[chat_jid][:-1], user_msg]
 
         settings = await load_settings()
         client = AsyncOpenAI(api_key="super-secret-key",
@@ -326,7 +415,7 @@ class XmppClient:
         try:
             stream = await client.chat.completions.create(
                 model=self.XmppAgent,
-                messages=self.memoryList[chat_jid],
+                messages=history,
                 stream=True,
                 extra_body={
                     "asyncToolsID": self.asyncToolsID[chat_jid],
@@ -457,6 +546,10 @@ class XmppClient:
             return None
         put_url, get_url = await self._request_slot(service, name, size)
         if not put_url:
+            return None
+        if not await self._gate_https(put_url):
+            await self._send_text(chat_jid, "（图片上传被拒：上传主机证书未获信任，"
+                                            "请在 SAP 设置→XMPP 卡片完成证书审阅）")
             return None
         with open(file_path, "rb") as f:
             data = f.read()
