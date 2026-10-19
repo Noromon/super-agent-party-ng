@@ -40,6 +40,9 @@ def make_client():
     c.domain = "localhost"
     c.service_url = "tcp://localhost:5222"
     c.xmpp = None
+    c._manager_ref = None
+    c._ready_callback = None
+    c.session = None
     c.sent = []
 
     async def fake_send(jid, text):
@@ -169,3 +172,104 @@ class TestIncomingImages:
         m2 = msg(body=f"图 {b64} 结束")
         uris2 = c._extract_incoming_images(m2, m2["body"])
         assert uris2 == [b64]
+
+
+class TestRunConstruction:
+    """Pin the slixmpp construction lines (past bugs: slixmpp.Client does not
+    exist in 1.17; connect() takes host/port kwargs, not an address tuple,
+    and must NOT be awaited — readiness comes from session_start)."""
+
+    def test_run_constructs_clientxmpp_and_connects_tcp(self, monkeypatch):
+        from py import xmpp_client as mod
+        calls, handlers = {}, {}
+
+        class FakeXmpp:
+            def __init__(self, jid, password, **kw):
+                calls["jid"] = jid
+                calls["password"] = password
+                calls["registered"] = []
+
+            def register_plugin(self, name):
+                calls["registered"].append(name)
+
+            def add_event_handler(self, ev, fn):
+                handlers[ev] = fn
+
+            def send_presence(self):
+                pass
+
+            def disconnect(self):
+                calls["disconnected"] = True
+
+            def connect(self, host=None, port=None):  # sync, returns a future IRL
+                calls["connect"] = (host, port)
+                calls["tls"] = (self.enable_direct_tls, self.enable_starttls,
+                                self.enable_plaintext)
+
+                async def _fire():
+                    await handlers["session_start"](None)
+                    c._shutdown_requested = True
+                asyncio.ensure_future(_fire())
+                return None
+
+        monkeypatch.setattr(mod.slixmpp, "ClientXMPP", FakeXmpp)
+        c = make_client()
+        asyncio.run(c.run())  # bounded: session_start sets shutdown
+        assert calls["jid"] == "sap_bot@localhost"
+        assert calls["connect"] == ("localhost", 5222)
+        assert calls["tls"] == (False, True, False)  # tcp => starttls only
+        assert set(calls["registered"]) == set(mod.XmppClient.PLUGINS)
+        assert calls.get("disconnected") is True
+
+    def test_xmpps_forces_direct_tls(self, monkeypatch):
+        from py import xmpp_client as mod
+        calls, handlers = {}, {}
+
+        class FakeXmpp:
+            def __init__(self, jid, password, **kw):
+                pass
+
+            def register_plugin(self, name):
+                pass
+
+            def add_event_handler(self, ev, fn):
+                handlers[ev] = fn
+
+            def send_presence(self):
+                pass
+
+            def disconnect(self):
+                pass
+
+            def connect(self, host=None, port=None):
+                calls["connect"] = (host, port)
+                calls["tls"] = (self.enable_direct_tls, self.enable_starttls,
+                                self.enable_plaintext)
+
+                async def _fire():
+                    await handlers["session_start"](None)
+                    c._shutdown_requested = True
+                asyncio.ensure_future(_fire())
+                return None
+
+        monkeypatch.setattr(mod.slixmpp, "ClientXMPP", FakeXmpp)
+        c = make_client()
+        c.service_url = "xmpps://xmpp.local:5223"
+        asyncio.run(c.run())
+        assert calls["connect"] == ("xmpp.local", 5223)
+        assert calls["tls"] == (True, False, False)
+
+    def test_ws_url_rejected_before_any_construction(self, monkeypatch):
+        from py import xmpp_client as mod
+        built = []
+
+        class NoBuild:
+            def __init__(self, *a, **k):
+                built.append(a)
+
+        monkeypatch.setattr(mod.slixmpp, "ClientXMPP", NoBuild)
+        c = make_client()
+        c.service_url = "ws://localhost:7071/ws"
+        with pytest.raises(RuntimeError, match="5222"):
+            asyncio.run(c.run())
+        assert built == []  # rejected before touching slixmpp at all

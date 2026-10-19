@@ -34,6 +34,8 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 
 
 class XmppClient:
+    PLUGINS = ("xep_0030", "xep_0066", "xep_0199")
+
     def __init__(self):
         self.XmppAgent = "super-model"
         self.memoryLimit = 10
@@ -66,31 +68,39 @@ class XmppClient:
     async def run(self):
         if not self.bot_username or not self.bot_password or not self.domain:
             raise RuntimeError("XMPP 配置不完整（需要用户名/密码/域名）")
-        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
         jid = f"{self.bot_username}@{self.domain}"
-        host, port, use_ssl = self._parse_service(self.service_url)
+        host, port, use_ssl = self._parse_service(self.service_url)  # fail before any I/O
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
 
-        self.xmpp = slixmpp.Client(jid, self.bot_password)
-        self.xmpp["xep_0030"]  # disco
-        self.xmpp["xep_0066"]  # OOB
-        self.xmpp["xep_0199"]  # keepalive
+        self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password)
+        for plug in self.PLUGINS:
+            self.xmpp.register_plugin(plug)  # disco(0030) / OOB(0066) / keepalive(0199)
         self.xmpp.auto_reconnect = True
         self.xmpp.add_event_handler("session_start", self._on_session_start)
         self.xmpp.add_event_handler("message", self._on_message)
         self.xmpp.add_event_handler("disconnected", self._on_disconnected)
 
         self._ready_future = asyncio.get_running_loop().create_future()
-        await self.xmpp.connect((host, port), use_ssl=use_ssl, use_tls="mandatory" if not use_ssl else False)
+        # slixmpp 1.17: TLS via switches; connect(host, port) returns a
+        # background retry future (never await it) — readiness comes from
+        # session_start, bounded by the 30 s wait below.
+        self.xmpp.enable_direct_tls = bool(use_ssl)
+        self.xmpp.enable_starttls = not use_ssl
+        self.xmpp.enable_plaintext = False
+        self.xmpp.connect(host=host, port=port)
         await asyncio.wait_for(self._ready_future, timeout=30)
 
-        while not self._shutdown_requested:
-            await asyncio.sleep(0.5)
         try:
-            self.xmpp.disconnect()
-        except Exception:
-            pass
-        if self.session:
-            await self.session.close()
+            while not self._shutdown_requested:
+                await asyncio.sleep(0.5)
+        finally:
+            try:
+                self.xmpp.disconnect()
+            except Exception:
+                pass
+            if self.session:
+                await self.session.close()
+                self.session = None
 
     @staticmethod
     def _parse_service(service_url: str):
