@@ -28,6 +28,8 @@ class XmppBotConfig(BaseModel):
     tools_list: List[str] = Field(default_factory=list)
     image_resize_mode: str = "downscale_only"   # off | fit | downscale_only
     image_max_side: int = 1024
+    image_oversize_action: str = "reject"   # off | reject | shrink
+    image_max_mb: int = 20
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetJids: List[str] = Field(default_factory=list)
 
@@ -116,6 +118,10 @@ class XmppBotManager:
                                                      if config.image_resize_mode in ("off", "fit", "downscale_only")
                                                      else "downscale_only")
                 self.bot_client.image_max_side = max(256, min(4096, int(config.image_max_side or 1024)))
+                self.bot_client.image_oversize_action = (config.image_oversize_action
+                                                         if config.image_oversize_action in ("off", "reject", "shrink")
+                                                         else "reject")
+                self.bot_client.image_max_mb = max(1, min(1024, int(config.image_max_mb or 20)))
                 self.bot_client.config = config
                 self.bot_client._manager_ref = __import__("weakref").ref(self)
 

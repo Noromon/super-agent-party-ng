@@ -14035,6 +14035,21 @@ function updateElement(el, rawMarkdown, formatFn) {
                                 </div>
                                 <div class="form-item-hint">{{ t('xmppImageResizeHint') }}</div>
                               </el-form-item>
+                              <el-form-item :label="t('xmppOversize')">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%; flex-wrap:wrap;">
+                                  <el-radio-group v-model="xmppBotConfig.image_oversize_action" @change="autoSaveSettings">
+                                    <el-radio-button value="off">{{ t('xmppOversizeOff') }}</el-radio-button>
+                                    <el-radio-button value="reject">{{ t('xmppOversizeReject') }}</el-radio-button>
+                                    <el-radio-button value="shrink">{{ t('xmppOversizeShrink') }}</el-radio-button>
+                                  </el-radio-group>
+                                  <el-input-number v-if="xmppBotConfig.image_oversize_action !== 'off'"
+                                    v-model="xmppBotConfig.image_max_mb" :min="1" :max="1024" :step="5"
+                                    controls-position="right" @change="autoSaveSettings" />
+                                  <span v-if="xmppBotConfig.image_oversize_action !== 'off'"
+                                        style="font-size:12px; color:#999;">MB</span>
+                                </div>
+                                <div class="form-item-hint">{{ t('xmppOversizeHint') }}</div>
+                              </el-form-item>
                               <el-form-item :label="t('xmppEnvShortcuts')">
                                 <el-button size="small" @click="openEnvPage('toolkit')">{{ t('xmppEnvTools') }}</el-button>
                                 <el-button size="small" @click="openEnvPage('role')">{{ t('xmppEnvAgents') }}</el-button>

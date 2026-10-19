@@ -1586,6 +1586,8 @@ let vue_data = {
       tools_list: [],
       image_resize_mode: 'downscale_only',
       image_max_side: 1024,
+      image_oversize_action: 'reject',
+      image_max_mb: 20,
     },
     isXmppBotRunning: false,
     isXmppStarting: false,

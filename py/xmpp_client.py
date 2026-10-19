@@ -58,6 +58,8 @@ class XmppClient:
         self.tools_list = []
         self.image_resize_mode = "downscale_only"   # off | fit | downscale_only
         self.image_max_side = 1024
+        self.image_oversize_action = "reject"   # off | reject | shrink
+        self.image_max_mb = 20
         self.config = None
         self._is_ready = False
         self._manager_ref = None
@@ -287,35 +289,119 @@ class XmppClient:
             logging.warning("图片缩放跳过（PIL 失败），按原图进入请求", exc_info=True)
             return data, ctype
 
+    _HARD_MAX_BYTES = 512 * 1024 * 1024   # 内存安全垫（仅 off 模式生效）
+
+    @staticmethod
+    def _validate_image(data: bytes) -> bool:
+        """Strict decode check + container-level end signature (PIL is far
+        too lenient about truncated PNG/GIF). Fail-closed on any doubt."""
+        try:
+            import io as _io
+            from PIL import Image
+            img = Image.open(_io.BytesIO(data))
+            img.load()
+        except Exception:
+            return False
+        try:
+            if data[:8] == b"\x89PNG\r\n\x1a\n":
+                return b"IEND" in data[-16:]
+            if data[:2] == b"\xff\xd8":                      # JPEG: EOI near EOF
+                return b"\xff\xd9" in data[-32:]
+            if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                declared = int.from_bytes(data[4:8], "little") + 8
+                return abs(declared - len(data)) <= 1        # RIFF length invariant
+            if data[:3] == b"GIF":
+                return data[-1:] == b"\x3b"                  # GIF trailer
+            if data[:2] == b"BM" and len(data) >= 6:
+                declared = int.from_bytes(data[2:6], "little")
+                return declared == 0 or abs(declared - len(data)) <= 1024
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
+    def _shrink_to_bytes(data: bytes, max_bytes: int):
+        """Lossless-PNG downsweep (LANCZOS x0.7 steps, long-side floor 256)
+        until the image fits max_bytes; the result is treated as the new
+        'original' for every downstream step. None = could not fit / broken."""
+        import io as _io
+        from PIL import Image
+        try:
+            img = Image.open(_io.BytesIO(data))
+            img.load()
+            has_alpha = (img.mode in ("RGBA", "LA", "PA")
+                         or (img.mode == "P" and "transparency" in img.info))
+            if has_alpha and img.mode != "RGBA":
+                img = img.convert("RGBA")
+            for _ in range(12):
+                buf = _io.BytesIO()
+                img.save(buf, "PNG")
+                out = buf.getvalue()
+                if len(out) <= max_bytes:
+                    return out, "image/png"
+                w, h = img.size
+                longest = max(w, h)
+                if longest <= 256:
+                    return None
+                scale = max(256.0 / longest, 0.7)
+                img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
+                                 Image.LANCZOS)
+            return None
+        except Exception:
+            logging.warning("无损缩至门槛失败", exc_info=True)
+            return None
+
     async def _download_as_data_uri(self, url: str):
-        """Returns (data_uri, saved_filename); (None, None) on any refusal."""
+        """Returns (data_uri, saved_filename); (None, None) on any refusal.
+        Streams to completion (aiohttp content.read(n) is a partial read!),
+        then gate -> oversize policy -> disk -> request-resize."""
         if not await self._gate_https(url):
             return None, None
+        action = self.image_oversize_action if self.image_oversize_action in ("off", "reject", "shrink") else "reject"
+        max_bytes = max(1, int(self.image_max_mb or 20)) * 1024 * 1024
         try:
             async with self.session.get(url, ssl=self._aio_ssl(url)) as resp:
                 if resp.status != 200:
                     return None, None
-                data = await resp.content.read(20 * 1024 * 1024 + 1)
-                if len(data) > 20 * 1024 * 1024:
-                    return None, None
                 ctype = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
                 if not ctype.startswith("image/"):
                     ctype = "image/jpeg"
-                # keep a copy in UPLOAD_FILES_DIR so tools/history can re-open it
-                fname = None
-                try:
-                    fname = f"xmpp_in_{int(time.time() * 1000)}.{ctype.rsplit('/', 1)[-1]}"
-                    with open(os.path.join(UPLOAD_FILES_DIR, fname), "wb") as f:
-                        f.write(data)
-                except OSError:
-                    fname = None
-                send_data, send_ctype = self._resize_if_needed(
-                    data, ctype, self.image_resize_mode, self.image_max_side)
-                return (f"data:{send_ctype};base64,"
-                        + base64.b64encode(send_data).decode()), fname
+                buf = bytearray()
+                async for chunk in resp.content.iter_chunked(65536):
+                    buf.extend(chunk)
+                    if action == "reject" and len(buf) > max_bytes:
+                        logging.warning("XMPP 图片超门槛拒绝(读取掐断) %s: >%d bytes", url, max_bytes)
+                        return None, None
+                    if len(buf) > self._HARD_MAX_BYTES:
+                        logging.warning("XMPP 图片超内存安全垫拒绝 %s: >%d bytes", url, self._HARD_MAX_BYTES)
+                        return None, None
+                data = bytes(buf)
         except Exception as e:
             logging.warning("XMPP 图片下载失败 %s: %s", url, e)
             return None, None
+        # 完整性闸门（fail-closed）：截断/坏图不进落盘、不进请求
+        if not self._validate_image(data):
+            logging.warning("XMPP 图片完整性校验失败(%d bytes)，已丢弃: %s", len(data), url)
+            return None, None
+        # 超限缩小：无损 PNG 迭代缩至门槛内，此后当"原图"用
+        if action == "shrink" and len(data) > max_bytes:
+            shrunk = self._shrink_to_bytes(data, max_bytes)
+            if shrunk is None:
+                logging.warning("XMPP 图片无法无损缩至门槛(%d bytes)，已拒绝: %s", max_bytes, url)
+                return None, None
+            data, ctype = shrunk
+        # keep a copy in UPLOAD_FILES_DIR so tools/history can re-open it
+        fname = None
+        try:
+            fname = f"xmpp_in_{int(time.time() * 1000)}.{ctype.rsplit('/', 1)[-1]}"
+            with open(os.path.join(UPLOAD_FILES_DIR, fname), "wb") as f:
+                f.write(data)
+        except OSError:
+            fname = None
+        send_data, send_ctype = self._resize_if_needed(
+            data, ctype, self.image_resize_mode, self.image_max_side)
+        return (f"data:{send_ctype};base64,"
+                + base64.b64encode(send_data).decode()), fname
 
     async def _inline_remote_images(self, content):
         """http(s) image parts -> downloaded base64 data URIs; failures keep
@@ -334,7 +420,8 @@ class XmppClient:
                                 "_saved": fname or ""})
                 else:
                     out.append({"type": "text", "text":
-                                f"[图片下载失败；若为自签名主机请先在 SAP 设置→XMPP 卡片完成证书信任。原始URL: {url}]"})
+                                f"[图片下载失败（可能原因：自签名主机需先在 SAP 设置→XMPP 卡片信任证书、"
+                                f"图片截断损坏、或超出大小门槛）。原始URL: {url}]"})
             else:
                 out.append(part)
         return out

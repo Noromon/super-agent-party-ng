@@ -50,6 +50,8 @@ def make_client():
     c.tools_list = []
     c.image_resize_mode = "downscale_only"
     c.image_max_side = 1024
+    c.image_oversize_action = "reject"
+    c.image_max_mb = 20
     c.sent = []
 
     async def fake_send(jid, text):
@@ -169,6 +171,117 @@ class TestCommandRouting:
         assert out == []  # gated, no LLM, no reply
 
 
+class _ChunkStream:
+    def __init__(self, chunks):
+        self.chunks = chunks
+        self.served = 0
+        self.total = len(chunks)
+
+    async def iter_chunked(self, _n):
+        for c in self.chunks:
+            self.served += 1
+            yield c
+
+
+class _FakeResp:
+    def __init__(self, stream, status=200, ctype="image/png"):
+        self.content = stream
+        self.status = status
+        self.headers = {"Content-Type": ctype + "; charset=binary"}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _fake_session(body, pieces=1, status=200, ctype="image/png"):
+    size = max(1, (len(body) + pieces - 1) // pieces)
+    stream = _ChunkStream([body[i:i + size] for i in range(0, len(body), size)] or [b""])
+
+    class FakeSession:
+        def get(self, url, ssl=None):
+            return _FakeResp(stream, status=status, ctype=ctype)
+    FakeSession.stream = stream
+    return FakeSession()
+
+
+class TestOversizeAndIntegrity:
+    @staticmethod
+    def _png(w, h, rgba=False):
+        import io as _io
+        from PIL import Image
+        img = Image.new("RGBA" if rgba else "RGB", (w, h), (9, 99, 199, 128) if rgba else (9, 99, 199))
+        buf = _io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+
+    @staticmethod
+    def _noise_png(w, h):
+        import io as _io
+        import os as _os
+        from PIL import Image
+        img = Image.frombytes("RGB", (w, h), _os.urandom(w * h * 3))
+        buf = _io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+
+    def test_validate_image_pure(self):
+        good = self._png(32, 32)
+        assert XmppClient._validate_image(good) is True
+        assert XmppClient._validate_image(good[:-10]) is False   # truncated
+        assert XmppClient._validate_image(b"not-an-image") is False
+
+    def test_truncated_stream_rejected_by_gate(self):
+        # the exact field bug: last bytes "missing" -> fail-closed, never to model
+        c = make_client()
+        body = self._png(200, 150)
+        c.session = _fake_session(body[:-16], pieces=5)
+        assert asyncio.run(c._download_as_data_uri("http://files.local/x.png")) == (None, None)
+
+    def test_reject_stops_stream_early(self):
+        c = make_client()
+        c.image_oversize_action, c.image_max_mb = "reject", 1
+        body = self._noise_png(600, 600)          # ~1.08MB incompressible PNG
+        assert len(body) > 1024 * 1024
+        sess = _fake_session(body, pieces=40)
+        c.session = sess
+        assert asyncio.run(c._download_as_data_uri("http://files.local/big.png")) == (None, None)
+        assert sess.stream.served < sess.stream.total   # 掐断，未传完
+
+    def test_shrink_oversize_becomes_new_original(self):
+        import base64 as b64m
+        import io as _io
+        from PIL import Image
+        c = make_client()
+        c.image_oversize_action, c.image_max_mb = "shrink", 1
+        c.image_resize_mode = "off"               # isolate the shrink layer
+        body = self._noise_png(700, 700)
+        assert len(body) > 1024 * 1024
+        sess = _fake_session(body, pieces=40)
+        c.session = sess
+        uri, fname = asyncio.run(c._download_as_data_uri("http://files.local/big.png"))
+        assert sess.stream.served == sess.stream.total     # 完整传完
+        assert uri and uri.startswith("data:image/png;base64,")
+        raw = b64m.b64decode(uri.split(",", 1)[1])
+        assert len(raw) <= 1024 * 1024
+        assert max(Image.open(_io.BytesIO(raw)).size) < 700
+        assert fname is None or fname.endswith(".png")     # 落盘"原图"=缩小版
+
+    def test_off_mode_no_limit(self):
+        c = make_client()
+        c.image_oversize_action = "off"
+        body = self._png(80, 60)
+        c.session = _fake_session(body, pieces=3)
+        uri, _f = asyncio.run(c._download_as_data_uri("http://files.local/x.png"))
+        assert uri and uri.startswith("data:image/png;base64,")
+
+    def test_shrink_floor_gives_up_cleanly(self):
+        # threshold below the 256px floor output -> clean None, no crash
+        assert XmppClient._shrink_to_bytes(self._noise_png(260, 260), 512) is None
+
+
 class TestMobileLayer:
     """WP1 inline / tools override / persistence helpers."""
 
@@ -188,58 +301,21 @@ class TestMobileLayer:
         assert out[1]["type"] == "text" and "原始URL" in out[1]["text"]
         assert out[2]["text"] == "附言"
 
-    def test_download_as_data_uri_structure(self):
+    def test_download_streams_chunks_to_completion(self):
+        # aiohttp content.read(n) is a PARTIAL read — the pipeline must
+        # consume iter_chunked to EOF; fake delivers bytes in pieces
         c = make_client()
-        body = b"\x89PNG fake image bytes"
-
-        class FakeContent:
-            async def read(self, _n):
-                return body
-
-        class FakeResp:
-            status = 200
-            headers = {"Content-Type": "image/png; charset=x"}
-            content = FakeContent()
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                return False
-
-        class FakeSession:
-            def get(self, url, ssl=None):
-                return FakeResp()
-        c.session = FakeSession()
-        uri, _fname = asyncio.run(c._download_as_data_uri("http://files.local/x.png"))
-        assert uri.startswith("data:image/png;base64,")
+        body = TestOversizeAndIntegrity._png(60, 40)
+        c.session = _fake_session(body, pieces=7)
         import base64 as b64m
+        uri, _f = asyncio.run(c._download_as_data_uri("http://files.local/x.png"))
+        assert uri.startswith("data:image/png;base64,")
         assert b64m.b64decode(uri.split(",", 1)[1]) == body
 
-    def test_download_oversize_rejected(self):
+    def test_download_bad_status(self):
         c = make_client()
-
-        class FakeContent:
-            async def read(self, _n):
-                return b"A" * (20 * 1024 * 1024 + 2)
-
-        class FakeResp:
-            status = 200
-            headers = {"Content-Type": "image/png"}
-            content = FakeContent()
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                return False
-
-        class FakeSession:
-            def get(self, url, ssl=None):
-                return FakeResp()
-        c.session = FakeSession()
-        uri, fname = asyncio.run(c._download_as_data_uri("http://files.local/big.png"))
-        assert uri is None and fname is None
+        c.session = _fake_session(b"x", status=404)
+        assert asyncio.run(c._download_as_data_uri("http://files.local/x.png")) == (None, None)
 
     def test_tools_override_modes(self):
         c = make_client()
@@ -347,26 +423,7 @@ class TestResizeIfNeeded:
         c = make_client()
         c.image_resize_mode, c.image_max_side = "downscale_only", 64
         body = TestResizeIfNeeded._png(500, 400)
-
-        class FakeContent:
-            async def read(self, _n):
-                return body
-
-        class FakeResp:
-            status = 200
-            headers = {"Content-Type": "image/png"}
-            content = FakeContent()
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *a):
-                return False
-
-        class FakeSession:
-            def get(self, url, ssl=None):
-                return FakeResp()
-        c.session = FakeSession()
+        c.session = _fake_session(body, pieces=4)
         import base64 as b64m
         import io as _io
         from PIL import Image
