@@ -232,9 +232,20 @@ let vue_methods = {
     }
     return originalUrl;
   },
+  // A2: 系统提示词改动写入当前会话副本并持久化（防过期副本在重启后覆盖顶层值）
+  async _persistSystemPrompt() {
+    if (!this.conversationId) return;
+    const conv = this.conversations.find(c => c.id === this.conversationId);
+    if (conv) {
+      conv.system_prompt = this.system_prompt;
+      this.markConvDirty(conv.id);
+      await this.flushDirtyConversations();
+    }
+  },
   async resetMessage(index) {
     this.messages[index].content = " ";
     this.system_prompt = " ";
+    await this._persistSystemPrompt();
     await this.autoSaveSettings();
   },
 
@@ -280,6 +291,7 @@ let vue_methods = {
     this.showEditDialog = false;
     if (this.editType === 'system') {
       this.system_prompt = this.editContent;
+      await this._persistSystemPrompt();
     }
     if (this.editType === 'user') {
       // 移除this.editIndex之后的所有消息
@@ -289,6 +301,11 @@ let vue_methods = {
       await this.sendMessage();
     }else{
       this.messages[this.editIndex].content = this.editContent; // 更新this.editIndex对应的消息内容
+      // A2: 编辑的若是系统消息本体，同步顶层与会话副本
+      if (this.editIndex === 0 && this.messages[0] && this.messages[0].role === 'system') {
+        this.system_prompt = this.editContent;
+        await this._persistSystemPrompt();
+      }
     }
     await this.autoSaveSettings();
   },
@@ -973,7 +990,13 @@ let vue_methods = {
           this.mainAgent = 'super-model';
         }
         this.showHistoryDialog = false;
-        this.system_prompt = conversation.system_prompt?conversation.system_prompt:" ";
+        // A2: 会话副本缺失/纯空白 → 保留顶层恢复值（防过期副本覆盖重启恢复的正确值）
+        const _spConv = conversation.system_prompt;
+        if (typeof _spConv === 'string' && _spConv.trim()) {
+          this.system_prompt = _spConv;
+        } else if (!(typeof this.system_prompt === 'string' && this.system_prompt.trim())) {
+          this.system_prompt = " ";
+        }
         this.draftConversationGroupId = conversation.groupId || 'default';
         this.activeConversationGroupId = conversation.groupId || 'default';
       }
@@ -1003,6 +1026,12 @@ let vue_methods = {
           }, 200);
       });
 
+      // A2: 恢复结果回写会话副本（自愈旧污染数据），随后才允许全局保存
+      if (conversation && conversation.system_prompt !== this.system_prompt) {
+        conversation.system_prompt = this.system_prompt;
+        this.markConvDirty(convId);
+        this.flushDirtyConversations();
+      }
       this.autoSaveSettings();
     },
     formatConversationTime(timestamp) {
@@ -3088,151 +3117,13 @@ let vue_methods = {
 
                         // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
                         if (delta.tool_progress) {
-                            const progress = delta.tool_progress;
-                            let toolCallId = progress.tool_call_id || progress.id;
-
-                            if (!toolCallId) {
-                                const existingCall = toolCallStack.find(c => c.name === progress.name && !c.resolved);
-                                if (existingCall) { toolCallId = existingCall.id; }
-                                else {
-                                    toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                                    toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
-                                }
-                            } else if (!toolCallStack.find(c => c.id === toolCallId)) {
-                                toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
-                            }
-
-                            let accArgs = this.toolArgsAccumulator[toolCallId] || "";
-                            if (progress.arguments !== undefined) {
-                                if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
-                                    accArgs = progress.arguments;
-                                } else {
-                                    accArgs += progress.arguments;
-                                }
-                                this.toolArgsAccumulator[toolCallId] = accArgs;
-                            }
-
-                            const b = getBlock('tool_call', toolCallId, progress.name);
-                            b.args = this.truncateDisplayContent(accArgs);
-                            // 不再生成 HTML 字符串
-                            this.requestScrollToBottom();
+                            this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
                             continue;
                         }
 
-                        // D. 工具结果 / 错误 / 审批 —— 仅更新 displayBlocks + backend_content
+                        // D. 工具结果 / 错误 / 审批 —— 共用摄取器（与 resume 重放同一事实源）
                         if (delta.tool_content) {
-                            const tool = delta.tool_content;
-                            const toolName = tool.title || 'unknown';
-                            let toolCallId = delta.tool_call_id || delta.async_tool_id;
-
-                            if (tool.type === 'call') {
-                                if (!toolCallId) toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                                toolCallStack.push({ id: toolCallId, name: toolName, resolved: false });
-                            } else {
-                                if (!toolCallId) {
-                                    const pendingCall = toolCallStack.find(c => c.name === toolName && !c.resolved);
-                                    if (pendingCall) {
-                                        toolCallId = pendingCall.id; pendingCall.resolved = true;
-                                    } else { toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
-                                }
-                                const callItem = toolCallStack.find(c => c.id === toolCallId);
-                                if (callItem) callItem.resolved = true;
-                            }
-
-                            if (delta.async_tool_id && (tool.type === 'tool_result' || tool.type === 'error')) {
-                                if (this.asyncToolsID) {
-                                    const index = this.asyncToolsID.indexOf(delta.async_tool_id);
-                                    if (index > -1) {
-                                        this.asyncToolsID.splice(index, 1);
-                                        const stackIndex = toolCallStack.findIndex(c => c.id === delta.async_tool_id);
-                                        if (stackIndex > -1) toolCallStack.splice(stackIndex, 1);
-                                    }
-                                }
-                            }
-
-                            let isApproval = false;
-                            let approvalData = null;
-
-                            if (tool.type === 'tool_approval') {
-                                isApproval = true;
-                                try { approvalData = JSON.parse(tool.content); } catch (e) { }
-                            } else if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.includes('"approval_required"')) {
-                                try {
-                                    const temp = JSON.parse(tool.content);
-                                    if (temp.type === 'approval_required') { isApproval = true; approvalData = temp; }
-                                } catch (e) { }
-                            }
-
-                            // 审批逻辑
-                            if (isApproval && approvalData) {
-                                const b = getBlock('approval', toolCallId, toolName);
-                                b.data = approvalData;
-                                // 围栏快照：审批必须记住产生它的流，停止/换流后不得借用新流身份执行
-                                approvalData._stream_id = this._currentStreamId || null;
-                                this.approvalMap[toolCallId] = approvalData;
-
-                                // 不再生成 HTML，直接更新 backend_content
-                                currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: "{}" });
-                                currentMsg.backend_content.push({ role: 'assistant', content: '' });
-                                this.requestScrollToBottom();
-                            }
-                            else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
-                                const targetBlock = getBlock('tool_result', toolCallId, toolName);
-                                targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
-                                // 更新 backend_content
-                                const lastToolIndex = currentMsg.backend_content.length - 1;
-                                for (let i = lastToolIndex; i >= 0; i--) {
-                                    if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
-                                        currentMsg.backend_content[i].content += tool.content;
-                                        break;
-                                    }
-                                }
-                            } else {
-                                let bType = 'tool_result';
-                                if (tool.type === 'error') bType = 'error';
-                                else if (tool.type === 'call') bType = 'tool_call';
-
-                                const targetBlock = getBlock(bType, toolCallId, toolName);
-                                
-                                // 截断显示内容（只影响 UI 显示）
-                                if (tool.type === 'call') {
-                                    targetBlock.args = this.truncateDisplayContent(tool.content);
-                                } else {
-                                    targetBlock.content = this.truncateDisplayContent(tool.content);
-                                }
-
-                                // 后端消息存储使用原始内容（可能截断，保护 AI 上下文）
-                                let rawContent = tool.content || '';
-                                if (tool.type === 'call') {
-                                    let last = currentMsg.backend_content[currentMsg.backend_content.length - 1];
-                                    if (last.role === 'assistant') {
-                                        if (!last.tool_calls) last.tool_calls = [];
-                                        if (!last.tool_calls.some(tc => tc.id === toolCallId)) {
-                                            last.tool_calls.push({ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } });
-                                        }
-                                    } else {
-                                        currentMsg.backend_content.push({ role: 'assistant', content: null, tool_calls: [{ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } }] });
-                                    }
-                                } else if (tool.type === 'tool_result' || tool.type === 'tool_result_stream' || tool.type === 'error') {
-                                    const hide = this.toolsSettings?.hideToolResults?.enabled && tool.type === 'tool_result';
-                                    rawContent = hide ? '<hide to save token>' : rawContent;
-                                    let updated = false;
-                                    for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
-                                        if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
-                                            currentMsg.backend_content[i].content = rawContent;
-                                            updated = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!updated) {
-                                        currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: rawContent });
-                                    }
-                                    if (currentMsg.backend_content[currentMsg.backend_content.length - 1].role !== 'assistant') {
-                                        currentMsg.backend_content.push({ role: 'assistant', content: '' });
-                                    }
-                                }
-                            }
-                            this.requestScrollToBottom();
+                            this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
                         }
 
                         if (delta.audio?.data) {
@@ -3366,6 +3257,7 @@ let vue_methods = {
                     conv.timestamp = Date.now();
                     conv.fileLinks = this.fileLinks;
                     conv.groupId = conv.groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
+                    conv.system_prompt = this.system_prompt;
                 }
             }
             this.markConvDirty(this.conversationId);
@@ -4154,59 +4046,19 @@ let vue_methods = {
                                 }
 
                                 if (delta.tool_progress) {
-                                    const progress = delta.tool_progress;
-                                    let toolCallId = progress.tool_call_id || progress.id;
-                                    if (!toolCallId) {
-                                        const existingCall = toolCallStack.find(c => c.name === progress.name && !c.resolved);
-                                        if (existingCall) { toolCallId = existingCall.id; }
-                                        else {
-                                            toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                                            toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
-                                        }
-                                    } else if (!toolCallStack.find(c => c.id === toolCallId)) {
-                                        toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
-                                    }
-                                    let accArgs = this.toolArgsAccumulator[toolCallId] || "";
-                                    if (progress.arguments !== undefined) {
-                                        if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
-                                            accArgs = progress.arguments;
-                                        } else {
-                                            accArgs += progress.arguments;
-                                        }
-                                        this.toolArgsAccumulator[toolCallId] = accArgs;
-                                    }
-                                    const b = getBlock('tool_call', toolCallId, progress.name);
-                                    b.args = this.truncateDisplayContent(accArgs);
-                                    this.requestScrollToBottom();
+                                    this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
                                     continue;
                                 }
 
                                 if (delta.tool_content) {
-                                    const tool = delta.tool_content;
-                                    const toolName = tool.title || 'unknown';
-                                    let toolCallId = delta.tool_call_id || delta.async_tool_id;
-                                    if (tool.type === 'call') {
-                                        if (!toolCallId) toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                                        toolCallStack.push({ id: toolCallId, name: toolName, resolved: false });
-                                    } else {
-                                        if (!toolCallId) {
-                                            const pendingCall = toolCallStack.find(c => c.name === toolName && !c.resolved);
-                                            if (pendingCall) { toolCallId = pendingCall.id; pendingCall.resolved = true; }
-                                            else { toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
-                                        }
-                                        const callItem = toolCallStack.find(c => c.id === toolCallId);
-                                        if (callItem) callItem.resolved = true;
+                                    this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
+                                }
+
+                                if (delta.async_tool_id) {
+                                    if (!this.asyncToolsID) this.asyncToolsID = [];
+                                    if (!this.asyncToolsID.includes(delta.async_tool_id)) {
+                                        this.asyncToolsID.push(delta.async_tool_id);
                                     }
-                                    let bType = 'tool_result';
-                                    if (tool.type === 'error') bType = 'error';
-                                    else if (tool.type === 'call') bType = 'tool_call';
-                                    const targetBlock = getBlock(bType, toolCallId, toolName);
-                                    if (tool.type === 'call') {
-                                        targetBlock.args = this.truncateDisplayContent(tool.content);
-                                    } else {
-                                        targetBlock.content = this.truncateDisplayContent(tool.content);
-                                    }
-                                    this.requestScrollToBottom();
                                 }
 
                                 this.sendMessagesToExtension();
@@ -4226,6 +4078,9 @@ let vue_methods = {
                     currentMsg.ttsChunks.push(tts_buffer);
                 }
 
+                // 正文写回：resume 路径此前漏调，导致断线重连后 backend_content 无正文（历史遗忘）
+                this._syncAssistantBody(currentMsg);
+
                 console.log(`[StreamResume] 断点续传成功，已恢复 ${chunkIndex - fromIndex} 个 chunk`);
                 return { newChunkIndex: chunkIndex, newStreamId };
             } catch (retryError) {
@@ -4239,6 +4094,134 @@ let vue_methods = {
         // 所有重试均失败
         console.error('[StreamResume] 所有重试均失败');
         return null;
+    },
+
+    // C-2: tool_progress 帧摄取单一来源 —— 主循环与 resume 重放共用。
+    _ingestToolProgress(progress, getBlock, toolCallStack) {
+        let toolCallId = progress.tool_call_id || progress.id;
+        if (!toolCallId) {
+            const existingCall = toolCallStack.find(c => c.name === progress.name && !c.resolved);
+            if (existingCall) { toolCallId = existingCall.id; }
+            else {
+                toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
+            }
+        } else if (!toolCallStack.find(c => c.id === toolCallId)) {
+            toolCallStack.push({ id: toolCallId, name: progress.name, resolved: false });
+        }
+        let accArgs = this.toolArgsAccumulator[toolCallId] || "";
+        if (progress.arguments !== undefined) {
+            if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
+                accArgs = progress.arguments;
+            } else {
+                accArgs += progress.arguments;
+            }
+            this.toolArgsAccumulator[toolCallId] = accArgs;
+        }
+        const b = getBlock('tool_call', toolCallId, progress.name);
+        b.args = this.truncateDisplayContent(accArgs);
+        this.requestScrollToBottom();
+    },
+
+    // C-2+C-6: tool_content 帧摄取单一来源 —— displayBlocks + backend_content（LLM 可见链）
+    // + 审批帧/异步工具 id 摘除。修复前 resume 重放路径整段跳过 backend_content（C-2）
+    // 且丢 approval_required/async 帧（C-6=审批按钮不重现、工具链永久卡死）。
+    _ingestToolFrame(tool, delta, currentMsg, getBlock, toolCallStack) {
+        if (!Array.isArray(currentMsg.backend_content)) currentMsg.backend_content = [];
+        const toolName = tool.title || 'unknown';
+        let toolCallId = delta.tool_call_id || delta.async_tool_id;
+        if (tool.type === 'call') {
+            if (!toolCallId) toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            toolCallStack.push({ id: toolCallId, name: toolName, resolved: false });
+        } else {
+            if (!toolCallId) {
+                const pendingCall = toolCallStack.find(c => c.name === toolName && !c.resolved);
+                if (pendingCall) { toolCallId = pendingCall.id; pendingCall.resolved = true; }
+                else { toolCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
+            }
+            const callItem = toolCallStack.find(c => c.id === toolCallId);
+            if (callItem) callItem.resolved = true;
+        }
+        if (delta.async_tool_id && (tool.type === 'tool_result' || tool.type === 'error')) {
+            if (this.asyncToolsID) {
+                const index = this.asyncToolsID.indexOf(delta.async_tool_id);
+                if (index > -1) {
+                    this.asyncToolsID.splice(index, 1);
+                    const stackIndex = toolCallStack.findIndex(c => c.id === delta.async_tool_id);
+                    if (stackIndex > -1) toolCallStack.splice(stackIndex, 1);
+                }
+            }
+        }
+        let isApproval = false;
+        let approvalData = null;
+        if (tool.type === 'tool_approval') {
+            isApproval = true;
+            try { approvalData = JSON.parse(tool.content); } catch (e) { }
+        } else if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.includes('"approval_required"')) {
+            try {
+                const temp = JSON.parse(tool.content);
+                if (temp.type === 'approval_required') { isApproval = true; approvalData = temp; }
+            } catch (e) { }
+        }
+        if (isApproval && approvalData) {
+            const b = getBlock('approval', toolCallId, toolName);
+            b.data = approvalData;
+            // 围栏快照：审批必须记住产生它的流，停止/换流后不得借用新流身份执行
+            approvalData._stream_id = this._currentStreamId || null;
+            this.approvalMap[toolCallId] = approvalData;
+            currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: "{}" });
+            currentMsg.backend_content.push({ role: 'assistant', content: '' });
+            this.requestScrollToBottom();
+        } else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
+            const targetBlock = getBlock('tool_result', toolCallId, toolName);
+            targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
+            for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
+                if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
+                    currentMsg.backend_content[i].content += tool.content;
+                    break;
+                }
+            }
+        } else {
+            let bType = 'tool_result';
+            if (tool.type === 'error') bType = 'error';
+            else if (tool.type === 'call') bType = 'tool_call';
+            const targetBlock = getBlock(bType, toolCallId, toolName);
+            if (tool.type === 'call') {
+                targetBlock.args = this.truncateDisplayContent(tool.content);
+            } else {
+                targetBlock.content = this.truncateDisplayContent(tool.content);
+            }
+            let rawContent = tool.content || '';
+            if (tool.type === 'call') {
+                let last = currentMsg.backend_content[currentMsg.backend_content.length - 1];
+                if (last && last.role === 'assistant') {
+                    if (!last.tool_calls) last.tool_calls = [];
+                    if (!last.tool_calls.some(tc => tc.id === toolCallId)) {
+                        last.tool_calls.push({ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } });
+                    }
+                } else {
+                    currentMsg.backend_content.push({ role: 'assistant', content: null, tool_calls: [{ id: toolCallId, type: 'function', function: { name: tool.title, arguments: tool.content || "{}" } }] });
+                }
+            } else if (tool.type === 'tool_result' || tool.type === 'tool_result_stream' || tool.type === 'error') {
+                const hide = this.toolsSettings?.hideToolResults?.enabled && tool.type === 'tool_result';
+                rawContent = hide ? '<hide to save token>' : rawContent;
+                let updated = false;
+                for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
+                    if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
+                        currentMsg.backend_content[i].content = rawContent;
+                        updated = true;
+                        break;
+                    }
+                }
+                if (!updated) {
+                    currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: rawContent });
+                }
+                if (currentMsg.backend_content[currentMsg.backend_content.length - 1].role !== 'assistant') {
+                    currentMsg.backend_content.push({ role: 'assistant', content: '' });
+                }
+            }
+        }
+        this.requestScrollToBottom();
     },
 
     // 将 pure_content 正文写回 backend_content 尾部 assistant 空项与 content 字段。
