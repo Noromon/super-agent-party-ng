@@ -11,6 +11,7 @@ import socket
 import errno
 from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
+from py import auth as sap_auth
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
 from py import llm_gate
@@ -663,6 +664,7 @@ def get_client_class(config, provider_id):
 from py.node_runner import node_mgr
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    sap_auth.write_token_file(USER_DATA_DIR)
     # --- [核心防御] 立即清理系统环境变量中的 SOCKS 代理，防止 httpx 崩溃 ---
     for env_key in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
         val = os.environ.get(env_key, "")
@@ -904,27 +906,57 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# M2 (X-5): 全站通配 CORS 已拆除。仅 /v1 与 /mcp（用户保留的对外接口）响应跨源，
+# 内部 API 一律同源 + session token；OPTIONS 预检只对这两个前缀应答。
+_EXTERNAL_PREFIXES = ("/v1", "/mcp")
 
 @app.middleware("http")
-async def cors_options_workaround(request: Request, call_next):
-    if request.method == "OPTIONS":
-        return Response(
-            status_code=200,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "*",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Max-Age": "86400",   # 预检缓存 24 h
-            }
-        )
+async def external_api_cors(request: Request, call_next):
+    path = request.url.path
+    if path.startswith(_EXTERNAL_PREFIXES):
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content, Content-Type, Accept",
+                    "Access-Control-Max-Age": "86400",
+                }
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
     return await call_next(request)
+
+@app.middleware("http")
+async def auth_guard(request: Request, call_next):
+    # M2: loopback session-token kernel (X-1/X-2/X-10)
+    if not sap_auth.is_exempt(request.url.path):
+        if not sap_auth.host_ok(request):
+            return JSONResponse(status_code=403,
+                                content={"error": {"message": "forbidden host"}})
+        if not sap_auth.origin_ok(request):
+            return JSONResponse(status_code=403,
+                                content={"error": {"message": "forbidden origin"}})
+        if not sap_auth.token_ok(request):
+            return JSONResponse(status_code=401,
+                                content={"error": {"message": "missing or invalid session token"}})
+    return await call_next(request)
+
+@app.get("/session_token")
+async def session_token(request: Request):
+    # Same-origin bootstrap: browser pages fetch this once; the Lax cookie then
+    # rides along on all fetch AND WebSocket handshakes automatically.
+    if not sap_auth.origin_ok(request):
+        return JSONResponse(status_code=403,
+                            content={"error": {"message": "forbidden origin"}})
+    if sap_auth.DISABLED:
+        return JSONResponse(content={"token": "", "disabled": True})
+    resp = JSONResponse(content={"token": sap_auth.SESSION_TOKEN})
+    resp.set_cookie(sap_auth.COOKIE, sap_auth.SESSION_TOKEN,
+                    httponly=False, samesite="lax", secure=False)
+    return resp
 
 async def t(text: str) -> str:
     global locales
@@ -8327,6 +8359,9 @@ def hotwords_to_json(input_str):
 # ASR WebSocket处理
 @app.websocket("/ws/asr")
 async def asr_websocket_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     
     # 生成唯一的连接ID
@@ -8901,6 +8936,9 @@ from py.vts_manager import vts_instance
 
 @app.websocket("/ws/tts")
 async def tts_websocket_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     await tts_manager.connect_main(websocket)
     try:
         while True:
@@ -8994,6 +9032,9 @@ async def tts_websocket_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/vrm")
 async def vrm_websocket_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     """VRM 窗口 WebSocket：接收主窗口发来的数据"""
     await tts_manager.connect_vrm(websocket)
     try:
@@ -9013,6 +9054,9 @@ async def vrm_websocket_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/subtitles")
 async def subtitles_websocket_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     """字幕叠加层专用端点：不参与音频播放判断"""
     await tts_manager.connect_overlay(websocket)
     try:
@@ -11926,6 +11970,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
 settings_lock = asyncio.Lock()
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     # 1. 建立连接
     await ws_manager.connect(websocket)
     print(f"[DEBUG] WebSocket连接建立成功")
