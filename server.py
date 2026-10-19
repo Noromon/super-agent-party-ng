@@ -2267,6 +2267,14 @@ async def message_without_images(messages: List[Dict]) -> List[Dict]:
                             break
     return messages
 
+def _append_note(content, note: str):
+    """Append a text note to str-or-list message content.
+    Caution: list += str would splat the string character-by-character."""
+    if isinstance(content, list):
+        return content + [{"type": "text", "text": note}]
+    return content + note
+
+
 async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> List[Dict]:
     media_items = []
     index = 0
@@ -2318,7 +2326,9 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                         cache_file = os.path.join(UPLOAD_FILES_DIR, f"{file_hash}.txt")
                         if os.path.exists(cache_file):
                             with open(cache_file, "r", encoding='utf-8') as f:
-                                messages[index]['content'] += f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n"
+                                messages[index]['content'] = _append_note(
+                                    messages[index]['content'],
+                                    f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n")
                         else:
                             # 根据输入类型调整提示词
                             prompt_text = "请仔细描述这段视频中的内容，包含视频中发生的事件、场景变化、人物动作以及关键细节等信息。" if media_key == "video_url" else "请仔细描述图片中的内容，包含图片中可能存在的文字、数字、颜色、形状、大小、位置、人物、物体、场景等信息。"
@@ -2342,7 +2352,9 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                                 **extra
                             )
                             result_text = str(response.choices[0].message.content)
-                            messages[index]['content'] += f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{result_text}\n\n"
+                            messages[index]['content'] = _append_note(
+                                messages[index]['content'],
+                                f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{result_text}\n\n")
                             
                             with open(cache_file, "w", encoding='utf-8') as f:
                                 f.write(result_text)
@@ -2359,7 +2371,9 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                         cache_file = os.path.join(UPLOAD_FILES_DIR, f"{file_hash}.txt")
                         if os.path.exists(cache_file):
                             with open(cache_file, "r", encoding='utf-8') as f:
-                                messages[index]['content'] += f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n"
+                                messages[index]['content'] = _append_note(
+                                    messages[index]['content'],
+                                    f"\n\nsystem: 用户发送的{media_name}(哈希值：{file_hash})信息如下：\n\n{f.read()}\n\n")
                         else:
                             if isinstance(messages[index]['content'], str):
                                 messages[index]['content'] =[{"type": "text", "text": messages[index]['content']}]

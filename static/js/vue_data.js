@@ -1577,6 +1577,8 @@ let vue_data = {
       extra_outbound_dirs: [],
       tools_mode: 'inherit',
       tools_list: [],
+      image_resize_mode: 'downscale_only',
+      image_max_side: 1024,
     },
     isXmppBotRunning: false,
     isXmppStarting: false,

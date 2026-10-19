@@ -48,6 +48,8 @@ def make_client():
     c.extra_outbound_dirs = []
     c.tools_mode = "inherit"
     c.tools_list = []
+    c.image_resize_mode = "downscale_only"
+    c.image_max_side = 1024
     c.sent = []
 
     async def fake_send(jid, text):
@@ -295,6 +297,82 @@ class TestIncomingImages:
         m2 = msg(body=f"图 {b64} 结束")
         uris2, _kept2 = c._extract_incoming_images(m2, m2["body"])
         assert uris2 == [b64]
+
+
+class TestResizeIfNeeded:
+    @staticmethod
+    def _png(w, h, rgba=False):
+        import io as _io
+        from PIL import Image
+        img = Image.new("RGBA" if rgba else "RGB", (w, h), (200, 30, 30, 120) if rgba else (200, 30, 30))
+        buf = _io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+
+    def test_off_passthrough(self):
+        data = self._png(300, 200)
+        out, ct = XmppClient._resize_if_needed(data, "image/png", "off", 100)
+        assert out is data and ct == "image/png"
+
+    def test_downscale_shrinks_small_untouched(self):
+        big, small = self._png(300, 200), self._png(50, 40)
+        out, ct = XmppClient._resize_if_needed(big, "image/png", "downscale_only", 100)
+        assert out is not big
+        from PIL import Image
+        import io as _io
+        assert max(Image.open(_io.BytesIO(out)).size) == 100
+        out2, _ = XmppClient._resize_if_needed(small, "image/png", "downscale_only", 100)
+        assert out2 is small   # 只缩小不放大
+
+    def test_fit_enlarges_to_side(self):
+        from PIL import Image
+        import io as _io
+        out, ct = XmppClient._resize_if_needed(self._png(50, 40), "image/png", "fit", 100)
+        assert max(Image.open(_io.BytesIO(out)).size) == 100
+
+    def test_alpha_survives(self):
+        from PIL import Image
+        import io as _io
+        out, ct = XmppClient._resize_if_needed(
+            self._png(400, 300, rgba=True), "image/png", "downscale_only", 128)
+        img = Image.open(_io.BytesIO(out))
+        assert ct == "image/png" and img.mode == "RGBA"
+
+    def test_corrupt_bytes_passthrough(self):
+        out, ct = XmppClient._resize_if_needed(b"not-an-image", "image/jpeg", "fit", 512)
+        assert out == b"not-an-image"
+
+    def test_download_wires_resize(self, monkeypatch):
+        # download pipeline must resize the request copy, keep original on disk
+        c = make_client()
+        c.image_resize_mode, c.image_max_side = "downscale_only", 64
+        body = TestResizeIfNeeded._png(500, 400)
+
+        class FakeContent:
+            async def read(self, _n):
+                return body
+
+        class FakeResp:
+            status = 200
+            headers = {"Content-Type": "image/png"}
+            content = FakeContent()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeSession:
+            def get(self, url, ssl=None):
+                return FakeResp()
+        c.session = FakeSession()
+        import base64 as b64m
+        import io as _io
+        from PIL import Image
+        uri, _f = asyncio.run(c._download_as_data_uri("http://files.local/x.png"))
+        raw = b64m.b64decode(uri.split(",", 1)[1])
+        assert max(Image.open(_io.BytesIO(raw)).size) == 64   # 请求副本已缩放
 
 
 class TestBodyUrlExtraction:

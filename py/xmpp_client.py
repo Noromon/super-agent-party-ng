@@ -56,6 +56,8 @@ class XmppClient:
         self.extra_outbound_dirs = []
         self.tools_mode = "inherit"      # inherit | whitelist | blacklist
         self.tools_list = []
+        self.image_resize_mode = "downscale_only"   # off | fit | downscale_only
+        self.image_max_side = 1024
         self.config = None
         self._is_ready = False
         self._manager_ref = None
@@ -240,6 +242,51 @@ class XmppClient:
             logging.warning("XMPP 会话持久化失败（本回合仅内存）", exc_info=True)
 
     # -------------------- 收图内联（本地模型不会拉远程 url） --------------------
+    @staticmethod
+    def _resize_if_needed(data: bytes, ctype: str, mode: str, max_side: int):
+        """Scale the image that goes into the model request only (the copy
+        saved to disk keeps the original bytes).
+        mode: off | fit (force long side to max_side) | downscale_only
+        (never enlarge). Any failure falls through to the original bytes."""
+        if mode not in ("fit", "downscale_only") or max_side < 16:
+            return data, ctype
+        try:
+            import io as _io
+            from PIL import Image
+            img = Image.open(_io.BytesIO(data))
+            img.load()
+            w, h = img.size
+            longest = max(w, h)
+            if longest <= 0:
+                return data, ctype
+            if mode == "downscale_only" and longest <= max_side:
+                return data, ctype
+            if mode == "fit" and longest == max_side:
+                return data, ctype
+            scale = max_side / longest
+            nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+            img = img.resize((nw, nh), Image.LANCZOS)
+            has_alpha = (img.mode in ("RGBA", "LA", "PA")
+                         or (img.mode == "P" and "transparency" in img.info))
+            buf = _io.BytesIO()
+            if has_alpha or ctype == "image/png":
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                img.save(buf, "PNG")
+                out_ctype = "image/png"
+            else:
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
+                img.save(buf, "JPEG", quality=85)
+                out_ctype = "image/jpeg"
+            out = buf.getvalue()
+            if mode == "downscale_only" and len(out) >= len(data):
+                return data, ctype   # 重编码无收益，保留原图
+            return out, out_ctype
+        except Exception:
+            logging.warning("图片缩放跳过（PIL 失败），按原图进入请求", exc_info=True)
+            return data, ctype
+
     async def _download_as_data_uri(self, url: str):
         """Returns (data_uri, saved_filename); (None, None) on any refusal."""
         if not await self._gate_https(url):
@@ -262,7 +309,10 @@ class XmppClient:
                         f.write(data)
                 except OSError:
                     fname = None
-                return f"data:{ctype};base64," + base64.b64encode(data).decode(), fname
+                send_data, send_ctype = self._resize_if_needed(
+                    data, ctype, self.image_resize_mode, self.image_max_side)
+                return (f"data:{send_ctype};base64,"
+                        + base64.b64encode(send_data).decode()), fname
         except Exception as e:
             logging.warning("XMPP 图片下载失败 %s: %s", url, e)
             return None, None

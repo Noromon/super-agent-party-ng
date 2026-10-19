@@ -13994,6 +13994,19 @@ function updateElement(el, rawMarkdown, formatFn) {
                                   class="full-width-input" @change="autoSaveSettings">
                                 </el-select>
                               </el-form-item>
+                              <el-form-item :label="t('xmppImageResize')">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                  <el-select v-model="xmppBotConfig.image_resize_mode" style="flex:1;" @change="autoSaveSettings">
+                                    <el-option :label="t('xmppResizeOff')" value="off" />
+                                    <el-option :label="t('xmppResizeFit')" value="fit" />
+                                    <el-option :label="t('xmppResizeDownscale')" value="downscale_only" />
+                                  </el-select>
+                                  <el-input-number v-if="xmppBotConfig.image_resize_mode !== 'off'"
+                                    v-model="xmppBotConfig.image_max_side" :min="256" :max="4096" :step="256"
+                                    controls-position="right" @change="autoSaveSettings" />
+                                </div>
+                                <div class="form-item-hint">{{ t('xmppImageResizeHint') }}</div>
+                              </el-form-item>
                               <el-form-item :label="t('xmppEnvShortcuts')">
                                 <el-button size="small" @click="openEnvPage('toolkit')">{{ t('xmppEnvTools') }}</el-button>
                                 <el-button size="small" @click="openEnvPage('role')">{{ t('xmppEnvAgents') }}</el-button>

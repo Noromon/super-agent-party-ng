@@ -25,6 +25,8 @@ class XmppBotConfig(BaseModel):
     extra_outbound_dirs: List[str] = Field(default_factory=list)
     tools_mode: str = "inherit"          # inherit | whitelist | blacklist
     tools_list: List[str] = Field(default_factory=list)
+    image_resize_mode: str = "downscale_only"   # off | fit | downscale_only
+    image_max_side: int = 1024
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetJids: List[str] = Field(default_factory=list)
 
@@ -109,6 +111,10 @@ class XmppBotManager:
                 self.bot_client.extra_outbound_dirs = config.extra_outbound_dirs or []
                 self.bot_client.tools_mode = config.tools_mode or "inherit"
                 self.bot_client.tools_list = config.tools_list or []
+                self.bot_client.image_resize_mode = (config.image_resize_mode
+                                                     if config.image_resize_mode in ("off", "fit", "downscale_only")
+                                                     else "downscale_only")
+                self.bot_client.image_max_side = max(256, min(4096, int(config.image_max_side or 1024)))
                 self.bot_client.config = config
                 self.bot_client._manager_ref = __import__("weakref").ref(self)
 
