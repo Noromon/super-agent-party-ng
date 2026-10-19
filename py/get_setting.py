@@ -210,6 +210,7 @@ async def init_db():
     if _db_init_done: return
 
     async with aiosqlite.connect(DATABASE_PATH) as db:
+        await db.execute('PRAGMA journal_mode=WAL')
         await db.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY,
@@ -225,6 +226,7 @@ async def init_covs_db():
     
     Path(USER_DATA_DIR).mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(COVS_PATH) as db:
+        await db.execute('PRAGMA journal_mode=WAL')
         await db.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 id INTEGER PRIMARY KEY,
@@ -398,6 +400,23 @@ def _wrap_pcm_to_wav(pcm_data):
         return pcm_data
 
 # ----------------- 7. 配置读写 -----------------
+# D-1/D-8: 单写者锁；D-3: 读败隔离+拒存；D-2: 主配置 conversations 护栏
+_SETTINGS_LOCK = asyncio.Lock()
+_COVS_LOCK = asyncio.Lock()
+_COVS_DEGRADED = False
+
+
+def _quarantine_raw(db_path, raw, tag):
+    """坏数据落盘保全，绝不静默覆盖（D-3）。"""
+    try:
+        dst = "{}.{}-corrupt-{}.json".format(db_path, tag, int(time.time()))
+        with open(dst, "w", encoding="utf-8") as f:
+            f.write(raw if isinstance(raw, str) else str(raw))
+        return dst
+    except Exception:
+        return None
+
+
 
 async def load_settings():
     await init_db()
@@ -407,9 +426,13 @@ async def load_settings():
         async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
             row = await cursor.fetchone()
             if row:
+                parse_ok = True
                 try:
                     user_settings = json.loads(row[0])
                 except Exception:
+                    parse_ok = False
+                    _quarantine_raw(DATABASE_PATH, row[0], "settings")
+                    logging.getLogger(__name__).error("settings JSON 已损坏：已隔离备份并按默认值运行，禁止回写覆盖")
                     user_settings = {}
                 
                 # Merge logic
@@ -423,8 +446,10 @@ async def load_settings():
                             merge_defaults(value, target_dict[key])
                 
                 merge_defaults(defaults, user_settings)
-                if has_changes[0]:
+                if has_changes[0] and parse_ok:
                     asyncio.create_task(save_settings(user_settings))
+                if not parse_ok:
+                    return defaults if not IS_DOCKER else {**defaults, "isdocker": True}
                 return user_settings
             else:
                 if IS_DOCKER:
@@ -433,23 +458,49 @@ async def load_settings():
                 return defaults
 
 async def save_settings(settings):
+    # D-2 护栏：会话不属于主配置；用副本 pop，不改动调用方内存对象
+    if "conversations" in settings:
+        settings = {k: v for k, v in settings.items() if k != "conversations"}
     data = json.dumps(settings, ensure_ascii=False, indent=2)
-    async with aiosqlite.connect(DATABASE_PATH) as db:
-        await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
-        await db.commit()
+    async with _SETTINGS_LOCK:
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
+            await db.commit()
 
 async def load_covs():
+    global _COVS_DEGRADED
     try:
         await init_covs_db()
         async with aiosqlite.connect(COVS_PATH) as db:
             async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
                 row = await cursor.fetchone()
-                return json.loads(row[0]) if row else {"conversations": []}
+        if not row:
+            _COVS_DEGRADED = False
+            return {"conversations": []}
+        data = json.loads(row[0])
+        _COVS_DEGRADED = False
+        return data
     except Exception:
+        # D-3：坏数据先隔离备份，再降级返回空；本次进程内 save_covs 拒写空库
+        try:
+            async with aiosqlite.connect(COVS_PATH) as db:
+                async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
+                    raw_row = await cursor.fetchone()
+            if raw_row:
+                _quarantine_raw(COVS_PATH, raw_row[0], "covs")
+        except Exception:
+            pass
+        logging.getLogger(__name__).error("conversations 读取/解析失败：已隔离备份；空库回写将被拒绝")
+        _COVS_DEGRADED = True
         return {"conversations": []}
 
 async def save_covs(settings):
+    global _COVS_DEGRADED
+    if _COVS_DEGRADED and not settings.get("conversations"):
+        raise RuntimeError("covs save refused: 上次读取失败，拒绝用空会话库覆盖（坏数据已隔离备份）")
     data = json.dumps(settings, ensure_ascii=False, indent=2)
-    async with aiosqlite.connect(COVS_PATH) as db:
-        await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
-        await db.commit()
+    async with _COVS_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
+            await db.commit()
+    _COVS_DEGRADED = False
