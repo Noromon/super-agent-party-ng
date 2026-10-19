@@ -886,7 +886,7 @@ async def lifespan(app: FastAPI):
                 try:
                     raw = dict((settings or {}).get(cfg_key) or {})
                     cfg_cls = getattr(importlib.import_module(mod_name), cls_name)
-                    await asyncio.to_thread(getattr(BotContainer, getter_map[cfg_key])(),
+                    await asyncio.to_thread(getattr(BotContainer, getter_map[cfg_key])().start_bot,
                                             cfg_cls(**raw))
                     logger.info(f"IM 自动连接成功: {cfg_key}")
                 except Exception as e:

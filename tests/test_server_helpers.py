@@ -68,6 +68,21 @@ class TestAutostartPlan:
         assert got == [("telegramBotConfig", "py.telegram_bot_manager", "TelegramBotConfig")]
         assert plan_fn(None) == []
 
+    def test_boot_loop_calls_start_bot(self):
+        # regression pin: the to_thread mount must be manager.start_bot,
+        # not the manager instance itself ('XmppBotManager' not callable)
+        tree = ast.parse((ROOT / "server.py").read_text(encoding="utf-8"))
+        boot = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "autostart_im_bots":
+                boot = node
+                break
+        assert boot is not None, "autostart_im_bots missing from lifespan"
+        src = ast.get_source_segment((ROOT / "server.py").read_text(encoding="utf-8"), boot)
+        assert ".start_bot," in src.replace("\n", " ").replace("  ", " ") or \
+            ").start_bot" in src, src
+        assert "to_thread" in src
+
     def test_all_managers_have_auto_connect_field(self):
         files = {
             "py/qq_bot_manager.py": "QQBotConfig",
