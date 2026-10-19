@@ -8,6 +8,7 @@ from openai import AsyncClient
 import uuid
 
 from py.llm_tool import get_image_base64, get_image_media_type
+from py import llm_gate
 async def pollinations_image(prompt: str, width=512, height=512, model="flux"):
     settings = await load_settings()
     
@@ -184,15 +185,16 @@ async def openai_chat_image(prompt: str,img_url_list: list = []):
             content.append({"type": "text", "text": prompt})
         else:
             content = prompt
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role":"user",
-                    "content":content
-                }
-            ]
-        )
+        async with llm_gate.gate():
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role":"user",
+                        "content":content
+                    }
+                ]
+            )
     except Exception as e:
         print(e)
         return f"ERROR: {e}"

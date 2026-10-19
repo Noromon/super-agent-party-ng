@@ -147,3 +147,28 @@ class TestDriftRadar:
     def test_t9_emit_site_uses_sentinel(self):
         emit = _func_src("dispatch_tool")
         assert "_approval_payload(tool_name, tool_params, permission_mode, cwd)" in emit
+
+
+class TestGateBlindSpotClosure:
+    """T-5 D2a: direct LLM exits outside stream/complete parents must gate."""
+
+    def test_gate_contextmanager_exists(self):
+        src = (ROOT / "py" / "llm_gate.py").read_text(encoding="utf-8")
+        assert "@asynccontextmanager" in src
+        assert "async def gate()" in src
+
+    def test_direct_llm_exits_gated(self):
+        lt = (ROOT / "py" / "llm_tool.py").read_text(encoding="utf-8")
+        po = (ROOT / "py" / "pollinations.py").read_text(encoding="utf-8")
+        cm = (ROOT / "py" / "context_manager.py").read_text(encoding="utf-8")
+        assert lt.count("async with llm_gate.gate():") == 2
+        assert po.count("async with llm_gate.gate():") == 1
+        assert "async with llm_gate.gate():" in cm
+
+    def test_mem0_side_never_gates(self):
+        # _extract_group_memories runs inside mem0 jobs: gating it would make
+        # wait_chat_idle wait on its own inflight forever (starvation bug).
+        src = (ROOT / "server.py").read_text(encoding="utf-8")
+        body = _func_src("_extract_group_memories")
+        assert "llm_gate.enter()" not in body
+        assert "llm_gate.gate()" not in body

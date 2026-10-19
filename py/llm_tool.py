@@ -8,6 +8,7 @@ from py.get_setting import load_settings, get_host, get_port # 确保导入了�
 from openai import AsyncOpenAI
 
 from py.load_files import check_robots_txt, is_private_ip, sanitize_url, ssrf_gate, NET_BLOCK_HINT
+from py import llm_gate
 
 # ================= 安全配置 =================
 
@@ -235,19 +236,21 @@ async def custom_llm_tool(tool_name, query, image_url=None):
                                 "text": query
                             }
                         ]
-                        response = await client.chat.completions.create(
-                            model=llmTool['model'],
-                            messages=[
-                                {"role": "user", "content": prompt},
-                            ],
-                        )
+                        async with llm_gate.gate():
+                            response = await client.chat.completions.create(
+                                model=llmTool['model'],
+                                messages=[
+                                    {"role": "user", "content": prompt},
+                                ],
+                            )
                     else:
-                        response = await client.chat.completions.create(
-                            model=llmTool['model'],
-                            messages=[
-                                {"role": "user", "content": query},
-                            ],
-                        )
+                        async with llm_gate.gate():
+                            response = await client.chat.completions.create(
+                                model=llmTool['model'],
+                                messages=[
+                                    {"role": "user", "content": query},
+                                ],
+                            )
                     return response.choices[0].message.content
                 except Exception as e:
                     return f"Error: {str(e)}"

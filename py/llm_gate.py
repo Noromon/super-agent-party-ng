@@ -13,6 +13,7 @@ This module keeps the backend effectively single-filed:
 """
 import threading
 import time
+from contextlib import asynccontextmanager
 
 _lock = threading.Lock()
 _inflight = 0
@@ -42,6 +43,20 @@ def leave():
 def inflight():
     with _lock:
         return _inflight
+
+
+@asynccontextmanager
+async def gate():
+    """T-5: any LLM exit's one-line gate (exception-safe enter/leave pair).
+
+    Reentrant-safe (plain counter), so calling inside an already-gated
+    section only adds a count, never deadlocks.
+    """
+    enter()
+    try:
+        yield
+    finally:
+        leave()
 
 
 def wait_chat_idle(timeout=600.0, poll=1.5):

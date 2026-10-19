@@ -5,6 +5,8 @@
 import copy
 import json
 
+from py import llm_gate
+
 SUMMARY_HEADER = "【对话摘要·已压缩】"
 SUMMARY_FOOTER = "（以上为本会话早前内容的压缩摘要，视为已发生且已确认的事实；不要重做其中已完成的动作，直接基于它继续当前任务。）"
 PRUNED_STUB_FMT = "[pruned: {name}, {n} chars — 如需该结果请重新运行对应工具]"
@@ -295,7 +297,9 @@ async def compact_messages(client, model, messages, task_mode=None, focus=None,
     if extra_params:
         kwargs["extra_body"] = extra_params
     try:
-        resp = await use_client.chat.completions.create(**kwargs)
+        # T-5: compact 摘要调用入闸（/api/compact 独立调用场景是盲区；stream 内重入安全）
+        async with llm_gate.gate():
+            resp = await use_client.chat.completions.create(**kwargs)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"[Compact] 摘要调用失败: {e}")
