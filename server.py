@@ -1775,8 +1775,22 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
                 if tool['name'] == tool_name:
                     # 找到对应的扩展，通过WebSocket调用
                     return await call_node_extension_tool(ext_id, tool_name, tool_params)
-        
-        return None
+
+        # C-19: 未知工具不再静默返回 None——给 LLM 可自我纠错的显式指引（含近似名建议）
+        import difflib as _difflib
+        _avail = set(_TOOL_HOOKS)
+        for _mc in mcp_client_list.values():
+            if hasattr(_mc, '_conn') and _mc._conn:
+                _tl = getattr(_mc._conn, 'tools', None) or {}
+                _avail.update(_tl.keys() if isinstance(_tl, dict) else _tl)
+        for _ext_tools in node_ext_mcp_tools.values():
+            for _t_meta in _ext_tools:
+                if isinstance(_t_meta, dict) and _t_meta.get('name'):
+                    _avail.add(_t_meta['name'])
+        _guess = _difflib.get_close_matches(tool_name, sorted(_avail), n=3, cutoff=0.6)
+        _hint = f" 最接近的可用工具：{', '.join(_guess)}。" if _guess else ""
+        return (f"[Unknown Tool] 工具 '{tool_name}' 不存在，无法执行。{_hint}"
+                f"请从工具列表中选择一个真实存在的工具名重试（不要新造或拼接工具名）。")
         
     tool_call = _TOOL_HOOKS[tool_name]
     try:
@@ -5116,21 +5130,20 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                     results = f"[Tool Execution Error] {type(e).__name__}: {e}"
 
                             if results is None:
-                                chunk = {
-                                    "id": "extra_tools",
-                                    "choices": [
-                                        {
-                                            "index": 0,
-                                            "delta": {
-                                                "role":"assistant",
-                                                "content": "",
-                                                "tool_calls": json.dumps(args_dict, ensure_ascii=False),
+                                none_text = "[Error] 该工具调用未获得可用结果（工具未注册或不可用），请改用工具列表中的真实工具。"
+                                none_chunk = {
+                                    "choices": [{
+                                        "delta": {
+                                            "tool_call_id": tool_call_id,
+                                            "tool_content": {
+                                                "title": response_content.name,
+                                                "content": none_text,
+                                                "type": "tool_result"
                                             }
                                         }
-                                    ]
+                                    }]
                                 }
-                                yield f"data: {json.dumps(chunk)}\n\n"
-                                none_text = "[Error] 该工具调用未获得可用结果，工具可能不可用。"
+                                yield f"data: {json.dumps(none_chunk)}\n\n"
                                 acked_ids.add(tool_call_id)
                                 reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", none_text))
                                 request.messages.append({
@@ -6734,7 +6747,7 @@ async def generate_complete_response(client,reasoner_client, request: ChatReques
                             "role": "tool",
                             "tool_call_id": tool_call_id,
                             "name": response_content.name,
-                            "content": "[Error] 该工具调用未获得可用结果，工具可能不可用。",
+                            "content": "[Error] 该工具调用未获得可用结果（工具未注册或不可用），请改用工具列表中的真实工具。",
                         })
                         ns_pending_abort = True
                         break
@@ -9432,6 +9445,7 @@ async def text_to_speech(request: Request):
                         return next(audio_stream)
                     except StopIteration:
                         return None
+
 
                 while True:
                     try:
