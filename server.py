@@ -4201,6 +4201,310 @@ async def _stream_character_context(request, settings, user_prompt, cur_memory, 
         logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
         content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")                   
 
+
+async def _stream_async_tools(request, async_tools_id):
+    """Async-tool result harvesting + SSE tool_result chunks. (M-3 split)
+
+    Delegation pattern: the caller re-yields every chunk so SSE ordering and
+    backpressure stay identical to the original inline code.
+    """
+    if async_tools_id:
+        responses_to_send = []
+        responses_to_wait = []
+        async with async_tools_lock:
+            # 收集已完成的结果并删除条目
+            for tid in list(async_tools.keys()):  # 转成list避免字典修改异常
+                if tid in async_tools_id:
+                    if async_tools[tid]["status"] in ("completed", "error"):
+                        responses_to_send.append({
+                            "tool_id": tid,
+                            **async_tools.pop(tid)  # 移除已处理的条目
+                        })
+                    elif async_tools[tid]["status"] == "pending":
+                        responses_to_wait.append({
+                            "tool_id": tid,
+                            "name":async_tools[tid]["name"],
+                            "parameters": async_tools[tid]["parameters"]
+                        })
+        for response in responses_to_send:
+            tid = response["tool_id"]
+            if response["status"] == "completed":
+                tool_chunk = {
+                    "choices": [{
+                        "delta": {
+                            "tool_content": {"title": response["name"], "content": str(response["result"]), "type": "tool_result"},
+                            "async_tool_id": tid,
+                        }
+                    }]
+                }
+                yield f"data: {json.dumps(tool_chunk)}\n\n"
+                request.messages.insert(-1, 
+                    {
+                        "tool_calls": [
+                            {
+                                "id": "agentParty",
+                                "function": {
+                                    "arguments": json.dumps(response["parameters"]),
+                                    "name": response["name"],
+                                },
+                                "type": "function",
+                            }
+                        ],
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning_content": "",
+                    }
+                )
+                request.messages.insert(-1, 
+                    {
+                        "role": "tool",
+                        "tool_call_id": "agentParty",
+                        "name": response["name"],
+                        "content": f"之前调用的异步工具（{tid}）的结果：\n\n{_cap_tool_result(str(response['result']))}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
+                    }
+                )
+            if response["status"] == "error":
+                tool_chunk = {
+                    "choices": [{
+                        "delta": {
+                            "tool_content": {"title": f"{tid}{await t('tool_result')}", "content": f"Error: {str(response['result'])}"},
+                            "async_tool_id": tid
+                        }
+                    }]
+                }
+                yield f"data: {json.dumps(tool_chunk)}\n\n"
+                request.messages.append({
+                    "role": "system",
+                    "content": f"之前调用的异步工具（{tid}）发生错误：\n\n{response['result']}\n\n====错误结束====\n\n"
+                }) 
+        for response in responses_to_wait:
+            # 在request.messages倒数第一个元素之前的位置插入一个新元素
+            request.messages.insert(-1, 
+                {
+                    "tool_calls": [
+                        {
+                            "id": "agentParty",
+                            "function": {
+                                "arguments": json.dumps(response["parameters"]),
+                                "name": response["name"],
+                            },
+                            "type": "function",
+                        }
+                    ],
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "",
+                }
+            )
+            results = f"{response["name"]}工具已成功启动，获取结果需要花费很久的时间。请不要再次调用该工具，因为工具结果将生成后自动发送，再次调用也不能更快的获取到结果。请直接告诉用户，你会在获得结果后回答他的问题。"
+            request.messages.insert(-1, 
+                {
+                    "role": "tool",
+                    "tool_call_id": "agentParty",
+                    "name": response["name"],
+                    "content": str(results),
+                }
+            )
+
+
+async def _stream_kb_before(request, settings, user_prompt, kb_list):
+    """before_thinking knowledge-base query with call/result SSE notices."""
+    from py.know_base import query_knowledge_base, rerank_knowledge_base
+    if settings["KBSettings"]["when"] == "before_thinking" or settings["KBSettings"]["when"] == "both":
+        if kb_list:
+            chunk_dict = {
+                "id": "webSearch",
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "index": 0,
+                        "delta": {
+                            "role":"assistant",
+                            "content": "",
+                            "tool_content": {"title": "query_knowledge_base", "content": "", "type": "call"},
+                        }
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+            all_kb_content = []
+            # 用query_knowledge_base函数查询kb_list中所有的知识库
+            for kb in kb_list:
+                kb_content = await query_knowledge_base(kb["kb_id"],user_prompt)
+                all_kb_content.extend(kb_content)
+                if settings["KBSettings"]["is_rerank"]:
+                    all_kb_content = await rerank_knowledge_base(user_prompt,all_kb_content)
+            if all_kb_content:
+                all_kb_content = json.dumps(all_kb_content, ensure_ascii=False, indent=4)
+                kb_message = f"\n\n可参考的知识库内容：{all_kb_content}"
+                content_append(request.messages, 'user',  f"{kb_message}\n\n用户：{user_prompt}")
+                tool_chunk = {
+                    "choices": [{
+                        "delta": {
+                            "tool_content": {"title": "query_knowledge_base", "content": str(all_kb_content), "type": "tool_result"},
+                        }
+                    }]
+                }
+                yield f"data: {json.dumps(tool_chunk)}\n\n"
+
+
+async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_web_search):
+    """Web search before-thinking injection + after-thinking announcements."""
+    from py.web_search import (
+        DDGsearch, searxng, Tavily_search, Bing_search, Google_search,
+        Brave_search, Exa_search, Serper_search, bochaai_search,
+        duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
+        brave_tool, exa_tool, serper_tool, bochaai_tool, jina_crawler_tool,
+        simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
+    )
+    if settings['webSearch']['enabled'] or enable_web_search:
+        if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
+            chunk_dict = {
+                "id": "webSearch",
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "index": 0,
+                        "delta": {
+                            "role":"assistant",
+                            "content": "",
+                            "tool_content": {"title": "web_search", "content": "", "type": "call"},
+                        }
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+            if settings['webSearch']['engine'] == 'duckduckgo':
+                results = await DDGsearch(user_prompt)
+            elif settings['webSearch']['engine'] == 'searxng':
+                results = await searxng(user_prompt)
+            elif settings['webSearch']['engine'] == 'tavily':
+                results = await Tavily_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'bing':
+                results = await Bing_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'google':
+                results = await Google_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'brave':
+                results = await Brave_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'exa':
+                results = await Exa_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'serper':
+                results = await Serper_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'bochaai':
+                results = await bochaai_search(user_prompt)
+            if results:
+                content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}\n\n请根据联网搜索结果组织你的回答，并确保你的回答是准确的。")
+                tool_chunk = {
+                    "choices": [{
+                        "delta": {
+                            "tool_content": {"title": "web_search", "content": str(results), "type": "tool_result"},
+                        }
+                    }]
+                }
+                yield f"data: {json.dumps(tool_chunk)}\n\n"
+        if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
+            if settings['webSearch']['engine'] == 'duckduckgo':
+                tools.append(duckduckgo_tool)
+            elif settings['webSearch']['engine'] == 'searxng':
+                tools.append(searxng_tool)
+            elif settings['webSearch']['engine'] == 'tavily':
+                tools.append(tavily_tool)
+            elif settings['webSearch']['engine'] == 'bing':
+                tools.append(bing_tool)
+            elif settings['webSearch']['engine'] == 'google':
+                tools.append(google_tool)
+            elif settings['webSearch']['engine'] == 'brave':
+                tools.append(brave_tool)
+            elif settings['webSearch']['engine'] == 'exa':
+                tools.append(exa_tool)
+            elif settings['webSearch']['crawler'] == 'serper':
+                tools.append(serper_tool)
+            elif settings['webSearch']['crawler'] == 'bochaai':
+                tools.append(bochaai_tool)
+
+            if settings['webSearch']['crawler'] == 'jina':
+                tools.append(jina_crawler_tool)
+            elif settings['webSearch']['crawler'] == 'crawl4ai':
+                tools.append(Crawl4Ai_tool)
+            elif settings['webSearch']['crawler'] == 'firecrawl':
+                tools.append(firecrawl_tool)
+            elif settings['webSearch']['crawler'] == 'simpleRequest':
+                tools.append(simple_fetch_tool)
+            elif settings['webSearch']['crawler'] == 'mdnew':
+                tools.append(markdown_new_tool)
+
+
+def _stream_filter_tools(request, tools):
+    """enable/disable whitelist-blacklist filter + subagent safety policy."""
+    if request.is_sub_agent or request.enable_tools or request.disable_tools:
+        original_tool_count = len(tools)
+                    
+        # 1. Enable Tools 过滤（白名单模式）
+        if request.enable_tools and len(request.enable_tools) > 0:
+            # 只保留白名单中的工具
+            filtered_tools = []
+            enable_set = set(request.enable_tools)
+                        
+            for tool in tools:
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name in enable_set:
+                    filtered_tools.append(tool)
+                        
+            tools = filtered_tools
+            logging.getLogger("app").info(f"[Tool Filter] Enable mode: {original_tool_count} -> {len(tools)} tools (enabled: {request.enable_tools})")
+                    
+        # 2. Disable Tools 过滤（黑名单模式）
+        elif request.disable_tools and len(request.disable_tools) > 0:
+            # 移除黑名单中的工具
+            disable_set = set(request.disable_tools)
+            filtered_tools = []
+                        
+            for tool in tools:
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name not in disable_set:
+                    filtered_tools.append(tool)
+                        
+            tools = filtered_tools
+            logging.getLogger("app").info(f"[Tool Filter] Disable mode: {original_tool_count} -> {len(tools)} tools (disabled: {request.disable_tools})")
+                    
+        # 3. 子智能体默认策略（如果没有指定 enable/disable）
+        elif request.is_sub_agent:
+            # 子智能体默认只保留安全的工具，移除高风险操作
+            SUBAGENT_BLOCKED_TOOLS = [
+                            
+                # 阻止子智能体管理进程/端口
+                "list_processes_tool",
+                "get_process_logs_tool",
+                "kill_process_tool",
+                "docker_manage_ports_tool",
+                "local_net_tool",
+                            
+                # 阻止子智能体创建子任务（防止递归）
+                "create_subtask",
+                            
+                # 阻止高风险的浏览器操作
+                "new_page",
+                "close_page",
+                "evaluate_script",
+                            
+                # 阻止子智能体使用 Agent 调用（防止复杂的嵌套）
+                "agent_tool_call",
+                "todo_write_tool",
+            ]
+                        
+            filtered_tools = []
+            blocked_count = 0
+                        
+            for tool in tools:
+                tool_name = tool.get("function", {}).get("name", "")
+                if tool_name not in SUBAGENT_BLOCKED_TOOLS:
+                    filtered_tools.append(tool)
+                else:
+                    blocked_count += 1
+                        
+            tools = filtered_tools
+            logging.getLogger("app").info(f"[SubAgent Safety] Blocked {blocked_count} dangerous tools: {original_tool_count} -> {len(tools)} tools")
+    return tools
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -4389,225 +4693,23 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 if settings['reasoner']['reasoning_effort'] is not None:
                     reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort']
                 # 处理传入的异步工具ID查询
-                if async_tools_id:
-                    responses_to_send = []
-                    responses_to_wait = []
-                    async with async_tools_lock:
-                        # 收集已完成的结果并删除条目
-                        for tid in list(async_tools.keys()):  # 转成list避免字典修改异常
-                            if tid in async_tools_id:
-                                if async_tools[tid]["status"] in ("completed", "error"):
-                                    responses_to_send.append({
-                                        "tool_id": tid,
-                                        **async_tools.pop(tid)  # 移除已处理的条目
-                                    })
-                                elif async_tools[tid]["status"] == "pending":
-                                    responses_to_wait.append({
-                                        "tool_id": tid,
-                                        "name":async_tools[tid]["name"],
-                                        "parameters": async_tools[tid]["parameters"]
-                                    })
-                    for response in responses_to_send:
-                        tid = response["tool_id"]
-                        if response["status"] == "completed":
-                            tool_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": response["name"], "content": str(response["result"]), "type": "tool_result"},
-                                        "async_tool_id": tid,
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(tool_chunk)}\n\n"
-                            request.messages.insert(-1, 
-                                {
-                                    "tool_calls": [
-                                        {
-                                            "id": "agentParty",
-                                            "function": {
-                                                "arguments": json.dumps(response["parameters"]),
-                                                "name": response["name"],
-                                            },
-                                            "type": "function",
-                                        }
-                                    ],
-                                    "role": "assistant",
-                                    "content": "",
-                                    "reasoning_content": "",
-                                }
-                            )
-                            request.messages.insert(-1, 
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": "agentParty",
-                                    "name": response["name"],
-                                    "content": f"之前调用的异步工具（{tid}）的结果：\n\n{_cap_tool_result(str(response['result']))}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
-                                }
-                            )
-                        if response["status"] == "error":
-                            tool_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"{tid}{await t('tool_result')}", "content": f"Error: {str(response['result'])}"},
-                                        "async_tool_id": tid
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(tool_chunk)}\n\n"
-                            request.messages.append({
-                                "role": "system",
-                                "content": f"之前调用的异步工具（{tid}）发生错误：\n\n{response['result']}\n\n====错误结束====\n\n"
-                            }) 
-                    for response in responses_to_wait:
-                        # 在request.messages倒数第一个元素之前的位置插入一个新元素
-                        request.messages.insert(-1, 
-                            {
-                                "tool_calls": [
-                                    {
-                                        "id": "agentParty",
-                                        "function": {
-                                            "arguments": json.dumps(response["parameters"]),
-                                            "name": response["name"],
-                                        },
-                                        "type": "function",
-                                    }
-                                ],
-                                "role": "assistant",
-                                "content": "",
-                                "reasoning_content": "",
-                            }
-                        )
-                        results = f"{response["name"]}工具已成功启动，获取结果需要花费很久的时间。请不要再次调用该工具，因为工具结果将生成后自动发送，再次调用也不能更快的获取到结果。请直接告诉用户，你会在获得结果后回答他的问题。"
-                        request.messages.insert(-1, 
-                            {
-                                "role": "tool",
-                                "tool_call_id": "agentParty",
-                                "name": response["name"],
-                                "content": str(results),
-                            }
-                        )
+                async for _c in _stream_async_tools(request, async_tools_id):
+                    yield _c
                 kb_list = []
                 if settings["knowledgeBases"]:
                     for kb in settings["knowledgeBases"]:
                         if kb["enabled"] and kb["processingStatus"] == "completed":
                             kb_list.append({"kb_id":kb["id"],"name": kb["name"],"introduction":kb["introduction"]})
-                if settings["KBSettings"]["when"] == "before_thinking" or settings["KBSettings"]["when"] == "both":
-                    if kb_list:
-                        chunk_dict = {
-                            "id": "webSearch",
-                            "choices": [
-                                {
-                                    "finish_reason": None,
-                                    "index": 0,
-                                    "delta": {
-                                        "role":"assistant",
-                                        "content": "",
-                                        "tool_content": {"title": "query_knowledge_base", "content": "", "type": "call"},
-                                    }
-                                }
-                            ]
-                        }
-                        yield f"data: {json.dumps(chunk_dict)}\n\n"
-                        all_kb_content = []
-                        # 用query_knowledge_base函数查询kb_list中所有的知识库
-                        for kb in kb_list:
-                            kb_content = await query_knowledge_base(kb["kb_id"],user_prompt)
-                            all_kb_content.extend(kb_content)
-                            if settings["KBSettings"]["is_rerank"]:
-                                all_kb_content = await rerank_knowledge_base(user_prompt,all_kb_content)
-                        if all_kb_content:
-                            all_kb_content = json.dumps(all_kb_content, ensure_ascii=False, indent=4)
-                            kb_message = f"\n\n可参考的知识库内容：{all_kb_content}"
-                            content_append(request.messages, 'user',  f"{kb_message}\n\n用户：{user_prompt}")
-                            tool_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": "query_knowledge_base", "content": str(all_kb_content), "type": "tool_result"},
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(tool_chunk)}\n\n"
+                async for _c in _stream_kb_before(request, settings, user_prompt, kb_list):
+                    yield _c
                 if settings["KBSettings"]["when"] == "after_thinking" or settings["KBSettings"]["when"] == "both":
                     if kb_list:
                         kb_list_message = f"\n\n可调用的知识库列表：{json.dumps(kb_list, ensure_ascii=False)}"
                         content_append(request.messages, 'system', kb_list_message)
                 else:
                     kb_list = []
-                if settings['webSearch']['enabled'] or enable_web_search:
-                    if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
-                        chunk_dict = {
-                            "id": "webSearch",
-                            "choices": [
-                                {
-                                    "finish_reason": None,
-                                    "index": 0,
-                                    "delta": {
-                                        "role":"assistant",
-                                        "content": "",
-                                        "tool_content": {"title": "web_search", "content": "", "type": "call"},
-                                    }
-                                }
-                            ]
-                        }
-                        yield f"data: {json.dumps(chunk_dict)}\n\n"
-                        if settings['webSearch']['engine'] == 'duckduckgo':
-                            results = await DDGsearch(user_prompt)
-                        elif settings['webSearch']['engine'] == 'searxng':
-                            results = await searxng(user_prompt)
-                        elif settings['webSearch']['engine'] == 'tavily':
-                            results = await Tavily_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'bing':
-                            results = await Bing_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'google':
-                            results = await Google_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'brave':
-                            results = await Brave_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'exa':
-                            results = await Exa_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'serper':
-                            results = await Serper_search(user_prompt)
-                        elif settings['webSearch']['engine'] == 'bochaai':
-                            results = await bochaai_search(user_prompt)
-                        if results:
-                            content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}\n\n请根据联网搜索结果组织你的回答，并确保你的回答是准确的。")
-                            tool_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": "web_search", "content": str(results), "type": "tool_result"},
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(tool_chunk)}\n\n"
-                    if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
-                        if settings['webSearch']['engine'] == 'duckduckgo':
-                            tools.append(duckduckgo_tool)
-                        elif settings['webSearch']['engine'] == 'searxng':
-                            tools.append(searxng_tool)
-                        elif settings['webSearch']['engine'] == 'tavily':
-                            tools.append(tavily_tool)
-                        elif settings['webSearch']['engine'] == 'bing':
-                            tools.append(bing_tool)
-                        elif settings['webSearch']['engine'] == 'google':
-                            tools.append(google_tool)
-                        elif settings['webSearch']['engine'] == 'brave':
-                            tools.append(brave_tool)
-                        elif settings['webSearch']['engine'] == 'exa':
-                            tools.append(exa_tool)
-                        elif settings['webSearch']['crawler'] == 'serper':
-                            tools.append(serper_tool)
-                        elif settings['webSearch']['crawler'] == 'bochaai':
-                            tools.append(bochaai_tool)
-
-                        if settings['webSearch']['crawler'] == 'jina':
-                            tools.append(jina_crawler_tool)
-                        elif settings['webSearch']['crawler'] == 'crawl4ai':
-                            tools.append(Crawl4Ai_tool)
-                        elif settings['webSearch']['crawler'] == 'firecrawl':
-                            tools.append(firecrawl_tool)
-                        elif settings['webSearch']['crawler'] == 'simpleRequest':
-                            tools.append(simple_fetch_tool)
-                        elif settings['webSearch']['crawler'] == 'mdnew':
-                            tools.append(markdown_new_tool)
+                async for _c in _stream_web_search_pre(request, settings, user_prompt, tools, enable_web_search):
+                    yield _c
                 if kb_list:
                     tools.append(kb_tool)
 
@@ -4635,74 +4737,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 if request.is_sub_agent:
                     tools.append(finish_task_tool)
                 # 如果是子智能体调用，或者指定了工具过滤规则
-                if request.is_sub_agent or request.enable_tools or request.disable_tools:
-                    original_tool_count = len(tools)
-                    
-                    # 1. Enable Tools 过滤（白名单模式）
-                    if request.enable_tools and len(request.enable_tools) > 0:
-                        # 只保留白名单中的工具
-                        filtered_tools = []
-                        enable_set = set(request.enable_tools)
-                        
-                        for tool in tools:
-                            tool_name = tool.get("function", {}).get("name", "")
-                            if tool_name in enable_set:
-                                filtered_tools.append(tool)
-                        
-                        tools = filtered_tools
-                        logging.getLogger("app").info(f"[Tool Filter] Enable mode: {original_tool_count} -> {len(tools)} tools (enabled: {request.enable_tools})")
-                    
-                    # 2. Disable Tools 过滤（黑名单模式）
-                    elif request.disable_tools and len(request.disable_tools) > 0:
-                        # 移除黑名单中的工具
-                        disable_set = set(request.disable_tools)
-                        filtered_tools = []
-                        
-                        for tool in tools:
-                            tool_name = tool.get("function", {}).get("name", "")
-                            if tool_name not in disable_set:
-                                filtered_tools.append(tool)
-                        
-                        tools = filtered_tools
-                        logging.getLogger("app").info(f"[Tool Filter] Disable mode: {original_tool_count} -> {len(tools)} tools (disabled: {request.disable_tools})")
-                    
-                    # 3. 子智能体默认策略（如果没有指定 enable/disable）
-                    elif request.is_sub_agent:
-                        # 子智能体默认只保留安全的工具，移除高风险操作
-                        SUBAGENT_BLOCKED_TOOLS = [
-                            
-                            # 阻止子智能体管理进程/端口
-                            "list_processes_tool",
-                            "get_process_logs_tool",
-                            "kill_process_tool",
-                            "docker_manage_ports_tool",
-                            "local_net_tool",
-                            
-                            # 阻止子智能体创建子任务（防止递归）
-                            "create_subtask",
-                            
-                            # 阻止高风险的浏览器操作
-                            "new_page",
-                            "close_page",
-                            "evaluate_script",
-                            
-                            # 阻止子智能体使用 Agent 调用（防止复杂的嵌套）
-                            "agent_tool_call",
-                            "todo_write_tool",
-                        ]
-                        
-                        filtered_tools = []
-                        blocked_count = 0
-                        
-                        for tool in tools:
-                            tool_name = tool.get("function", {}).get("name", "")
-                            if tool_name not in SUBAGENT_BLOCKED_TOOLS:
-                                filtered_tools.append(tool)
-                            else:
-                                blocked_count += 1
-                        
-                        tools = filtered_tools
-                        logging.getLogger("app").info(f"[SubAgent Safety] Blocked {blocked_count} dangerous tools: {original_tool_count} -> {len(tools)} tools")
+                tools = _stream_filter_tools(request, tools)
             
 
                 logging.getLogger("app").info(tools)
