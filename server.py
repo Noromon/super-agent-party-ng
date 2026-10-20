@@ -1037,12 +1037,13 @@ app = FastAPI(lifespan=lifespan)
 # 内部 API 一律同源 + session token；OPTIONS 预检只对这两个前缀应答。
 _EXTERNAL_PREFIXES = ("/v1", "/mcp")
 
-from py.routers import media, bots, memories, system, files
+from py.routers import media, bots, memories, system, files, bot_conversations
 app.include_router(media.router)
 app.include_router(bots.router)
 app.include_router(memories.router)
 app.include_router(system.router)
 app.include_router(files.router)
+app.include_router(bot_conversations.router)
 
 @app.middleware("http")
 async def external_api_cors(request: Request, call_next):
@@ -7764,64 +7765,11 @@ async def simple_chat_endpoint(request: ChatRequest):
     )
 
 
-class DeleteConversationRequest(BaseModel):
-    conversation_id: Union[str, int, float]
-    delete_memory: bool = False
 
 
 
-@app.post("/api/compact")
-async def compact_conversation_endpoint(request: Request):
-    """手动上下文压缩（/compact 指令）：任意任务模式生成摘要，前端负责替换落账。"""
-    settings = await load_settings()
-    body = await request.json()
-    messages = body.get("messages") or []
-    focus = (body.get("focus") or "").strip() or None
-    conversation_id = body.get("conversation_id")
-    if not messages:
-        return JSONResponse(status_code=400, content={"ok": False, "reason": "empty messages"})
-    try:
-        from py.context_manager import compact_messages, detect_task_mode, get_context_settings
-        c_class = get_client_class(settings, settings['selectedProvider'])
-        compact_client = client if client is not None else c_class(
-            api_key=settings['api_key'],
-            base_url=settings['base_url'] or "https://api.openai.com/v1")
-        r_cli = None
-        r_model = None
-        if settings.get('reasoner', {}).get('enabled'):
-            r_class = get_client_class(settings, settings['reasoner']['selectedProvider'])
-            r_cli = reasoner_client if reasoner_client is not None else r_class(
-                api_key=settings['reasoner']['api_key'],
-                base_url=settings['reasoner']['base_url'] or "https://api.openai.com/v1")
-            r_model = settings['reasoner']['model']
-        cm = get_context_settings(settings)
-        task_mode = detect_task_mode(messages)
-        if not cm["enabled"]:
-            cm = dict(cm, enabled=True)  # 手动指令无视自动开关
-        res = await compact_messages(compact_client, settings['model'], messages, task_mode=task_mode,
-                                     focus=focus, keep_recent_dialog=cm["keep_recent_dialog"],
-                                     extra_params=None, reasoner_client=r_cli, reasoner_model=r_model)
-        if not res:
-            return {"ok": False, "reason": "not-worth-compacting"}
-        req_stub = ChatRequest(messages=messages, conversation_id=conversation_id)
-        _write_context_state(settings, req_stub, res)
-        return {"ok": True, "summary": res["summary"], "task_mode": res["task_mode"],
-                "compacted_count": res["compacted_count"]}
-    except Exception as e:
-        print(f"[Compact] /api/compact 失败: {e}")
-        return JSONResponse(status_code=500, content={"ok": False, "reason": str(e)})
 
 
-@app.post("/api/conversations/delete")
-async def delete_conversation_endpoint(req: DeleteConversationRequest):
-    req.conversation_id = _normalize_entity_id(req.conversation_id)
-    covs = await load_covs()
-    conversations = covs.get("conversations", []) or []
-    covs["conversations"] = [conv for conv in conversations if conv.get("id") != req.conversation_id]
-    await save_covs(covs)
-    if req.delete_memory:
-        await _invalidate_group_memories_by_chat(req.conversation_id)
-    return {"success": True}
 
 
 
@@ -9353,85 +9301,11 @@ def _bot_conv_meta(conv_id: str) -> dict:
         peer = peer.partition("::")[0]
     return {"channel": channel, "peer": peer or rest, "archived": archived}
 
-@app.get("/bot_conversations")
-async def bot_conversations():
-    from py.get_setting import list_bot_convs
-    try:
-        items = await list_bot_convs()
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
-    live = set()
-    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
-        live = {"bot:xmpp:%s" % k for k in (BotContainer._xmpp.bot_client.memoryList or {})}
-    for it in items:
-        it.update(_bot_conv_meta(it["conv_id"]))
-        it["live"] = it["conv_id"] in live
-    return {"success": True, "conversations": items}
 
-@app.get("/bot_conversation")
-async def bot_conversation(id: str):
-    from py.get_setting import load_bot_conv, redact_messages_for_view
-    if not str(id).startswith("bot:"):
-        return JSONResponse(status_code=400, content={"success": False, "message": "id 需以 bot: 开头"})
-    msgs = await load_bot_conv(id)
-    if msgs is None:
-        return JSONResponse(status_code=404, content={"success": False, "message": "会话不存在"})
-    return {"success": True, "conv_id": id, **_bot_conv_meta(id),
-            "messages": redact_messages_for_view(msgs)}
 
-@app.delete("/bot_conversation")
-async def delete_bot_conversation(id: str):
-    from py.get_setting import delete_bot_conv
-    try:
-        await delete_bot_conv(id)
-        return {"success": True}
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
 
-@app.post("/bot_conversation/clear")
-async def clear_bot_conversation(data: dict):
-    from py.get_setting import save_bot_conv
-    conv_id = str(data.get("id", ""))
-    try:
-        await save_bot_conv(conv_id, [])
-        if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
-            jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
-            if jid and jid in BotContainer._xmpp.bot_client.memoryList:
-                BotContainer._xmpp.bot_client.memoryList[jid] = []
-        return {"success": True}
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
 
-@app.post("/bot_conversation/new")
-async def new_bot_conversation(data: dict):
-    """Archive the active conversation; next inbound message starts fresh."""
-    from py.get_setting import archive_bot_conv
-    conv_id = str(data.get("id", ""))
-    try:
-        archive_id = await archive_bot_conv(conv_id)
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
-        jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
-        if jid and jid in BotContainer._xmpp.bot_client.memoryList:
-            BotContainer._xmpp.bot_client.memoryList[jid] = []
-    return {"success": True, "archive_id": archive_id}
 
-@app.post("/bot_conversation/activate")
-async def activate_bot_conversation(data: dict):
-    """Swap an archived conversation into the active slot (demoting the
-    current active one into the archive) — next message continues it."""
-    from py.get_setting import swap_bot_conv, load_bot_conv
-    archive_id, active_id = str(data.get("id", "")), str(data.get("into", ""))
-    try:
-        await swap_bot_conv(archive_id, active_id)
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
-        jid = _bot_conv_meta(active_id)["peer"] if active_id.startswith("bot:xmpp:") else ""
-        if jid:
-            BotContainer._xmpp.bot_client.memoryList[jid] = await load_bot_conv(active_id) or []
-    return {"success": True}
 
 
 
