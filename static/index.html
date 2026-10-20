@@ -12318,12 +12318,60 @@ function updateElement(el, rawMarkdown, formatFn) {
                 :closable="false"
                 class="mb-2"
               >
-                <template #default>
-                  <div class="alert-content">
-                    {{ t('userfileNotice') }}
+                 <template #default>
+                   <div class="alert-content">
+                     {{ t('userfileNotice') }}
+                   </div>
+                 </template>
+               </el-alert>
+             </div>
+
+            <!-- 数据安全（M4-lite 快照备份） -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-database"></i>
+                  </el-icon>
+                  {{ t('dataGuardTitle') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <el-button type="primary" :loading="backupNowRunning" @click="backupNow">
+                      {{ t('dataGuardBackupNow') }}
+                    </el-button>
+                    <el-button @click="loadBackupList" :loading="backupListLoading">{{ t('dataGuardRefresh') }}</el-button>
+                    <span style="font-size:12px; opacity:.7;">{{ t('dataGuardAutoNote') }}</span>
                   </div>
-                </template>
-              </el-alert>
+                </el-form-item>
+                <el-form-item class="form-item-align">
+                  <el-switch v-model="systemSettings.backupIncludeUploads" @change="autoSaveSettings" />
+                  <span style="margin-left:8px; font-size:13px;">{{ t('dataGuardIncludeUploads') }}</span>
+                </el-form-item>
+                <el-table :data="backupSnapshots" stripe size="small" style="margin-top:8px;" max-height="260">
+                  <el-table-column prop="name" :label="t('dataGuardColSnap')" min-width="230"></el-table-column>
+                  <el-table-column :label="t('dataGuardColSize')" width="100">
+                    <template #default="scope">{{ formatBackupBytes(scope.row.bytes) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="files" :label="t('dataGuardColFiles')" width="80"></el-table-column>
+                  <el-table-column :label="t('dataGuardColState')" width="90">
+                    <template #default="scope">
+                      <span v-if="scope.row.partial" style="color:#e6a23c;">{{ t('dataGuardPartial') }}</span>
+                      <span v-else style="color:#67c23a;">{{ t('dataGuardComplete') }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('dataGuardColVerify')" width="90">
+                    <template #default="scope">
+                      <el-button size="small" :loading="verifyBackupName === scope.row.name" @click="verifyBackup(scope.row.name)">
+                        {{ t('dataGuardVerify') }}
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div style="font-size:12px; opacity:.65; margin-top:6px;">{{ t('dataGuardRestoreHint') }}</div>
+              </div>
             </div>
           </el-form>
         </div>

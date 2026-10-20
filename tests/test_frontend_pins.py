@@ -108,6 +108,39 @@ class TestDeadLinkCleanupPins:
         assert "wx_bot_status" not in SRC
 
 
+class TestBackupUiPins:
+    """M4-lite Data Guard UI: endpoints wired, loading guards, i18n both langs."""
+
+    HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    ZH = (ROOT / "static" / "js" / "locales" / "zh-CN.js").read_text(encoding="utf-8")
+    EN = (ROOT / "static" / "js" / "locales" / "en-US.js").read_text(encoding="utf-8")
+
+    def test_endpoints_wired(self):
+        for url in ("/api/backup/list", "/api/backup/now", "/api/backup/verify"):
+            assert url in SRC
+        for fn in ("loadBackupList(", "backupNow(", "verifyBackup(", "formatBackupBytes("):
+            assert fn in SRC
+
+    def test_ui_buttons_connected(self):
+        for hook in ('@click="backupNow"', '@click="loadBackupList"',
+                     'v-model="systemSettings.backupIncludeUploads"',
+                     'formatBackupBytes(scope.row.bytes)'):
+            assert hook in self.HTML
+
+    def test_reentrancy_guard(self):
+        body = _slice("async backupNow()")
+        assert "if (this.backupNowRunning) return;" in body
+
+    def test_i18n_keys_in_both_languages(self):
+        import re
+        zh_keys = set(re.findall(r"'(dataGuard\w+)'", self.ZH))
+        en_keys = set(re.findall(r"'(dataGuard\w+)'", self.EN))
+        assert zh_keys and zh_keys == en_keys
+        used = set(re.findall(r"t\('(dataGuard\w+)'\)", self.HTML)) | \
+               set(re.findall(r"this\.t\('(dataGuard\w+)'\)", SRC))
+        assert used and used <= zh_keys, f"missing i18n keys: {used - zh_keys}"
+
+
 class TestStreamIdHeaderPin:
     """C-14: stream id captured from the response header (no meta-frame wait)."""
 

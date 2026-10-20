@@ -530,7 +530,13 @@ let vue_data = {
       proxy: 'http://127.0.0.1:7890',
       proxyMode: 'system', //system or manual or none
       isChinaProxy: false,
+      backupIncludeUploads: false,
     },
+    // --- 数据安全网（M4-lite 快照备份 UI）---
+    backupSnapshots: [],
+    backupNowRunning: false,
+    backupListLoading: false,
+    verifyBackupName: '',
     networkOptions:[
       { value: 'local', label: 'local' }, 
       { value: 'global', label: 'allDevicesVisible' },
