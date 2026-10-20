@@ -4883,18 +4883,28 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     choice = chunk.choices[0]
                     if choice.delta.tool_calls:  # function_calling
                         is_tool_call = True
-                        for idx, tool_call in enumerate(choice.delta.tool_calls):
-                            tool = choice.delta.tool_calls[idx]
-                            if len(tool_calls) <= idx:
-                                tool_calls.append(tool)
-                                continue
-                            if tool.function.arguments:
-                                # function参数为流式响应，需要拼接
-                                if tool_calls[idx].function.arguments:
-                                    tool_calls[idx].function.arguments += tool.function.arguments
-                                else:
-                                    tool_calls[idx].function.arguments = tool.function.arguments
-                            current_tool = tool_calls[idx]
+                        # C-20: 槽位=协议级 tool.index（多 call 交叠时 delta 数组内
+                        # 位置≠call 编号，旧逻辑把第二个 call 的 arguments 拼进第一个
+                        # slot=两个 JSON 挤进同一 fragment；无 index 的旧模型回退末槽）
+                        for tool in choice.delta.tool_calls:
+                            _slot = getattr(tool, "index", None)
+                            if _slot is None:
+                                _slot = max(len(tool_calls) - 1, 0)
+                            while len(tool_calls) <= _slot:
+                                _fill = copy.deepcopy(tool)
+                                if _fill.function is not None:
+                                    _fill.function.arguments = ""
+                                tool_calls.append(_fill)
+                            current_tool = tool_calls[_slot]
+                            if tool.id and not current_tool.id:
+                                current_tool.id = tool.id
+                            if tool.function:
+                                if tool.function.name and not current_tool.function.name:
+                                    current_tool.function.name = tool.function.name
+                                if tool.function.arguments:
+                                    current_tool.function.arguments = (
+                                        current_tool.function.arguments or ""
+                                    ) + tool.function.arguments
                             if current_tool.function and current_tool.function.name:
                                 progress_chunk = {
                                     "choices": [{
@@ -4902,8 +4912,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                             "tool_progress": {  # 新增字段，区别于最终的 tool_content
                                                 "name": current_tool.function.name,
                                                 "arguments": current_tool.function.arguments or "",
-                                                "index": idx,
-                                                "id": current_tool.id or f"call_{idx}"
+                                                "index": _slot,
+                                                "id": current_tool.id or f"call_{_slot}"
                                             }
                                         }
                                     }]

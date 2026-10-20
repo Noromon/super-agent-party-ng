@@ -136,6 +136,25 @@ class _Handler(BaseHTTPRequestHandler):
                     self._chunk({"tool_calls": [{"index": 0,
                                                  "function": {"arguments": args[max(1, len(args) // 2):]}}]})
                 self._chunk(finish="tool_calls")
+            elif kind == "tools_interleave":
+                # C-20 repro shape: two calls, one delta element per chunk,
+                # indices alternating (llama.cpp/vLLM parallel-call streaming).
+                heads = []
+                for c in scenario.get("calls", []):
+                    args = json.dumps(c.get("arguments", {}), ensure_ascii=False)
+                    d = {"index": c.get("index"),
+                         "id": c.get("id", f"call_{c.get('index')}_mock"),
+                         "type": "function",
+                         "function": {"name": c.get("name", "mock_tool"),
+                                      "arguments": args[: max(1, len(args) // 2)]}}
+                    heads.append((c, args, d))
+                    self._chunk({"tool_calls": [d]})
+                for c, args, _d in heads:
+                    tail = args[max(1, len(args) // 2):]
+                    if tail:
+                        self._chunk({"tool_calls": [{"index": c.get("index"),
+                                                     "function": {"arguments": tail}}]})
+                self._chunk(finish="tool_calls")
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
