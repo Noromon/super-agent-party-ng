@@ -13,6 +13,7 @@ from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
 from py.defaults import DEFAULT_SERVER_PORT, FUNASR_WS_URL, GSV_TTS_URL
+from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                         arg_error_text, append_missing_results)
 from py.task_tools import query_task_progress
@@ -1747,26 +1748,8 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
     }
     
     # ==================== 3. 权限拦截逻辑 (Human-in-the-loop) ====================
-    # 定义受控的敏感工具列表
-    # 这些工具在执行前需要检查权限配置 (.agent/config.json 或 全局设置)
-    SENSITIVE_TOOLS = [
-        "docker_sandbox",
-        "edit_file_tool",
-        "edit_file_patch_tool",          
-        "shell_tool_local",
-        "edit_file_tool_local",
-        "edit_file_patch_tool_local",
-        "list_processes_tool",
-        "get_process_logs_tool",
-        "kill_process_tool",
-        "docker_manage_ports_tool",
-        "local_net_tool",
-    ]
-    
-    # --- 规则 0: 计划模式只读硬拦截（对全部写入/执行类工具生效，不经审批弹窗） ---
-    PLAN_BLOCKED_TOOLS = set(SENSITIVE_TOOLS) | {
-        "todo_write_tool", "todo_write_tool_local", "acpx_agent", "update_workspace_settings",
-    }
+    # 敏感/受限工具清单单一来源=py/tool_registry.py（E-1，顶部已导入）
+    # 规则 0: 计划模式只读硬拦截（对全部写入/执行类工具生效，不经审批弹窗）
     if tool_name in PLAN_BLOCKED_TOOLS:
         from py.cli_tool import normalize_permission_mode
         _engine0 = settings.get("CLISettings", {}).get("engine", "")
