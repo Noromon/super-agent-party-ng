@@ -141,6 +141,20 @@ class TestBackupUiPins:
         assert used and used <= zh_keys, f"missing i18n keys: {used - zh_keys}"
 
 
+class TestResumeScopePin:
+    """resume state must be declared BEFORE the main try so the catch-side
+    resume branch can see it (was a ReferenceError swallowed-handler bug,
+    first caught by eslint no-undef in M-2 rollout)."""
+
+    def test_declarations_outside_try(self):
+        decl = SRC.index("let _streamId = null;")
+        fetch = SRC.index("const response = await fetch(`/v1/chat/completions`")
+        assert decl < fetch, "resume declarations must live before the main try block"
+        assert "let _streamId = null;" not in SRC[fetch:]
+        # catch branch keeps consuming them
+        assert "if (_enableStreamResume && _streamId && _chunkIndex > 0" in SRC
+
+
 class TestStreamIdHeaderPin:
     """C-14: stream id captured from the response header (no meta-frame wait)."""
 

@@ -2988,6 +2988,13 @@ let vue_methods = {
             return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         };
 
+        // === 断点续传：追踪 stream_id 和已处理 chunk 数量 ===
+        // 必须声明在 try 之前：catch 的续传分支需要可见（原声明在 try 体内=
+        // 断线时 catch 抛 ReferenceError，resume 从未生效且吞掉错误提示，eslint no-undef 抓获）
+        let _streamId = null;
+        let _chunkIndex = 0;
+        const _enableStreamResume = this.settings?.enableStreamResume !== false;
+
         try {
             const response = await fetch(`/v1/chat/completions`, {
                 method: 'POST',
@@ -3026,11 +3033,6 @@ let vue_methods = {
             // 初始化流式文本批量更新状态
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
-
-            // === 断点续传：追踪 stream_id 和已处理 chunk 数量 ===
-            let _streamId = null;
-            let _chunkIndex = 0;
-            const _enableStreamResume = this.settings?.enableStreamResume !== false;
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
             // 断线也能 resume，停止按钮也能取消后端生产者流
