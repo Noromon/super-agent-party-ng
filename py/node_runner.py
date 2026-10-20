@@ -3,8 +3,9 @@ import json, asyncio, socket
 from pathlib import Path
 from typing import Dict, Optional
 from py.get_setting import EXT_DIR, IS_DOCKER
+from py.defaults import NODE_EXT_PORT_RANGE
 
-PORT_RANGE = (3100, 13999)
+PORT_RANGE = NODE_EXT_PORT_RANGE  # 单一事实源=py/defaults.py（M-6）
 
 # 获取环境变量（由 Docker 或 Electron 注入）
 ELECTRON_NODE = os.environ.get("ELECTRON_NODE_EXEC")

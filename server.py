@@ -12,6 +12,7 @@ import errno
 from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
+from py.defaults import DEFAULT_SERVER_PORT, FUNASR_WS_URL, GSV_TTS_URL
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                         arg_error_text, append_missing_results)
 from py.task_tools import query_task_progress
@@ -21,7 +22,7 @@ import shortuuid
 os.environ["MEM0_TELEMETRY"] = "False"
 parser = argparse.ArgumentParser(description="Run the ASGI application server.")
 parser.add_argument("--host", default="127.0.0.1")
-parser.add_argument("--port", type=int, default=3456)
+parser.add_argument("--port", type=int, default=DEFAULT_SERVER_PORT)
 args, _ = parser.parse_known_args()
 
 HOST = args.host
@@ -8415,7 +8416,7 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
     """
     try:
         # 获取FunASR服务器地址
-        funasr_url = funasr_settings.get('funasr_ws_url', 'ws://localhost:10095')
+        funasr_url = funasr_settings.get('funasr_ws_url', FUNASR_WS_URL)
         hotwords = funasr_settings.get('hotwords', '')
         if not funasr_url.startswith('ws://') and not funasr_url.startswith('wss://'):
             funasr_url = f"ws://{funasr_url}"
@@ -8591,7 +8592,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                     funasr_mode = asr_settings.get('funasr_mode', 'openai')  # 存储模式
                     if funasr_mode == "2pass" or funasr_mode == "online":
                         # 获取FunASR服务器地址
-                        funasr_url = asr_settings.get('funasr_ws_url', 'ws://localhost:10095')
+                        funasr_url = asr_settings.get('funasr_ws_url', FUNASR_WS_URL)
                         if not funasr_url.startswith('ws://') and not funasr_url.startswith('wss://'):
                             funasr_url = f"ws://{funasr_url}"
                         try:
@@ -8615,7 +8616,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                     hotwords = asr_settings.get('hotwords', '')
                     if funasr_mode == "2pass":
                         # 获取FunASR服务器地址
-                        funasr_url = asr_settings.get('funasr_ws_url', 'ws://localhost:10095')
+                        funasr_url = asr_settings.get('funasr_ws_url', FUNASR_WS_URL)
                         if not funasr_url.startswith('ws://') and not funasr_url.startswith('wss://'):
                             funasr_url = f"ws://{funasr_url}"
                         try:
@@ -8676,7 +8677,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                             funasr_mode = asr_settings.get('funasr_mode', '2pass')  # 存储模式
                             if funasr_mode == "2pass":
                                 # 获取FunASR服务器地址
-                                funasr_url = asr_settings.get('funasr_ws_url', 'ws://localhost:10095')
+                                funasr_url = asr_settings.get('funasr_ws_url', FUNASR_WS_URL)
                                 if not funasr_url.startswith('ws://') and not funasr_url.startswith('wss://'):
                                     funasr_url = f"ws://{funasr_url}"
                                 try:
@@ -8895,7 +8896,7 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
     """
     try:
         # 获取FunASR服务器地址
-        funasr_url = funasr_settings.get('funasr_ws_url', 'ws://localhost:10095')
+        funasr_url = funasr_settings.get('funasr_ws_url', FUNASR_WS_URL)
         hotwords = funasr_settings.get('hotwords', '')
         if not funasr_url.startswith('ws://') and not funasr_url.startswith('wss://'):
             funasr_url = f"ws://{funasr_url}"
@@ -9390,12 +9391,12 @@ async def text_to_speech(request: Request):
                 speed_value = min(speed_value * 0.95, 1.2)
 
             params = {key_text: text, key_speaker: speaker_value, key_speed: speed_value}
-            servers = [s for s in tts_settings.get('customTTSserver', 'http://127.0.0.1:9880').split('\n') if s.strip()]
+            servers = [s for s in tts_settings.get('customTTSserver', GSV_TTS_URL).split('\n') if s.strip()]
             custom_tt_server = servers[index % len(servers)]
             custom_streaming = tts_settings.get('customStream', False)
             
             async def generate_audio():
-                safe_url = sanitize_url(input_url=custom_tt_server, default_base="http://127.0.0.1:9880", endpoint="")
+                safe_url = sanitize_url(input_url=custom_tt_server, default_base=GSV_TTS_URL, endpoint="")
                 try:
                     # 使用全局客户端，无需 async with httpx.AsyncClient()
                     async with global_http_client.stream("GET", safe_url, params=params) as response:
@@ -9435,11 +9436,11 @@ async def text_to_speech(request: Request):
             }
             if mobile_optimized: gsv_params["speed_factor"] = min(gsv_params["speed_factor"] * 0.95, 1.1)
             
-            servers = [s for s in tts_settings.get('gsvServer', 'http://127.0.0.1:9880').split('\n') if s.strip()]
+            servers = [s for s in tts_settings.get('gsvServer', GSV_TTS_URL).split('\n') if s.strip()]
             gsvServer = servers[index % len(servers)]
                 
             async def generate_audio():
-                safe_url = sanitize_url(input_url=gsvServer, default_base="http://127.0.0.1:9880", endpoint="/tts")
+                safe_url = sanitize_url(input_url=gsvServer, default_base=GSV_TTS_URL, endpoint="/tts")
                 try:
                     async with global_http_client.stream("POST", safe_url, json=gsv_params) as response:
                         response.raise_for_status()

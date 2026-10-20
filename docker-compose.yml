@@ -18,11 +18,13 @@ services:
     ports:
       - "3456:3456"  # 对外暴露的端口
     environment:
-      - JWT_SECRET=ChangeThisToARandomString123!
-      - INIT_USER=root
-      - INIT_PASS=pass
-      # 如果忘记密码，将下面设置为 true 重启容器即可重置为 root/pass，重置完记得改回 false 或删除
-      - FORCE_RESET=false 
+      # M-6 凭据加固：三项均必填、无默认值——未设置时 compose 直接拒绝启动并给出提示，
+      # 明文默认凭据不再随模板分发
+      - JWT_SECRET=${JWT_SECRET:?请在 .env 或环境变量中设置 JWT_SECRET（随机长字符串）}
+      - INIT_USER=${INIT_USER:?请在 .env 或环境变量中设置 INIT_USER（初始账号）}
+      - INIT_PASS=${INIT_PASS:?请在 .env 或环境变量中设置 INIT_PASS（初始密码）}
+      # 忘记密码：置 FORCE_RESET=true 重启容器，即重置为当前 INIT_USER/INIT_PASS 的值，重置完记得改回 false 或删除
+      - FORCE_RESET=${FORCE_RESET:-false} 
     volumes:
       - ./gateway-data:/data # 持久化保存密码修改后的状态
     depends_on:
