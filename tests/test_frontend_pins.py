@@ -4,6 +4,7 @@ A1 (C-2/C-6): resume replay must share the same tool-frame ingest as the
 main loop (backend_content bookkeeping + approval/async branches).
 A2: system prompt edits must sync into the conversation copy so a restart
 cannot let a stale copy clobber the restored top-level value."""
+import re
 from pathlib import Path
 
 import pytest
@@ -200,3 +201,40 @@ class TestStreamIdHeaderPin:
         hdr = _slice("const _hdrStreamId = response.headers.get('X-Stream-Id');")
         hdr = hdr[: hdr.index("while (true)")]
         assert "this._currentStreamId = _streamId" in hdr
+
+
+class TestSettingsSchemaSingleSource:
+    """批 0-④: settings save/restore driven by settings_schema.js (no hand lists)."""
+
+    SCHEMA = (ROOT / "static" / "js" / "settings_schema.js").read_text(encoding="utf-8")
+
+    def test_schema_defined_and_wired(self):
+        assert "window.SETTINGS_SCHEMA" in self.SCHEMA
+        assert "window.SETTINGS_SCHEMA.buildSettingsPayload(this)" in SRC
+        assert "window.SETTINGS_SCHEMA.applySettingsPayload(this, data.data)" in SRC
+        assert "window.SETTINGS_SCHEMA.buildSettingsFromWire(data.data)" in SRC
+
+    def test_hand_written_lists_retired(self):
+        # 恢复侧手写 `this.X = data.data.W ||` 只允许特例（≤4：isdocker+对话三元组）
+        assert len(re.findall(r"this\.\w+ = data\.data\.\w+ \|\|", SRC)) <= 4
+        # 保存侧：autoSaveSettings 函数体内不得再出现手写映射（函数外对象字面量不算）
+        body = _slice("async autoSaveSettings()")
+        body = body[: body.index("const correlationId")]
+        assert not re.search(r"\w+:\s*this\.\w+,\n\s*\w+:\s*this\.\w+,", body), \
+            "autoSaveSettings 手写清单回潮"
+
+    def test_schema_pairs_self_consistent(self):
+        pairs = re.findall(r"\['(\w+)',\s*'(\w+)'\]", self.SCHEMA)
+        wires = [w for w, _ in pairs]
+        states = [s for _, s in pairs]
+        assert len(pairs) >= 60
+        assert len(set(wires)) == len(wires), "PAIRS wire 键重复"
+        assert len(set(states)) == len(states), "PAIRS state 字段重复"
+        special = re.search(r"RESTORE_SPECIAL = new Set\(\[([\s\S]*?)\]\)", self.SCHEMA)
+        special_keys = set(re.findall(r"'(\w+)'", special.group(1)))
+        assert special_keys <= set(wires), "RESTORE_SPECIAL 引用了表外 wire 键"
+
+    def test_pages_load_schema_before_methods(self):
+        for page in ("index.html", "chat.html"):
+            html = (ROOT / "static" / page).read_text(encoding="utf-8")
+            assert html.index("settings_schema.js") < html.index("vue_methods.js"), page

@@ -1057,9 +1057,12 @@ const app = Vue.createApp({
   watch: {
     'CLISettings.cc_path': {
       handler(newPath) {
+        // 单一 watcher：同时负责工作区文件监听与项目技能状态刷新
+        // （历史上此处有两个同键 watcher，对象形被函数形静默覆盖，文件监听失效）
         if (newPath) {
           console.log('工作区路径更新，准备启动文件监听:', newPath);
           this.setupWorkspaceWatcher(newPath);
+          this.fetchProjectSkillsStatus();
         } else if (window.electronAPI && window.electronAPI.stopWorkspaceWatch) {
           window.electronAPI.stopWorkspaceWatch();
         }
@@ -1108,10 +1111,6 @@ const app = Vue.createApp({
     // 监听 CLI 内部的 Tab
     activeCLITab(newVal) {
       this.handleSkillsPolling(this.activeMenu,this.subMenu, newVal);
-    },
-    'CLISettings.cc_path': function(newPath) {
-      console.log('工作区路径变化，更新技能状态');
-      this.fetchProjectSkillsStatus();
     },
     'searchEngine': function(newVal) {
       if (newVal === 'party') {

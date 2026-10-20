@@ -1924,70 +1924,10 @@ let vue_methods = {
         console.log('Received pong from server.');
       } 
       else if (data.type === 'settings_update') {
-          this.settings = {
-            model: data.data.model || '',
-            base_url: data.data.base_url || '',
-            api_key: data.data.api_key || '',
-            temperature: data.data.temperature || 0.7,
-            max_tokens: data.data.max_tokens || 4096,
-            max_rounds: data.data.max_rounds || 0,
-            contextManagement: data.data.contextManagement || { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 4, keepRecentDialog: 12, autoAgentCompact: true },
-            networkAccessSettings: data.data.networkAccessSettings || { allowLocalEquivalentUrls: false, allowLanUrls: false },
-            selectedProvider: data.data.selectedProvider || '',
-            top_p: data.data.top_p || 1,
-            reasoning_effort: data.data.reasoning_effort || null,
-            enableOmniTTS: data.data.enableOmniTTS || false,
-            omniVoice: data.data.omniVoice || 'Cherry',
-            extra_params: data.data.extra_params || [],
-          };
-          this.qqBotConfig = data.data.qqBotConfig || this.qqBotConfig;
-          this.feishuBotConfig = data.data.feishuBotConfig || this.feishuBotConfig;
-          this.wechatBotConfig = data.data.wechatBotConfig || this.wechatBotConfig;
-          this.weComBotConfig = data.data.weComBotConfig || this.weComBotConfig;
-          this.dingtalkBotConfig = data.data.dingtalkBotConfig || this.dingtalkBotConfig;
-          this.discordBotConfig = data.data.discordBotConfig || this.discordBotConfig;
-          this.telegramBotConfig = data.data.telegramBotConfig || this.telegramBotConfig;
-          this.xmppBotConfig = data.data.xmppBotConfig || this.xmppBotConfig;
-          this.slackBotConfig = data.data.slackBotConfig || this.slackBotConfig;
-          this.targetLangSelected = data.data.targetLangSelected || this.targetLangSelected;
-          this.BotConfig = data.data.BotConfig || this.BotConfig;
-          this.liveConfig = data.data.liveConfig || this.liveConfig;
-          this.WXBotConfig = data.data.WXBotConfig || this.WXBotConfig;
-          this.stickerPacks = data.data.stickerPacks || this.stickerPacks;
-          this.toolsSettings = data.data.tools || this.toolsSettings;
-          this.llmTools = data.data.llmTools || this.llmTools;
-          this.reasonerSettings = data.data.reasoner || this.reasonerSettings;
-          this.fastSettings = data.data.fast || this.fastSettings;
-          this.visionSettings = data.data.vision || this.visionSettings;
-          this.webSearchSettings = data.data.webSearch || this.webSearchSettings;
-          this.codeSettings = data.data.codeSettings || this.codeSettings;
-          this.CLISettings = data.data.CLISettings || this.CLISettings;
-          this.acpSettings = data.data.acpSettings || this.acpSettings;
-          this.visionControlSettings = data.data.visionControlSettings || this.visionControlSettings;
-          this.loveSettings = data.data.loveSettings || this.loveSettings;
-          this.ccSettings = data.data.ccSettings || this.ccSettings;
-          this.qcSettings = data.data.qcSettings || this.qcSettings;
-          this.dsSettings = data.data.dsSettings || this.dsSettings;
-          this.localEnvSettings = data.data.localEnvSettings || this.localEnvSettings;
-          this.ocSettings = data.data.ocSettings || this.ocSettings;
-          this.HASettings = data.data.HASettings || this.HASettings;
-          this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
-          this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
-          this.KBSettings = data.data.KBSettings || this.KBSettings;
-          this.mcpServers = data.data.mcpServers || this.mcpServers;
-          this.a2aServers = data.data.a2aServers || this.a2aServers;
-          this.memories = data.data.memories || this.memories;
-          this.memorySettings = data.data.memorySettings || this.memorySettings;
-          this.llmGuardSettings = data.data.llmGuardSettings || this.llmGuardSettings;
-          this.text2imgSettings = data.data.text2imgSettings || this.text2imgSettings;
-          this.asrSettings = data.data.asrSettings || this.asrSettings;
-          this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
-          this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
-          this.VRMConfig = data.data.VRMConfig || this.VRMConfig;
-          this.comfyuiServers = data.data.comfyuiServers || this.comfyuiServers;
-          this.comfyuiAPIkey = data.data.comfyuiAPIkey || this.comfyuiAPIkey;
-          this.workflows = data.data.workflows || this.workflows;
-          this.customHttpTools = data.data.custom_http || this.customHttpTools;
+          // 增量广播：payload 为 settings 子集，schema 驱动恢复自动跳过未推送键
+          // （批 0-④：原手写清单缺 agents/systemSettings 等键，推送被静默忽略，已并入单源）
+          this.settings = window.SETTINGS_SCHEMA.buildSettingsFromWire(data.data);
+          window.SETTINGS_SCHEMA.applySettingsPayload(this, data.data);
       }
       else if (data.type === 'settings') {
           // 【重连保护】如果是重连，保护当前对话状态不被服务端全量覆盖
@@ -2012,26 +1952,8 @@ let vue_methods = {
           }
           this.ensureConversationGroups();
           this.isdocker = data.data.isdocker || false;
-          this.settings = {
-            model: data.data.model || '',
-            base_url: data.data.base_url || '',
-            api_key: data.data.api_key || '',
-            temperature: data.data.temperature || 0.7,
-            max_tokens: data.data.max_tokens || 4096,
-            max_rounds: data.data.max_rounds || 0,
-            contextManagement: data.data.contextManagement || { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 4, keepRecentDialog: 12, autoAgentCompact: true },
-            networkAccessSettings: data.data.networkAccessSettings || { allowLocalEquivalentUrls: false, allowLanUrls: false },
-            selectedProvider: data.data.selectedProvider || '',
-            top_p: data.data.top_p || 1,
-            reasoning_effort: data.data.reasoning_effort || null,
-            enableOmniTTS: data.data.enableOmniTTS || false,
-            omniVoice: data.data.omniVoice || 'Cherry',
-            extra_params: data.data.extra_params || [],
-          };
-          this.isBtnCollapse = data.data.isBtnCollapse || false;
-          this.showHistorySidebar = data.data.showHistorySidebar || false;
-          this.system_prompt = data.data.system_prompt || '';
-          this.SystemPromptsList = data.data.SystemPromptsList || [];
+          // settings 展开字段与常规设置对均由 settings_schema.js 单一事实源驱动（批 0-④）
+          this.settings = window.SETTINGS_SCHEMA.buildSettingsFromWire(data.data);
           // 【重连保护】重连时不覆盖对话数据，避免丢失正在进行的对话
           if (!isReconnect) {
             this.conversations = data.data.conversations || this.conversations;
@@ -2041,52 +1963,8 @@ let vue_methods = {
             // 重连：与服务器副本按 id+timestamp 双向合并，本地未落盘的会话保留并补推
             this.mergeRemoteConversations(data.data.conversations);
           }
-          this.agents = data.data.agents || this.agents;
-          this.mainAgent = data.data.mainAgent || this.mainAgent;
-          this.qqBotConfig = data.data.qqBotConfig || this.qqBotConfig;
-          this.feishuBotConfig = data.data.feishuBotConfig || this.feishuBotConfig;
-          this.wechatBotConfig = data.data.wechatBotConfig || this.wechatBotConfig;
-          this.weComBotConfig = data.data.weComBotConfig || this.weComBotConfig;
-          this.dingtalkBotConfig = data.data.dingtalkBotConfig || this.dingtalkBotConfig;
-          this.discordBotConfig = data.data.discordBotConfig || this.discordBotConfig;
-          this.telegramBotConfig = data.data.telegramBotConfig || this.telegramBotConfig;
-          this.xmppBotConfig = data.data.xmppBotConfig || this.xmppBotConfig;
-          this.slackBotConfig = data.data.slackBotConfig || this.slackBotConfig;
-          this.targetLangSelected = data.data.targetLangSelected || this.targetLangSelected;
-          this.allBriefly = data.data.allBriefly || this.allBriefly;
-          this.isForceScrollToBottom = data.data.isForceScrollToBottom || this.isForceScrollToBottom;
-          this.BotConfig = data.data.BotConfig || this.BotConfig;
-          this.liveConfig = data.data.liveConfig || this.liveConfig;
-          this.WXBotConfig = data.data.WXBotConfig || this.WXBotConfig;
-          this.stickerPacks = data.data.stickerPacks || this.stickerPacks;
-          this.toolsSettings = data.data.tools || this.toolsSettings;
-          this.llmTools = data.data.llmTools || this.llmTools;
-          this.reasonerSettings = data.data.reasoner || this.reasonerSettings;
-          this.fastSettings = data.data.fast || this.fastSettings;
-          this.visionSettings = data.data.vision || this.visionSettings;
-          this.webSearchSettings = data.data.webSearch || this.webSearchSettings;
-          this.codeSettings = data.data.codeSettings || this.codeSettings;
-          this.CLISettings = data.data.CLISettings || this.CLISettings;
-          this.acpSettings = data.data.acpSettings || this.acpSettings;
-          this.visionControlSettings = data.data.visionControlSettings || this.visionControlSettings;
-          this.loveSettings = data.data.loveSettings || this.loveSettings;
-          this.ccSettings = data.data.ccSettings || this.ccSettings;
-          this.qcSettings = data.data.qcSettings || this.qcSettings;
-          this.dsSettings = data.data.dsSettings || this.dsSettings;
-          this.localEnvSettings = data.data.localEnvSettings || this.localEnvSettings;
-          this.ocSettings = data.data.ocSettings || this.ocSettings;
-          this.HASettings = data.data.HASettings || this.HASettings;
-          this.chromeMCPSettings = data.data.chromeMCPSettings || this.chromeMCPSettings;
-          this.sqlSettings = data.data.sqlSettings || this.sqlSettings;
-          this.KBSettings = data.data.KBSettings || this.KBSettings;
-          this.textFiles = data.data.textFiles || this.textFiles;
-          this.imageFiles = data.data.imageFiles || this.imageFiles;
-          this.videoFiles = data.data.videoFiles || this.videoFiles;
-          this.knowledgeBases = data.data.knowledgeBases || this.knowledgeBases;
-          this.modelProviders = data.data.modelProviders || this.modelProviders;
-          this.systemSettings = data.data.systemSettings || this.systemSettings;
-          this.showBrowserChat = data.data.showBrowserChat || this.showBrowserChat;
-          this.searchEngine = data.data.searchEngine || this.searchEngine;
+          // 常规设置对恢复（truthy 覆盖），清单在 settings_schema.js 单源维护
+          window.SETTINGS_SCHEMA.applySettingsPayload(this, data.data);
           if (data.data.largeMoreButtonDict) {
             this.largeMoreButtonDict = this.largeMoreButtonDict.map(existingButton => {
               const newButton = data.data.largeMoreButtonDict.find(button => button.name === existingButton.name);
@@ -2109,23 +1987,6 @@ let vue_methods = {
           if (!isReconnect) {
             this.loadConversation(this.conversationId);
           }
-          this.currentLanguage = data.data.currentLanguage || this.currentLanguage;
-          this.mcpServers = data.data.mcpServers || this.mcpServers;
-          this.a2aServers = data.data.a2aServers || this.a2aServers;
-          this.memories = data.data.memories || this.memories;
-          this.memorySettings = data.data.memorySettings || this.memorySettings;
-          this.llmGuardSettings = data.data.llmGuardSettings || this.llmGuardSettings;
-          this.text2imgSettings = data.data.text2imgSettings || this.text2imgSettings;
-          this.asrSettings = data.data.asrSettings || this.asrSettings;
-          this.ttsSettings = data.data.ttsSettings || this.ttsSettings;
-          this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
-          this.VRMConfig = data.data.VRMConfig || this.VRMConfig;
-          this.comfyuiServers = data.data.comfyuiServers || this.comfyuiServers;
-          this.comfyuiAPIkey = data.data.comfyuiAPIkey || this.comfyuiAPIkey;
-          this.workflows = data.data.workflows || this.workflows;
-          this.customHttpTools = data.data.custom_http || this.customHttpTools;
-          this.isGroupMode = data.data.isGroupMode || this.isGroupMode;
-          this.selectedGroupAgents = data.data.selectedGroupAgents || this.selectedGroupAgents;
           // 初始化时确保数据一致性
           this.edgettsLanguage = this.ttsSettings.edgettsLanguage;
           this.edgettsGender = this.ttsSettings.edgettsGender;
@@ -4312,82 +4173,8 @@ let vue_methods = {
       }
       return new Promise((resolve, reject) => {
         this.ensureConversationGroups();
-        // 构造 payload（保持原有逻辑）
-        const payload = {
-          ...this.settings,
-          showHistorySidebar: this.showHistorySidebar,
-          system_prompt: this.system_prompt,
-          SystemPromptsList: this.SystemPromptsList,
-          agents: this.agents,
-          mainAgent: this.mainAgent,
-          qqBotConfig : this.qqBotConfig,
-          feishuBotConfig: this.feishuBotConfig,
-          wechatBotConfig: this.wechatBotConfig,
-          weComBotConfig: this.weComBotConfig,
-          dingtalkBotConfig: this.dingtalkBotConfig,
-          discordBotConfig: this.discordBotConfig,
-          slackBotConfig: this.slackBotConfig,
-          telegramBotConfig: this.telegramBotConfig,
-          xmppBotConfig: this.xmppBotConfig,
-          targetLangSelected: this.targetLangSelected,
-          allBriefly: this.allBriefly,
-          isForceScrollToBottom: this.isForceScrollToBottom,
-          BotConfig: this.BotConfig,
-          liveConfig: this.liveConfig,
-          WXBotConfig: this.WXBotConfig,
-          stickerPacks: this.stickerPacks,
-          tools: this.toolsSettings,
-          llmTools: this.llmTools,
-          conversationId: this.conversationId,
-          conversationGroups: this.conversationGroups,
-          reasoner: this.reasonerSettings,
-          fast: this.fastSettings,
-          isBtnCollapse: this.isBtnCollapse,
-          vision: this.visionSettings,
-          webSearch: this.webSearchSettings, 
-          codeSettings: this.codeSettings,
-          CLISettings: this.CLISettings,
-          acpSettings: this.acpSettings,
-          visionControlSettings: this.visionControlSettings,
-          loveSettings: this.loveSettings,
-          ccSettings: this.ccSettings,
-          qcSettings: this.qcSettings,
-          dsSettings: this.dsSettings,
-          localEnvSettings: this.localEnvSettings,
-          ocSettings: this.ocSettings,
-          HASettings: this.HASettings,
-          chromeMCPSettings: this.chromeMCPSettings,
-          sqlSettings: this.sqlSettings,
-          KBSettings: this.KBSettings,
-          textFiles: this.textFiles,
-          imageFiles: this.imageFiles,
-          videoFiles: this.videoFiles,
-          knowledgeBases: this.knowledgeBases,
-          modelProviders: this.modelProviders,
-          systemSettings: this.systemSettings,
-          largeMoreButtonDict: this.largeMoreButtonDict,
-          smallMoreButtonDict: this.smallMoreButtonDict,
-          currentLanguage: this.currentLanguage,
-          mcpServers: this.mcpServers,
-          a2aServers: this.a2aServers,
-          isdocker: this.isdocker,
-          memories: this.memories,
-          memorySettings: this.memorySettings,
-          llmGuardSettings: this.llmGuardSettings,
-          text2imgSettings: this.text2imgSettings,
-          asrSettings: this.asrSettings,
-          ttsSettings: this.ttsSettings,
-          behaviorSettings: this.behaviorSettings,
-          VRMConfig: this.VRMConfig,
-          comfyuiServers: this.comfyuiServers,
-          comfyuiAPIkey: this.comfyuiAPIkey,
-          workflows: this.workflows,
-          custom_http: this.customHttpTools,
-          showBrowserChat: this.showBrowserChat,
-          searchEngine: this.searchEngine,
-          isGroupMode: this.isGroupMode,
-          selectedGroupAgents: this.selectedGroupAgents,
-        };
+        // payload 由 settings_schema.js 单一事实源生成（批 0-④，替代 71 对手写清单）
+        const payload = window.SETTINGS_SCHEMA.buildSettingsPayload(this);
         const correlationId = uuid.v4();
         // 发送保存请求
         this.ws.send(JSON.stringify({
@@ -5758,7 +5545,9 @@ let vue_methods = {
     },
     // 在 methods 中添加
     t(key) {
-      return this.translations[this.currentLanguage][key] || this.translations[this.currentLanguage]['en-US'] || key;
+      const lang = this.translations[this.currentLanguage];
+      const fallback = this.translations['en-US'];
+      return (lang && lang[key]) || (fallback && fallback[key]) || key;
     },
     async handleSystemLanguageChange(val) {
       this.systemSettings.language = val;
