@@ -4980,6 +4980,1177 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
     _st["snot"] = search_not_done
     _st["stask"] = search_task
 
+
+
+def _stream_round_compress(request, settings, _st):
+    """L1 context compression after a tool round (W1 copy). (M-3 split)"""
+    max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
+    chat_messages = request.messages # 这里的 chat_messages 包含 system
+    usage_info = None
+    _st.setdefault("_ctx_peak", 0)
+    if max_rounds > 0:
+                            
+        # 区分系统消息和对话消息
+        sys_msgs = [m for m in chat_messages if get_role(m) == "system"]
+        dialog_msgs = [m for m in chat_messages if get_role(m) != "system"]
+                            
+        # 设定压缩阈值：当非系统消息超过 max_rounds * 2 + 1 时开始压缩
+        if len(dialog_msgs) > (max_rounds * 2 + 1):
+            keep_indices = set()
+                                
+            # 1. 总是保留第一条消息 (Anchor User Prompt)
+            if len(dialog_msgs) > 0: keep_indices.add(0)
+                                
+            # 2. 保留所有 User 消息 (User 优先策略)
+            for i, m in enumerate(dialog_msgs):
+                if get_role(m) == "user": keep_indices.add(i)
+                                
+            # 3. 保留每个 Turn 的最后一个 Assistant 消息 (最终答案)
+            for i in range(len(dialog_msgs)):
+                if get_role(dialog_msgs[i]) == "assistant":
+                    is_last = True
+                    for j in range(i + 1, len(dialog_msgs)):
+                        if get_role(dialog_msgs[j]) == "assistant":
+                            is_last = False; break
+                        if get_role(dialog_msgs[j]) == "user": break
+                    if is_last: keep_indices.add(i)
+                                
+            # 4. 保留最近的活跃窗口 (最近 N 条消息，确保当前工具链不被切断)
+            tail_start = max(0, len(dialog_msgs) - (max_rounds * 2))
+            for i in range(tail_start, len(dialog_msgs)):
+                keep_indices.add(i)
+                                
+            # 构造初步压缩后的列表
+            compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
+            chat_messages = sys_msgs + compressed_dialog
+            logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
+
+
+    request.messages = sanitize_tool_chains(chat_messages)
+    request.messages = ensure_thinking_fields(request.messages)
+
+async def _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
+    """While-loop tool round: ack, dispatch, SSE results, abort/cancel signals.
+
+    w1_cancel = user cancelled mid-round (generator must terminate);
+    w1_abort  = approval gate hit (while must break). (M-3 split)
+    """
+    from py.know_base import rerank_knowledge_base
+    # 将本轮全部 tool_calls 连同伴随的叙述文本一次性 append 为 assistant 消息
+    assistant_tool_calls = []
+    for _tc in tool_calls:
+        _fn = _tc.function
+        assistant_tool_calls.append({
+            "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
+            "function": {
+                "arguments": _fn.arguments or "",
+                "name": _fn.name,
+            },
+            "type": getattr(_tc, "type", None) or "function",
+        })
+    request.messages.append({
+        "role": "assistant",
+        "content": full_content or "",
+        "tool_calls": assistant_tool_calls,
+        "reasoning_content": "",
+    })
+    pending_abort = False
+    acked_ids = set()
+    reasoner_tool_events = []
+    for _ti, _tc in enumerate(tool_calls):
+        tool_call_id = assistant_tool_calls[_ti]["id"]
+        response_content = _tc.function
+        logging.getLogger("app").info(response_content)
+        args_dict, arg_err = parse_tool_arguments(response_content.arguments)
+        if arg_err is not None:
+            err_text = arg_error_text(arg_err)
+            acked_ids.add(tool_call_id)
+            reasoner_tool_events.append((f"{response_content.name}({response_content.arguments})", err_text))
+            err_chunk = {
+                "choices": [{
+                    "delta": {
+                        "tool_call_id": tool_call_id,
+                        "tool_content": {
+                            "title": response_content.name,
+                            "content": err_text,
+                            "type": "tool_result"
+                        }
+                    }
+                }]
+            }
+            yield f"data: {json.dumps(err_chunk)}\n\n"
+            request.messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": response_content.name,
+                "content": err_text,
+            })
+            continue
+
+        # 显式发送 "call" 事件，锁定 UI 状态并同步 ID（参数接收完毕，确认调用，绑定 ID）
+        call_confirm_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_call_id": tool_call_id,
+                    "tool_content": {
+                        "title": response_content.name,
+                        "content": json.dumps(args_dict, ensure_ascii=False),
+                        "type": "call"
+                    }
+                }
+            }]
+        }
+        yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
+
+        if settings['tools']['asyncTools']['enabled']:
+            # ... 异步工具逻辑保持不变 ...
+            tool_id = uuid.uuid4()
+            async_tool_id = f"{response_content.name}_{tool_id}"
+            chunk_dict = {
+                "id": "agentParty",
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "index": 0,
+                        "delta": {
+                            "role":"assistant",
+                            "content": "",
+                            "async_tool_id": async_tool_id
+                        }
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+            asyncio.create_task(
+                execute_tool(
+                    async_tool_id,
+                    response_content.name,
+                    args_dict,
+                    settings,
+                    user_prompt
+                )
+            )
+            async with async_tools_lock:
+                async_tools[async_tool_id] = {
+                    "status": "pending",
+                    "result": None,
+                    "name":response_content.name,
+                    "parameters":args_dict
+                }
+            results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
+        else:
+            if _stream_cancelled():
+                logging.getLogger("app").info(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
+                _st["w1_cancel"] = True
+                yield "data: [DONE]\n\n"
+                return
+            try:
+                await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
+                results = await dispatch_tool(response_content.name, args_dict, settings)
+                await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
+            except Exception as e:
+                results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
+
+        if results is None:
+            none_text = NONE_TEXT
+            none_chunk = {
+                "choices": [{
+                    "delta": {
+                        "tool_call_id": tool_call_id,
+                        "tool_content": {
+                            "title": response_content.name,
+                            "content": none_text,
+                            "type": "tool_result"
+                        }
+                    }
+                }]
+            }
+            yield f"data: {json.dumps(none_chunk)}\n\n"
+            acked_ids.add(tool_call_id)
+            reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", none_text))
+            request.messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": response_content.name,
+                "content": none_text,
+            })
+            pending_abort = True
+            break
+
+        if response_content.name in ["query_knowledge_base"] and type(results) == list:
+            if settings["KBSettings"]["is_rerank"]:
+                results = await rerank_knowledge_base(user_prompt, results)
+            results = json.dumps(results, ensure_ascii=False, indent=4)
+
+        # 发送结果，带上匹配的 tool_call_id
+        if not isinstance(results, AsyncIterator):
+            results = _cap_tool_result(results)
+            result_chunk = {
+                "choices": [{
+                    "delta": {
+                        "tool_call_id": tool_call_id,
+                        "tool_content": {
+                            "title": response_content.name,
+                            "content": str(results),
+                            "type": "tool_result"
+                        }
+                    }
+                }]
+            }
+            yield f"data: {json.dumps(result_chunk)}\n\n"
+            if str(response_content.name).startswith("todo_write_tool"):
+                try:
+                    from py.cli_tool import read_todo_snapshot
+                    _td = await read_todo_snapshot()
+                    _td_done = sum(1 for _t in _td if isinstance(_t, dict) and _t.get("status") == "done")
+                    _td_evt = {"type": "todo_stats",
+                               "items": [{k: _t.get(k) for k in ("id", "content", "status", "priority")} for _t in _td if isinstance(_t, dict)],
+                               "done": _td_done, "total": len(_td)}
+                    yield f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
+                except Exception as _te:
+                    logging.getLogger("app").info(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
+        else:
+            # 流式工具结果处理 (AsyncIterator)
+            buffer = []
+            first = True
+            async for chunk in results:
+                buffer.append(chunk)
+                if first:
+                    # 第一帧带 title
+                    stream_chunk = {
+                        "choices": [{
+                            "delta": {
+                                "tool_call_id": tool_call_id,
+                                "tool_content": {
+                                    "title": response_content.name,
+                                    "content": chunk,
+                                    "type": "tool_result_stream"
+                                }
+                            }
+                        }]
+                    }
+                    yield f"data: {json.dumps(stream_chunk)}\n\n"
+                    first = False
+                else:
+                    # 后续帧
+                    stream_chunk = {
+                        "choices": [{
+                            "delta": {
+                                "tool_call_id": tool_call_id,
+                                "tool_content": {
+                                    "title": "tool_result_stream",
+                                    "content": chunk,
+                                    "type": "tool_result_stream"
+                                }
+                            }
+                        }]
+                    }
+                    yield f"data: {json.dumps(stream_chunk)}\n\n"
+            results = "".join(buffer)
+
+        tool_result_text = str("".join(results))
+        _st["results"] = results
+        acked_ids.add(tool_call_id)
+        reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", tool_result_text))
+        request.messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": response_content.name,
+                "content": truncate_tool_result(tool_result_text),
+            }
+        )
+
+        # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
+        # T-9: 结构化哨兵判定（非子串嗅探），命中即断
+        if _is_approval_result(results) is not None:
+            pending_abort = True
+            break
+
+    # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
+    append_missing_results(request.messages, assistant_tool_calls, acked_ids)
+
+
+    # =========================================================================
+    # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
+    # =========================================================================
+    _stream_round_compress(request, settings, _st)
+
+    # 将本轮工具事件喂给推理模型上下文
+    for _r_call, _r_result in reasoner_tool_events:
+        reasoner_messages.append(
+            {
+                "role": "assistant",
+                "content": _r_call,
+                "reasoning_content": "",
+            }
+        )
+        reasoner_messages.append(
+            {
+                "role": "user",
+                "content": f"工具结果：" + truncate_tool_result(str(_r_result), 8000),
+                "reasoning_content": "",
+            }
+        )
+
+    _st["w1_abort"] = pending_abort
+
+
+async def _stream_reasoner_update(_st, request, reasoner_client, settings, reasoner_messages, images, reasoner_extra, open_tag, close_tag, tools, vendor):
+    """While-loop reasoner refresh (streamed) + vendor resolution."""
+    if tools:
+        content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
+    for modelProvider in settings['modelProviders']: 
+        if modelProvider['id'] == settings['reasoner']['selectedProvider']:
+            vendor = modelProvider['vendor']
+            break
+    msg = await images_add_in_messages(reasoner_messages, images,settings)
+    if vendor == 'Ollama':
+        if settings['reasoner']['temperature'] !=1:
+            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        # 流式调用推理模型
+        reasoner_stream = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=True,
+            **reasoner_extra
+        )
+        full_reasoning = ""
+        buffer = ""  # 跨chunk的内容缓冲区
+        in_reasoning = False  # 是否在标签内
+                            
+        async for chunk in reasoner_stream:
+            if not chunk.choices:
+                continue
+            chunk_dict = chunk.model_dump()
+            delta = chunk_dict["choices"][0].get("delta", {})
+            if delta:
+                current_content = delta.get("content", "")
+                buffer += current_content  # 累积到缓冲区
+                                    
+                # 实时处理缓冲区内容
+                while True:
+                    reasoning_content = delta.get("reasoning_content", "")
+                    if reasoning_content:
+                        full_reasoning += reasoning_content
+                    else:
+                        reasoning_content = delta.get("reasoning", "")
+                        if reasoning_content:
+                            delta['reasoning_content'] = reasoning_content
+                            full_reasoning += reasoning_content
+                    if reasoning_content:
+                        yield f"data: {json.dumps(chunk_dict)}\n\n"
+                        break
+                    if not in_reasoning:
+                        # 寻找开放标签
+                        start_pos = buffer.find(open_tag)
+                        if start_pos != -1:
+                            # 开放标签前的内容（非思考内容）
+                            non_reasoning = buffer[:start_pos]
+                            buffer = buffer[start_pos+len(open_tag):]
+                            in_reasoning = True
+                        else:
+                            break  # 无开放标签，保留后续处理
+                    else:
+                        # 寻找闭合标签
+                        end_pos = buffer.find(close_tag)
+                        if end_pos != -1:
+                            # 提取思考内容并构造响应
+                            reasoning_part = buffer[:end_pos]
+                            chunk_dict["choices"][0]["delta"] = {
+                                "reasoning_content": reasoning_part,
+                                "content": ""  # 清除非思考内容
+                            }
+                            yield f"data: {json.dumps(chunk_dict)}\n\n"
+                            full_reasoning += reasoning_part
+                            buffer = buffer[end_pos+len(close_tag):]
+                            in_reasoning = False
+                        else:
+                            # 发送未闭合的中间内容
+                            if buffer:
+                                chunk_dict["choices"][0]["delta"] = {
+                                    "reasoning_content": buffer,
+                                    "content": ""
+                                }
+                                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                                full_reasoning += buffer
+                                buffer = ""
+                            break  # 等待更多内容
+    else:
+        if settings['reasoner']['temperature'] !=1:
+            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+
+        # 流式调用推理模型
+        reasoner_stream = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=True,
+            stop=settings['reasoner']['stop_words'],
+            **reasoner_extra
+        )
+        full_reasoning = ""
+        # 处理推理模型的流式响应
+        async for chunk in reasoner_stream:
+            if not chunk.choices:
+                continue
+
+            chunk_dict = chunk.model_dump()
+            delta = chunk_dict["choices"][0].get("delta", {})
+            if delta:
+                reasoning_content = delta.get("reasoning_content", "")
+                if reasoning_content:
+                    full_reasoning += reasoning_content
+                else:
+                    reasoning_content = delta.get("reasoning", "")
+                    if reasoning_content:
+                        delta['reasoning_content'] = reasoning_content
+                        full_reasoning += reasoning_content
+                # 移除content字段，确保yield的内容中不包含content
+                if 'content' in delta:
+                    del delta['content']
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+
+    # 在推理结束后添加完整推理内容到消息
+    content_append(request.messages, 'user', f"\n\n可参考的推理过程：{full_reasoning}") # 可参考的推理过程
+
+    _st["vendor"] = vendor
+
+
+async def _stream_regrab(request, settings, results, images, fastapi_base_url):
+    """Post-tool desktop re-grab with action feedback + grid."""
+    try:
+        import pyautogui
+        # 必须从你的工具类中引入设置区域的方法
+        from py.computer_use_tool import set_screen_region
+                            
+        v_settings = settings.get('visionControlSettings', {})
+        is_grid_enabled = v_settings.get('isEnableGrid', False)
+        is_full_screen = v_settings.get('isFullScreen', True)
+        # ScreenSize 格式为 [x, y, width, height]
+        screen_size = v_settings.get('ScreenSize', [0, 0, 1920, 1080])
+        time.sleep(0.5) # 等待一下，确保截图工具已经准备好
+        logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
+                            
+        # --- 1. 区域判定与捕获 ---
+        if not is_full_screen and len(screen_size) == 4:
+            # 局部截图模式
+            rx, ry, rw, rh = map(int, screen_size)
+            # 关键：告诉鼠标工具，接下来的 0-1000 坐标要映射到这个局部矩形
+            set_screen_region((rx, ry, rw, rh))
+                                
+            # 逻辑尺寸即为选区尺寸
+            logical_width, logical_height = rw, rh
+            # 捕获指定区域
+            screenshot = await asyncio.to_thread(pyautogui.screenshot, region=(rx, ry, rw, rh))
+        else:
+            # 全屏截图模式
+            set_screen_region(None) # 恢复全屏映射
+            logical_width, logical_height = pyautogui.size()
+            screenshot = await asyncio.to_thread(pyautogui.screenshot)
+                            
+        # --- 2. 强制 Resize 到逻辑坐标系 (解决 Windows 缩放偏移) ---
+        if screenshot.width != logical_width or screenshot.height != logical_height:
+            screenshot = await asyncio.to_thread(
+                screenshot.resize, (logical_width, logical_height), Image.Resampling.LANCZOS
+            )
+                            
+        # 限制传输图片大小，平衡 Token 消耗
+        target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
+        if screenshot.width > target_w or screenshot.height > target_h:
+            screenshot = await asyncio.to_thread(
+                screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
+            )
+
+        # --- 3. 绘制视觉反馈 (红点/线) ---
+        action_feedback_hint = ""
+        if results and "[LAST_ACTION:" in str(results):
+            screenshot = await asyncio.to_thread(draw_action_feedback, screenshot, str(results))
+            action_feedback_hint = (
+                " Notice: The colored markers show your PREVIOUS actions relative to this view. "
+                "Cyan = Click. Blue = Double Click. Green-Yellow = Drag."
+            )
+
+        # --- 4. 绘制网格辅助 ---
+        if is_grid_enabled:
+            display_image = await asyncio.to_thread(draw_grid_on_image, screenshot.copy(), grid_spacing=10)
+            region_text = "partial region" if not is_full_screen else "full desktop"
+            grid_hint = f"\n\n【system info】Screenshot of {region_text} with coordinate grid (0-1000) injected. Use coordinates for precise clicking within this view.\n{action_feedback_hint}"
+        else:
+            display_image = screenshot
+            grid_hint = f"\n\n【system info】Current screenshot injected.\n{action_feedback_hint}"
+                            
+        # --- 5. 保存并注入消息 ---
+        desktop_img_name = f"desktop_view_{uuid.uuid4().hex}.png"
+        desktop_img_path = os.path.join(UPLOAD_FILES_DIR, desktop_img_name)
+        await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
+                            
+        desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
+                            
+        current_user_msg = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": '[Getting screenshot]' + grid_hint},
+                {"type": "image_url", "image_url": {"url": desktop_url}}
+            ]
+        }
+        request.messages.append(current_user_msg)
+                            
+        # --- 6. 清理旧截图 ---
+        if v_settings.get('onlyNewScreen', False):
+            for msg in request.messages[:-1]:
+                if isinstance(msg.get('content'), list):
+                    msg['content'] = [item for item in msg['content'] if item.get('type') != 'image_url']
+                    if len(msg['content']) == 1 and msg['content'][0].get('type') == 'text':
+                        msg['content'] = msg['content'][0]['text']
+                    elif len(msg['content']) == 0:
+                        msg['content'] = ""
+
+    except Exception as e:
+        logging.getLogger("app").info(f"后端桌面截图失败: {e}")
+                            
+    images = await images_in_messages(request.messages, fastapi_base_url)
+    request.messages = await message_without_images(request.messages)
+
+    return images
+
+
+async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
+    """While-loop LLM re-request chunk stream (slot merge + think tags)."""
+    async for chunk in response:
+        if not chunk.choices:
+            if getattr(chunk, "usage", None):
+                usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
+                _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
+            continue
+        _chunk_count2 += 1
+        if _chunk_count2 % 5 == 0:
+            await asyncio.sleep(0)  # 定期让出控制权，防止事件循环饥饿导致1006断开
+        if chunk.choices:
+            choice = chunk.choices[0]
+            if hasattr(choice.delta, "audio") and choice.delta.audio:
+                # 只把 Base64 音频数据留在 delta 里，别动它
+                yield f"data: {chunk.model_dump_json()}\n\n"
+                continue
+            if choice.delta.tool_calls:  # function_calling
+                for idx, tool_call in enumerate(choice.delta.tool_calls):
+                    tool = choice.delta.tool_calls[idx]
+                    if len(tool_calls) <= idx:
+                        tool_calls.append(tool)
+                        continue
+                    if tool.function.arguments:
+                        # function参数为流式响应，需要拼接
+                        if tool_calls[idx].function.arguments:
+                            tool_calls[idx].function.arguments += tool.function.arguments
+                        else:
+                            tool_calls[idx].function.arguments = tool.function.arguments
+                current_tool = tool_calls[idx]
+                if current_tool.function and current_tool.function.name:
+                    progress_chunk = {
+                        "choices": [{
+                            "delta": {
+                                "tool_progress": {  # 新增字段，区别于最终的 tool_content
+                                    "name": current_tool.function.name,
+                                    "arguments": current_tool.function.arguments or "",
+                                    "index": idx,
+                                    "id": current_tool.id or f"call_{idx}"
+                                }
+                            }
+                        }]
+                    }
+                    yield f"data: {json.dumps(progress_chunk)}\n\n"
+            else:
+                # 创建原始chunk的拷贝
+                chunk_dict = chunk.model_dump()
+                delta = chunk_dict["choices"][0]["delta"]
+                                
+                # 初始化必要字段
+                delta.setdefault("content", "")
+                delta.setdefault("reasoning_content", "")
+
+                # 优先处理 reasoning_content
+                if delta["reasoning_content"]:
+                    yield f"data: {json.dumps(chunk_dict)}\n\n"
+                    continue
+                if delta.get("reasoning", ""):
+                    delta["reasoning_content"] = delta["reasoning"]
+                    yield f"data: {json.dumps(chunk_dict)}\n\n"
+                    continue
+                # 处理内容
+                current_content = delta["content"]
+                buffer = current_content
+                                
+                while buffer:
+                    if not in_reasoning:
+                        # 寻找开始标签
+                        start_pos = buffer.find(open_tag)
+                        if start_pos != -1:
+                            # 处理开始标签前的内容
+                            content_buffer.append(buffer[:start_pos])
+                            buffer = buffer[start_pos+len(open_tag):]
+                            in_reasoning = True
+                        else:
+                            content_buffer.append(buffer)
+                            buffer = ""
+                    else:
+                        # 寻找结束标签
+                        end_pos = buffer.find(close_tag)
+                        if end_pos != -1:
+                            # 处理思考内容
+                            reasoning_buffer.append(buffer[:end_pos])
+                            buffer = buffer[end_pos+len(close_tag):]
+                            in_reasoning = False
+                        else:
+                            reasoning_buffer.append(buffer)
+                            buffer = ""
+                                
+                # 构造新的delta内容
+                new_content = "".join(content_buffer)
+                new_reasoning = "".join(reasoning_buffer)
+                                
+                # 更新chunk内容
+                delta["content"] = new_content.strip("\x00")  # 保留未完成内容
+                delta["reasoning_content"] = new_reasoning.strip("\x00") or None
+                                
+                # 重置缓冲区但保留未完成部分
+                if in_reasoning:
+                    content_buffer = [new_content.split(open_tag)[-1]] 
+                else:
+                    content_buffer = []
+                reasoning_buffer = []
+                                
+                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                full_content += delta.get("content") or "" 
+
+    _st["usage_info"] = usage_info
+    _st["_ctx_peak"] = _ctx_peak
+    _st["full_content"] = full_content
+    _st["in_reasoning"] = in_reasoning
+    _st["content_buffer"] = content_buffer
+    _st["reasoning_buffer"] = reasoning_buffer
+    _st["_chunk_count2"] = _chunk_count2
+
+
+async def _stream_drs_loop_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
+    """While-loop deep-research status machine (stream SSE notices)."""
+    search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[                        
+            {
+            "role": "system",
+            "content": source_prompt,
+            },
+            {
+            "role": "user",
+            "content": search_prompt,
+            }
+        ],
+        extra_body = extra_params, # 其他参数
+    )
+    response_content = response.choices[0].message.content
+    if response_content is None:
+        response_content = ""
+    # 用re 提取```json 包裹json字符串 ```
+    if "```json" in response_content:
+        try:
+            response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
+        except:
+            # 用re 提取```json 之后的内容
+            response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
+    try:
+        response_content = json.loads(response_content)
+    except json.JSONDecodeError:
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❌{await t('task_error')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+    if response_content["status"] == "done":
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"✅{await t('task_done')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = False
+    elif response_content["status"] == "not_done":
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❎{await t('task_not_done')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "need_more_info":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❓{await t('task_need_more_info')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = False
+    elif response_content["status"] == "need_work":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"🔍{await t('enter_search_stage')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+            }
+        )
+    elif response_content["status"] == "need_more_work":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"🔍{await t('need_more_work')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "answer":
+        DRS_STAGE = 3
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"⭐{await t('enter_answer_stage')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+            }
+        )
+
+    _st["drs"] = DRS_STAGE
+    _st["snot"] = search_not_done
+    _st["stask"] = search_task
+
+
+async def _stream_usage_event(request, settings, usage_info, _ctx_peak, tools):
+    """context_usage SSE event generation + log line. (M-3 split)"""
+    try:
+        from py.context_manager import get_context_settings as _gcs, estimate_tokens as _esttok
+        _cm_u = _gcs(settings)
+        _usage_evt = {
+            "type": "context_usage",
+            "prompt_tokens": (usage_info or {}).get("prompt_tokens"),
+            "completion_tokens": (usage_info or {}).get("completion_tokens"),
+            "peak_prompt_tokens": _ctx_peak or None,
+            "window": _cm_u["context_window"],
+            "budget": int(_cm_u["context_window"] * _cm_u["compact_ratio"]),
+            "est_total": _esttok(request.messages, tools),
+            "breakdown": _breakdown_tokens(request.messages, tools),
+        }
+        yield f"data: {json.dumps(_usage_evt, ensure_ascii=False)}\n\n"
+        logging.getLogger("app").info(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
+    except Exception as _ue:
+        logging.getLogger("app").info(f"[Context] usage 事件生成异常（跳过）: {_ue}")
+
+
+async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory):
+    """turn-log shadow append + affection extraction + mem0 submit job."""
+    try:
+        from py.turn_log import shadow_append as _shadow_append
+        await _shadow_append(request.conversation_id, request.messages, log=print)
+    except Exception as _tle:
+        logging.getLogger("app").info(f"[TurnLog] stream shadow skip: {_tle}")
+    if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
+        try:
+            from py.affection_system import extract_and_update_affection
+            # full_content 是当前轮次 AI 的完整回复文本
+            await extract_and_update_affection(full_content)
+        except Exception as e:
+            logging.getLogger("app").info(f"解析好感度标签出错: {e}")
+    if m0 and not request.is_sub_agent:
+        logging.getLogger("app").info("记忆更新任务开始提交")
+        messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
+        infer = cur_memory.get('infer', False) or False
+        _m0_job = m0
+        _mid = memoryId
+        _job_msgs = messages
+
+        def _mem_job():
+            metadata = {
+                "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
+
+        llm_gate.submit_memory_job(
+            _mid, _mem_job, name="mem0-add",
+            debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
+                     if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
+            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
+        logging.getLogger("app").info("记忆更新任务已提交到后台线程")
+
+async def stream_generator(client, reasoner_client, request, settings, fastapi_base_url,
+                     enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
+                     user_prompt, DRS_STAGE, tools, images,
+                     chat_vendor, reasoner_vendor, model, extra_params,
+                     open_tag, close_tag, source_prompt, m0, memoryId, cur_memory):
+    from py.know_base import kb_tool
+    from py.task_tools import (
+        create_subtask_tool,
+        query_tasks_tool,
+        cancel_subtask_tool,
+        finish_task_tool,
+    )
+    from py.mode_change import mode_change_tool
+    # ---------- 统一 SSE 封装 ----------
+    def make_sse(tool_data: dict) -> str:
+        chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": tool_data, # 这里直接传字典
+                }
+            }]
+        }
+        return f"data: {json.dumps(chunk)}\n\n"
+    try:
+        llm_gate.enter()
+        _st = {}
+        usage_info = None
+        _ctx_peak = 0
+        extra = {}
+        reasoner_extra = {}
+        if chat_vendor == 'OpenAI':
+            extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
+        else:
+            extra['max_tokens'] = request.max_tokens or settings['max_tokens']
+        if settings.get('enableOmniTTS',False) and not request.is_sub_agent:
+            extra['modalities'] = ["text", "audio"]
+            extra['audio'] ={"voice": settings.get('omniVoice',"Cherry"), "format": "wav"}
+        if reasoner_vendor == 'OpenAI':
+            reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
+        else:
+            reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
+        if request.reasoning_effort or settings['reasoning_effort']:
+            extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
+        if settings['reasoner']['reasoning_effort'] is not None:
+            reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort']
+        # 处理传入的异步工具ID查询
+        async for _c in _stream_async_tools(request, async_tools_id):
+            yield _c
+        kb_list = []
+        if settings["knowledgeBases"]:
+            for kb in settings["knowledgeBases"]:
+                if kb["enabled"] and kb["processingStatus"] == "completed":
+                    kb_list.append({"kb_id":kb["id"],"name": kb["name"],"introduction":kb["introduction"]})
+        async for _c in _stream_kb_before(request, settings, user_prompt, kb_list):
+            yield _c
+        if settings["KBSettings"]["when"] == "after_thinking" or settings["KBSettings"]["when"] == "both":
+            if kb_list:
+                kb_list_message = f"\n\n可调用的知识库列表：{json.dumps(kb_list, ensure_ascii=False)}"
+                content_append(request.messages, 'system', kb_list_message)
+        else:
+            kb_list = []
+        async for _c in _stream_web_search_pre(request, settings, user_prompt, tools, enable_web_search):
+            yield _c
+        if kb_list:
+            tools.append(kb_tool)
+
+        # ==================== 获取权限模式 ====================
+        cli_settings = settings.get("CLISettings", {})
+        engine = cli_settings.get("engine", "")
+                
+        # 根据环境类型获取权限模式
+        if engine == "local":
+            env_settings = settings.get("localEnvSettings", {})
+        elif engine == "ds":
+            env_settings = settings.get("dsSettings", {})
+        else:
+            env_settings = settings.get("acpSettings", {})
+                
+        permission_mode = cli_permission_mode_for(settings)
+        if permission_mode == "cowork" and settings['CLISettings']['enabled'] and not request.is_sub_agent:
+            tools = []
+            tools.append(create_subtask_tool)
+            tools.append(query_tasks_tool)
+            tools.append(cancel_subtask_tool)
+            if  settings['CLISettings']['mode_change']:
+                tools.append(mode_change_tool)
+
+        if request.is_sub_agent:
+            tools.append(finish_task_tool)
+        # 如果是子智能体调用，或者指定了工具过滤规则
+        tools = _stream_filter_tools(request, tools)
+            
+
+        logging.getLogger("app").info(tools)
+
+        if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            async for _c in _stream_deepsearch_pre(_st, client, model, extra_params, request):
+                yield _c
+            user_prompt = _st["user_prompt"]
+        # 如果启用推理模型
+        if settings['reasoner']['enabled'] or enable_thinking:
+            async for _c in _stream_reasoner_prep(_st, request, reasoner_client, settings, images, reasoner_extra, open_tag, close_tag, tools, DRS_STAGE, user_prompt, enable_deep_research):
+                yield _c
+            vendor = _st["vendor"]
+        # 状态跟踪变量
+        in_reasoning = False
+        reasoning_buffer = []
+        content_buffer = []
+        if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            content_append(request.messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
+            drs_msg = get_drs_stage(DRS_STAGE)
+            if drs_msg:
+                content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
+        # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式），结果下发前端落账 =====
+        _compact_event_payload = await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
+        if _compact_event_payload:
+            yield f"data: {json.dumps(_compact_event_payload, ensure_ascii=False)}\n\n"
+        msg = await images_add_in_messages(request.messages, images,settings)
+        if request.top_p != 1 or settings['top_p'] != 1:
+            extra['top_p'] = request.top_p or settings['top_p']
+
+        if settings['temperature'] !=1:
+            extra['temperature'] = settings['temperature']
+
+        if tools:
+            extra['tools'] = tools
+
+        if _stream_cancelled():
+            logging.getLogger("app").info("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
+            yield "data: [DONE]\n\n"
+            return
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=msg,  # 添加图片信息到消息
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body = extra_params, # 其他参数
+            **_apply_ctx_guardrail(extra, msg, settings)
+        )
+
+        tool_calls = []
+        full_content = ""
+        search_not_done = False
+        search_task = ""
+        is_tool_call = False
+        _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
+        async for _c in _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
+            yield _c
+        usage_info = _st["usage_info"]
+        _ctx_peak = _st["_ctx_peak"]
+        is_tool_call = _st["is_tool_call"]
+        full_content = _st["full_content"]
+        in_reasoning = _st["in_reasoning"]
+        content_buffer = _st["content_buffer"]
+        reasoning_buffer = _st["reasoning_buffer"]
+        _chunk_count = _st["_chunk_count"]
+        # 最终flush未完成内容
+        if content_buffer or reasoning_buffer:
+            final_chunk = {
+                "choices": [{
+                    "delta": {
+                        "content": "".join(content_buffer),
+                        "reasoning_content": "".join(reasoning_buffer)
+                    }
+                }]
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+            full_content += final_chunk["choices"][0]["delta"].get("content", "")
+        if not tool_calls:
+            # 将响应添加到消息列表
+            content_append(request.messages, 'assistant', full_content)
+        # 工具和深度搜索
+        if tool_calls:
+            print("tool_calls",tool_calls)
+            pass
+        elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            async for _c in _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
+                yield _c
+            DRS_STAGE = _st["drs"]
+            search_not_done = _st["snot"]
+            search_task = _st["stask"]
+
+        reasoner_messages = copy.deepcopy(request.messages)
+        _tool_loop_count = 0
+        _max_tool_iterations = int(settings.get("max_tool_iterations", 100) or 100)
+        force_no_tools = False
+        while tool_calls or search_not_done:
+            _tool_loop_count += 1
+            if tool_calls and _tool_loop_count > _max_tool_iterations:
+                logging.getLogger("app").info(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
+                request.messages.append({
+                    "role": "user",
+                    "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
+                })
+                tool_calls = []
+                force_no_tools = True
+            if tool_calls:
+                async for _c in _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
+                    yield _c
+                if _st.pop("w1_cancel", False):
+                    return
+                if _st.pop("w1_abort", False):
+                    break
+                results = _st.get("results")
+            # 如果启用推理模型
+            if settings['reasoner']['enabled'] or enable_thinking:
+                async for _c in _stream_reasoner_update(_st, request, reasoner_client, settings, reasoner_messages, images, reasoner_extra, open_tag, close_tag, tools, vendor):
+                    yield _c
+                vendor = _st["vendor"]
+                    
+            vision_control_enabled = settings.get('visionControlSettings', {}).get('enabled', False)
+            if vision_control_enabled and (results =='[Getting screenshot]' or settings.get('visionControlSettings', {}).get('desktopVision', False)):
+                images = await _stream_regrab(request, settings, results, images, fastapi_base_url)
+            msg = await images_add_in_messages(request.messages, images, settings)
+            if request.top_p != 1 or settings['top_p'] != 1:
+                extra['top_p'] = request.top_p or settings['top_p']
+
+            if settings['temperature'] !=1:
+                extra['temperature'] = settings['temperature']
+
+            full_content = ""
+            if tools and not force_no_tools:
+                extra['tools'] = tools
+            if _stream_cancelled():
+                logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
+                yield "data: [DONE]\n\n"
+                return
+            response = await client.chat.completions.create(
+                model=model,
+                messages=msg,  # 添加图片信息到消息
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body = extra_params, # 其他参数
+                **_apply_ctx_guardrail(extra, msg, settings)
+            )
+            tool_calls = []
+            _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
+            async for _c in _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
+                yield _c
+            usage_info = _st["usage_info"]
+            _ctx_peak = _st["_ctx_peak"]
+            full_content = _st["full_content"]
+            in_reasoning = _st["in_reasoning"]
+            content_buffer = _st["content_buffer"]
+            reasoning_buffer = _st["reasoning_buffer"]
+            _chunk_count2 = _st["_chunk_count2"]
+            # 最终flush未完成内容
+            if content_buffer or reasoning_buffer:
+                final_chunk = {
+                    "choices": [{
+                        "delta": {
+                            "content": "".join(content_buffer),
+                            "reasoning_content": "".join(reasoning_buffer)
+                        }
+                    }]
+                }
+                yield f"data: {json.dumps(final_chunk)}\n\n"
+                full_content += final_chunk["choices"][0]["delta"].get("content", "")
+            if not tool_calls:
+                # 将响应添加到消息列表
+                content_append(request.messages, 'assistant', full_content)
+            # 工具和深度搜索
+            if tool_calls:
+                pass
+            elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+                async for _c in _stream_drs_loop_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
+                    yield _c
+                DRS_STAGE = _st["drs"]
+                search_not_done = _st["snot"]
+                search_task = _st["stask"]
+        async for _c in _stream_usage_event(request, settings, usage_info, _ctx_peak, tools):
+            yield _c
+        logger.info(f"all msg: {request.messages}")
+        yield "data: [DONE]\n\n"
+        await _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory)
+
+        return
+    except Exception as e:
+        logger.error(f"{request.messages}")
+        # 捕获异常并返回结构化错误信息
+        error_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {
+                        "title": "❎ Error", # 统一标题
+                        "content": str(e),   # 错误详情
+                        "type": "error"      # 标记类型，方便前端切换样式
+                    }
+                }
+            }]
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield "data: [DONE]\n\n"  # 确保最终结束
+        return
+    finally:
+        llm_gate.leave()
+
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -5066,6 +6237,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 
         m0 = None
         memoryId = None
+        cur_memory = None
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != ""  and not request.is_sub_agent:
             memoryId = settings["memorySettings"]["selectedMemory"]
             cur_memory = None
@@ -5135,1080 +6307,6 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             extra_params = process_extra_params(extra_params)
         else:
             extra_params = {}
-        async def stream_generator(user_prompt,DRS_STAGE,tools,images):
-            # ---------- 统一 SSE 封装 ----------
-            def make_sse(tool_data: dict) -> str:
-                chunk = {
-                    "choices": [{
-                        "delta": {
-                            "tool_content": tool_data, # 这里直接传字典
-                        }
-                    }]
-                }
-                return f"data: {json.dumps(chunk)}\n\n"
-            try:
-                llm_gate.enter()
-                _st = {}
-                usage_info = None
-                _ctx_peak = 0
-                extra = {}
-                reasoner_extra = {}
-                if chat_vendor == 'OpenAI':
-                    extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
-                else:
-                    extra['max_tokens'] = request.max_tokens or settings['max_tokens']
-                if settings.get('enableOmniTTS',False) and not request.is_sub_agent:
-                    extra['modalities'] = ["text", "audio"]
-                    extra['audio'] ={"voice": settings.get('omniVoice',"Cherry"), "format": "wav"}
-                if reasoner_vendor == 'OpenAI':
-                    reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
-                else:
-                    reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
-                if request.reasoning_effort or settings['reasoning_effort']:
-                    extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
-                if settings['reasoner']['reasoning_effort'] is not None:
-                    reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort']
-                # 处理传入的异步工具ID查询
-                async for _c in _stream_async_tools(request, async_tools_id):
-                    yield _c
-                kb_list = []
-                if settings["knowledgeBases"]:
-                    for kb in settings["knowledgeBases"]:
-                        if kb["enabled"] and kb["processingStatus"] == "completed":
-                            kb_list.append({"kb_id":kb["id"],"name": kb["name"],"introduction":kb["introduction"]})
-                async for _c in _stream_kb_before(request, settings, user_prompt, kb_list):
-                    yield _c
-                if settings["KBSettings"]["when"] == "after_thinking" or settings["KBSettings"]["when"] == "both":
-                    if kb_list:
-                        kb_list_message = f"\n\n可调用的知识库列表：{json.dumps(kb_list, ensure_ascii=False)}"
-                        content_append(request.messages, 'system', kb_list_message)
-                else:
-                    kb_list = []
-                async for _c in _stream_web_search_pre(request, settings, user_prompt, tools, enable_web_search):
-                    yield _c
-                if kb_list:
-                    tools.append(kb_tool)
-
-                # ==================== 获取权限模式 ====================
-                cli_settings = settings.get("CLISettings", {})
-                engine = cli_settings.get("engine", "")
-                
-                # 根据环境类型获取权限模式
-                if engine == "local":
-                    env_settings = settings.get("localEnvSettings", {})
-                elif engine == "ds":
-                    env_settings = settings.get("dsSettings", {})
-                else:
-                    env_settings = settings.get("acpSettings", {})
-                
-                permission_mode = cli_permission_mode_for(settings)
-                if permission_mode == "cowork" and settings['CLISettings']['enabled'] and not request.is_sub_agent:
-                    tools = []
-                    tools.append(create_subtask_tool)
-                    tools.append(query_tasks_tool)
-                    tools.append(cancel_subtask_tool)
-                    if  settings['CLISettings']['mode_change']:
-                        tools.append(mode_change_tool)
-
-                if request.is_sub_agent:
-                    tools.append(finish_task_tool)
-                # 如果是子智能体调用，或者指定了工具过滤规则
-                tools = _stream_filter_tools(request, tools)
-            
-
-                logging.getLogger("app").info(tools)
-
-                if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                    async for _c in _stream_deepsearch_pre(_st, client, model, extra_params, request):
-                        yield _c
-                    user_prompt = _st["user_prompt"]
-                # 如果启用推理模型
-                if settings['reasoner']['enabled'] or enable_thinking:
-                    async for _c in _stream_reasoner_prep(_st, request, reasoner_client, settings, images, reasoner_extra, open_tag, close_tag, tools, DRS_STAGE, user_prompt, enable_deep_research):
-                        yield _c
-                    vendor = _st["vendor"]
-                # 状态跟踪变量
-                in_reasoning = False
-                reasoning_buffer = []
-                content_buffer = []
-                if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                    content_append(request.messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
-                    drs_msg = get_drs_stage(DRS_STAGE)
-                    if drs_msg:
-                        content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
-                # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式），结果下发前端落账 =====
-                _compact_event_payload = await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
-                if _compact_event_payload:
-                    yield f"data: {json.dumps(_compact_event_payload, ensure_ascii=False)}\n\n"
-                msg = await images_add_in_messages(request.messages, images,settings)
-                if request.top_p != 1 or settings['top_p'] != 1:
-                    extra['top_p'] = request.top_p or settings['top_p']
-
-                if settings['temperature'] !=1:
-                    extra['temperature'] = settings['temperature']
-
-                if tools:
-                    extra['tools'] = tools
-
-                if _stream_cancelled():
-                    logging.getLogger("app").info("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
-                    yield "data: [DONE]\n\n"
-                    return
-
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=msg,  # 添加图片信息到消息
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_body = extra_params, # 其他参数
-                    **_apply_ctx_guardrail(extra, msg, settings)
-                )
-
-                tool_calls = []
-                full_content = ""
-                search_not_done = False
-                search_task = ""
-                is_tool_call = False
-                _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
-                async for _c in _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
-                    yield _c
-                usage_info = _st["usage_info"]
-                _ctx_peak = _st["_ctx_peak"]
-                is_tool_call = _st["is_tool_call"]
-                full_content = _st["full_content"]
-                in_reasoning = _st["in_reasoning"]
-                content_buffer = _st["content_buffer"]
-                reasoning_buffer = _st["reasoning_buffer"]
-                _chunk_count = _st["_chunk_count"]
-                # 最终flush未完成内容
-                if content_buffer or reasoning_buffer:
-                    final_chunk = {
-                        "choices": [{
-                            "delta": {
-                                "content": "".join(content_buffer),
-                                "reasoning_content": "".join(reasoning_buffer)
-                            }
-                        }]
-                    }
-                    yield f"data: {json.dumps(final_chunk)}\n\n"
-                    full_content += final_chunk["choices"][0]["delta"].get("content", "")
-                if not tool_calls:
-                    # 将响应添加到消息列表
-                    content_append(request.messages, 'assistant', full_content)
-                # 工具和深度搜索
-                if tool_calls:
-                    print("tool_calls",tool_calls)
-                    pass
-                elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                    async for _c in _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
-                        yield _c
-                    DRS_STAGE = _st["drs"]
-                    search_not_done = _st["snot"]
-                    search_task = _st["stask"]
-
-                reasoner_messages = copy.deepcopy(request.messages)
-                _tool_loop_count = 0
-                _max_tool_iterations = int(settings.get("max_tool_iterations", 100) or 100)
-                force_no_tools = False
-                while tool_calls or search_not_done:
-                    _tool_loop_count += 1
-                    if tool_calls and _tool_loop_count > _max_tool_iterations:
-                        logging.getLogger("app").info(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
-                        request.messages.append({
-                            "role": "user",
-                            "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
-                        })
-                        tool_calls = []
-                        force_no_tools = True
-                    if tool_calls:
-                        # 将本轮全部 tool_calls 连同伴随的叙述文本一次性 append 为 assistant 消息
-                        assistant_tool_calls = []
-                        for _tc in tool_calls:
-                            _fn = _tc.function
-                            assistant_tool_calls.append({
-                                "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
-                                "function": {
-                                    "arguments": _fn.arguments or "",
-                                    "name": _fn.name,
-                                },
-                                "type": getattr(_tc, "type", None) or "function",
-                            })
-                        request.messages.append({
-                            "role": "assistant",
-                            "content": full_content or "",
-                            "tool_calls": assistant_tool_calls,
-                            "reasoning_content": "",
-                        })
-                        pending_abort = False
-                        acked_ids = set()
-                        reasoner_tool_events = []
-                        for _ti, _tc in enumerate(tool_calls):
-                            tool_call_id = assistant_tool_calls[_ti]["id"]
-                            response_content = _tc.function
-                            logging.getLogger("app").info(response_content)
-                            args_dict, arg_err = parse_tool_arguments(response_content.arguments)
-                            if arg_err is not None:
-                                err_text = arg_error_text(arg_err)
-                                acked_ids.add(tool_call_id)
-                                reasoner_tool_events.append((f"{response_content.name}({response_content.arguments})", err_text))
-                                err_chunk = {
-                                    "choices": [{
-                                        "delta": {
-                                            "tool_call_id": tool_call_id,
-                                            "tool_content": {
-                                                "title": response_content.name,
-                                                "content": err_text,
-                                                "type": "tool_result"
-                                            }
-                                        }
-                                    }]
-                                }
-                                yield f"data: {json.dumps(err_chunk)}\n\n"
-                                request.messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "name": response_content.name,
-                                    "content": err_text,
-                                })
-                                continue
-
-                            # 显式发送 "call" 事件，锁定 UI 状态并同步 ID（参数接收完毕，确认调用，绑定 ID）
-                            call_confirm_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_call_id": tool_call_id,
-                                        "tool_content": {
-                                            "title": response_content.name,
-                                            "content": json.dumps(args_dict, ensure_ascii=False),
-                                            "type": "call"
-                                        }
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
-
-                            if settings['tools']['asyncTools']['enabled']:
-                                # ... 异步工具逻辑保持不变 ...
-                                tool_id = uuid.uuid4()
-                                async_tool_id = f"{response_content.name}_{tool_id}"
-                                chunk_dict = {
-                                    "id": "agentParty",
-                                    "choices": [
-                                        {
-                                            "finish_reason": None,
-                                            "index": 0,
-                                            "delta": {
-                                                "role":"assistant",
-                                                "content": "",
-                                                "async_tool_id": async_tool_id
-                                            }
-                                        }
-                                    ]
-                                }
-                                yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                asyncio.create_task(
-                                    execute_tool(
-                                        async_tool_id,
-                                        response_content.name,
-                                        args_dict,
-                                        settings,
-                                        user_prompt
-                                    )
-                                )
-                                async with async_tools_lock:
-                                    async_tools[async_tool_id] = {
-                                        "status": "pending",
-                                        "result": None,
-                                        "name":response_content.name,
-                                        "parameters":args_dict
-                                    }
-                                results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
-                            else:
-                                if _stream_cancelled():
-                                    logging.getLogger("app").info(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
-                                    yield "data: [DONE]\n\n"
-                                    return
-                                try:
-                                    await asyncio.sleep(0)  # 让出控制权，确保心跳/ping能及时发送
-                                    results = await dispatch_tool(response_content.name, args_dict, settings)
-                                    await asyncio.sleep(0)  # 工具调用完成后再次让出，防止事件循环饥饿
-                                except Exception as e:
-                                    results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
-
-                            if results is None:
-                                none_text = NONE_TEXT
-                                none_chunk = {
-                                    "choices": [{
-                                        "delta": {
-                                            "tool_call_id": tool_call_id,
-                                            "tool_content": {
-                                                "title": response_content.name,
-                                                "content": none_text,
-                                                "type": "tool_result"
-                                            }
-                                        }
-                                    }]
-                                }
-                                yield f"data: {json.dumps(none_chunk)}\n\n"
-                                acked_ids.add(tool_call_id)
-                                reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", none_text))
-                                request.messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "name": response_content.name,
-                                    "content": none_text,
-                                })
-                                pending_abort = True
-                                break
-
-                            if response_content.name in ["query_knowledge_base"] and type(results) == list:
-                                if settings["KBSettings"]["is_rerank"]:
-                                    results = await rerank_knowledge_base(user_prompt, results)
-                                results = json.dumps(results, ensure_ascii=False, indent=4)
-
-                            # 发送结果，带上匹配的 tool_call_id
-                            if not isinstance(results, AsyncIterator):
-                                results = _cap_tool_result(results)
-                                result_chunk = {
-                                    "choices": [{
-                                        "delta": {
-                                            "tool_call_id": tool_call_id,
-                                            "tool_content": {
-                                                "title": response_content.name,
-                                                "content": str(results),
-                                                "type": "tool_result"
-                                            }
-                                        }
-                                    }]
-                                }
-                                yield f"data: {json.dumps(result_chunk)}\n\n"
-                                if str(response_content.name).startswith("todo_write_tool"):
-                                    try:
-                                        from py.cli_tool import read_todo_snapshot
-                                        _td = await read_todo_snapshot()
-                                        _td_done = sum(1 for _t in _td if isinstance(_t, dict) and _t.get("status") == "done")
-                                        _td_evt = {"type": "todo_stats",
-                                                   "items": [{k: _t.get(k) for k in ("id", "content", "status", "priority")} for _t in _td if isinstance(_t, dict)],
-                                                   "done": _td_done, "total": len(_td)}
-                                        yield f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
-                                    except Exception as _te:
-                                        logging.getLogger("app").info(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
-                            else:
-                                # 流式工具结果处理 (AsyncIterator)
-                                buffer = []
-                                first = True
-                                async for chunk in results:
-                                    buffer.append(chunk)
-                                    if first:
-                                        # 第一帧带 title
-                                        stream_chunk = {
-                                            "choices": [{
-                                                "delta": {
-                                                    "tool_call_id": tool_call_id,
-                                                    "tool_content": {
-                                                        "title": response_content.name,
-                                                        "content": chunk,
-                                                        "type": "tool_result_stream"
-                                                    }
-                                                }
-                                            }]
-                                        }
-                                        yield f"data: {json.dumps(stream_chunk)}\n\n"
-                                        first = False
-                                    else:
-                                        # 后续帧
-                                        stream_chunk = {
-                                            "choices": [{
-                                                "delta": {
-                                                    "tool_call_id": tool_call_id,
-                                                    "tool_content": {
-                                                        "title": "tool_result_stream",
-                                                        "content": chunk,
-                                                        "type": "tool_result_stream"
-                                                    }
-                                                }
-                                            }]
-                                        }
-                                        yield f"data: {json.dumps(stream_chunk)}\n\n"
-                                results = "".join(buffer)
-
-                            tool_result_text = str("".join(results))
-                            acked_ids.add(tool_call_id)
-                            reasoner_tool_events.append((f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})", tool_result_text))
-                            request.messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tool_call_id,
-                                    "name": response_content.name,
-                                    "content": truncate_tool_result(tool_result_text),
-                                }
-                            )
-
-                            # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
-                            # T-9: 结构化哨兵判定（非子串嗅探），命中即断
-                            if _is_approval_result(results) is not None:
-                                pending_abort = True
-                                break
-
-                        # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
-                        append_missing_results(request.messages, assistant_tool_calls, acked_ids)
-
-
-                        # =========================================================================
-                        # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
-                        # =========================================================================
-                        max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
-                        chat_messages = request.messages # 这里的 chat_messages 包含 system
-                        usage_info = None
-                        _ctx_peak = max(_ctx_peak, 0)
-                        if max_rounds > 0:
-                            
-                            # 区分系统消息和对话消息
-                            sys_msgs = [m for m in chat_messages if get_role(m) == "system"]
-                            dialog_msgs = [m for m in chat_messages if get_role(m) != "system"]
-                            
-                            # 设定压缩阈值：当非系统消息超过 max_rounds * 2 + 1 时开始压缩
-                            if len(dialog_msgs) > (max_rounds * 2 + 1):
-                                keep_indices = set()
-                                
-                                # 1. 总是保留第一条消息 (Anchor User Prompt)
-                                if len(dialog_msgs) > 0: keep_indices.add(0)
-                                
-                                # 2. 保留所有 User 消息 (User 优先策略)
-                                for i, m in enumerate(dialog_msgs):
-                                    if get_role(m) == "user": keep_indices.add(i)
-                                
-                                # 3. 保留每个 Turn 的最后一个 Assistant 消息 (最终答案)
-                                for i in range(len(dialog_msgs)):
-                                    if get_role(dialog_msgs[i]) == "assistant":
-                                        is_last = True
-                                        for j in range(i + 1, len(dialog_msgs)):
-                                            if get_role(dialog_msgs[j]) == "assistant":
-                                                is_last = False; break
-                                            if get_role(dialog_msgs[j]) == "user": break
-                                        if is_last: keep_indices.add(i)
-                                
-                                # 4. 保留最近的活跃窗口 (最近 N 条消息，确保当前工具链不被切断)
-                                tail_start = max(0, len(dialog_msgs) - (max_rounds * 2))
-                                for i in range(tail_start, len(dialog_msgs)):
-                                    keep_indices.add(i)
-                                
-                                # 构造初步压缩后的列表
-                                compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
-                                chat_messages = sys_msgs + compressed_dialog
-                                logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
-
-
-                        request.messages = sanitize_tool_chains(chat_messages)
-                        request.messages = ensure_thinking_fields(request.messages)
-
-                        # 将本轮工具事件喂给推理模型上下文
-                        for _r_call, _r_result in reasoner_tool_events:
-                            reasoner_messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": _r_call,
-                                    "reasoning_content": "",
-                                }
-                            )
-                            reasoner_messages.append(
-                                {
-                                    "role": "user",
-                                    "content": f"工具结果：" + truncate_tool_result(str(_r_result), 8000),
-                                    "reasoning_content": "",
-                                }
-                            )
-
-                        if pending_abort:
-                            break  # 命中审批请求/不可用工具：跳出 while，等待前端手动执行工具后恢复
-                    # 如果启用推理模型
-                    if settings['reasoner']['enabled'] or enable_thinking:
-                        if tools:
-                            content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
-                        for modelProvider in settings['modelProviders']: 
-                            if modelProvider['id'] == settings['reasoner']['selectedProvider']:
-                                vendor = modelProvider['vendor']
-                                break
-                        msg = await images_add_in_messages(reasoner_messages, images,settings)
-                        if vendor == 'Ollama':
-                            if settings['reasoner']['temperature'] !=1:
-                                reasoner_extra['temperature'] = settings['reasoner']['temperature']
-                            # 流式调用推理模型
-                            reasoner_stream = await reasoner_client.chat.completions.create(
-                                model=settings['reasoner']['model'],
-                                messages=msg,
-                                stream=True,
-                                **reasoner_extra
-                            )
-                            full_reasoning = ""
-                            buffer = ""  # 跨chunk的内容缓冲区
-                            in_reasoning = False  # 是否在标签内
-                            
-                            async for chunk in reasoner_stream:
-                                if not chunk.choices:
-                                    continue
-                                chunk_dict = chunk.model_dump()
-                                delta = chunk_dict["choices"][0].get("delta", {})
-                                if delta:
-                                    current_content = delta.get("content", "")
-                                    buffer += current_content  # 累积到缓冲区
-                                    
-                                    # 实时处理缓冲区内容
-                                    while True:
-                                        reasoning_content = delta.get("reasoning_content", "")
-                                        if reasoning_content:
-                                            full_reasoning += reasoning_content
-                                        else:
-                                            reasoning_content = delta.get("reasoning", "")
-                                            if reasoning_content:
-                                                delta['reasoning_content'] = reasoning_content
-                                                full_reasoning += reasoning_content
-                                        if reasoning_content:
-                                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                            break
-                                        if not in_reasoning:
-                                            # 寻找开放标签
-                                            start_pos = buffer.find(open_tag)
-                                            if start_pos != -1:
-                                                # 开放标签前的内容（非思考内容）
-                                                non_reasoning = buffer[:start_pos]
-                                                buffer = buffer[start_pos+len(open_tag):]
-                                                in_reasoning = True
-                                            else:
-                                                break  # 无开放标签，保留后续处理
-                                        else:
-                                            # 寻找闭合标签
-                                            end_pos = buffer.find(close_tag)
-                                            if end_pos != -1:
-                                                # 提取思考内容并构造响应
-                                                reasoning_part = buffer[:end_pos]
-                                                chunk_dict["choices"][0]["delta"] = {
-                                                    "reasoning_content": reasoning_part,
-                                                    "content": ""  # 清除非思考内容
-                                                }
-                                                yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                                full_reasoning += reasoning_part
-                                                buffer = buffer[end_pos+len(close_tag):]
-                                                in_reasoning = False
-                                            else:
-                                                # 发送未闭合的中间内容
-                                                if buffer:
-                                                    chunk_dict["choices"][0]["delta"] = {
-                                                        "reasoning_content": buffer,
-                                                        "content": ""
-                                                    }
-                                                    yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                                    full_reasoning += buffer
-                                                    buffer = ""
-                                                break  # 等待更多内容
-                        else:
-                            if settings['reasoner']['temperature'] !=1:
-                                reasoner_extra['temperature'] = settings['reasoner']['temperature']
-
-                            # 流式调用推理模型
-                            reasoner_stream = await reasoner_client.chat.completions.create(
-                                model=settings['reasoner']['model'],
-                                messages=msg,
-                                stream=True,
-                                stop=settings['reasoner']['stop_words'],
-                                **reasoner_extra
-                            )
-                            full_reasoning = ""
-                            # 处理推理模型的流式响应
-                            async for chunk in reasoner_stream:
-                                if not chunk.choices:
-                                    continue
-
-                                chunk_dict = chunk.model_dump()
-                                delta = chunk_dict["choices"][0].get("delta", {})
-                                if delta:
-                                    reasoning_content = delta.get("reasoning_content", "")
-                                    if reasoning_content:
-                                        full_reasoning += reasoning_content
-                                    else:
-                                        reasoning_content = delta.get("reasoning", "")
-                                        if reasoning_content:
-                                            delta['reasoning_content'] = reasoning_content
-                                            full_reasoning += reasoning_content
-                                    # 移除content字段，确保yield的内容中不包含content
-                                    if 'content' in delta:
-                                        del delta['content']
-                                yield f"data: {json.dumps(chunk_dict)}\n\n"
-
-                        # 在推理结束后添加完整推理内容到消息
-                        content_append(request.messages, 'user', f"\n\n可参考的推理过程：{full_reasoning}") # 可参考的推理过程
-                    
-                    vision_control_enabled = settings.get('visionControlSettings', {}).get('enabled', False)
-                    if vision_control_enabled and (results =='[Getting screenshot]' or settings.get('visionControlSettings', {}).get('desktopVision', False)):
-                        try:
-                            import pyautogui
-                            # 必须从你的工具类中引入设置区域的方法
-                            from py.computer_use_tool import set_screen_region
-                            
-                            v_settings = settings.get('visionControlSettings', {})
-                            is_grid_enabled = v_settings.get('isEnableGrid', False)
-                            is_full_screen = v_settings.get('isFullScreen', True)
-                            # ScreenSize 格式为 [x, y, width, height]
-                            screen_size = v_settings.get('ScreenSize', [0, 0, 1920, 1080])
-                            time.sleep(0.5) # 等待一下，确保截图工具已经准备好
-                            logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
-                            
-                            # --- 1. 区域判定与捕获 ---
-                            if not is_full_screen and len(screen_size) == 4:
-                                # 局部截图模式
-                                rx, ry, rw, rh = map(int, screen_size)
-                                # 关键：告诉鼠标工具，接下来的 0-1000 坐标要映射到这个局部矩形
-                                set_screen_region((rx, ry, rw, rh))
-                                
-                                # 逻辑尺寸即为选区尺寸
-                                logical_width, logical_height = rw, rh
-                                # 捕获指定区域
-                                screenshot = await asyncio.to_thread(pyautogui.screenshot, region=(rx, ry, rw, rh))
-                            else:
-                                # 全屏截图模式
-                                set_screen_region(None) # 恢复全屏映射
-                                logical_width, logical_height = pyautogui.size()
-                                screenshot = await asyncio.to_thread(pyautogui.screenshot)
-                            
-                            # --- 2. 强制 Resize 到逻辑坐标系 (解决 Windows 缩放偏移) ---
-                            if screenshot.width != logical_width or screenshot.height != logical_height:
-                                screenshot = await asyncio.to_thread(
-                                    screenshot.resize, (logical_width, logical_height), Image.Resampling.LANCZOS
-                                )
-                            
-                            # 限制传输图片大小，平衡 Token 消耗
-                            target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
-                            if screenshot.width > target_w or screenshot.height > target_h:
-                                screenshot = await asyncio.to_thread(
-                                    screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
-                                )
-
-                            # --- 3. 绘制视觉反馈 (红点/线) ---
-                            action_feedback_hint = ""
-                            if results and "[LAST_ACTION:" in str(results):
-                                screenshot = await asyncio.to_thread(draw_action_feedback, screenshot, str(results))
-                                action_feedback_hint = (
-                                    " Notice: The colored markers show your PREVIOUS actions relative to this view. "
-                                    "Cyan = Click. Blue = Double Click. Green-Yellow = Drag."
-                                )
-
-                            # --- 4. 绘制网格辅助 ---
-                            if is_grid_enabled:
-                                display_image = await asyncio.to_thread(draw_grid_on_image, screenshot.copy(), grid_spacing=10)
-                                region_text = "partial region" if not is_full_screen else "full desktop"
-                                grid_hint = f"\n\n【system info】Screenshot of {region_text} with coordinate grid (0-1000) injected. Use coordinates for precise clicking within this view.\n{action_feedback_hint}"
-                            else:
-                                display_image = screenshot
-                                grid_hint = f"\n\n【system info】Current screenshot injected.\n{action_feedback_hint}"
-                            
-                            # --- 5. 保存并注入消息 ---
-                            desktop_img_name = f"desktop_view_{uuid.uuid4().hex}.png"
-                            desktop_img_path = os.path.join(UPLOAD_FILES_DIR, desktop_img_name)
-                            await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
-                            
-                            desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
-                            
-                            current_user_msg = {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": '[Getting screenshot]' + grid_hint},
-                                    {"type": "image_url", "image_url": {"url": desktop_url}}
-                                ]
-                            }
-                            request.messages.append(current_user_msg)
-                            
-                            # --- 6. 清理旧截图 ---
-                            if v_settings.get('onlyNewScreen', False):
-                                for msg in request.messages[:-1]:
-                                    if isinstance(msg.get('content'), list):
-                                        msg['content'] = [item for item in msg['content'] if item.get('type') != 'image_url']
-                                        if len(msg['content']) == 1 and msg['content'][0].get('type') == 'text':
-                                            msg['content'] = msg['content'][0]['text']
-                                        elif len(msg['content']) == 0:
-                                            msg['content'] = ""
-
-                        except Exception as e:
-                            logging.getLogger("app").info(f"后端桌面截图失败: {e}")
-                            
-                        images = await images_in_messages(request.messages, fastapi_base_url)
-                        request.messages = await message_without_images(request.messages)
-                    msg = await images_add_in_messages(request.messages, images, settings)
-                    if request.top_p != 1 or settings['top_p'] != 1:
-                        extra['top_p'] = request.top_p or settings['top_p']
-
-                    if settings['temperature'] !=1:
-                        extra['temperature'] = settings['temperature']
-
-                    full_content = ""
-                    if tools and not force_no_tools:
-                        extra['tools'] = tools
-                    if _stream_cancelled():
-                        logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
-                        yield "data: [DONE]\n\n"
-                        return
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=msg,  # 添加图片信息到消息
-                        stream=True,
-                        stream_options={"include_usage": True},
-                        extra_body = extra_params, # 其他参数
-                        **_apply_ctx_guardrail(extra, msg, settings)
-                    )
-                    tool_calls = []
-                    _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
-                    async for chunk in response:
-                        if not chunk.choices:
-                            if getattr(chunk, "usage", None):
-                                usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
-                                _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
-                            continue
-                        _chunk_count2 += 1
-                        if _chunk_count2 % 5 == 0:
-                            await asyncio.sleep(0)  # 定期让出控制权，防止事件循环饥饿导致1006断开
-                        if chunk.choices:
-                            choice = chunk.choices[0]
-                            if hasattr(choice.delta, "audio") and choice.delta.audio:
-                                # 只把 Base64 音频数据留在 delta 里，别动它
-                                yield f"data: {chunk.model_dump_json()}\n\n"
-                                continue
-                            if choice.delta.tool_calls:  # function_calling
-                                for idx, tool_call in enumerate(choice.delta.tool_calls):
-                                    tool = choice.delta.tool_calls[idx]
-                                    if len(tool_calls) <= idx:
-                                        tool_calls.append(tool)
-                                        continue
-                                    if tool.function.arguments:
-                                        # function参数为流式响应，需要拼接
-                                        if tool_calls[idx].function.arguments:
-                                            tool_calls[idx].function.arguments += tool.function.arguments
-                                        else:
-                                            tool_calls[idx].function.arguments = tool.function.arguments
-                                current_tool = tool_calls[idx]
-                                if current_tool.function and current_tool.function.name:
-                                    progress_chunk = {
-                                        "choices": [{
-                                            "delta": {
-                                                "tool_progress": {  # 新增字段，区别于最终的 tool_content
-                                                    "name": current_tool.function.name,
-                                                    "arguments": current_tool.function.arguments or "",
-                                                    "index": idx,
-                                                    "id": current_tool.id or f"call_{idx}"
-                                                }
-                                            }
-                                        }]
-                                    }
-                                    yield f"data: {json.dumps(progress_chunk)}\n\n"
-                            else:
-                                # 创建原始chunk的拷贝
-                                chunk_dict = chunk.model_dump()
-                                delta = chunk_dict["choices"][0]["delta"]
-                                
-                                # 初始化必要字段
-                                delta.setdefault("content", "")
-                                delta.setdefault("reasoning_content", "")
-
-                                # 优先处理 reasoning_content
-                                if delta["reasoning_content"]:
-                                    yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                    continue
-                                if delta.get("reasoning", ""):
-                                    delta["reasoning_content"] = delta["reasoning"]
-                                    yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                    continue
-                                # 处理内容
-                                current_content = delta["content"]
-                                buffer = current_content
-                                
-                                while buffer:
-                                    if not in_reasoning:
-                                        # 寻找开始标签
-                                        start_pos = buffer.find(open_tag)
-                                        if start_pos != -1:
-                                            # 处理开始标签前的内容
-                                            content_buffer.append(buffer[:start_pos])
-                                            buffer = buffer[start_pos+len(open_tag):]
-                                            in_reasoning = True
-                                        else:
-                                            content_buffer.append(buffer)
-                                            buffer = ""
-                                    else:
-                                        # 寻找结束标签
-                                        end_pos = buffer.find(close_tag)
-                                        if end_pos != -1:
-                                            # 处理思考内容
-                                            reasoning_buffer.append(buffer[:end_pos])
-                                            buffer = buffer[end_pos+len(close_tag):]
-                                            in_reasoning = False
-                                        else:
-                                            reasoning_buffer.append(buffer)
-                                            buffer = ""
-                                
-                                # 构造新的delta内容
-                                new_content = "".join(content_buffer)
-                                new_reasoning = "".join(reasoning_buffer)
-                                
-                                # 更新chunk内容
-                                delta["content"] = new_content.strip("\x00")  # 保留未完成内容
-                                delta["reasoning_content"] = new_reasoning.strip("\x00") or None
-                                
-                                # 重置缓冲区但保留未完成部分
-                                if in_reasoning:
-                                    content_buffer = [new_content.split(open_tag)[-1]] 
-                                else:
-                                    content_buffer = []
-                                reasoning_buffer = []
-                                
-                                yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                full_content += delta.get("content") or "" 
-                    # 最终flush未完成内容
-                    if content_buffer or reasoning_buffer:
-                        final_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "content": "".join(content_buffer),
-                                    "reasoning_content": "".join(reasoning_buffer)
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(final_chunk)}\n\n"
-                        full_content += final_chunk["choices"][0]["delta"].get("content", "")
-                    if not tool_calls:
-                        # 将响应添加到消息列表
-                        content_append(request.messages, 'assistant', full_content)
-                    # 工具和深度搜索
-                    if tool_calls:
-                        pass
-                    elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                        search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
-                        response = await client.chat.completions.create(
-                            model=model,
-                            messages=[                        
-                                {
-                                "role": "system",
-                                "content": source_prompt,
-                                },
-                                {
-                                "role": "user",
-                                "content": search_prompt,
-                                }
-                            ],
-                            extra_body = extra_params, # 其他参数
-                        )
-                        response_content = response.choices[0].message.content
-                        if response_content is None:
-                            response_content = ""
-                        # 用re 提取```json 包裹json字符串 ```
-                        if "```json" in response_content:
-                            try:
-                                response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                            except:
-                                # 用re 提取```json 之后的内容
-                                response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
-                        try:
-                            response_content = json.loads(response_content)
-                        except json.JSONDecodeError:
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"❌{await t('task_error')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                        if response_content["status"] == "done":
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"✅{await t('task_done')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = False
-                        elif response_content["status"] == "not_done":
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"❎{await t('task_not_done')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = True
-                            search_task = response_content["unfinished_task"]
-                            task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
-                            request.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": full_content,
-                                    "reasoning_content": "",
-                                }
-                            )
-                            request.messages.append(
-                                {
-                                    "role": "user",
-                                    "content": task_prompt,
-                                }
-                            )
-                        elif response_content["status"] == "need_more_info":
-                            DRS_STAGE = 2
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"❓{await t('task_need_more_info')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = False
-                        elif response_content["status"] == "need_work":
-                            DRS_STAGE = 2
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"🔍{await t('enter_search_stage')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = True
-                            drs_msg = get_drs_stage(DRS_STAGE)
-                            request.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": full_content,
-                                    "reasoning_content": "",
-                                }
-                            )
-                            request.messages.append(
-                                {
-                                    "role": "user",
-                                    "content": drs_msg,
-                                }
-                            )
-                        elif response_content["status"] == "need_more_work":
-                            DRS_STAGE = 2
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"🔍{await t('need_more_work')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = True
-                            search_task = response_content["unfinished_task"]
-                            task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
-                            request.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": full_content,
-                                    "reasoning_content": "",
-                                }
-                            )
-                            request.messages.append(
-                                {
-                                    "role": "user",
-                                    "content": task_prompt,
-                                }
-                            )
-                        elif response_content["status"] == "answer":
-                            DRS_STAGE = 3
-                            search_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_content": {"title": f"⭐{await t('enter_answer_stage')}", "content": ""}
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(search_chunk)}\n\n"
-                            search_not_done = True
-                            drs_msg = get_drs_stage(DRS_STAGE)
-                            request.messages.append(
-                                {
-                                    "role": "assistant",
-                                    "content": full_content,
-                                    "reasoning_content": "",
-                                }
-                            )
-                            request.messages.append(
-                                {
-                                    "role": "user",
-                                    "content": drs_msg,
-                                }
-                            )
-                try:
-                    from py.context_manager import get_context_settings as _gcs, estimate_tokens as _esttok
-                    _cm_u = _gcs(settings)
-                    _usage_evt = {
-                        "type": "context_usage",
-                        "prompt_tokens": (usage_info or {}).get("prompt_tokens"),
-                        "completion_tokens": (usage_info or {}).get("completion_tokens"),
-                        "peak_prompt_tokens": _ctx_peak or None,
-                        "window": _cm_u["context_window"],
-                        "budget": int(_cm_u["context_window"] * _cm_u["compact_ratio"]),
-                        "est_total": _esttok(request.messages, tools),
-                        "breakdown": _breakdown_tokens(request.messages, tools),
-                    }
-                    yield f"data: {json.dumps(_usage_evt, ensure_ascii=False)}\n\n"
-                    logging.getLogger("app").info(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
-                except Exception as _ue:
-                    logging.getLogger("app").info(f"[Context] usage 事件生成异常（跳过）: {_ue}")
-                logger.info(f"all msg: {request.messages}")
-                yield "data: [DONE]\n\n"
-                try:
-                    from py.turn_log import shadow_append as _shadow_append
-                    await _shadow_append(request.conversation_id, request.messages, log=print)
-                except Exception as _tle:
-                    logging.getLogger("app").info(f"[TurnLog] stream shadow skip: {_tle}")
-                if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
-                    try:
-                        from py.affection_system import extract_and_update_affection
-                        # full_content 是当前轮次 AI 的完整回复文本
-                        await extract_and_update_affection(full_content)
-                    except Exception as e:
-                        logging.getLogger("app").info(f"解析好感度标签出错: {e}")
-                if m0 and not request.is_sub_agent:
-                    logging.getLogger("app").info("记忆更新任务开始提交")
-                    messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
-                    infer = cur_memory.get('infer', False) or False
-                    _m0_job = m0
-                    _mid = memoryId
-                    _job_msgs = messages
-
-                    def _mem_job():
-                        metadata = {
-                            "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        }
-                        _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
-
-                    llm_gate.submit_memory_job(
-                        _mid, _mem_job, name="mem0-add",
-                        debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
-                                 if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
-                        wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
-                    logging.getLogger("app").info("记忆更新任务已提交到后台线程")
-
-                return
-            except Exception as e:
-                logger.error(f"{request.messages}")
-                # 捕获异常并返回结构化错误信息
-                error_chunk = {
-                    "choices": [{
-                        "delta": {
-                            "tool_content": {
-                                "title": "❎ Error", # 统一标题
-                                "content": str(e),   # 错误详情
-                                "type": "error"      # 标记类型，方便前端切换样式
-                            }
-                        }
-                    }]
-                }
-                yield f"data: {json.dumps(error_chunk)}\n\n"
-                yield "data: [DONE]\n\n"  # 确保最终结束
-                return
-            finally:
-                llm_gate.leave()
         
         # 检查是否启用断点续传
         enable_stream_resume = settings.get('enableStreamResume', True)
@@ -6231,7 +6329,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             _active_streams[stream_id]["task"] = asyncio.create_task(
                 _stream_producer_wrapper(
                     stream_id,
-                    stream_generator(user_prompt, DRS_STAGE, tools, images)
+                    stream_generator(
+                        client, reasoner_client, request, settings, fastapi_base_url,
+                        enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
+                        user_prompt, DRS_STAGE, tools, images,
+                        chat_vendor, reasoner_vendor, model, extra_params,
+                        open_tag, close_tag, source_prompt, m0, memoryId, cur_memory)
                 )
             )
 
@@ -6255,7 +6358,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             )
         else:
             return StreamingResponse(
-                stream_generator(user_prompt, DRS_STAGE, tools, images),
+                stream_generator(
+                    client, reasoner_client, request, settings, fastapi_base_url,
+                enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
+                user_prompt, DRS_STAGE, tools, images,
+                chat_vendor, reasoner_vendor, model, extra_params,
+                open_tag, close_tag, source_prompt, m0, memoryId, cur_memory),
                 media_type="text/event-stream",
                 headers={
                     "Content-Type": "text/event-stream",

@@ -10,10 +10,31 @@ import pathlib
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# remaining M-3 targets, (name -> approximate line count at freeze time)
-GIANT_WHITELIST = {
-    "generate_stream_response": 2206,   # includes nested stream_generator
-}
+# whitelist retired 2026-10-20: server.py has no module-level function >=300
+GIANT_WHITELIST = {}
+
+STREAM_HELPERS = [
+    "_stream_desktop_capture",
+    "_stream_context_compress",
+    "_stream_character_context",
+    "_stream_async_tools",
+    "_stream_kb_before",
+    "_stream_web_search_pre",
+    "_stream_filter_tools",
+    "_stream_deepsearch_pre",
+    "_stream_reasoner_prep",
+    "_stream_first_pass",
+    "_stream_drs_round",
+    "_stream_tool_round",
+    "_stream_reasoner_update",
+    "_stream_regrab",
+    "_stream_loop_pass",
+    "_stream_drs_loop_round",
+    "_stream_round_compress",
+    "_stream_usage_event",
+    "_stream_finalize_jobs",
+    "stream_generator",
+]
 
 COMPLETE_HELPERS = [
     "_apply_context_compression",
@@ -97,5 +118,15 @@ def test_complete_split_helpers_present_and_small():
     funcs = {n.name: n for n in _module_funcs()}
     assert funcs["_generate_complete_impl"].end_lineno - funcs["_generate_complete_impl"].lineno + 1 < 300
     for h in COMPLETE_HELPERS:
+        assert h in funcs, "helper %s missing" % h
+        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+
+
+def test_stream_split_helpers_present_and_small():
+    # M-3 batch 4: stream engine fully split -- shell, the (now module-level)
+    # stream_generator and every delegated block stay under 300 lines.
+    funcs = {n.name: n for n in _module_funcs()}
+    assert funcs["generate_stream_response"].end_lineno - funcs["generate_stream_response"].lineno + 1 < 300
+    for h in STREAM_HELPERS:
         assert h in funcs, "helper %s missing" % h
         assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
