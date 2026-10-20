@@ -4505,6 +4505,481 @@ def _stream_filter_tools(request, tools):
             tools = filtered_tools
             logging.getLogger("app").info(f"[SubAgent Safety] Blocked {blocked_count} dangerous tools: {original_tool_count} -> {len(tools)} tools")
     return tools
+
+async def _stream_deepsearch_pre(_st, client, model, extra_params, request):
+    """Deep-research step planning streamed to the client as tool_progress.
+
+    Mutable results cross the generator boundary via _st (yield delegation
+    cannot carry a return value). (M-3 split)
+    """
+    deepsearch_messages = copy.deepcopy(request.messages)
+    content_append(deepsearch_messages, 'user',  "\n\n将用户提出的问题或给出的当前任务拆分成多个步骤，每一个步骤用一句简短的话概括即可，无需回答或执行这些内容，直接返回总结即可，但不能省略问题或任务的细节。如果用户输入的只是闲聊或者不包含任务和问题，直接把用户输入重复输出一遍即可。如果是非常简单的问题，也可以只给出一个步骤即可。一般情况下都是需要拆分成多个步骤的。")
+                    
+    # 1. 开启 stream=True 进行流式请求
+    response = await client.chat.completions.create(
+        model=model,
+        messages=deepsearch_messages,
+        stream=True,  # 新增
+        extra_body = extra_params, # 其他参数
+    )
+                    
+    user_prompt = ""
+    # 生成一个唯一的 ID，用于让前端锁定同一个 UI 块进行内容更新
+    deepsearch_id = f"ds_{uuid.uuid4().hex[:8]}"
+                    
+    # 2. 遍历流式响应并实时推给前端
+    async for chunk in response:
+        if not chunk.choices:
+            continue
+                        
+        # 兼容不同版本的 openai 响应对象
+        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+        delta = chunk_dict["choices"][0].get("delta", {})
+        content = delta.get("content", "")
+                        
+        if content:
+            user_prompt += content
+                            
+            # 3. 借用前端原有的 tool_progress 渲染机制
+            # 前端会自动创建类似 "调用deep_research工具" 的动态刷新框
+            progress_chunk = {
+                "choices": [{
+                    "delta": {
+                        "tool_progress": {
+                            "name": "deep_research",
+                            "arguments": user_prompt, # 传入不断累加的内容
+                            "tool_call_id": deepsearch_id
+                        }
+                    }
+                }]
+            }
+            yield f"data: {json.dumps(progress_chunk)}\n\n"
+                    
+    content_append(request.messages, 'user',  f"\n\n如果用户没有提出问题或者任务，直接闲聊即可，如果用户提出了问题或者任务，任务描述不清晰或者你需要进一步了解用户的真实需求，你可以暂时不完成任务，而是分析需要让用户进一步明确哪些需求。")
+
+    _st["user_prompt"] = user_prompt
+
+
+async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images, reasoner_extra, open_tag, close_tag, tools, DRS_STAGE, user_prompt, enable_deep_research):
+    """First reasoner pass (streamed reasoning deltas) + vendor resolution."""
+    reasoner_messages = copy.deepcopy(request.messages)
+    if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+        content_append(reasoner_messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
+        drs_msg = get_drs_stage(DRS_STAGE)
+        if drs_msg:
+            content_append(reasoner_messages, 'user',  f"\n\n{drs_msg}\n\n")
+    if tools:
+        content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
+    for modelProvider in settings['modelProviders']: 
+        if modelProvider['id'] == settings['reasoner']['selectedProvider']:
+            vendor = modelProvider['vendor']
+            break
+    msg = await images_add_in_messages(reasoner_messages, images,settings)
+    if vendor == 'Ollama':
+        if settings['reasoner']['temperature'] !=1:
+            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+
+        # 流式调用推理模型
+        reasoner_stream = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=True,
+            **reasoner_extra
+        )
+        full_reasoning = ""
+        buffer = ""  # 跨chunk的内容缓冲区
+        in_reasoning = False  # 是否在标签内
+                        
+        async for chunk in reasoner_stream:
+            if not chunk.choices:
+                continue
+            chunk_dict = chunk.model_dump()
+            delta = chunk_dict["choices"][0].get("delta", {})
+            if delta:
+                current_content = delta.get("content", "")
+                buffer += current_content  # 累积到缓冲区
+                                
+                # 实时处理缓冲区内容
+                while True:
+                    reasoning_content = delta.get("reasoning_content", "")
+                    if reasoning_content:
+                        full_reasoning += reasoning_content
+                    else:
+                        reasoning_content = delta.get("reasoning", "")
+                        if reasoning_content:
+                            delta['reasoning_content'] = reasoning_content
+                            full_reasoning += reasoning_content
+                    if reasoning_content:
+                        yield f"data: {json.dumps(chunk_dict)}\n\n"
+                        break
+                    if not in_reasoning:
+                        # 寻找开放标签
+                        start_pos = buffer.find(open_tag)
+                        if start_pos != -1:
+                            # 开放标签前的内容（非思考内容）
+                            non_reasoning = buffer[:start_pos]
+                            buffer = buffer[start_pos+len(open_tag):]
+                            in_reasoning = True
+                        else:
+                            break  # 无开放标签，保留后续处理
+                    else:
+                        # 寻找闭合标签
+                        end_pos = buffer.find(close_tag)
+                        if end_pos != -1:
+                            # 提取思考内容并构造响应
+                            reasoning_part = buffer[:end_pos]
+                            chunk_dict["choices"][0]["delta"] = {
+                                "reasoning_content": reasoning_part,
+                                "content": ""  # 清除非思考内容
+                            }
+                            yield f"data: {json.dumps(chunk_dict)}\n\n"
+                            full_reasoning += reasoning_part
+                            buffer = buffer[end_pos+len(close_tag):]
+                            in_reasoning = False
+                        else:
+                            # 发送未闭合的中间内容
+                            if buffer:
+                                chunk_dict["choices"][0]["delta"] = {
+                                    "reasoning_content": buffer,
+                                    "content": ""
+                                }
+                                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                                full_reasoning += buffer
+                                buffer = ""
+                            break  # 等待更多内容
+    else:
+        if settings['reasoner']['temperature'] !=1:
+            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        # 流式调用推理模型
+        reasoner_stream = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=True,
+            stop=settings['reasoner']['stop_words'],
+            **reasoner_extra
+        )
+        full_reasoning = ""
+        # 处理推理模型的流式响应
+        async for chunk in reasoner_stream:
+            if not chunk.choices:
+                continue
+
+            chunk_dict = chunk.model_dump()
+            delta = chunk_dict["choices"][0].get("delta", {})
+            if delta:
+                reasoning_content = delta.get("reasoning_content", "")
+                if reasoning_content:
+                    full_reasoning += reasoning_content
+                else:
+                    reasoning_content = delta.get("reasoning", "")
+                    if reasoning_content:
+                        delta['reasoning_content'] = reasoning_content
+                        full_reasoning += reasoning_content
+                # 移除content字段，确保yield的内容中不包含content
+                if 'content' in delta:
+                    del delta['content']
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+
+    # 在推理结束后添加完整推理内容到消息
+    content_append(request.messages, 'assistant', f"<think>\n{full_reasoning}\n</think>")  # 可参考的推理过程
+
+    _st["vendor"] = vendor
+
+
+async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
+    """First LLM stream: tool_call slot merging + think-tag splitting + SSE."""
+    async for chunk in response:
+        if not chunk.choices:
+            if getattr(chunk, "usage", None):
+                usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
+                _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
+            continue
+        _chunk_count += 1
+        if _chunk_count % 5 == 0:
+            await asyncio.sleep(0)  # 定期让出控制权，让事件循环处理WebSocket ping
+        choice = chunk.choices[0]
+        if choice.delta.tool_calls:  # function_calling
+            is_tool_call = True
+            # C-20: 槽位=协议级 tool.index（多 call 交叠时 delta 数组内
+            # 位置≠call 编号，旧逻辑把第二个 call 的 arguments 拼进第一个
+            # slot=两个 JSON 挤进同一 fragment；无 index 的旧模型回退末槽）
+            for tool in choice.delta.tool_calls:
+                _slot = getattr(tool, "index", None)
+                if _slot is None:
+                    _slot = max(len(tool_calls) - 1, 0)
+                while len(tool_calls) <= _slot:
+                    _fill = copy.deepcopy(tool)
+                    if _fill.function is not None:
+                        _fill.function.arguments = ""
+                    tool_calls.append(_fill)
+                current_tool = tool_calls[_slot]
+                if tool.id and not current_tool.id:
+                    current_tool.id = tool.id
+                if tool.function:
+                    if tool.function.name and not current_tool.function.name:
+                        current_tool.function.name = tool.function.name
+                    if tool.function.arguments:
+                        current_tool.function.arguments = (
+                            current_tool.function.arguments or ""
+                        ) + tool.function.arguments
+                if current_tool.function and current_tool.function.name:
+                    progress_chunk = {
+                        "choices": [{
+                            "delta": {
+                                "tool_progress": {  # 新增字段，区别于最终的 tool_content
+                                    "name": current_tool.function.name,
+                                    "arguments": current_tool.function.arguments or "",
+                                    "index": _slot,
+                                    "id": current_tool.id or f"call_{_slot}"
+                                }
+                            }
+                        }]
+                    }
+                    yield f"data: {json.dumps(progress_chunk)}\n\n"
+        else:
+            if hasattr(choice.delta, "audio") and choice.delta.audio and is_tool_call == False:
+                # 只把 Base64 音频数据留在 delta 里，别动它
+                yield f"data: {chunk.model_dump_json()}\n\n"
+                continue
+            elif hasattr(choice.delta, "audio") and choice.delta.audio and is_tool_call == True:
+                continue
+            # 创建原始chunk的拷贝
+            chunk_dict = chunk.model_dump()
+            delta = chunk_dict["choices"][0]["delta"]
+                        
+            # 初始化必要字段
+            delta.setdefault("content", "")
+            delta.setdefault("reasoning_content", "")
+                        
+            # 优先处理 reasoning_content
+            if delta["reasoning_content"]:
+                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                continue
+            if delta.get("reasoning", ""):
+                delta["reasoning_content"] = delta["reasoning"]
+                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                continue
+
+            # 处理内容
+            current_content = delta["content"]
+            buffer = current_content
+                        
+            while buffer:
+                if not in_reasoning:
+                    # 寻找开始标签
+                    start_pos = buffer.find(open_tag)
+                    if start_pos != -1:
+                        # 处理开始标签前的内容
+                        content_buffer.append(buffer[:start_pos])
+                        buffer = buffer[start_pos+len(open_tag):]
+                        in_reasoning = True
+                    else:
+                        content_buffer.append(buffer)
+                        buffer = ""
+                else:
+                    # 寻找结束标签
+                    end_pos = buffer.find(close_tag)
+                    if end_pos != -1:
+                        # 处理思考内容
+                        reasoning_buffer.append(buffer[:end_pos])
+                        buffer = buffer[end_pos+len(close_tag):]
+                        in_reasoning = False
+                    else:
+                        reasoning_buffer.append(buffer)
+                        buffer = ""
+                        
+            # 构造新的delta内容
+            new_content = "".join(content_buffer)
+            new_reasoning = "".join(reasoning_buffer)
+                        
+            # 更新chunk内容
+            delta["content"] = new_content.strip("\x00")  # 保留未完成内容
+            delta["reasoning_content"] = new_reasoning.strip("\x00") or None
+                        
+            # 重置缓冲区但保留未完成部分
+            if in_reasoning:
+                content_buffer = [new_content.split(open_tag)[-1]] 
+            else:
+                content_buffer = []
+            reasoning_buffer = []
+            yield f"data: {json.dumps(chunk_dict)}\n\n"
+            full_content += delta.get("content") or "" 
+
+    _st["usage_info"] = usage_info
+    _st["_ctx_peak"] = _ctx_peak
+    _st["is_tool_call"] = is_tool_call
+    _st["full_content"] = full_content
+    _st["in_reasoning"] = in_reasoning
+    _st["content_buffer"] = content_buffer
+    _st["reasoning_buffer"] = reasoning_buffer
+    _st["_chunk_count"] = _chunk_count
+
+
+async def _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
+    """Post-first-pass deep-research status machine with per-status SSE notices."""
+    search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+            "role": "system",
+            "content": source_prompt,
+            },
+            {
+            "role": "user",
+            "content": search_prompt,
+            }
+        ],
+        extra_body = extra_params, # 其他参数
+    )
+    response_content = response.choices[0].message.content
+    # 用re 提取```json 包裹json字符串 ```
+    if "```json" in response_content:
+        try:
+            response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
+        except:
+            # 用re 提取```json 之后的内容
+            response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
+    try:
+        response_content = json.loads(response_content)
+    except json.JSONDecodeError:
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❌{await t('task_error')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+    if response_content["status"] == "done":
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                   "tool_content": {"title": f"✅{await t('task_done')}", "content": ""},
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = False
+    elif response_content["status"] == "not_done":
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❎{await t('task_not_done')}", "content": ""},
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "need_more_info":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"❓{await t('task_need_more_info')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = False
+    elif response_content["status"] == "need_work":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"🔍{await t('enter_search_stage')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+                "reasoning_content": "",
+            }
+        )
+    elif response_content["status"] == "need_more_work":
+        DRS_STAGE = 2
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"🔍{await t('need_more_work')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "answer":
+        DRS_STAGE = 3
+        search_chunk = {
+            "choices": [{
+                "delta": {
+                    "tool_content": {"title": f"⭐{await t('enter_answer_stage')}", "content": ""}
+                }
+            }]
+        }
+        yield f"data: {json.dumps(search_chunk)}\n\n"
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": full_content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+                "reasoning_content": "",
+            }
+        )
+
+    _st["drs"] = DRS_STAGE
+    _st["snot"] = search_not_done
+    _st["stask"] = search_task
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -4673,6 +5148,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 return f"data: {json.dumps(chunk)}\n\n"
             try:
                 llm_gate.enter()
+                _st = {}
                 usage_info = None
                 _ctx_peak = 0
                 extra = {}
@@ -4743,172 +5219,14 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 logging.getLogger("app").info(tools)
 
                 if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                    deepsearch_messages = copy.deepcopy(request.messages)
-                    content_append(deepsearch_messages, 'user',  "\n\n将用户提出的问题或给出的当前任务拆分成多个步骤，每一个步骤用一句简短的话概括即可，无需回答或执行这些内容，直接返回总结即可，但不能省略问题或任务的细节。如果用户输入的只是闲聊或者不包含任务和问题，直接把用户输入重复输出一遍即可。如果是非常简单的问题，也可以只给出一个步骤即可。一般情况下都是需要拆分成多个步骤的。")
-                    
-                    # 1. 开启 stream=True 进行流式请求
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=deepsearch_messages,
-                        stream=True,  # 新增
-                        extra_body = extra_params, # 其他参数
-                    )
-                    
-                    user_prompt = ""
-                    # 生成一个唯一的 ID，用于让前端锁定同一个 UI 块进行内容更新
-                    deepsearch_id = f"ds_{uuid.uuid4().hex[:8]}"
-                    
-                    # 2. 遍历流式响应并实时推给前端
-                    async for chunk in response:
-                        if not chunk.choices:
-                            continue
-                        
-                        # 兼容不同版本的 openai 响应对象
-                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                        delta = chunk_dict["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        
-                        if content:
-                            user_prompt += content
-                            
-                            # 3. 借用前端原有的 tool_progress 渲染机制
-                            # 前端会自动创建类似 "调用deep_research工具" 的动态刷新框
-                            progress_chunk = {
-                                "choices": [{
-                                    "delta": {
-                                        "tool_progress": {
-                                            "name": "deep_research",
-                                            "arguments": user_prompt, # 传入不断累加的内容
-                                            "tool_call_id": deepsearch_id
-                                        }
-                                    }
-                                }]
-                            }
-                            yield f"data: {json.dumps(progress_chunk)}\n\n"
-                    
-                    content_append(request.messages, 'user',  f"\n\n如果用户没有提出问题或者任务，直接闲聊即可，如果用户提出了问题或者任务，任务描述不清晰或者你需要进一步了解用户的真实需求，你可以暂时不完成任务，而是分析需要让用户进一步明确哪些需求。")
+                    async for _c in _stream_deepsearch_pre(_st, client, model, extra_params, request):
+                        yield _c
+                    user_prompt = _st["user_prompt"]
                 # 如果启用推理模型
                 if settings['reasoner']['enabled'] or enable_thinking:
-                    reasoner_messages = copy.deepcopy(request.messages)
-                    if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                        content_append(reasoner_messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
-                        drs_msg = get_drs_stage(DRS_STAGE)
-                        if drs_msg:
-                            content_append(reasoner_messages, 'user',  f"\n\n{drs_msg}\n\n")
-                    if tools:
-                        content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
-                    for modelProvider in settings['modelProviders']: 
-                        if modelProvider['id'] == settings['reasoner']['selectedProvider']:
-                            vendor = modelProvider['vendor']
-                            break
-                    msg = await images_add_in_messages(reasoner_messages, images,settings)
-                    if vendor == 'Ollama':
-                        if settings['reasoner']['temperature'] !=1:
-                            reasoner_extra['temperature'] = settings['reasoner']['temperature']
-
-                        # 流式调用推理模型
-                        reasoner_stream = await reasoner_client.chat.completions.create(
-                            model=settings['reasoner']['model'],
-                            messages=msg,
-                            stream=True,
-                            **reasoner_extra
-                        )
-                        full_reasoning = ""
-                        buffer = ""  # 跨chunk的内容缓冲区
-                        in_reasoning = False  # 是否在标签内
-                        
-                        async for chunk in reasoner_stream:
-                            if not chunk.choices:
-                                continue
-                            chunk_dict = chunk.model_dump()
-                            delta = chunk_dict["choices"][0].get("delta", {})
-                            if delta:
-                                current_content = delta.get("content", "")
-                                buffer += current_content  # 累积到缓冲区
-                                
-                                # 实时处理缓冲区内容
-                                while True:
-                                    reasoning_content = delta.get("reasoning_content", "")
-                                    if reasoning_content:
-                                        full_reasoning += reasoning_content
-                                    else:
-                                        reasoning_content = delta.get("reasoning", "")
-                                        if reasoning_content:
-                                            delta['reasoning_content'] = reasoning_content
-                                            full_reasoning += reasoning_content
-                                    if reasoning_content:
-                                        yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                        break
-                                    if not in_reasoning:
-                                        # 寻找开放标签
-                                        start_pos = buffer.find(open_tag)
-                                        if start_pos != -1:
-                                            # 开放标签前的内容（非思考内容）
-                                            non_reasoning = buffer[:start_pos]
-                                            buffer = buffer[start_pos+len(open_tag):]
-                                            in_reasoning = True
-                                        else:
-                                            break  # 无开放标签，保留后续处理
-                                    else:
-                                        # 寻找闭合标签
-                                        end_pos = buffer.find(close_tag)
-                                        if end_pos != -1:
-                                            # 提取思考内容并构造响应
-                                            reasoning_part = buffer[:end_pos]
-                                            chunk_dict["choices"][0]["delta"] = {
-                                                "reasoning_content": reasoning_part,
-                                                "content": ""  # 清除非思考内容
-                                            }
-                                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                            full_reasoning += reasoning_part
-                                            buffer = buffer[end_pos+len(close_tag):]
-                                            in_reasoning = False
-                                        else:
-                                            # 发送未闭合的中间内容
-                                            if buffer:
-                                                chunk_dict["choices"][0]["delta"] = {
-                                                    "reasoning_content": buffer,
-                                                    "content": ""
-                                                }
-                                                yield f"data: {json.dumps(chunk_dict)}\n\n"
-                                                full_reasoning += buffer
-                                                buffer = ""
-                                            break  # 等待更多内容
-                    else:
-                        if settings['reasoner']['temperature'] !=1:
-                            reasoner_extra['temperature'] = settings['reasoner']['temperature']
-                        # 流式调用推理模型
-                        reasoner_stream = await reasoner_client.chat.completions.create(
-                            model=settings['reasoner']['model'],
-                            messages=msg,
-                            stream=True,
-                            stop=settings['reasoner']['stop_words'],
-                            **reasoner_extra
-                        )
-                        full_reasoning = ""
-                        # 处理推理模型的流式响应
-                        async for chunk in reasoner_stream:
-                            if not chunk.choices:
-                                continue
-
-                            chunk_dict = chunk.model_dump()
-                            delta = chunk_dict["choices"][0].get("delta", {})
-                            if delta:
-                                reasoning_content = delta.get("reasoning_content", "")
-                                if reasoning_content:
-                                    full_reasoning += reasoning_content
-                                else:
-                                    reasoning_content = delta.get("reasoning", "")
-                                    if reasoning_content:
-                                        delta['reasoning_content'] = reasoning_content
-                                        full_reasoning += reasoning_content
-                                # 移除content字段，确保yield的内容中不包含content
-                                if 'content' in delta:
-                                    del delta['content']
-                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-
-                    # 在推理结束后添加完整推理内容到消息
-                    content_append(request.messages, 'assistant', f"<think>\n{full_reasoning}\n</think>")  # 可参考的推理过程
+                    async for _c in _stream_reasoner_prep(_st, request, reasoner_client, settings, images, reasoner_extra, open_tag, close_tag, tools, DRS_STAGE, user_prompt, enable_deep_research):
+                        yield _c
+                    vendor = _st["vendor"]
                 # 状态跟踪变量
                 in_reasoning = False
                 reasoning_buffer = []
@@ -4952,122 +5270,16 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 search_task = ""
                 is_tool_call = False
                 _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
-                async for chunk in response:
-                    if not chunk.choices:
-                        if getattr(chunk, "usage", None):
-                            usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
-                            _ctx_peak = max(_ctx_peak, usage_info.get("prompt_tokens") or 0)
-                        continue
-                    _chunk_count += 1
-                    if _chunk_count % 5 == 0:
-                        await asyncio.sleep(0)  # 定期让出控制权，让事件循环处理WebSocket ping
-                    choice = chunk.choices[0]
-                    if choice.delta.tool_calls:  # function_calling
-                        is_tool_call = True
-                        # C-20: 槽位=协议级 tool.index（多 call 交叠时 delta 数组内
-                        # 位置≠call 编号，旧逻辑把第二个 call 的 arguments 拼进第一个
-                        # slot=两个 JSON 挤进同一 fragment；无 index 的旧模型回退末槽）
-                        for tool in choice.delta.tool_calls:
-                            _slot = getattr(tool, "index", None)
-                            if _slot is None:
-                                _slot = max(len(tool_calls) - 1, 0)
-                            while len(tool_calls) <= _slot:
-                                _fill = copy.deepcopy(tool)
-                                if _fill.function is not None:
-                                    _fill.function.arguments = ""
-                                tool_calls.append(_fill)
-                            current_tool = tool_calls[_slot]
-                            if tool.id and not current_tool.id:
-                                current_tool.id = tool.id
-                            if tool.function:
-                                if tool.function.name and not current_tool.function.name:
-                                    current_tool.function.name = tool.function.name
-                                if tool.function.arguments:
-                                    current_tool.function.arguments = (
-                                        current_tool.function.arguments or ""
-                                    ) + tool.function.arguments
-                            if current_tool.function and current_tool.function.name:
-                                progress_chunk = {
-                                    "choices": [{
-                                        "delta": {
-                                            "tool_progress": {  # 新增字段，区别于最终的 tool_content
-                                                "name": current_tool.function.name,
-                                                "arguments": current_tool.function.arguments or "",
-                                                "index": _slot,
-                                                "id": current_tool.id or f"call_{_slot}"
-                                            }
-                                        }
-                                    }]
-                                }
-                                yield f"data: {json.dumps(progress_chunk)}\n\n"
-                    else:
-                        if hasattr(choice.delta, "audio") and choice.delta.audio and is_tool_call == False:
-                            # 只把 Base64 音频数据留在 delta 里，别动它
-                            yield f"data: {chunk.model_dump_json()}\n\n"
-                            continue
-                        elif hasattr(choice.delta, "audio") and choice.delta.audio and is_tool_call == True:
-                            continue
-                        # 创建原始chunk的拷贝
-                        chunk_dict = chunk.model_dump()
-                        delta = chunk_dict["choices"][0]["delta"]
-                        
-                        # 初始化必要字段
-                        delta.setdefault("content", "")
-                        delta.setdefault("reasoning_content", "")
-                        
-                        # 优先处理 reasoning_content
-                        if delta["reasoning_content"]:
-                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-                            continue
-                        if delta.get("reasoning", ""):
-                            delta["reasoning_content"] = delta["reasoning"]
-                            yield f"data: {json.dumps(chunk_dict)}\n\n"
-                            continue
-
-                        # 处理内容
-                        current_content = delta["content"]
-                        buffer = current_content
-                        
-                        while buffer:
-                            if not in_reasoning:
-                                # 寻找开始标签
-                                start_pos = buffer.find(open_tag)
-                                if start_pos != -1:
-                                    # 处理开始标签前的内容
-                                    content_buffer.append(buffer[:start_pos])
-                                    buffer = buffer[start_pos+len(open_tag):]
-                                    in_reasoning = True
-                                else:
-                                    content_buffer.append(buffer)
-                                    buffer = ""
-                            else:
-                                # 寻找结束标签
-                                end_pos = buffer.find(close_tag)
-                                if end_pos != -1:
-                                    # 处理思考内容
-                                    reasoning_buffer.append(buffer[:end_pos])
-                                    buffer = buffer[end_pos+len(close_tag):]
-                                    in_reasoning = False
-                                else:
-                                    reasoning_buffer.append(buffer)
-                                    buffer = ""
-                        
-                        # 构造新的delta内容
-                        new_content = "".join(content_buffer)
-                        new_reasoning = "".join(reasoning_buffer)
-                        
-                        # 更新chunk内容
-                        delta["content"] = new_content.strip("\x00")  # 保留未完成内容
-                        delta["reasoning_content"] = new_reasoning.strip("\x00") or None
-                        
-                        # 重置缓冲区但保留未完成部分
-                        if in_reasoning:
-                            content_buffer = [new_content.split(open_tag)[-1]] 
-                        else:
-                            content_buffer = []
-                        reasoning_buffer = []
-                        yield f"data: {json.dumps(chunk_dict)}\n\n"
-                        full_content += delta.get("content") or "" 
+                async for _c in _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
+                    yield _c
+                usage_info = _st["usage_info"]
+                _ctx_peak = _st["_ctx_peak"]
+                is_tool_call = _st["is_tool_call"]
+                full_content = _st["full_content"]
+                in_reasoning = _st["in_reasoning"]
+                content_buffer = _st["content_buffer"]
+                reasoning_buffer = _st["reasoning_buffer"]
+                _chunk_count = _st["_chunk_count"]
                 # 最终flush未完成内容
                 if content_buffer or reasoning_buffer:
                     final_chunk = {
@@ -5088,164 +5300,11 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     print("tool_calls",tool_calls)
                     pass
                 elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                    search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
-                    response = await client.chat.completions.create(
-                        model=model,
-                        messages=[
-                            {
-                            "role": "system",
-                            "content": source_prompt,
-                            },
-                            {
-                            "role": "user",
-                            "content": search_prompt,
-                            }
-                        ],
-                        extra_body = extra_params, # 其他参数
-                    )
-                    response_content = response.choices[0].message.content
-                    # 用re 提取```json 包裹json字符串 ```
-                    if "```json" in response_content:
-                        try:
-                            response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                        except:
-                            # 用re 提取```json 之后的内容
-                            response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
-                    try:
-                        response_content = json.loads(response_content)
-                    except json.JSONDecodeError:
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"❌{await t('task_error')}", "content": ""}
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                    if response_content["status"] == "done":
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                   "tool_content": {"title": f"✅{await t('task_done')}", "content": ""},
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = False
-                    elif response_content["status"] == "not_done":
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"❎{await t('task_not_done')}", "content": ""},
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = True
-                        search_task = response_content["unfinished_task"]
-                        task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
-                        request.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": full_content,
-                                "reasoning_content": "",
-                            }
-                        )
-                        request.messages.append(
-                            {
-                                "role": "user",
-                                "content": task_prompt,
-                            }
-                        )
-                    elif response_content["status"] == "need_more_info":
-                        DRS_STAGE = 2
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"❓{await t('task_need_more_info')}", "content": ""}
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = False
-                    elif response_content["status"] == "need_work":
-                        DRS_STAGE = 2
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"🔍{await t('enter_search_stage')}", "content": ""}
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = True
-                        drs_msg = get_drs_stage(DRS_STAGE)
-                        request.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": full_content,
-                                "reasoning_content": "",
-                            }
-                        )
-                        request.messages.append(
-                            {
-                                "role": "user",
-                                "content": drs_msg,
-                                "reasoning_content": "",
-                            }
-                        )
-                    elif response_content["status"] == "need_more_work":
-                        DRS_STAGE = 2
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"🔍{await t('need_more_work')}", "content": ""}
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = True
-                        search_task = response_content["unfinished_task"]
-                        task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
-                        request.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": full_content,
-                                "reasoning_content": "",
-                            }
-                        )
-                        request.messages.append(
-                            {
-                                "role": "user",
-                                "content": task_prompt,
-                            }
-                        )
-                    elif response_content["status"] == "answer":
-                        DRS_STAGE = 3
-                        search_chunk = {
-                            "choices": [{
-                                "delta": {
-                                    "tool_content": {"title": f"⭐{await t('enter_answer_stage')}", "content": ""}
-                                }
-                            }]
-                        }
-                        yield f"data: {json.dumps(search_chunk)}\n\n"
-                        search_not_done = True
-                        drs_msg = get_drs_stage(DRS_STAGE)
-                        request.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": full_content,
-                                "reasoning_content": "",
-                            }
-                        )
-                        request.messages.append(
-                            {
-                                "role": "user",
-                                "content": drs_msg,
-                                "reasoning_content": "",
-                            }
-                        )
+                    async for _c in _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
+                        yield _c
+                    DRS_STAGE = _st["drs"]
+                    search_not_done = _st["snot"]
+                    search_task = _st["stask"]
 
                 reasoner_messages = copy.deepcopy(request.messages)
                 _tool_loop_count = 0
