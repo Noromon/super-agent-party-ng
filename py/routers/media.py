@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
 """Media endpoints (TTS / ASR / audio assets) moved verbatim out of
 server.py in the R1 router migration (audit 09 item 6).  Process state
-defined by server is reached through the module cache (`import server
-as _srv`, fully initialised long before these handlers run); shared
+defined by server is reached through the module object bound below
+(`_srv`, fully initialised long before these handlers run); shared
 library/stdlib names are imported here exactly as server imported them.
 server imports this module, never the other way around.  Legacy
 complexity exemptions: see pyproject per-file-ignores (M-3 will split
 the big handlers instead of grandfathering forever).
 """
 import sys as _sys
-# server runs as __main__ when launched directly; bind the module
-# OBJECT once so attribute access always sees current process state
-_srv = _sys.modules.get('server') or _sys.modules['__main__']
 import asyncio
 import base64
 import json
@@ -31,6 +28,10 @@ from py.get_setting import TOOL_TEMP_DIR, UPLOAD_FILES_DIR, convert_to_opus_simp
 from py.load_files import sanitize_url
 from py.vts_manager import vts_instance
 from fastapi import APIRouter
+
+# server runs as __main__ when launched directly; bind the module OBJECT
+# once so attribute access always sees current process state
+_srv = _sys.modules.get('server') or _sys.modules['__main__']
 
 router = APIRouter()
 
