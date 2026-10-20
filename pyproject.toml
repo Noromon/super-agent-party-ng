@@ -90,9 +90,94 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
+    "ruff>=0.8",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 300
 addopts = "-q"
+
+# --- M-2 静态检查（ruff）：最小实用集 = pyflakes 错误(F) + 明显风格错误(E4/E7/E9) + 复杂度门(C901) ---
+# 复杂度上限=存量基线（只防恶化，不做历史清账）；新增/改动文件必须零告警（CI 对 diff 文件全量把关）
+[tool.ruff]
+target-version = "py312"
+line-length = 140
+# 项目显式配置存在即阻断对上级/用户全局 ruff 配置的向上搜索
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 60
+
+# M-2 legacy baseline: existing violations are grandfathered per file/rule;
+# deleting an entry (after cleaning that class in that file) re-enables the gate.
+[tool.ruff.lint.per-file-ignores]
+"py/ClaudeAsOpenAI.py" = ["F401"]
+"py/acpx_tools.py" = ["F541"]
+"py/agent.py" = ["E722", "F401"]
+"py/behavior_engine.py" = ["E701", "E722", "F401"]
+"py/blivedm/__init__.py" = ["F403"]
+"py/blivedm/clients/__init__.py" = ["F403"]
+"py/blivedm/clients/open_live.py" = ["F403", "F405"]
+"py/blivedm/clients/web.py" = ["F403", "F405"]
+"py/blivedm/clients/ws_base.py" = ["F403", "F405"]
+"py/blivedm/handlers.py" = ["F403", "F405"]
+"py/blivedm/models/open_live.py" = ["F403", "F405"]
+"py/blivedm/models/web.py" = ["F403", "F405"]
+"py/cdp_tool.py" = ["F401", "F541", "F841"]
+"py/cli_tool.py" = ["E402", "E701", "E722", "F401", "F541", "F811", "F841"]
+"py/code_interpreter.py" = ["E402", "F811"]
+"py/computer_use_tool.py" = ["E701", "F401"]
+"py/context_manager.py" = ["F401"]
+"py/dingtalk_bot_manager.py" = ["E701", "E722", "F401", "F541"]
+"py/discord_bot_manager.py" = ["E701", "E702", "F401", "F841"]
+"py/ebd_model_manager.py" = ["E701", "E722"]
+"py/extensions.py" = ["F401"]
+"py/feishu_bot_manager.py" = ["C901", "E701", "E722", "F401", "F841"]
+"py/get_setting.py" = ["E401", "E701", "F401"]
+"py/image_host.py" = ["F401"]
+"py/know_base.py" = ["E722", "F541"]
+"py/live_router.py" = ["E401", "E722", "F541", "F841"]
+"py/llm_tool.py" = ["E701", "F541"]
+"py/load_files.py" = ["E402", "E701", "E722", "F401", "F541", "F811", "F841"]
+"py/mcp_clients.py" = ["F401"]
+"py/moss/ort_cpu_runtime.py" = ["F401"]
+"py/moss/tts_runtime.py" = ["E402", "F401", "F811"]
+"py/moss_model_manager.py" = ["F401"]
+"py/moss_tts.py" = ["F401"]
+"py/node_runner.py" = ["E401", "E722"]
+"py/overlay_router.py" = ["F401"]
+"py/qq_bot_manager.py" = ["E722", "F401", "F841"]
+"py/recover_from_log.py" = ["E741"]
+"py/scheduler.py" = ["E722"]
+"py/sherpa_asr.py" = ["F401"]
+"py/sherpa_model_manager.py" = ["E722", "F401"]
+"py/skills.py" = ["E402", "F401"]
+"py/slack_bot_manager.py" = ["E701", "E722", "F401"]
+"py/sleep_guard.py" = ["F401", "F541"]
+"py/sub_agent.py" = ["E701", "E722", "F401"]
+"py/task_center.py" = ["F401"]
+"py/task_tools.py" = ["E701"]
+"py/telegram_bot_manager.py" = ["E401", "F401"]
+"py/telegram_client.py" = ["E401", "E701", "F401"]
+"py/twitch_service.py" = ["E722", "F401", "F541"]
+"py/utility_tools.py" = ["F401", "F541"]
+"py/vts_manager.py" = ["E701", "E722"]
+"py/web_search.py" = ["E402", "E721", "F401", "F541", "F811"]
+"py/wechat_bot_manager.py" = ["E701", "E722", "F401", "F541"]
+"py/wecom_bot_manager.py" = ["E701", "E722", "F401"]
+"py/xmpp_client.py" = ["E402", "F401"]
+"py/ytdm.py" = ["E401", "F401"]
+"server.py" = ["C901", "E402", "E701", "E702", "E712", "E721", "E722", "E731", "F401", "F402", "F541", "F811", "F841"]
+"tests/test_bot_store.py" = ["F401"]
+"tests/test_contract_sse.py" = ["F401"]
+"tests/test_covs_rescue.py" = ["F401"]
+"tests/test_data_backup.py" = ["E402"]
+"tests/test_engine_parity.py" = ["F841"]
+"tests/test_process_tree.py" = ["E402"]
+"tests/test_secret_box.py" = ["F401"]
+"tests/test_ws_manager.py" = ["E402"]
+"tests/test_xmpp_channel.py" = ["E402"]
+"tests/test_xmpp_trust.py" = ["F401"]

@@ -8,6 +8,54 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install toolchains
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          uv venv
+          uv sync --group dev
+          npm install --no-audit --no-fund
+
+      - name: Collect changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+          fi
+          git diff --name-only --diff-filter=ACMR "$BASE" "$HEAD" > changed.txt || true
+          echo "py=$(grep -E '\.py$' changed.txt | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          echo "js=$(grep -E '\.js$' changed.txt | grep -vE 'static/libs/|static/ext/|eslint.config.js' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Ruff (changed Python files)
+        if: steps.changed.outputs.py != ''
+        run: uv run ruff check ${{ steps.changed.outputs.py }}
+
+      - name: ESLint (changed JavaScript files)
+        if: steps.changed.outputs.js != ''
+        run: npx eslint ${{ steps.changed.outputs.js }}
+
   test:
     runs-on: windows-latest
     steps:
