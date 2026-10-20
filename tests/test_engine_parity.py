@@ -218,3 +218,8 @@ class TestC5C15Pins:
     def test_ws_save_failures_ack_error(self):
         # save_settings + save_conversations failure paths both answer
         assert SRC.count('"type": "save_error"') >= 2
+
+    def test_stream_id_header_exposed(self):
+        # C-14: cross-origin clients must be able to read X-Stream-Id
+        assert "Access-Control-Expose-Headers" in SRC
+        assert '"X-Stream-Id"' in SRC

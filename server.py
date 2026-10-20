@@ -954,6 +954,8 @@ async def external_api_cors(request: Request, call_next):
             )
         response = await call_next(request)
         response.headers["Access-Control-Allow-Origin"] = "*"
+        # C-14: 暴露流 id 响应头，跨源客户端在 meta 帧前即可 resume/cancel
+        response.headers["Access-Control-Expose-Headers"] = "X-Stream-Id"
         return response
     return await call_next(request)
 

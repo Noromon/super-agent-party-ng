@@ -3032,6 +3032,16 @@ let vue_methods = {
             let _chunkIndex = 0;
             const _enableStreamResume = this.settings?.enableStreamResume !== false;
 
+            // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
+            // 断线也能 resume，停止按钮也能取消后端生产者流
+            if (_enableStreamResume && !_streamId) {
+                const _hdrStreamId = response.headers.get('X-Stream-Id');
+                if (_hdrStreamId) {
+                    _streamId = _hdrStreamId;
+                    this._currentStreamId = _streamId;
+                }
+            }
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;

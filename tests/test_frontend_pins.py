@@ -106,3 +106,16 @@ class TestDeadLinkCleanupPins:
         # commented-out wx_bot era remnants stay removed
         assert "start_wx_bot" not in SRC
         assert "wx_bot_status" not in SRC
+
+
+class TestStreamIdHeaderPin:
+    """C-14: stream id captured from the response header (no meta-frame wait)."""
+
+    def test_header_capture_before_meta_frame(self):
+        assert "response.headers.get('X-Stream-Id')" in SRC
+        # meta-frame fallback path stays intact (belt and braces)
+        assert "delta.stream_id && !_streamId" in SRC
+        # captured id feeds both resume and cancel paths
+        hdr = _slice("const _hdrStreamId = response.headers.get('X-Stream-Id');")
+        hdr = hdr[: hdr.index("while (true)")]
+        assert "this._currentStreamId = _streamId" in hdr
