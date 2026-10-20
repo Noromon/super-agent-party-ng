@@ -83,3 +83,26 @@ class TestSystemPromptPersistence:
     ])
     def test_smoke_snippets_exist(self, snippet):
         assert snippet in SRC
+
+
+class TestDeadLinkCleanupPins:
+    """R4 dead-code sweep: broken links fixed to real endpoints, dead branches gone."""
+
+    def test_no_broken_llm_models_link(self):
+        assert "fetch(`/llm_models`" not in SRC
+        assert "fetch(`/v1/providers/models`" in SRC
+
+    def test_add_vector_row_real_post(self):
+        body = _slice("async addVectorRow()")
+        body = body[: body.index("startEditRow")]
+        assert "method: 'POST'" in body
+        assert "content: this.newVectorText.trim()" in body
+        assert "await this.loadVectorTable(mid)" in body
+
+    def test_dead_branches_removed(self):
+        # backend never sends tool_approval type frames nor 'behavior' WS events
+        assert "tool.type === 'tool_approval'" not in SRC
+        assert "data.type === 'behavior'" not in SRC
+        # commented-out wx_bot era remnants stay removed
+        assert "start_wx_bot" not in SRC
+        assert "wx_bot_status" not in SRC

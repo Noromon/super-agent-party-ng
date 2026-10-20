@@ -12069,6 +12069,34 @@ async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
     _, meta_dict = load_index_and_meta(memory_id)   # 拆包
     return flatten_records(meta_dict)               # 传字典
 
+
+class MemoryAddBody(BaseModel):
+    content: str
+
+
+# ---------- 1.5 新增原始记忆行（C-5：此前双端皆缺=新增按钮静默必败） ----------
+@app.post("/memory/{memory_id}")
+async def add_memory_text(memory_id: str, body: MemoryAddBody = Body(...)) -> dict:
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content required")
+    cur_settings = await load_settings()
+    cur_memory = next((m for m in cur_settings.get("memories", [])
+                       if isinstance(m, dict) and m.get("id") == memory_id), None)
+    if cur_memory is None:
+        raise HTTPException(status_code=404, detail="memory not found")
+    try:
+        # 与 GET/PUT/DELETE 操作同一 faiss+meta 存储；infer=False=原文入库不走 LLM 抽取
+        m0 = llm_gate.get_mem0_instance(memory_id, cur_memory, cur_settings)
+        await asyncio.to_thread(
+            m0.add, content, user_id=memory_id,
+            metadata={"timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+            infer=False)
+        return {"message": "added"}
+    except Exception as e:
+        logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"add failed: {e}")
+
 # ---------- 2. 修改（只改 data） ----------
 @app.put("/memory/{memory_id}/{idx}")
 async def update_text(
@@ -12428,9 +12456,19 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "save_settings":
                 settings_dict = data.get("data", {})
-                await save_settings(settings_dict)
-                await sync_all_bots_behavior(settings_dict)
-
+                # C-15: 失败必须回 save_error（此前异常被外层吞=前端白等 10s 超时）
+                try:
+                    await save_settings(settings_dict)
+                    await sync_all_bots_behavior(settings_dict)
+                except Exception as _save_e:
+                    logger.error(f"[WS] save_settings 失败: {_save_e}")
+                    await ws_manager.send_json({
+                        "type": "save_error",
+                        "correlationId": data.get("correlationId"),
+                        "success": False,
+                        "error": str(_save_e),
+                    }, websocket)
+                    continue
                 await ws_manager.send_json({
                     "type": "settings_saved",
                     "correlationId": data.get("correlationId"),
@@ -12441,7 +12479,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 await ws_manager.broadcast_settings_update(settings_dict, exclude=websocket)
 
             elif msg_type == "save_conversations":
-                await save_covs(data.get("data", {}))
+                try:
+                    await save_covs(data.get("data", {}))
+                except Exception as _save_e:
+                    logger.error(f"[WS] save_conversations 失败: {_save_e}")
+                    await ws_manager.send_json({
+                        "type": "save_error",
+                        "correlationId": data.get("correlationId"),
+                        "success": False,
+                        "error": str(_save_e),
+                    }, websocket)
+                    continue
                 await ws_manager.send_json({
                     "type": "conversations_saved",
                     "correlationId": data.get("correlationId"),

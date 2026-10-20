@@ -448,12 +448,13 @@ let vue_methods = {
     // 获取模型列表
     async fetchModelsForType(type) {
       try {
-        const response = await fetch(`/llm_models`, {
+        // C-4: /llm_models 后端从不存在（调用必 404 被 catch 吞）=改用真实端点
+        const response = await fetch(`/v1/providers/models`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: type,
-            base_url: this.newLLMTool.base_url,
+            url: this.newLLMTool.base_url,
             api_key: this.newLLMTool.api_key
           })
         })
@@ -1922,10 +1923,6 @@ let vue_methods = {
         // 可以在这里处理 pong 回复，比如记录状态
         console.log('Received pong from server.');
       } 
-      else if (data.type === 'behavior') {
-          this.behaviorSettings = data.data.behaviorSettings || this.behaviorSettings;
-          this.autoSaveSettings();
-      }
       else if (data.type === 'settings_update') {
           this.settings = {
             model: data.data.model || '',
@@ -4154,10 +4151,8 @@ let vue_methods = {
         }
         let isApproval = false;
         let approvalData = null;
-        if (tool.type === 'tool_approval') {
-            isApproval = true;
-            try { approvalData = JSON.parse(tool.content); } catch (e) { }
-        } else if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.startsWith('{"__sap_approval_v1__":1,')) {
+        // 审批嗅探（C-20/T-9 同源收紧）：仅结构哨兵帧触发
+        if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.startsWith('{"__sap_approval_v1__":1,')) {
             try {
                 const temp = JSON.parse(tool.content);
                 if (temp.type === 'approval_required') { isApproval = true; approvalData = temp; }
@@ -7791,135 +7786,6 @@ async checkSlackBotStatus() {
 handleCreateSlackSeparator(val) {
   this.slackBotConfig.separators.push(val);
 },
-
-    // // 启动微信机器人
-    // async startWXBot() {
-    //   this.isWXStarting = true;
-
-    //   try {
-    //     // 显示连接中的提示
-    //     showNotification('正在连接微信机器人...', 'info');
-
-    //     const response = await fetch(`/start_wx_bot`, {
-    //       method: 'POST',
-    //       headers: { 'Content-Type': 'application/json' },
-    //       body: JSON.stringify(this.WXBotConfig)
-    //     });
-
-    //     const result = await response.json();
-
-    //     if (result.success) {
-    //       this.isWXBotRunning = true;
-    //       showNotification('微信机器人已成功启动并就绪', 'success');
-    //     } else {
-    //       // 显示具体错误信息
-    //       const errorMessage = result.message || '启动失败，请检查配置';
-    //       showNotification(`启动失败: ${errorMessage}`, 'error');
-
-    //       // 如果是超时错误，给出更具体的提示
-    //       if (errorMessage.includes('超时')) {
-    //         showNotification('提示：请检查网络连接和机器人配置是否正确', 'warning');
-    //       }
-    //     }
-    //   } catch (error) {
-    //     console.error('启动微信机器人时出错:', error);
-    //     showNotification('启动微信机器人失败: 网络错误或服务器未响应', 'error');
-    //   } finally {
-    //     this.isWXStarting = false;
-    //   }
-    // },
-
-    // // 停止微信机器人
-    // async stopWXBot() {
-    //   this.isWXStopping = true;
-
-    //   try {
-    //     const response = await fetch(`/stop_wx_bot`, {
-    //       method: 'POST',
-    //       headers: { 'Content-Type': 'application/json' }
-    //     });
-
-    //     const result = await response.json();
-
-    //     if (result.success) {
-    //       this.isWXBotRunning = false;
-    //       showNotification('微信机器人已成功停止', 'success');
-    //     } else {
-    //       const errorMessage = result.message || '停止失败';
-    //       showNotification(`停止失败: ${errorMessage}`, 'error');
-    //     }
-    //   } catch (error) {
-    //     console.error('停止微信机器人时出错:', error);
-    //     showNotification('停止微信机器人失败: 网络错误或服务器未响应', 'error');
-    //   } finally {
-    //     this.isWXStopping = false;
-    //   }
-    // },
-
-    // // 重载微信机器人配置
-    // async reloadWXBotConfig() {
-    //   this.isWXReloading = true;
-
-    //   try {
-    //     const response = await fetch(`/reload_wx_bot`, {
-    //       method: 'POST',
-    //       headers: { 'Content-Type': 'application/json' },
-    //       body: JSON.stringify(this.WXBotConfig)
-    //     });
-
-    //     const result = await response.json();
-
-    //     if (result.success) {
-    //       if (result.config_changed) {
-    //         showNotification('微信机器人配置已重载并重新启动', 'success');
-    //       } else {
-    //         showNotification('微信机器人配置已更新', 'success');
-    //       }
-    //     } else {
-    //       const errorMessage = result.message || '重载失败';
-    //       showNotification(`重载失败: ${errorMessage}`, 'error');
-    //     }
-    //   } catch (error) {
-    //     console.error('重载微信机器人配置时出错:', error);
-    //     showNotification('重载微信机器人配置失败: 网络错误或服务器未响应', 'error');
-    //   } finally {
-    //     this.isWXReloading = false;
-    //   }
-    // },
-
-    // // 检查微信机器人状态
-    // async checkWXBotStatus() {
-    //   try {
-    //     const response = await fetch(`/wx_bot_status`);
-    //     const status = await response.json();
-
-    //     // 更新机器人运行状态
-    //     this.isWXBotRunning = status.is_running;
-
-    //     // 如果机器人正在运行但前端状态不一致，更新状态
-    //     if (status.is_running && !this.isWXBotRunning) {
-    //       this.isWXBotRunning = true;
-    //     }
-    //   } catch (error) {
-    //     console.error('检查机器人状态失败:', error);
-    //   }
-    // },
-
-    // // 新增的方法：供主进程请求关闭机器人
-    // async requestStopWXBotIfRunning() {
-    //   try {
-    //     const response = await fetch(`/wx_bot_status`)
-    //     const status = await response.json()
-
-    //     if (status.is_running) {
-    //       // 调用 stopWXBot 来关闭机器人
-    //       await this.stopWXBot()
-    //       console.log('机器人已关闭')
-    //     }
-    //   } catch (error) {
-    //     console.error('检查或停止机器人失败:', error)
-    //   }
-    // },
 
     async handleSeparatorChange(val) {
       this.qqBotConfig.separators = val.map(s => 
@@ -15280,14 +15146,21 @@ collapseSidePanel() {
       }
     },
 
-    // 新增记忆
+    // 新增记忆（C-5：此前为空 fetch 残壳=按钮静默必败，后端已补 POST /memory/{id}）
     async addVectorRow() {
       if (!this.newVectorText.trim()) return
       try {
         const mid = this.vectorDialogMemoryId
         const res = await fetch(`/memory/${mid}`, {
-          
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: this.newVectorText.trim() })
         })
+        if (!res.ok) throw new Error(await res.text())
+        this.newVectorText = ''
+        await this.loadVectorTable(mid)
+      } catch (e) {
+        showNotification(e.message, 'error')
       } finally {
         this.vectorLoading = false
       }

@@ -207,3 +207,14 @@ class TestGateBlindSpotClosure:
                     if not ok and chain[0].name not in exempt_funcs:
                         bad.append((path.name, chain[0].name, node.lineno))
         assert not bad, f"ungated direct LLM exits: {bad}"
+
+
+class TestC5C15Pins:
+    """C-5: POST /memory both-ends fix. C-15: WS save failure must ack save_error."""
+
+    def test_post_memory_endpoint_exists(self):
+        assert '@app.post("/memory/{memory_id}")' in SRC
+
+    def test_ws_save_failures_ack_error(self):
+        # save_settings + save_conversations failure paths both answer
+        assert SRC.count('"type": "save_error"') >= 2
