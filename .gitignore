@@ -206,3 +206,11 @@ vts_token.txt
 # re-ignore caches under tests/ (last match wins)
 tests/__pycache__/
 .pytest_cache/
+
+# 本地运行时/工具目录（M-8 仓库卫生）
+Git/
+tiktoken_cache/
+.opencode/
+browsers/
+一键启动(start).bat
+一键更新(update).bat
