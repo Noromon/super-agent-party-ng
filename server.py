@@ -1037,9 +1037,10 @@ app = FastAPI(lifespan=lifespan)
 # 内部 API 一律同源 + session token；OPTIONS 预检只对这两个前缀应答。
 _EXTERNAL_PREFIXES = ("/v1", "/mcp")
 
-from py.routers import media, bots
+from py.routers import media, bots, memories
 app.include_router(media.router)
 app.include_router(bots.router)
+app.include_router(memories.router)
 
 @app.middleware("http")
 async def external_api_cors(request: Request, call_next):
@@ -7760,47 +7761,12 @@ async def simple_chat_endpoint(request: ChatRequest):
         headers={"Cache-Control": "no-cache"}
     )
 
-class GroupMemoryExtractRequest(BaseModel):
-    group_id: Union[str, int, float]
-    conversation_id: Union[str, int, float]
-    user_message_id: Optional[Union[str, int, float]] = None
-    assistant_message_id: Optional[Union[str, int, float]] = None
-    user_message: str
-    assistant_message: str
 
 class DeleteConversationRequest(BaseModel):
     conversation_id: Union[str, int, float]
     delete_memory: bool = False
 
-class ClearGroupMemoryRequest(BaseModel):
-    group_id: Union[str, int, float]
 
-@app.post("/api/group-memory/extract")
-async def extract_group_memory_endpoint(req: GroupMemoryExtractRequest):
-    req.group_id = _normalize_entity_id(req.group_id)
-    req.conversation_id = _normalize_entity_id(req.conversation_id)
-    req.user_message_id = _normalize_entity_id(req.user_message_id) or None
-    req.assistant_message_id = _normalize_entity_id(req.assistant_message_id) or None
-
-    group_map = await _load_group_map()
-    group = group_map.get(req.group_id)
-    if not group or not (group.get("memoryConfig") or {}).get("enabled"):
-        return {"success": True, "memories": 0}
-
-    current_settings = await load_settings()
-    client_class = get_client_class(current_settings, current_settings.get('selectedProvider'))
-    memory_client = client_class(
-        api_key=current_settings.get('api_key'),
-        base_url=current_settings.get('base_url') or "https://api.openai.com/v1",
-    )
-    memories = await _extract_group_memories(memory_client, current_settings, req.model_dump())
-    await _upsert_group_memories(
-        req.group_id,
-        req.conversation_id,
-        req.assistant_message_id or req.user_message_id or req.conversation_id,
-        memories,
-    )
-    return {"success": True, "memories": len(memories)}
 
 @app.post("/api/compact")
 async def compact_conversation_endpoint(request: Request):
@@ -7855,16 +7821,7 @@ async def delete_conversation_endpoint(req: DeleteConversationRequest):
         await _invalidate_group_memories_by_chat(req.conversation_id)
     return {"success": True}
 
-@app.post("/api/group-memory/clear-group")
-async def clear_group_memory_endpoint(req: ClearGroupMemoryRequest):
-    req.group_id = _normalize_entity_id(req.group_id)
-    await _invalidate_group_memories_by_group(req.group_id)
-    return {"success": True}
 
-@app.post("/api/group-memory/clear-all")
-async def clear_all_group_memory_endpoint():
-    await _invalidate_all_group_memories()
-    return {"success": True}
 
 from py.task_center import get_task_center
 from py.sub_agent import run_subtask_in_background
@@ -8897,29 +8854,7 @@ async def subtitles_websocket_endpoint(websocket: WebSocket):
 
 # 添加状态存储
 mcp_status = {}
-@app.post("/create_mcp")
-async def create_mcp_endpoint(request: Request, background_tasks: BackgroundTasks):
-    data = await request.json()
-    mcp_id = data.get("mcpId")
-    
-    if not mcp_id:
-        raise HTTPException(status_code=400, detail="Missing mcpId")
-    
-    # 将任务添加到后台队列
-    background_tasks.add_task(process_mcp, mcp_id)
-    
-    return {"success": True, "message": "MCP服务器初始化已开始"}
 
-@app.get("/mcp_status/{mcp_id}")
-async def get_mcp_status(mcp_id: str):
-    global mcp_client_list, mcp_status
-    status = mcp_status.get(mcp_id, "not_found")
-    if status == "ready":
-        # 保证 _tools 里都是可序列化的 dict / list / 基本类型
-        tools = await mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
-        tools = json.dumps(mcp_client_list[mcp_id]._tools_list)
-        return {"mcp_id": mcp_id, "status": status, "tools": tools}
-    return {"mcp_id": mcp_id, "status": status, "tools": []}
 
 async def process_mcp(mcp_id: str):
     """
@@ -9004,53 +8939,7 @@ async def process_mcp(mcp_id: str):
             except asyncio.CancelledError:
                 pass
 
-@app.delete("/remove_mcp")
-async def remove_mcp_server(request: Request):
-    global settings, mcp_client_list
-    try:
-        data = await request.json()
-        server_name = data.get("serverName", "")
 
-        if not server_name:
-            raise HTTPException(status_code=400, detail="No server names provided")
-
-        # 移除指定的MCP服务器
-        current_settings = await load_settings()
-        if server_name in current_settings['mcpServers']:
-            del current_settings['mcpServers'][server_name]
-            await save_settings(current_settings)
-            settings = current_settings
-
-            # 从mcp_client_list中移除
-            if server_name in mcp_client_list:
-                mcp_client_list[server_name].disabled = True
-                await mcp_client_list[server_name].close()
-                del mcp_client_list[server_name]
-                print(f"关闭MCP服务器: {server_name}")
-
-            return JSONResponse({"success": True, "removed": server_name})
-        else:
-            raise HTTPException(status_code=404, detail="Server not found")
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format")
-    except Exception as e:
-        logger.error(f"移除MCP服务器失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/remove_memory")
-async def remove_memory_endpoint(request: Request):
-    data = await request.json()
-    memory_id = data.get("memoryId")
-    if memory_id:
-        try:
-            # 删除MEMORY_CACHE_DIR目录下的memory_id文件夹
-            memory_dir = os.path.join(MEMORY_CACHE_DIR, memory_id)
-            shutil.rmtree(memory_dir)
-            return JSONResponse({"success": True, "message": "Memory removed"})
-        except Exception as e:
-            return JSONResponse({"success": False, "message": str(e)})
-    else:
-        return JSONResponse({"success": False, "message": "No memoryId provided"})
 
 @app.delete("/remove_agent")
 async def remove_agent_endpoint(request: Request):
@@ -9923,31 +9812,7 @@ async def get_file_content_endpoint(file_url: str):
     content = await get_file_content(file_path)
     return JSONResponse(content={"content": content})
 
-@app.post("/create_kb")
-async def create_kb_endpoint(request: Request, background_tasks: BackgroundTasks):
-    data = await request.json()
-    kb_id = data.get("kbId")
-    
-    if not kb_id:
-        raise HTTPException(status_code=400, detail="Missing kbId")
-    
-    # 将任务添加到后台队列
-    background_tasks.add_task(process_kb, kb_id)
-    
-    return {"success": True, "message": "知识库处理已开始，请稍后查询状态"}
 
-@app.delete("/remove_kb")
-async def remove_kb_endpoint(request: Request, background_tasks: BackgroundTasks):
-    data = await request.json()
-    kb_id = data.get("kbId")
-
-    if not kb_id:
-        raise HTTPException(status_code=400, detail="Missing kbId")
-    try:
-        background_tasks.add_task(remove_kb, kb_id)
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-    return {"success": True, "message": "知识库已删除"}
 
 # 删除知识库
 async def remove_kb(kb_id):
@@ -9961,11 +9826,6 @@ async def remove_kb(kb_id):
 
 # 添加状态存储
 kb_status = {}
-@app.get("/kb_status/{kb_id}")
-async def get_kb_status(kb_id):
-    status = kb_status.get(kb_id, "not_found")
-    print (f"kb_status: {kb_id} - {status}")
-    return {"kb_id": kb_id, "status": status}
 
 # 修改 process_kb
 async def process_kb(kb_id):
@@ -10495,42 +10355,13 @@ def list_to_dict(meta_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     return new_meta
 
 # ---------- 模型 ----------
-class TextUpdate(BaseModel):
-    new_text: str
 
 # ---------- 1. 读取（平铺） ----------
-@app.get("/memory/{memory_id}")
-async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
-    _, meta_dict = load_index_and_meta(memory_id)   # 拆包
-    return flatten_records(meta_dict)               # 传字典
 
 
-class MemoryAddBody(BaseModel):
-    content: str
 
 
 # ---------- 1.5 新增原始记忆行（C-5：此前双端皆缺=新增按钮静默必败） ----------
-@app.post("/memory/{memory_id}")
-async def add_memory_text(memory_id: str, body: MemoryAddBody = Body(...)) -> dict:
-    content = (body.content or "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="content required")
-    cur_settings = await load_settings()
-    cur_memory = next((m for m in cur_settings.get("memories", [])
-                       if isinstance(m, dict) and m.get("id") == memory_id), None)
-    if cur_memory is None:
-        raise HTTPException(status_code=404, detail="memory not found")
-    try:
-        # 与 GET/PUT/DELETE 操作同一 faiss+meta 存储；infer=False=原文入库不走 LLM 抽取
-        m0 = llm_gate.get_mem0_instance(memory_id, cur_memory, cur_settings)
-        await asyncio.to_thread(
-            m0.add, content, user_id=memory_id,
-            metadata={"timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
-            infer=False)
-        return {"message": "added"}
-    except Exception as e:
-        logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
-        raise HTTPException(status_code=500, detail=f"add failed: {e}")
 
 # ---------- M4-lite: 数据快照滚动备份（列表 / 手动快照 / 校验演练） ----------
 @app.get("/api/backup/list")
@@ -10559,53 +10390,9 @@ async def backup_verify(body: dict = Body(...)) -> dict:
     return await asyncio.to_thread(verify_snapshot, target)
 
 # ---------- 2. 修改（只改 data） ----------
-@app.put("/memory/{memory_id}/{idx}")
-async def update_text(
-    memory_id: str,
-    idx: int,
-    body: TextUpdate = Body(...)
-) -> dict:
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
-    # 定位 → 改 data
-    uuid, rec = next(iter(meta_list[idx].items()))
-    rec["data"] = body.new_text
-    # 写回
-    save_index_and_meta(memory_id, index, list_to_dict(meta_list))
-    return {"message": "updated", "idx": idx}
 
 
 # ---------- 3. 删除（按行号） ----------
-@app.delete("/memory/{memory_id}/{idx}")
-async def delete_text(memory_id: str, idx: int) -> dict:
-    import faiss
-    import numpy as np
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
-
-    ntotal = index.ntotal
-    print("index.ntotal",index.ntotal)
-    print("len(meta_list)",len(meta_list))
-    if ntotal != len(meta_list):
-        raise RuntimeError("index 与 meta 长度不一致")
-
-    # 1. 重建 Faiss 索引（去掉 idx）
-    ids_to_keep = np.array([i for i in range(ntotal) if i != idx], dtype=np.int64)
-    vecs = np.vstack([index.reconstruct(i) for i in range(ntotal)])
-    new_index = faiss.IndexFlatL2(index.d)   # 跟你建索引时保持一致
-    if vecs.shape[0] - 1 > 0:
-        new_index.add(vecs[ids_to_keep].astype("float32"))
-
-    # 2. 删除列表元素
-    del meta_list[idx]
-
-    # 3. 落盘
-    save_index_and_meta(memory_id, new_index, list_to_dict(meta_list))
-    return {"message": "deleted", "idx": idx}
 
 @app.post("/api/update_proxy") # 建议改用 POST 表达状态变更
 async def update_proxy():
