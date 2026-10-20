@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""E-1 forensics (informational phase): the streaming engine and the complete
-engine assemble their LLM tool lists with copy-pasted code that has drifted.
+"""E-1 forensics, dispositioned (S43): both engines now assemble their LLM
+tool lists through the single source py/tool_assembly.build_llm_tools.
 
-Phase 1 (this file): both engines run against the scripted mock; the tool-name
-sets sent to the LLM are captured and the drift is PRINTED (assertions only
-pin the common core). Phase 2 (E-1b, after dispositioning the drift): single
-source + tighten to strict set equality.
+Phase 1 printed the drift; E-1b aligned the engines (node-extension tools are
+announced on both paths per the S43 decision) and this file now enforces
+strict set equality plus the single-source structure itself.
 """
 import json
 import os
@@ -49,8 +48,8 @@ def _tool_names(history):
     return names
 
 
-class TestAssemblyDriftEvidence:
-    def test_stream_and_complete_tool_sets(self, sap, mock_llm, capsys):
+class TestAssemblyParity:
+    def test_stream_and_complete_tool_sets(self, sap, mock_llm):
         # --- streaming engine ---
         mock_llm.script([{"kind": "text", "content": "s-ok"}])
         r = post_chat(sap, {"messages": [{"role": "user", "content": "hi"}]})
@@ -66,21 +65,12 @@ class TestAssemblyDriftEvidence:
 
         assert stream_tools, "stream engine must send some tools to the LLM"
         assert complete_tools, "complete engine must send some tools to the LLM"
-        common = stream_tools & complete_tools
-        assert common, "engines must share a common tool core"
-
-        drift = {"stream_only": sorted(stream_tools - complete_tools),
-                 "complete_only": sorted(complete_tools - stream_tools)}
-        with capsys.disabled():
-            print("[assembly-drift]", json.dumps(drift, ensure_ascii=False),
-                  "| sizes:", len(stream_tools), len(complete_tools))
-        # the default-config core is pinned as the regression floor for E-1b;
-        # names chosen from the first evidence run (stable built-ins, no
-        # external services involved)
-        assert {"list_files_tool_local", "read_file_tool_local", "shell_tool_local"} <= common, \
-            f"core built-ins missing from common set: {sorted(common)[:20]}"
-        # informational: E-1b dispositiones the drift, then flip this to strict
-        # assert stream_tools == complete_tools
+        # E-1b: strict equality is the ratchet (single source can never drift)
+        assert stream_tools == complete_tools, (
+            f"engine drift: stream_only={sorted(stream_tools - complete_tools)} "
+            f"complete_only={sorted(complete_tools - stream_tools)}")
+        assert {"list_files_tool_local", "read_file_tool_local", "shell_tool_local"} <= stream_tools, \
+            f"core built-ins missing: {sorted(stream_tools)[:20]}"
 
 
 class TestPermissionListsSingleSource:
@@ -144,19 +134,21 @@ class TestNonDefaultConfigDrift:
         finally:
             _restore_settings(sap.data_dir, original)
 
-    def test_node_ext_gap_is_the_only_assemble_divergence(self):
-        """Static evidence for the dispositioning decision: the streaming
-        assembler iterates node_ext_mcp_tools; the complete assembler has no
-        such loop, so node-extension tools are never announced to the LLM on
-        the non-streaming (IM bots / stream=false) path. Dispatch itself is
-        shared, so the execution layer is ready -- only the announcement is
-        missing. E-1b single-sources this once dispositioned."""
-        stream_zone = SERVER_SRC[SERVER_SRC.index("tools = request.tools or []"):
-                                 SERVER_SRC.index("if settings[\"tools\"][\"arxiv\"]")]
-        complete_zone = SERVER_SRC[SERVER_SRC.rindex("tools = request.tools or []"):
-                                   SERVER_SRC.rindex("if settings[\"tools\"][\"arxiv\"]")]
-        assert "node_ext_mcp_tools" in stream_zone
-        assert "node_ext_mcp_tools" not in complete_zone  # the gap (E-1b target)
-        # every optional-tool switch except node-ext must be identical zones
-        for key in ('"randomTopic"', "['time']", '"weather"', '"wikipedia"', '"arxiv"'):
-            assert stream_zone.count(key) == complete_zone.count(key), key
+    def test_assembly_is_single_source(self):
+        """E-1b end-state ratchet: both engines call build_llm_tools and the
+        server file carries no inline assembly copies anymore (the old drift
+        surface: complete missed node-extension tools entirely)."""
+        assert SERVER_SRC.count("await build_llm_tools(request, settings, "
+                                "_assemble_toolkit())") == 2
+        assert 'tools = request.tools or []' not in SERVER_SRC
+        # the node-extension announce loop lives exactly once, in the module
+        asm = open(os.path.join(ROOT, "py", "tool_assembly.py"),
+                   encoding="utf-8").read()
+        assert "node_ext_mcp_tools" in asm
+        assert asm.count("for ext_id, tools_list in") == 1
+        assert asm.count("来自扩展") == 1
+        # server keeps only the dispatch-side lookup over node_ext_mcp_tools
+        # (execution layer), never a tool-announce loop for the LLM
+        assert "来自扩展" not in SERVER_SRC
+        assert SERVER_SRC.count(
+            "for ext_id, tools in node_ext_mcp_tools.items()") == 1
