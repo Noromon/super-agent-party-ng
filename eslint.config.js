@@ -33,6 +33,25 @@ const appGlobals = {
     ChartJS: "readonly",
     LocalForage: "readonly",
     showNotification: "readonly", // renderer.js 定义的全局通知函数
+    // R1 专域排查确认的跨文件顶层真全局（script 加载顺序保证可见性；
+    // R3 模块化时改 import 后逐项移出本表）：
+    isElectron: "readonly",         // vue_data.js 顶层 const
+    vue_data: "writable",           // vue_data.js 顶层 let
+    vue_methods: "readonly",        // vue_methods.js 顶层 const
+    backendURL: "readonly",         // vue_data.js 顶层 const
+    translations: "readonly",       // locales.js 顶层 const
+    md: "readonly",                 // vue_methods.js 顶层 const（markdown-it 实例）
+    MAX_RENDERED_BLOCKS: "readonly",// renderer.js 顶层 const
+    MAX_DISPLAY_LENGTH: "readonly", // renderer.js 顶层 const
+    uuid: "readonly",               // libs/uuid.min.js
+    hljs: "readonly",               // libs/highlight.min.js
+    mermaid: "readonly",            // libs/mermaid.min.js
+    morphdom: "readonly",           // libs/morphdom-umd.min.js
+    ElementPlusIconsVue: "readonly",// libs/element-plus-icons.js
+    QRCode: "readonly",             // libs/qrcode.min.js
+    ExcelJS: "readonly",            // libs/exceljs.min.js
+    vad: "readonly",                // libs/bundle.min.js（@ricky0123/vad-web）
+    chrome: "readonly",             // Electron renderer 的 chrome.* API
 };
 
 module.exports = [
@@ -65,12 +84,5 @@ module.exports = [
             sourceType: "commonjs",
             globals: { ...globals.node, ...appGlobals },
         },
-    },
-    {
-        // legacy：跨文件顶层 var（isElectron 等浏览器实际可见但 eslint 静态不可见）
-        // 与可疑未定义引用（url/uuid/fileName/data...）暂整体豁免；
-        // 后续专域批次逐个排查修复后从本名单移除即重新收紧（对齐 ruff per-file-ignores 策略）
-        files: ["static/js/vue_data.js", "static/js/vue_methods.js", "static/js/renderer.js"],
-        rules: { "no-undef": "off" },
     },
 ];
