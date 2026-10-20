@@ -1005,12 +1005,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger("app").info(f"防休眠停止异常: {e}")
 
-    if 'heartbeat_task' in locals() or 'heartbeat_task' in globals(): # 简单的清理检查
-        try:
-            # 因为 heartbeat_task 是在 lifespan 作用域内定义的，这里需要正确引用
-            pass 
-        except: pass
-
     if scheduler_task:
         scheduler_task.cancel()
     ext_ids = list(node_mgr.exts.keys())

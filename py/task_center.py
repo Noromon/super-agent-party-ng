@@ -2,6 +2,7 @@
 import logging
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -69,6 +70,7 @@ class TaskCenter:
         self.workspace_dir = Path(workspace_dir)
         self.task_dir = self.workspace_dir / ".agent" / "tasks"
         self._lock = asyncio.Lock()
+        self._reconciled = False
         self._ensure_task_dir()
     
     def _ensure_task_dir(self):
@@ -109,10 +111,12 @@ class TaskCenter:
             return task
     
     async def _save_task(self, task: SubTask):
-        """保存任务到文件"""
+        """保存任务到文件（temp + rename 原子写，D-12：崩溃不产生半截 JSON）"""
         task_file = self._get_task_file(task.task_id)
-        async with aiofiles.open(task_file, 'w', encoding='utf-8') as f:
+        tmp_file = task_file.with_suffix(".json.tmp")
+        async with aiofiles.open(tmp_file, 'w', encoding='utf-8') as f:
             await f.write(task.model_dump_json(indent=2))
+        os.replace(tmp_file, task_file)
     
     async def get_task(self, task_id: str) -> Optional[SubTask]:
         """获取任务详情"""
@@ -183,12 +187,40 @@ class TaskCenter:
             await self._save_task(task)
             return True
 
+    async def _startup_reconcile(self):
+        """T-6 启动对账：进程重启后 RUNNING 必为崩溃残留，统一置 FAILED。"""
+        async with self._lock:
+            if self._reconciled:
+                return
+            self._reconciled = True
+            if not self.task_dir.exists():
+                return
+            for task_file in self.task_dir.glob("*.json"):
+                try:
+                    async with aiofiles.open(task_file, 'r', encoding='utf-8') as f:
+                        data = await f.read()
+                    task = SubTask.model_validate_json(data)
+                except Exception:
+                    continue
+                if task.status != TaskStatus.RUNNING:
+                    continue
+                task.status = TaskStatus.FAILED
+                task.error = "进程重启导致任务中断，启动对账自动置失败 (T-6)"
+                task.updated_at = datetime.now().isoformat()
+                task.completed_at = datetime.now().isoformat()
+                await self._save_task(task)
+                logging.getLogger("app").info(
+                    f"[TaskCenter] T-6 对账: 任务 {task.task_id} ({task.title}) "
+                    f"RUNNING 残留已置 FAILED")
+
     async def list_tasks(
         self,
         parent_task_id: Optional[str] = None,
         status: Optional[TaskStatus] = None
     ) -> List[SubTask]:
         """列出任务"""
+        if not self._reconciled:
+            await self._startup_reconcile()
         tasks = []
         if not self.task_dir.exists():
             return tasks
