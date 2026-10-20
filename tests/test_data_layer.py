@@ -91,6 +91,15 @@ class TestCovsDefense:
             await gs.init_covs_db()
             await gs.save_covs({"conversations": [{"id": "keep"}]})
             corrupt_row(gs.COVS_PATH)
+            # M4-B2': blob 坏而行级影子完好 → 救援（不再直接清空）
+            rescued = await gs.load_covs()
+            assert [c["id"] for c in rescued["conversations"]] == ["keep"]
+            # blob 与影子行同坏 → D-3 原降级防御全保留
+            corrupt_row(gs.COVS_PATH)
+            con = sqlite3.connect(str(gs.COVS_PATH))
+            con.execute("DELETE FROM conversation_rows")
+            con.commit()
+            con.close()
             empty = await gs.load_covs()
             assert empty == {"conversations": []}
             backups = glob.glob(str(tmp_path / "*.covs-corrupt-*.json"))

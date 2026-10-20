@@ -544,6 +544,23 @@ async def save_settings(settings):
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
             await db.commit()
 
+async def _rescue_from_rows():
+    """M4-B2'：blob 损坏时从行级影子表救援全部会话（每次 save_covs 确定性同步，
+    blob 单点损坏时行表通常完好）。任一行坏 = 整体放弃（宁可空不可半坏）。"""
+    async with aiosqlite.connect(COVS_PATH) as db:
+        async with db.execute(
+                "SELECT data FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%' "
+                "ORDER BY updated_at") as cur:
+            raw_rows = await cur.fetchall()
+    convs = []
+    for (raw,) in raw_rows:
+        conv = json.loads(raw)
+        if not isinstance(conv, dict) or conv.get("id") is None:
+            raise ValueError("shadow row shape invalid")
+        convs.append(conv)
+    return convs
+
+
 async def load_covs():
     global _COVS_DEGRADED
     try:
@@ -567,6 +584,17 @@ async def load_covs():
                 _quarantine_raw(COVS_PATH, raw_row[0], "covs")
         except Exception:
             pass
+        # M4-B2'：行级影子救援——"对话消失"降级前的最后防线
+        try:
+            rescued = await _rescue_from_rows()
+        except Exception:
+            rescued = []
+        if rescued:
+            logging.getLogger(__name__).error(
+                f"conversations 读取/解析失败：坏数据已隔离备份；"
+                f"已从行级影子救援 {len(rescued)} 条会话（下次保存自动修复 blob）")
+            _COVS_DEGRADED = False
+            return {"conversations": rescued}
         logging.getLogger(__name__).error("conversations 读取/解析失败：已隔离备份；空库回写将被拒绝")
         _COVS_DEGRADED = True
         return {"conversations": []}

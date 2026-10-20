@@ -719,6 +719,22 @@ async def lifespan(app: FastAPI):
             print(f"[Backup] 启动快照异常: {e}")
     asyncio.create_task(_startup_snapshot())
     
+    # --- [M4-B2': 启动对账探针（只读，mismatch 仅告警留证据，不影响启动）] ---
+    async def _startup_reconcile():
+        try:
+            from py import covs_reconcile
+            blob_map, rows_map, traces = await asyncio.to_thread(covs_reconcile.load_maps, COVS_PATH)
+            r = covs_reconcile.reconcile(blob_map, rows_map, traces)
+            if not r["consistent"]:
+                print(f"[Reconcile] 会话 blob/行级影子不一致: blob-only={len(r['blob_only'])} "
+                      f"rows-only={len(r['rows_only'])} content-mismatch={len(r['content_mismatch'])}"
+                      f"；建议运行 python py/covs_reconcile.py --out report.md")
+            else:
+                print(f"[Reconcile] 会话一致性对账通过（{r['blob_conversations']} 会话）")
+        except Exception as e:
+            print(f"[Reconcile] 对账探针跳过: {e}")
+    asyncio.create_task(_startup_reconcile())
+    
     from py.sleep_guard import SleepGuard
     sleep_guard = SleepGuard(verbose=True)
     try:
