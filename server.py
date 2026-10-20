@@ -3956,6 +3956,251 @@ def _breakdown_tokens(messages, tools=None):
     return seg
 
 
+
+async def _stream_desktop_capture(request, settings, vision_cfg, vision_control_enabled, user_prompt, fastapi_base_url):
+    """Desktop-vision wake/vision-control capture pipeline + injection. (M-3 split)"""
+    should_capture = False
+    if vision_control_enabled and settings.get('visionControlSettings', {}).get('desktopVision', False):
+        should_capture = True
+    elif vision_cfg.get('desktopVision'):
+        # 检查唤醒词
+        if vision_cfg.get('enableWakeWord'):
+            wake_words = [w.strip() for w in vision_cfg.get('wakeWord', "").split('\n') if w.strip()]
+            if any(word in user_prompt for word in wake_words):
+                should_capture = True
+        else:
+            # 未开启唤醒词则默认每次捕获（或根据需求调整）
+            should_capture = True
+        
+    if should_capture:
+        try:
+            import pyautogui
+            # 引入我们刚才写的设置区域的方法
+            from py.computer_use_tool import set_screen_region
+                
+            # 获取配置
+            v_settings = settings.get('visionControlSettings', {})
+            is_full_screen = v_settings.get('isFullScreen', True)
+            screen_size = v_settings.get('ScreenSize', [0, 0, 1280, 720])
+            is_grid_enabled = vision_control_enabled and v_settings.get('isEnableGrid', False)
+
+            logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
+                
+            # 1. 根据全屏配置决定截取范围，并同步给鼠标工具
+            if not is_full_screen and len(screen_size) == 4:
+                x, y, w, h = map(int, screen_size)
+                # 截取指定区域
+                screenshot = await asyncio.to_thread(pyautogui.screenshot, region=(x, y, w, h))
+                logical_width, logical_height = w, h
+                # 通知计算机工具，接下来的鼠标操作要基于这个区域
+                set_screen_region((x, y, w, h))
+            else:
+                # 全屏截图
+                logical_width, logical_height = pyautogui.size()
+                screenshot = await asyncio.to_thread(pyautogui.screenshot)
+                # 恢复全屏鼠标映射
+                set_screen_region(None)
+                
+            # 2. 统一缩放到逻辑坐标系 (解决 Windows DPI 缩放偏移)
+            if screenshot.width != logical_width or screenshot.height != logical_height:
+                screenshot = await asyncio.to_thread(
+                    screenshot.resize, (logical_width, logical_height), Image.Resampling.LANCZOS
+                )
+                
+            # 3. 缩放到传输尺寸 (1280x720 左右，平衡清晰度与 Token 消耗)
+            target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
+                
+            if screenshot.width > target_w or screenshot.height > target_h:
+                logging.getLogger("app").info(f"检测到高分辨率屏幕，正在从 {screenshot.size} 缩放到 {(target_w, target_h)}")
+                screenshot = await asyncio.to_thread(
+                    screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
+                )
+
+            # 4. 根据设置决定是否绘制网格
+            if is_grid_enabled:
+                # 在副本上绘制网格
+                display_image = await asyncio.to_thread(draw_grid_on_image, screenshot.copy(), grid_spacing=10)
+                if not is_full_screen:
+                    grid_hint = "\n\n【system info】Current partial screen region screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
+                else:
+                    grid_hint = "\n\n【system info】Current desktop screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
+            else:
+                display_image = screenshot
+                grid_hint = "\n\n【system info】Current desktop screenshot is injected."
+
+            # 5. 保存图片
+            file_prefix = "desktop_grid" if is_grid_enabled else "desktop_plain"
+            desktop_img_name = f"{file_prefix}_{uuid.uuid4().hex}.png"
+            desktop_img_path = os.path.join(UPLOAD_FILES_DIR, desktop_img_name)
+                
+            await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
+            desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
+                
+            # 6. 注入到当前消息
+            current_user_msg = request.messages[-1]
+            if isinstance(current_user_msg['content'], str):
+                original_text = current_user_msg['content']
+                current_user_msg['content'] = [
+                    {"type": "text", "text": original_text + grid_hint},
+                    {"type": "image_url", "image_url": {"url": desktop_url}}
+                ]
+            elif isinstance(current_user_msg['content'], list):
+                current_user_msg['content'].append(
+                    {"type": "image_url", "image_url": {"url": desktop_url}}
+                )
+                
+            # 7. 清理历史截图 (如果开启了 onlyNewScreen)
+            if settings.get('visionControlSettings', {}).get('onlyNewScreen', False):
+                for msg in request.messages[:-1]: # 不处理最后一条刚刚添加的消息
+                    if isinstance(msg.get('content'), list):
+                        # 过滤掉 image_url，只保留 text
+                        new_content = [item for item in msg['content'] if item.get('type') != 'image_url']
+                        # 如果 list 里只剩文本，简化为字符串提高处理效率
+                        if len(new_content) == 1 and new_content[0].get('type') == 'text':
+                            msg['content'] = new_content[0]['text']
+                        else:
+                            msg['content'] = new_content
+                logging.getLogger("app").info("已清理历史上下文中的旧截图。")
+
+            logging.getLogger("app").info(f"桌面截图已注入: {desktop_url}")
+
+        except Exception as e:
+            logging.getLogger("app").info(f"后端桌面截图失败: {e}")
+
+
+def _stream_context_compress(request, settings):
+    """L1 context window compression (stream channel; dead-neutral inits kept)."""
+    max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
+    chat_messages = request.messages # 这里的 chat_messages 包含 system
+    usage_info = None
+    _ctx_peak = 0
+        
+    if max_rounds > 0:
+            
+        # 区分系统消息和对话消息
+        sys_msgs = [m for m in chat_messages if get_role(m) == "system"]
+        dialog_msgs = [m for m in chat_messages if get_role(m) != "system"]
+            
+        # 设定压缩阈值：当非系统消息超过 max_rounds * 2 + 1 时开始压缩
+        if len(dialog_msgs) > (max_rounds * 2 + 1):
+            keep_indices = set()
+                
+            # 1. 总是保留第一条消息 (Anchor User Prompt)
+            if len(dialog_msgs) > 0: keep_indices.add(0)
+                
+            # 2. 保留所有 User 消息 (User 优先策略)
+            for i, m in enumerate(dialog_msgs):
+                if get_role(m) == "user": keep_indices.add(i)
+                
+            # 3. 保留每个 Turn 的最后一个 Assistant 消息 (最终答案)
+            for i in range(len(dialog_msgs)):
+                if get_role(dialog_msgs[i]) == "assistant":
+                    is_last = True
+                    for j in range(i + 1, len(dialog_msgs)):
+                        if get_role(dialog_msgs[j]) == "assistant":
+                            is_last = False; break
+                        if get_role(dialog_msgs[j]) == "user": break
+                    if is_last: keep_indices.add(i)
+                
+            # 4. 保留最近的活跃窗口 (最近 N 条消息，确保当前工具链不被切断)
+            tail_start = max(0, len(dialog_msgs) - (max_rounds * 2))
+            for i in range(tail_start, len(dialog_msgs)):
+                keep_indices.add(i)
+                
+            # 构造初步压缩后的列表
+            compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
+            chat_messages = sys_msgs + compressed_dialog
+            logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
+
+    request.messages = sanitize_tool_chains(chat_messages)
+    request.messages = ensure_thinking_fields(request.messages)
+
+
+async def _stream_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):
+    """Character-book lore + persona fields + mem0 recall (stream wording)."""
+    if settings["memorySettings"]["userName"]:
+        logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
+        content_append(request.messages, 'system', "与你交流的默认用户名为：\n\n" + settings["memorySettings"]["userName"] + "\n\n注意！除非用户消息中提到了是其他用户发送，否则视为默认用户发送的消息\n\n")
+    lore_content = ""
+    assistant_reply = ""
+    # 找出request.messages中上次的assistant回复
+    for i in range(len(request.messages)-1, -1, -1):
+        if request.messages[i]['role'] == 'assistant':
+            assistant_reply = request.messages[i]['content']
+            break
+    if cur_memory["characterBook"]:
+        for lore in cur_memory["characterBook"]:
+            # lore['keysRaw'] 按照换行符分割，并去除空字符串
+            lore_keys = lore["keysRaw"].split("\n")
+            lore_keys = [key for key in lore_keys if key != ""]
+            logging.getLogger("app").info(lore_keys)
+            # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
+            if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
+                lore_content += lore['content'] + "\n\n"
+    if lore_content:
+        if settings["memorySettings"]["userName"]:
+            # 替换lore_content中的{{user}}为settings["memorySettings"]["userName"]
+            lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换lore_content中的{{char}}为cur_memory["name"]
+        lore_content = lore_content.replace("{{char}}", cur_memory["name"])
+        logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+        content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+    if cur_memory["description"]:
+        if settings["memorySettings"]["userName"]:
+            # 替换cur_memory["description"]中的{{user}}为settings["memorySettings"]["userName"]
+            cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
+        cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
+        logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+        content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+    if cur_memory["personality"]:
+        if settings["memorySettings"]["userName"]:
+            # 替换cur_memory["personality"]中的{{user}}为settings["memorySettings"]["userName"]
+            cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
+        cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
+        logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
+        content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
+    if cur_memory['mesExample']:
+        if settings["memorySettings"]["userName"]:
+            # 替换cur_memory["mesExample"]中的{{user}}为settings["memorySettings"]["userName"]
+            cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
+        cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
+        logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+        content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+    if cur_memory["systemPrompt"]:
+        if settings["memorySettings"]["userName"]:
+            # 替换cur_memory["systemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
+            cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
+        cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{char}}", cur_memory["name"])
+        content_append(request.messages, 'system', "\n\n" + cur_memory["systemPrompt"] + "\n\n")
+    if settings["memorySettings"]["genericSystemPrompt"]:
+        if settings["memorySettings"]["userName"]:
+            # 替换settings["memorySettings"]["genericSystemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
+            settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
+        # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
+        settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
+        content_append(request.messages, 'system', "\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n")
+    if m0 and not request.is_sub_agent:
+        memoryLimit = settings["memorySettings"]["memoryLimit"]
+        try:
+            # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
+            # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
+            relevant_memories = await asyncio.to_thread(
+                m0.search, 
+                query=user_prompt, 
+                user_id=memoryId, 
+                limit=memoryLimit
+            )
+            relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
+        except Exception as e:
+            print("m0.search error:",e)
+            relevant_memories = ""
+        logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
+        content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")                   
+
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
@@ -3974,161 +4219,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         user_prompt = request.messages[-1].get('content') or ""
         
         # 1. 只要开启了计算机控制 或者 符合桌面视觉唤醒词条件，就进行初始截图
-        should_capture = False
-        if vision_control_enabled and settings.get('visionControlSettings', {}).get('desktopVision', False):
-            should_capture = True
-        elif vision_cfg.get('desktopVision'):
-            # 检查唤醒词
-            if vision_cfg.get('enableWakeWord'):
-                wake_words = [w.strip() for w in vision_cfg.get('wakeWord', "").split('\n') if w.strip()]
-                if any(word in user_prompt for word in wake_words):
-                    should_capture = True
-            else:
-                # 未开启唤醒词则默认每次捕获（或根据需求调整）
-                should_capture = True
-        
-        if should_capture:
-            try:
-                import pyautogui
-                # 引入我们刚才写的设置区域的方法
-                from py.computer_use_tool import set_screen_region
-                
-                # 获取配置
-                v_settings = settings.get('visionControlSettings', {})
-                is_full_screen = v_settings.get('isFullScreen', True)
-                screen_size = v_settings.get('ScreenSize', [0, 0, 1280, 720])
-                is_grid_enabled = vision_control_enabled and v_settings.get('isEnableGrid', False)
-
-                logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
-                
-                # 1. 根据全屏配置决定截取范围，并同步给鼠标工具
-                if not is_full_screen and len(screen_size) == 4:
-                    x, y, w, h = map(int, screen_size)
-                    # 截取指定区域
-                    screenshot = await asyncio.to_thread(pyautogui.screenshot, region=(x, y, w, h))
-                    logical_width, logical_height = w, h
-                    # 通知计算机工具，接下来的鼠标操作要基于这个区域
-                    set_screen_region((x, y, w, h))
-                else:
-                    # 全屏截图
-                    logical_width, logical_height = pyautogui.size()
-                    screenshot = await asyncio.to_thread(pyautogui.screenshot)
-                    # 恢复全屏鼠标映射
-                    set_screen_region(None)
-                
-                # 2. 统一缩放到逻辑坐标系 (解决 Windows DPI 缩放偏移)
-                if screenshot.width != logical_width or screenshot.height != logical_height:
-                    screenshot = await asyncio.to_thread(
-                        screenshot.resize, (logical_width, logical_height), Image.Resampling.LANCZOS
-                    )
-                
-                # 3. 缩放到传输尺寸 (1280x720 左右，平衡清晰度与 Token 消耗)
-                target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
-                
-                if screenshot.width > target_w or screenshot.height > target_h:
-                    logging.getLogger("app").info(f"检测到高分辨率屏幕，正在从 {screenshot.size} 缩放到 {(target_w, target_h)}")
-                    screenshot = await asyncio.to_thread(
-                        screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
-                    )
-
-                # 4. 根据设置决定是否绘制网格
-                if is_grid_enabled:
-                    # 在副本上绘制网格
-                    display_image = await asyncio.to_thread(draw_grid_on_image, screenshot.copy(), grid_spacing=10)
-                    if not is_full_screen:
-                        grid_hint = "\n\n【system info】Current partial screen region screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
-                    else:
-                        grid_hint = "\n\n【system info】Current desktop screenshot with coordinate grid (0-1000) is injected. Use coordinates for precise clicking."
-                else:
-                    display_image = screenshot
-                    grid_hint = "\n\n【system info】Current desktop screenshot is injected."
-
-                # 5. 保存图片
-                file_prefix = "desktop_grid" if is_grid_enabled else "desktop_plain"
-                desktop_img_name = f"{file_prefix}_{uuid.uuid4().hex}.png"
-                desktop_img_path = os.path.join(UPLOAD_FILES_DIR, desktop_img_name)
-                
-                await asyncio.to_thread(display_image.save, desktop_img_path, optimize=True)
-                desktop_url = f"{fastapi_base_url}uploaded_files/{desktop_img_name}"
-                
-                # 6. 注入到当前消息
-                current_user_msg = request.messages[-1]
-                if isinstance(current_user_msg['content'], str):
-                    original_text = current_user_msg['content']
-                    current_user_msg['content'] = [
-                        {"type": "text", "text": original_text + grid_hint},
-                        {"type": "image_url", "image_url": {"url": desktop_url}}
-                    ]
-                elif isinstance(current_user_msg['content'], list):
-                    current_user_msg['content'].append(
-                        {"type": "image_url", "image_url": {"url": desktop_url}}
-                    )
-                
-                # 7. 清理历史截图 (如果开启了 onlyNewScreen)
-                if settings.get('visionControlSettings', {}).get('onlyNewScreen', False):
-                    for msg in request.messages[:-1]: # 不处理最后一条刚刚添加的消息
-                        if isinstance(msg.get('content'), list):
-                            # 过滤掉 image_url，只保留 text
-                            new_content = [item for item in msg['content'] if item.get('type') != 'image_url']
-                            # 如果 list 里只剩文本，简化为字符串提高处理效率
-                            if len(new_content) == 1 and new_content[0].get('type') == 'text':
-                                msg['content'] = new_content[0]['text']
-                            else:
-                                msg['content'] = new_content
-                    logging.getLogger("app").info("已清理历史上下文中的旧截图。")
-
-                logging.getLogger("app").info(f"桌面截图已注入: {desktop_url}")
-
-            except Exception as e:
-                logging.getLogger("app").info(f"后端桌面截图失败: {e}")
+        await _stream_desktop_capture(request, settings, vision_cfg, vision_control_enabled, user_prompt, fastapi_base_url)
 
         # =========================================================================
         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
         # =========================================================================
-        max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
-        chat_messages = request.messages # 这里的 chat_messages 包含 system
-        usage_info = None
-        _ctx_peak = 0
-        
-        if max_rounds > 0:
-            
-            # 区分系统消息和对话消息
-            sys_msgs = [m for m in chat_messages if get_role(m) == "system"]
-            dialog_msgs = [m for m in chat_messages if get_role(m) != "system"]
-            
-            # 设定压缩阈值：当非系统消息超过 max_rounds * 2 + 1 时开始压缩
-            if len(dialog_msgs) > (max_rounds * 2 + 1):
-                keep_indices = set()
-                
-                # 1. 总是保留第一条消息 (Anchor User Prompt)
-                if len(dialog_msgs) > 0: keep_indices.add(0)
-                
-                # 2. 保留所有 User 消息 (User 优先策略)
-                for i, m in enumerate(dialog_msgs):
-                    if get_role(m) == "user": keep_indices.add(i)
-                
-                # 3. 保留每个 Turn 的最后一个 Assistant 消息 (最终答案)
-                for i in range(len(dialog_msgs)):
-                    if get_role(dialog_msgs[i]) == "assistant":
-                        is_last = True
-                        for j in range(i + 1, len(dialog_msgs)):
-                            if get_role(dialog_msgs[j]) == "assistant":
-                                is_last = False; break
-                            if get_role(dialog_msgs[j]) == "user": break
-                        if is_last: keep_indices.add(i)
-                
-                # 4. 保留最近的活跃窗口 (最近 N 条消息，确保当前工具链不被切断)
-                tail_start = max(0, len(dialog_msgs) - (max_rounds * 2))
-                for i in range(tail_start, len(dialog_msgs)):
-                    keep_indices.add(i)
-                
-                # 构造初步压缩后的列表
-                compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
-                chat_messages = sys_msgs + compressed_dialog
-                logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
-
-        request.messages = sanitize_tool_chains(chat_messages)
-        request.messages = ensure_thinking_fields(request.messages)
+        _stream_context_compress(request, settings)
         # =========================================================================
         images = await images_in_messages(request.messages,fastapi_base_url)
         request.messages = await message_without_images(request.messages)
@@ -4219,88 +4315,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             source_prompt += fileLinks_message
         user_prompt = request.messages[-1].get('content') or ""
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != ""  and not request.is_sub_agent:
-            if settings["memorySettings"]["userName"]:
-                logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
-                content_append(request.messages, 'system', "与你交流的默认用户名为：\n\n" + settings["memorySettings"]["userName"] + "\n\n注意！除非用户消息中提到了是其他用户发送，否则视为默认用户发送的消息\n\n")
-            lore_content = ""
-            assistant_reply = ""
-            # 找出request.messages中上次的assistant回复
-            for i in range(len(request.messages)-1, -1, -1):
-                if request.messages[i]['role'] == 'assistant':
-                    assistant_reply = request.messages[i]['content']
-                    break
-            if cur_memory["characterBook"]:
-                for lore in cur_memory["characterBook"]:
-                    # lore['keysRaw'] 按照换行符分割，并去除空字符串
-                    lore_keys = lore["keysRaw"].split("\n")
-                    lore_keys = [key for key in lore_keys if key != ""]
-                    logging.getLogger("app").info(lore_keys)
-                    # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
-                    if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
-                        lore_content += lore['content'] + "\n\n"
-            if lore_content:
-                if settings["memorySettings"]["userName"]:
-                    # 替换lore_content中的{{user}}为settings["memorySettings"]["userName"]
-                    lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换lore_content中的{{char}}为cur_memory["name"]
-                lore_content = lore_content.replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
-                content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
-            if cur_memory["description"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["description"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
-                cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
-                content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
-            if cur_memory["personality"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["personality"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
-                cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
-                content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
-            if cur_memory['mesExample']:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["mesExample"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
-                cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
-                content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
-            if cur_memory["systemPrompt"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["systemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
-                cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{char}}", cur_memory["name"])
-                content_append(request.messages, 'system', "\n\n" + cur_memory["systemPrompt"] + "\n\n")
-            if settings["memorySettings"]["genericSystemPrompt"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换settings["memorySettings"]["genericSystemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
-                    settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
-                settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
-                content_append(request.messages, 'system', "\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n")
-            if m0 and not request.is_sub_agent:
-                memoryLimit = settings["memorySettings"]["memoryLimit"]
-                try:
-                    # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
-                    # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
-                    relevant_memories = await asyncio.to_thread(
-                        m0.search, 
-                        query=user_prompt, 
-                        user_id=memoryId, 
-                        limit=memoryLimit
-                    )
-                    relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
-                except Exception as e:
-                    print("m0.search error:",e)
-                    relevant_memories = ""
-                logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
-                content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")                   
+            await _stream_character_context(request, settings, user_prompt, cur_memory, memoryId, m0)
         request = await tools_change_messages(request, settings)
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
