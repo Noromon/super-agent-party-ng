@@ -703,6 +703,22 @@ async def lifespan(app: FastAPI):
     global settings, client, reasoner_client, fast_client, mcp_client_list, local_timezone, logger, locales, global_http_client,scheduler_task,sleep_guard
     _, _, locales, settings, local_timezone = results
     
+    # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
+    async def _startup_snapshot():
+        try:
+            from py.data_backup import snapshot_data_dir
+            include = bool((settings or {}).get("backupIncludeUploads", False))
+            res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include)
+            if res.get("ok"):
+                print(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
+            elif res.get("skipped"):
+                print("[Backup] 启动快照节流跳过（距上次 <1h）")
+            else:
+                print(f"[Backup] 启动快照失败: {res.get('reason')}")
+        except Exception as e:
+            print(f"[Backup] 启动快照异常: {e}")
+    asyncio.create_task(_startup_snapshot())
+    
     from py.sleep_guard import SleepGuard
     sleep_guard = SleepGuard(verbose=True)
     try:
@@ -12098,6 +12114,31 @@ async def add_memory_text(memory_id: str, body: MemoryAddBody = Body(...)) -> di
     except Exception as e:
         logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
         raise HTTPException(status_code=500, detail=f"add failed: {e}")
+
+# ---------- M4-lite: 数据快照滚动备份（列表 / 手动快照 / 校验演练） ----------
+@app.get("/api/backup/list")
+async def backup_list() -> dict:
+    from py.data_backup import list_snapshots
+    snaps = await asyncio.to_thread(list_snapshots, USER_DATA_DIR)
+    return {"snapshots": snaps}
+
+@app.post("/api/backup/now")
+async def backup_now() -> dict:
+    from py.data_backup import snapshot_data_dir
+    cur_settings = await load_settings()
+    include = bool(cur_settings.get("backupIncludeUploads", False))
+    return await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include, 0.0)
+
+@app.post("/api/backup/verify")
+async def backup_verify(body: dict = Body(...)) -> dict:
+    from py.data_backup import backups_root, verify_snapshot
+    name = str((body or {}).get("name") or "")
+    root = os.path.abspath(backups_root(USER_DATA_DIR))
+    target = os.path.abspath(os.path.join(root, name))
+    # 路径围栏：只允许 backups/ 直属子目录，拒绝穿越与绝对路径
+    if not target.startswith(root + os.sep) or not os.path.isdir(target):
+        raise HTTPException(status_code=400, detail="invalid snapshot name")
+    return await asyncio.to_thread(verify_snapshot, target)
 
 # ---------- 2. 修改（只改 data） ----------
 @app.put("/memory/{memory_id}/{idx}")
