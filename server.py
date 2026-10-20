@@ -707,7 +707,10 @@ async def lifespan(app: FastAPI):
     async def _startup_snapshot():
         try:
             from py.data_backup import snapshot_data_dir
-            include = bool((settings or {}).get("backupIncludeUploads", False))
+            # 开关持久化域=systemSettings 子对象（前端开关所在层），兼容顶层旧写法
+            _s = settings or {}
+            include = bool(((_s.get("systemSettings") or {}).get("backupIncludeUploads")
+                            or _s.get("backupIncludeUploads") or False))
             res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include)
             if res.get("ok"):
                 print(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
@@ -12142,7 +12145,8 @@ async def backup_list() -> dict:
 async def backup_now() -> dict:
     from py.data_backup import snapshot_data_dir
     cur_settings = await load_settings()
-    include = bool(cur_settings.get("backupIncludeUploads", False))
+    include = bool(((cur_settings.get("systemSettings") or {}).get("backupIncludeUploads")
+                    or cur_settings.get("backupIncludeUploads") or False))
     return await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include, 0.0)
 
 @app.post("/api/backup/verify")

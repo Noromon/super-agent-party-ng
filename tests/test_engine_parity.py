@@ -223,3 +223,8 @@ class TestC5C15Pins:
         # C-14: cross-origin clients must be able to read X-Stream-Id
         assert "Access-Control-Expose-Headers" in SRC
         assert '"X-Stream-Id"' in SRC
+
+    def test_backup_toggle_domain_consistency(self):
+        # Data Guard switch persists under systemSettings (frontend domain);
+        # both backend readers (startup snapshot + backup_now) must read it there
+        assert SRC.count('("systemSettings") or {}).get("backupIncludeUploads"') >= 2
