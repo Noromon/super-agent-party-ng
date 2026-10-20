@@ -1,3 +1,5 @@
+
+import logging
 import os
 import base64
 import json
@@ -54,7 +56,7 @@ async def get_image_base64(image_url: str) -> str:
             if not await ssrf_gate(parsed_url.hostname, 'image'):
                 raise PermissionError(f"安全拒绝: 不允许从内部网络获取图像 ({parsed_url.hostname}){NET_BLOCK_HINT}")
             internal_source = True
-            print(f"[SSRF] 已放行内部图像源: {parsed_url.hostname}")
+            logging.getLogger("app").info(f"[SSRF] 已放行内部图像源: {parsed_url.hostname}")
         else:
             internal_source = False
 
@@ -184,7 +186,7 @@ async def get_image_media_type(image_url: str, base64_data: str = "") -> str:
     return media_type
 
 async def custom_llm_tool(tool_name, query, image_url=None):
-    print(f"调用LLM工具：{tool_name}")
+    logging.getLogger("app").info(f"调用LLM工具：{tool_name}")
     settings = await load_settings()
     llmTools = settings['llmTools']
     for llmTool in llmTools:

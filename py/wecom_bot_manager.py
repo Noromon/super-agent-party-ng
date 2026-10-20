@@ -169,7 +169,7 @@ class WeComBotManager:
             self.bot_client.WeComAgent = config.WeComAgent 
             self.bot_client.wakeWord = config.wakeWord
         global_behavior_engine.update_config(config.behaviorSettings, {"wecom": config.behaviorTargetChatIds})
-        print(f"[WeComManager] 行为配置已成功热更新，目标数: {len(config.behaviorTargetChatIds)}")
+        logging.getLogger("app").info(f"[WeComManager] 行为配置已成功热更新，目标数: {len(config.behaviorTargetChatIds)}")
 
 
 class WeComClient:

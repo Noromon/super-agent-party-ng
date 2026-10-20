@@ -1,3 +1,5 @@
+
+import logging
 import json
 from py.get_setting import HOST,PORT
 from openai import AsyncOpenAI
@@ -48,6 +50,6 @@ async def agent_tool_call(agent_id, query):
         res = response.choices[0].message.content
         return str(res)
     except Exception as e:
-        print(f"Error: {e}")
+        logging.getLogger("app").info(f"Error: {e}")
         return str(e)
 

@@ -1,5 +1,7 @@
 # py/acpx_tools.py
 
+
+import logging
 import os
 import sys
 import signal
@@ -617,7 +619,7 @@ async def acpx_agent(
     # Prompt content
     cmd.append(prompt)
 
-    print(f"[ACPM] Executing: {' '.join(cmd)}")
+    logging.getLogger("app").info(f"[ACPM] Executing: {' '.join(cmd)}")
 
     yield f"[Agent] {final_agent.upper()} via ACPM\n"
     yield f"[Mode]  {final_mode} (set-mode: {set_mode_value})\n"

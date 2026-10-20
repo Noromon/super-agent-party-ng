@@ -2,6 +2,8 @@
 # 上下文管理唯一权威点：token 估算 / L1 工具结果修剪 / tool 配对 sanitizer / 任务模式检测 / L2 LLM 摘要压缩。
 # 设计前提：历史所有权在前端（全量重放），压缩结果以"摘要消息 + 近期原文"形式返回，由前端落账。
 
+
+import logging
 import copy
 import json
 
@@ -170,7 +172,7 @@ def sanitize_tool_pairs(messages):
                 final.append(msg)
                 pending.discard(t_id)
             else:
-                print(f"[Sanitizer] 丢弃孤立的 tool 消息: {t_id}")
+                logging.getLogger("app").info(f"[Sanitizer] 丢弃孤立的 tool 消息: {t_id}")
                 continue
         elif role == "assistant":
             tcs = _tcs(msg)
@@ -189,14 +191,14 @@ def sanitize_tool_pairs(messages):
         if tcs and any((tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) in pending for tc in tcs):
             content = _content_text(last.get("content") if isinstance(last, dict) else getattr(last, "content", None))
             if content.strip():
-                print("[Sanitizer] 清除末尾悬空 tool_calls（保留文本）")
+                logging.getLogger("app").info("[Sanitizer] 清除末尾悬空 tool_calls（保留文本）")
                 new_last = dict(last) if isinstance(last, dict) else last
                 if isinstance(new_last, dict):
                     new_last.pop("tool_calls", None)
                     final[-1] = new_last
                     break
             else:
-                print("[Sanitizer] 弹出末尾无内容的孤立 tool_call 发起消息")
+                logging.getLogger("app").info("[Sanitizer] 弹出末尾无内容的孤立 tool_call 发起消息")
                 final.pop()
                 continue
         else:
@@ -302,7 +304,7 @@ async def compact_messages(client, model, messages, task_mode=None, focus=None,
             resp = await use_client.chat.completions.create(**kwargs)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        print(f"[Compact] 摘要调用失败: {e}")
+        logging.getLogger("app").info(f"[Compact] 摘要调用失败: {e}")
         return None
     if not summary:
         return None

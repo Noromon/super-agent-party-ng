@@ -265,10 +265,10 @@ class WeChatBotManager:
                     qr = qrcode.QRCode(border=1)
                     qr.add_data(url)
                     qr.make(fit=True)
-                    print("\n\n" + "="*50)
-                    print("👉 微信机器人验证: 请扫码登录 👈")
+                    logging.getLogger("app").info("\n\n" + "="*50)
+                    logging.getLogger("app").info("👉 微信机器人验证: 请扫码登录 👈")
                     qr.print_ascii(invert=True)
-                    print("="*50 + "\n\n")
+                    logging.getLogger("app").info("="*50 + "\n\n")
                     
                     img = qr.make_image(fill_color="black", back_color="white")
                     buffered = io.BytesIO()

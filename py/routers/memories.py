@@ -7,6 +7,8 @@ launched directly, so we bind the OBJECT once and attributes resolve at
 request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
+
+import logging
 import sys as _sys
 import asyncio
 import json
@@ -135,7 +137,7 @@ async def remove_mcp_server(request: Request):
                 _srv.mcp_client_list[server_name].disabled = True
                 await _srv.mcp_client_list[server_name].close()
                 del _srv.mcp_client_list[server_name]
-                print(f"关闭MCP服务器: {server_name}")
+                logging.getLogger("app").info(f"关闭MCP服务器: {server_name}")
 
             return JSONResponse({"success": True, "removed": server_name})
         else:
@@ -194,7 +196,7 @@ async def remove_kb_endpoint(request: Request, background_tasks: BackgroundTasks
 @router.get("/kb_status/{kb_id}")
 async def get_kb_status(kb_id):
     status = _srv.kb_status.get(kb_id, "not_found")
-    print (f"kb_status: {kb_id} - {status}")
+    logging.getLogger("app").info (f"kb_status: {kb_id} - {status}")
     return {"kb_id": kb_id, "status": status}
 
 

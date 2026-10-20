@@ -1,4 +1,6 @@
 
+
+import logging
 import json
 import os
 import random
@@ -94,7 +96,7 @@ async def upload_image_via_url(image_url, server_address):
             # 下载图片
             async with session.get(image_url, ssl=dl_ssl) as response:
                 if response.status != 200:
-                    print("Failed to download image.")
+                    logging.getLogger("app").info("Failed to download image.")
                     return None
                 image_content = await response.read()
 
@@ -121,8 +123,8 @@ async def upload_image_via_url(image_url, server_address):
                     print("Image uploaded successfully:", result)
                     return result
                 else:
-                    print(f"Failed to upload image: {resp.status}")
-                    print(await resp.text())
+                    logging.getLogger("app").info(f"Failed to upload image: {resp.status}")
+                    logging.getLogger("app").info(await resp.text())
                     return None
     except Exception as e:
         print("Upload error:", str(e))
@@ -183,7 +185,7 @@ async def comfyui_tool_call(tool_name, text_input = None, image_input = None,tex
             image_name = image_result.get("name")
             if image_name:
                 prompt[image_nodeId]["inputs"][image_inputField] = image_name
-                print("Image uploaded successfully.")
+                logging.getLogger("app").info("Image uploaded successfully.")
             else:
                 return "图片上传失败"
         else:
@@ -197,7 +199,7 @@ async def comfyui_tool_call(tool_name, text_input = None, image_input = None,tex
             image_name_2 = image_result.get("name")
             if image_name_2:
                 prompt[image_nodeId]["inputs"][image_inputField] = image_name_2
-                print("Image uploaded successfully.")
+                logging.getLogger("app").info("Image uploaded successfully.")
             else:
                 return "图片上传失败"
         else:

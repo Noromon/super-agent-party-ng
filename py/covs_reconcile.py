@@ -6,6 +6,8 @@ Usage:
     python py/covs_reconcile.py [--db path/to/conversations.db] [--out report.md]
 Exit code: 0 = fully consistent, 1 = mismatch found, 2 = cannot read.
 """
+
+import logging
 import argparse
 import json
 import os
@@ -118,7 +120,7 @@ def main(argv=None):
             f.write(text)
         print("report ->", args.out)
     else:
-        print(text)
+        logging.getLogger("app").info(text)
     return 0 if r["consistent"] else 1
 
 

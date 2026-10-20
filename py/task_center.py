@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import json
 import uuid
@@ -123,7 +125,7 @@ class TaskCenter:
                 data = await f.read()
                 return SubTask.model_validate_json(data)
         except Exception as e:
-            print(f"Error loading task {task_id}: {e}")
+            logging.getLogger("app").info(f"Error loading task {task_id}: {e}")
             return None
     
     async def update_task_progress(
@@ -142,7 +144,7 @@ class TaskCenter:
                 return False
             
             if task.status == TaskStatus.CANCELLED and status is not None and status != TaskStatus.CANCELLED:
-                print(f"[TaskCenter] 任务 {task_id} 已被取消，拒绝状态更新为 {status}")
+                logging.getLogger("app").info(f"[TaskCenter] 任务 {task_id} 已被取消，拒绝状态更新为 {status}")
                 return False
             
             safe_progress = max(0, min(100, progress))
@@ -202,7 +204,7 @@ class TaskCenter:
                         continue
                     tasks.append(task)
             except Exception as e:
-                print(f"Error loading task file {task_file}: {e}")
+                logging.getLogger("app").info(f"Error loading task file {task_file}: {e}")
                 continue
         tasks.sort(key=lambda x: x.created_at, reverse=True)
         return tasks
@@ -222,7 +224,7 @@ class TaskCenter:
                     await aiofiles.os.remove(task_file)
                     return True
                 except Exception as e:
-                    print(f"Error deleting task {task_id}: {e}")
+                    logging.getLogger("app").info(f"Error deleting task {task_id}: {e}")
                     return False
             return False
 

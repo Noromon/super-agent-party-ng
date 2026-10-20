@@ -1,4 +1,6 @@
 # sherpa_asr.py
+
+import logging
 import os
 import asyncio
 from pathlib import Path
@@ -39,11 +41,11 @@ def _get_recognizer(model_name: str = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue")
     # 检查文件是否存在，不存在时不抛出异常（防止主程序崩溃），只返回 None
     if not model_path.is_file() or not tokens_path.is_file():
         # 这里用 logging 或 print，不要抛出 ValueError，否则 server.py lifespan 会崩溃
-        print(f"提示: Sherpa 模型文件尚未下载，ASR 功能暂不可用。路径: {model_dir}")
+        logging.getLogger("app").info(f"提示: Sherpa 模型文件尚未下载，ASR 功能暂不可用。路径: {model_dir}")
         return None
 
     device = _detect_device()
-    print(f"正在加载 Sherpa-ONNX 模型 [{model_name}] 使用设备 [{device}]...")
+    logging.getLogger("app").info(f"正在加载 Sherpa-ONNX 模型 [{model_name}] 使用设备 [{device}]...")
 
     try:
         recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
@@ -58,7 +60,7 @@ def _get_recognizer(model_name: str = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue")
         _last_model_name = model_name
         return _recognizer
     except Exception as e:
-        print(f"加载 Sherpa 模型时发生错误: {e}")
+        logging.getLogger("app").info(f"加载 Sherpa 模型时发生错误: {e}")
         return None
 
 # ---------- 核心同步逻辑 (运行在线程池中) ----------

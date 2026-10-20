@@ -1,3 +1,5 @@
+
+import logging
 import base64
 import os
 import re
@@ -80,12 +82,12 @@ async def openai_image(prompt: str, size="auto"):
     
         response = await client.images.generate(prompt=prompt, size=size, model=model)
     except Exception as e:
-        print(e)
+        logging.getLogger("app").info(e)
         return f"ERROR: {e}"
     
     res_url = response.data[0].url
     res = f"![image]({res_url})"
-    print(res)
+    logging.getLogger("app").info(res)
     if res_url is None:
         res = response.data[0].b64_json
         HOST = get_host()
@@ -196,7 +198,7 @@ async def openai_chat_image(prompt: str,img_url_list: list = []):
                 ]
             )
     except Exception as e:
-        print(e)
+        logging.getLogger("app").info(e)
         return f"ERROR: {e}"
     
     if response:

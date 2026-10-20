@@ -3,6 +3,8 @@
 功能与原来完全一致，prefix 写死在 router 里
 """
 from __future__ import annotations
+
+import logging
 import asyncio, threading, http.cookies, aiohttp
 import uuid
 from typing import Optional, List
@@ -162,7 +164,7 @@ async def stop_live():
     
     try:
         
-        print("开始停止直播监听...")
+        logging.getLogger("app").info("开始停止直播监听...")
         if live_client is not None:
             
             # 设置停止事件
@@ -179,17 +181,17 @@ async def stop_live():
                     )
                     # 等待停止完成，最多等待5秒
                     future.result(timeout=5)
-                    print("客户端停止成功")
+                    logging.getLogger("app").info("客户端停止成功")
                 except asyncio.TimeoutError:
-                    print("停止客户端超时")
+                    logging.getLogger("app").info("停止客户端超时")
                 except Exception as e:
-                    print(f"停止客户端时出错: {e}")
+                    logging.getLogger("app").info(f"停止客户端时出错: {e}")
             
             # 等待线程结束
             if live_thread and live_thread.is_alive():
                 live_thread.join(timeout=3)
                 if live_thread.is_alive():
-                    print("警告: 线程未能在超时时间内结束")
+                    logging.getLogger("app").info("警告: 线程未能在超时时间内结束")
 
         if yt_client is not None:
             yt_client.stop()
@@ -210,11 +212,11 @@ async def stop_live():
         stop_event = None
         current_loop = None
 
-        print("直播监听停止完成")
+        logging.getLogger("app").info("直播监听停止完成")
         return ApiResponse(success=True, message="直播监听停止成功")
         
     except Exception as e:
-        print(f"停止直播监听时出错: {e}")
+        logging.getLogger("app").info(f"停止直播监听时出错: {e}")
         return ApiResponse(success=False, message=f"停止失败: {str(e)}")
 
 async def stop_live_client():
@@ -224,9 +226,9 @@ async def stop_live_client():
     if live_client:
         try:
             await live_client.stop_and_close()
-            print("直播客户端已停止")
+            logging.getLogger("app").info("直播客户端已停止")
         except Exception as e:
-            print(f"停止直播客户端时出错: {e}")
+            logging.getLogger("app").info(f"停止直播客户端时出错: {e}")
         finally:
             live_client = None
 
@@ -299,13 +301,13 @@ def run_live_client(config: dict):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        print("开始运行直播客户端...")
+        logging.getLogger("app").info("开始运行直播客户端...")
         
         # 运行异步函数
         loop.run_until_complete(start_live_client(config))
         
     except Exception as e:
-        print(f"直播客户端运行错误: {e}")
+        logging.getLogger("app").info(f"直播客户端运行错误: {e}")
         # 通知前端错误
         if loop and not loop.is_closed():
             try:
@@ -316,7 +318,7 @@ def run_live_client(config: dict):
             except:
                 pass
     finally:
-        print("直播客户端线程结束")
+        logging.getLogger("app").info("直播客户端线程结束")
         # 清理
         if loop and not loop.is_closed():
             try:
@@ -373,34 +375,34 @@ async def start_live_client(config: dict):
         try:
             while not (stop_event and stop_event.is_set()):
                 await asyncio.sleep(1)
-            print("收到停止信号，准备停止客户端")
+            logging.getLogger("app").info("收到停止信号，准备停止客户端")
         except asyncio.CancelledError:
-            print("客户端被取消")
+            logging.getLogger("app").info("客户端被取消")
             
     except Exception as e:
-        print(f"启动直播客户端错误: {e}")
+        logging.getLogger("app").info(f"启动直播客户端错误: {e}")
         raise
     finally:
         # 清理资源
         if live_client:
             try:
                 await live_client.stop_and_close()
-                print("客户端已关闭")
+                logging.getLogger("app").info("客户端已关闭")
             except Exception as e:
-                print(f"关闭客户端时出错: {e}")
+                logging.getLogger("app").info(f"关闭客户端时出错: {e}")
         
         if session:
             try:
                 await session.close()
-                print("Session已关闭")
+                logging.getLogger("app").info("Session已关闭")
             except Exception as e:
-                print(f"关闭Session时出错: {e}")
+                logging.getLogger("app").info(f"关闭Session时出错: {e}")
 
 class WebSocketHandler(blivedm.BaseHandler):
     """Web类型WebSocket处理器"""
     
     def _on_heartbeat(self, client: blivedm.BLiveClient, message: web_models.HeartbeatMessage):
-        print(f'[{client.room_id}] 心跳')
+        logging.getLogger("app").info(f'[{client.room_id}] 心跳')
 
     def _on_danmaku(self, client: blivedm.BLiveClient, message: web_models.DanmakuMessage):
         msg_text = f'{message.uname}说：{message.msg}'
@@ -410,7 +412,7 @@ class WebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "danmaku"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
     
     def _on_gift(self, client: blivedm.BLiveClient, message: web_models.GiftMessage):
@@ -421,7 +423,7 @@ class WebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "gift"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
     
     def _on_buy_guard(self, client: blivedm.BLiveClient, message: web_models.GuardBuyMessage):
@@ -432,7 +434,7 @@ class WebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "buy_guard"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
     
     def _on_super_chat(self, client: blivedm.BLiveClient, message: web_models.SuperChatMessage):
@@ -443,7 +445,7 @@ class WebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "super_chat"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_interact_word(self, client: blivedm.BLiveClient, message: web_models.InteractWordMessage):
@@ -455,7 +457,7 @@ class WebSocketHandler(blivedm.BaseHandler):
                 'content': msg_text,
                 "danmu_type": "enter_room"
             }
-            print(msg_text)
+            logging.getLogger("app").info(msg_text)
             asyncio.create_task(manager.broadcast(data))
         elif message.msg_type == 2:
             msg_text = f'{message.username} 关注了你'
@@ -465,7 +467,7 @@ class WebSocketHandler(blivedm.BaseHandler):
                 'content': msg_text,
                 "danmu_type": "follow"
             }
-            print(msg_text)
+            logging.getLogger("app").info(msg_text)
             asyncio.create_task(manager.broadcast(data))
 
 
@@ -473,7 +475,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
     """开放平台类型WebSocket处理器"""
     
     def _on_heartbeat(self, client: blivedm.OpenLiveClient, message: web_models.HeartbeatMessage):
-        print(f'[开放平台] 心跳')
+        logging.getLogger("app").info(f'[开放平台] 心跳')
 
     def _on_open_live_danmaku(self, client: blivedm.OpenLiveClient, message: open_models.DanmakuMessage):
         msg_text = f'{message.uname}说：{message.msg}'
@@ -483,7 +485,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "danmaku"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_open_live_gift(self, client: blivedm.OpenLiveClient, message: open_models.GiftMessage):
@@ -496,7 +498,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "gift"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_open_live_buy_guard(self, client: blivedm.OpenLiveClient, message: open_models.GuardBuyMessage):
@@ -507,7 +509,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "buy_guard"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_open_live_super_chat(self, client: blivedm.OpenLiveClient, message: open_models.SuperChatMessage):
@@ -518,7 +520,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "super_chat"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_open_live_like(self, client: blivedm.OpenLiveClient, message: open_models.LikeMessage):
@@ -529,7 +531,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "like"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
     def _on_open_live_enter_room(self, client: blivedm.OpenLiveClient, message: open_models.RoomEnterMessage):
@@ -540,7 +542,7 @@ class OpenLiveWebSocketHandler(blivedm.BaseHandler):
             'content': msg_text,
             "danmu_type": "enter_room"
         }
-        print(msg_text)
+        logging.getLogger("app").info(msg_text)
         asyncio.create_task(manager.broadcast(data))
 
 # 导出两个 router，主文件分别 include 即可

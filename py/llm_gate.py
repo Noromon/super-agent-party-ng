@@ -11,6 +11,8 @@ This module keeps the backend effectively single-filed:
   - memory extraction jobs are serialized by a dedicated lock and only start while
     no chat request is in flight (bounded wait, stale-job drop)
 """
+
+import logging
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -112,24 +114,24 @@ def submit_memory_job(memory_id, fn, name="mem0-add",
     def runner():
         acquired = _mem0_lock.acquire(timeout=1800)
         if not acquired:
-            print(f"[LlmGate] {name}: 互斥锁获取超时，放弃本次记忆提取")
+            logging.getLogger("app").info(f"[LlmGate] {name}: 互斥锁获取超时，放弃本次记忆提取")
             return
         try:
             if debounce and debounce > 0:
                 time.sleep(debounce)
             with _gen_lock:
                 if _pending.get(memory_id) != gen:
-                    print(f"[LlmGate] {name}: 静默窗内有新回合，本次提取已推迟给新任务")
+                    logging.getLogger("app").info(f"[LlmGate] {name}: 静默窗内有新回合，本次提取已推迟给新任务")
                     return
             if wait_idle and not wait_chat_idle(timeout=600):
-                print(f"[LlmGate] {name}: 等待会话空闲超时(600s)，跳过本次记忆提取")
+                logging.getLogger("app").info(f"[LlmGate] {name}: 等待会话空闲超时(600s)，跳过本次记忆提取")
                 return
-            print(f"[LlmGate] {name}: 开始记忆提取（会话空闲）")
+            logging.getLogger("app").info(f"[LlmGate] {name}: 开始记忆提取（会话空闲）")
             t0 = time.time()
             fn()
-            print(f"[LlmGate] {name}: 记忆提取完成，耗时 {time.time() - t0:.1f}s")
+            logging.getLogger("app").info(f"[LlmGate] {name}: 记忆提取完成，耗时 {time.time() - t0:.1f}s")
         except Exception as e:
-            print(f"[LlmGate] {name}: 任务异常: {e}")
+            logging.getLogger("app").info(f"[LlmGate] {name}: 任务异常: {e}")
         finally:
             _mem0_lock.release()
 

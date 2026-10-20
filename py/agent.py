@@ -1,3 +1,5 @@
+
+import logging
 import json
 import os
 from pathlib import Path
@@ -23,7 +25,7 @@ def is_tool_allowed_by_project_config(cwd: str, tool_name: str) -> bool:
             allowed_tools = data.get("allowed_tools", [])
             return tool_name in allowed_tools
     except Exception as e:
-        print(f"[Config Error] Failed to read .party config: {e}")
+        logging.getLogger("app").info(f"[Config Error] Failed to read .party config: {e}")
         return False
 
 def add_tool_to_project_config(cwd: str, tool_name: str):

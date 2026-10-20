@@ -58,7 +58,7 @@ class SubAgentExecutor:
 
                     latest_task = await task_center.get_task(task_id)
                     if latest_task and latest_task.status == TaskStatus.CANCELLED:
-                        print(f"[SubAgent] Task {task_id} was cancelled, stopping.")
+                        logging.getLogger("app").info(f"[SubAgent] Task {task_id} was cancelled, stopping.")
                         return {"success": False, "error": "Task cancelled by user"}
 
                     iteration += 1
@@ -71,7 +71,7 @@ class SubAgentExecutor:
                     
                     # 避免在遇到网络断连时造成高频请求死循环
                     if not assistant_response.strip():
-                        print(f"[SubAgent] 警告: 第 {iteration} 次迭代收到空回复(可能是API连接失败)，休眠3秒...")
+                        logging.getLogger("app").info(f"[SubAgent] 警告: 第 {iteration} 次迭代收到空回复(可能是API连接失败)，休眠3秒...")
                         await asyncio.sleep(3)
 
                     conversation_history.append({"role": "assistant", "content": assistant_response})
@@ -165,7 +165,7 @@ class SubAgentExecutor:
         target_platforms = task.platforms if task.platforms else ["chat"]
         
         # A. 始终推送到网页端 (WebSocket)
-        print(f"[TaskExecutor] 正在广播任务完成信号到网页端: {task.title}")
+        logging.getLogger("app").info(f"[TaskExecutor] 正在广播任务完成信号到网页端: {task.title}")
         await ws_manager.broadcast({
             "type": "task_notification",
             "data": {
@@ -181,7 +181,7 @@ class SubAgentExecutor:
 
             handler = global_behavior_engine.handlers.get(platform)
             if not handler:
-                print(f"[TaskExecutor] 平台 {platform} 尚未注册 handler，跳过推送")
+                logging.getLogger("app").info(f"[TaskExecutor] 平台 {platform} 尚未注册 handler，跳过推送")
                 continue
 
             trigger_obj = BehaviorTrigger(
@@ -204,13 +204,13 @@ class SubAgentExecutor:
 
             targets = global_behavior_engine.platform_targets.get(platform, [])
             if not targets:
-                print(f"[TaskExecutor] 平台 {platform} 未配置目标 ChatID，尝试使用空 ID 触发 fallback")
+                logging.getLogger("app").info(f"[TaskExecutor] 平台 {platform} 未配置目标 ChatID，尝试使用空 ID 触发 fallback")
                 asyncio.create_task(handler("", fake_behavior))
                 continue
 
             for chat_id in set(targets):
                 if chat_id:
-                    print(f"[TaskExecutor] 正在触发平台动作 -> {platform}:{chat_id}")
+                    logging.getLogger("app").info(f"[TaskExecutor] 正在触发平台动作 -> {platform}:{chat_id}")
                     asyncio.create_task(handler(chat_id, fake_behavior))
 
         return {"success": True, "task_id": task_id, "result": result}
@@ -313,7 +313,7 @@ class SubAgentExecutor:
                         if now - last_update_time >= UPDATE_INTERVAL:
                             current_task = await task_center.get_task(task_id)
                             if current_task and current_task.status == TaskStatus.CANCELLED:
-                                print(f"[SubAgent] Stream aborted due to cancellation of {task_id}")
+                                logging.getLogger("app").info(f"[SubAgent] Stream aborted due to cancellation of {task_id}")
                                 return ""
 
                             # 修复核心点1：将 status=TaskStatus.RUNNING 删去或改为 status=None，防止抹去已触发的完成状态
@@ -325,7 +325,7 @@ class SubAgentExecutor:
                             
                     except: continue
         except Exception as e:
-            print(f"[SubAgent] Stream error: {e}")
+            logging.getLogger("app").info(f"[SubAgent] Stream error: {e}")
         
         _flush_buffer()
         if current_text_buffer.strip():
@@ -351,7 +351,7 @@ class SubAgentExecutor:
             return resp.json()["choices"][0]["message"]["content"].strip().upper().startswith("YES")
         except Exception as e:
             # 加入日志，不要悄悄失败
-            print(f"[_check_task_completion_smart] 兜底检查请求失败: {e}")
+            logging.getLogger("app").info(f"[_check_task_completion_smart] 兜底检查请求失败: {e}")
             return False
 
     async def _extract_final_result(self, task, conversation_history, http_client):
@@ -360,7 +360,7 @@ class SubAgentExecutor:
             resp = await http_client.post(self.simple_chat_endpoint, json={"messages": msgs, "model": "super-model"})
             return {"full": resp.json()["choices"][0]["message"]["content"].strip()}
         except Exception as e:
-            print(f"[_extract_final_result] 结果提取请求失败: {e}")
+            logging.getLogger("app").info(f"[_extract_final_result] 结果提取请求失败: {e}")
             return {"full": "任务执行完成，未提取到明确结果。"}
 
 async def run_subtask_in_background(task_id: str, workspace_dir: str, settings: Dict, consensus_content: Optional[str] = None):

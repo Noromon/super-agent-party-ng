@@ -11,6 +11,8 @@ This module imports nothing from server.py: every process-global client and
 tool object is injected through the ``tk`` toolkit dict, which server
 rebuilds per request (fresh global references, no staleness).
 """
+
+import logging
 import json
 
 
@@ -55,7 +57,7 @@ async def build_llm_tools(request, settings, tk):
                     }
                 })
             else:
-                print(f"[WARNING] 跳过重复工具: {tool_name}")
+                logging.getLogger("app").info(f"[WARNING] 跳过重复工具: {tool_name}")
 
     get_llm_tool_fuction = await tk["get_llm_tool"](settings)
     if get_llm_tool_fuction:

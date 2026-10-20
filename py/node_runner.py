@@ -1,3 +1,5 @@
+
+import logging
 import os
 import json, asyncio, socket
 from pathlib import Path
@@ -50,9 +52,9 @@ class NodeExtension:
         run_env["NODE_EXTENSION_ID"] = self.ext_id 
         # 0. 快速判断：node_modules 存在且比 package.json 新
         if nm_folder.is_dir() and nm_folder.stat().st_mtime >= pkg_file.stat().st_mtime:
-            print(f"[{self.ext_id}] node_modules 已存在，跳过 npm install")
+            logging.getLogger("app").info(f"[{self.ext_id}] node_modules 已存在，跳过 npm install")
         else:
-            print(f"[{self.ext_id}] 首次/依赖变更，执行 npm install")
+            logging.getLogger("app").info(f"[{self.ext_id}] 首次/依赖变更，执行 npm install")
             # 1. 启动 npm install
             # 注意这里使用 *npm_cmd 解包列表
             proc = await asyncio.create_subprocess_exec(

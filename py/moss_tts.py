@@ -30,28 +30,28 @@ def _get_moss_runtime():
             import scipy.signal
             from py.moss.tts_runtime import TTSRuntime
         except ImportError as e:
-            print(f"MOSS TTS 依赖缺失，请确认 numpy/scipy/onnxruntime/sentencepiece/soundfile 已安装: {e}")
+            logging.getLogger("app").info(f"MOSS TTS 依赖缺失，请确认 numpy/scipy/onnxruntime/sentencepiece/soundfile 已安装: {e}")
             return None
 
         # 将父目录丢给 TTSRuntime，它内部会根据 MANIFEST_CANDIDATE_RELATIVE_PATHS 自动定位
         model_dir = Path(DEFAULT_TTS_DIR) / MOSS_DIR_NAME
         if not (model_dir / "MOSS-TTS-Nano-100M-ONNX").exists():
-            print("提示: MOSS TTS 模型未找到，请先通过 SDK 接口下载。")
+            logging.getLogger("app").info("提示: MOSS TTS 模型未找到，请先通过 SDK 接口下载。")
             return None
 
-        print(f"正在加载 MOSS TTS 模型 [{model_dir}]...")
+        logging.getLogger("app").info(f"正在加载 MOSS TTS 模型 [{model_dir}]...")
         try:
             _moss_runtime = TTSRuntime(
                 model_dir=str(model_dir),
                 thread_count=4,  # 控制 CPU 占用
             )
             # 预热模型，避免第一次推理时卡顿
-            print("正在进行模型预热...")
+            logging.getLogger("app").info("正在进行模型预热...")
             _moss_runtime.warmup()
-            print("MOSS TTS 模型加载完成")
+            logging.getLogger("app").info("MOSS TTS 模型加载完成")
             return _moss_runtime
         except Exception as e:
-            print(f"加载 MOSS TTS 失败: {e}")
+            logging.getLogger("app").info(f"加载 MOSS TTS 失败: {e}")
             return None
 
 

@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import json
 import os
@@ -19,14 +21,14 @@ async def DDGsearch(query):
             results = dds.invoke(query)
             return results
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logging.getLogger("app").info(f"An error occurred: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         # 使用默认executor在单独线程中执行同步操作
         return await asyncio.get_event_loop().run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Event loop error: {e}")
+        logging.getLogger("app").info(f"Event loop error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 duckduckgo_tool = {
@@ -93,14 +95,14 @@ async def searxng(query,categories="general"):
             return json.dumps(results, indent=2, ensure_ascii=False)
             
         except Exception as e:
-            print(f"Search error: {e}")
+            logging.getLogger("app").info(f"Search error: {e}")
             return f"Search error: {e}"
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search, query)
     except Exception as e:
-        print(f"Async error: {e}")
+        logging.getLogger("app").info(f"Async error: {e}")
         return f"Async error: {e}"
 
 searxng_tool = {
@@ -174,14 +176,14 @@ async def bochaai_search(query):
             else:
                 return f"[Error] Request failed (status {response.status_code}): {response.text[:200]}. Retry with a shorter query or try another search tool."
         except Exception as e:
-            print(f"博查得搜索错误: {str(e)}")
+            logging.getLogger("app").info(f"博查得搜索错误: {str(e)}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"异步执行错误: {e}")
+        logging.getLogger("app").info(f"异步执行错误: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 bochaai_tool = {
@@ -215,14 +217,14 @@ async def Tavily_search(query):
             )
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Tavily search error: {e}")
+            logging.getLogger("app").info(f"Tavily search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 tavily_tool = {
@@ -256,14 +258,14 @@ async def Bing_search(query):
             response = client.results(query=query,num_results=max_results)
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Bing search error: {e}")
+            logging.getLogger("app").info(f"Bing search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 
@@ -298,14 +300,14 @@ async def Google_search(query):
             response = client.results(query=query,num_results=max_results)
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Google search error: {e}")
+            logging.getLogger("app").info(f"Google search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 
@@ -339,14 +341,14 @@ async def Brave_search(query):
             response = client.run(query)
             return response
         except Exception as e:
-            print(f"Brave search error: {e}")
+            logging.getLogger("app").info(f"Brave search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 brave_tool = {
@@ -385,14 +387,14 @@ async def Exa_search(query):
             elif type(response) == str:
                 return response
         except Exception as e:
-            print(f"Exa search error: {e}")
+            logging.getLogger("app").info(f"Exa search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
 exa_tool = {
@@ -425,14 +427,14 @@ async def Serper_search(query):
             response = client.results(query)
             return json.dumps(response, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Serper search error: {e}")
+            logging.getLogger("app").info(f"Serper search error: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
 
     try:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
     
 serper_tool = {
@@ -480,7 +482,7 @@ async def jina_crawler(original_url):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return str(e)
 
 jina_crawler_tool = {
@@ -509,7 +511,7 @@ class Crawl4AiTester:
         # Submit crawl job
         response = requests.post(f"{self.base_url}/crawl", json=request_data,headers=headers)
         task_id = response.json()["task_id"]
-        print(f"Task ID: {task_id}")
+        logging.getLogger("app").info(f"Task ID: {task_id}")
 
         # Poll for result
         start_time = time.time()
@@ -547,7 +549,7 @@ async def Crawl4Ai_search(original_url):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_search)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return str(e)
 
 Crawl4Ai_tool = {
@@ -846,7 +848,7 @@ async def firecrawl_search(original_url: str, query: str = None) -> str:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)
     except Exception as e:
-        print(f"Async execution error: {e}")
+        logging.getLogger("app").info(f"Async execution error: {e}")
         return str(e)
 
 
@@ -1045,7 +1047,7 @@ async def markdown_new(original_url):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_crawler)
     except Exception as e:
-        print(f"Async execution error in markdown_new: {e}")
+        logging.getLogger("app").info(f"Async execution error in markdown_new: {e}")
         return str(e)
     
 markdown_new_tool = {

@@ -401,7 +401,7 @@ class MyClient(botpy.Client):
                                         image_data = jpg_buffer.getvalue()
                                         content_type = "image/jpeg"
                                     except Exception as e:
-                                        print(f"图像转换失败: {e}")
+                                        logging.getLogger("app").info(f"图像转换失败: {e}")
                                         continue
                                 
                                 # 转换为Base64
@@ -420,7 +420,7 @@ class MyClient(botpy.Client):
         else:
             user_content = message.content
             
-        print(f"User content: {user_content}")
+        logging.getLogger("app").info(f"User content: {user_content}")
 
         c_id = message.author.user_openid
         if c_id not in self.memoryList:
@@ -552,7 +552,7 @@ class MyClient(botpy.Client):
                     self.memoryList[c_id].pop(0)
 
         except Exception as e:
-            print(f"处理异常: {e}")
+            logging.getLogger("app").info(f"处理异常: {e}")
             clean_text = self._clean_text(str(e))
             if clean_text:
                 await self._send_text_message(message, clean_text)
@@ -600,7 +600,7 @@ class MyClient(botpy.Client):
                 # 用request获取图片，保证图片存在
                 res = requests.get(url)
 
-                print(f"发送图片: {url}")
+                logging.getLogger("app").info(f"发送图片: {url}")
                 # 上传媒体文件
                 upload_media = await message._api.post_c2c_file(
                     openid=message.author.user_openid,
@@ -617,7 +617,7 @@ class MyClient(botpy.Client):
                 )
                 self.msg_seq_counters[c_id] += 1
             except Exception as e:
-                print(f"图片发送失败: {e}")
+                logging.getLogger("app").info(f"图片发送失败: {e}")
                 clean_text = self._clean_text(str(e))
                 if clean_text:
                     await self._send_text_message(message, clean_text)
@@ -669,7 +669,7 @@ class MyClient(botpy.Client):
                                         image_data = jpg_buffer.getvalue()
                                         content_type = "image/jpeg"
                                     except Exception as e:
-                                        print(f"图像转换失败: {e}")
+                                        logging.getLogger("app").info(f"图像转换失败: {e}")
                                         continue
                                 
                                 # 转换为Base64
@@ -809,7 +809,7 @@ class MyClient(botpy.Client):
                     self.memoryList[g_id].pop(0)
 
         except Exception as e:
-            print(f"群聊处理异常: {e}")
+            logging.getLogger("app").info(f"群聊处理异常: {e}")
             clean_text = self._clean_group_text(str(e))
             if clean_text:
                 await self._send_group_text(message, clean_text, state)
@@ -852,7 +852,7 @@ class MyClient(botpy.Client):
                 # url = await upload_image_host(url)
                 # 用request获取图片，保证图片存在
                 res = requests.get(url)
-                print(f"发送图片: {url}")
+                logging.getLogger("app").info(f"发送图片: {url}")
                 # 上传群文件
                 upload_media = await message._api.post_group_file(
                     group_openid=message.group_openid,
@@ -869,7 +869,7 @@ class MyClient(botpy.Client):
                 )
                 state["msg_seq"] += 1
             except Exception as e:
-                print(f"群图片发送失败: {e}")
+                logging.getLogger("app").info(f"群图片发送失败: {e}")
                 clean_text = self._clean_group_text(str(e))
                 if clean_text:
                     await self._send_group_text(message, clean_text, state)

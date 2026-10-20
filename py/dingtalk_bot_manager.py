@@ -139,7 +139,7 @@ class DingtalkBotManager:
             config.behaviorSettings,
             target_map
         )
-        print("钉钉机器人: 行为配置已热更新，计时器已重置")
+        logging.getLogger("app").info("钉钉机器人: 行为配置已热更新，计时器已重置")
 
 class DingtalkInternalHandler(dingtalk_stream.ChatbotHandler):
     def __init__(self, bot_logic):
@@ -153,7 +153,7 @@ class DingtalkInternalHandler(dingtalk_stream.ChatbotHandler):
             # 传入完整数据 callback.data 以便解析更多隐藏字段
             await self.bot_logic.on_message(callback.data, incoming_message, self)
         except Exception as e:
-            print(f"消息处理异常: {e}")
+            logging.getLogger("app").info(f"消息处理异常: {e}")
         return AckMessage.STATUS_OK, 'OK'
 
 class DingtalkClientLogic:
@@ -176,9 +176,9 @@ class DingtalkClientLogic:
                         data = await response.read()
                         return base64.b64encode(data).decode('utf-8')
                     else:
-                        print(f"图片下载失败, HTTP状态码: {response.status}")
+                        logging.getLogger("app").info(f"图片下载失败, HTTP状态码: {response.status}")
         except Exception as e:
-            print(f"图片处理异常: {e}")
+            logging.getLogger("app").info(f"图片处理异常: {e}")
         return None
 
     @llm_gate.gated
@@ -373,7 +373,7 @@ class DingtalkClientLogic:
                     self.memoryList[cid].pop(0)
 
         except Exception as e:
-            print(f"钉钉 AI 生成异常: {e}")
+            logging.getLogger("app").info(f"钉钉 AI 生成异常: {e}")
             handler.reply_text(f"抱歉，处理消息时出错: {str(e)}", incoming_message)
 
     async def _get_access_token(self) -> Optional[str]:
@@ -390,9 +390,9 @@ class DingtalkClientLogic:
                         data = await resp.json()
                         return data.get("accessToken")
                     else:
-                        print(f"钉钉获取Token失败: {await resp.text()}")
+                        logging.getLogger("app").info(f"钉钉获取Token失败: {await resp.text()}")
         except Exception as e:
-            print(f"钉钉获取Token异常: {e}")
+            logging.getLogger("app").info(f"钉钉获取Token异常: {e}")
         return None
     
     @llm_gate.gated

@@ -8,6 +8,8 @@ server imports this module, never the other way around.  Legacy
 complexity exemptions: see pyproject per-file-ignores (M-3 will split
 the big handlers instead of grandfathering forever).
 """
+
+import logging
 import sys as _sys
 import asyncio
 import base64
@@ -49,7 +51,7 @@ async def asr_transcription(
     try:
         # 1. 读取上传的音频文件
         audio_bytes = await audio.read()
-        print(f"Received audio file: {audio.filename}, size: {len(audio_bytes)} bytes")
+        logging.getLogger("app").info(f"Received audio file: {audio.filename}, size: {len(audio_bytes)} bytes")
         
         # 2. 自动检测格式
         if format == "auto":
@@ -79,7 +81,7 @@ async def asr_transcription(
             # --- 核心改进：使用缓存的客户端 ---
             cache_key = (api_key, base_url)
             if cache_key not in _srv.openai_asr_clients_cache:
-                print(f"Initializing new OpenAI ASR Client for: {base_url}")
+                logging.getLogger("app").info(f"Initializing new OpenAI ASR Client for: {base_url}")
                 _srv.openai_asr_clients_cache[cache_key] = AsyncOpenAI(
                     api_key=api_key,
                     base_url=base_url
@@ -87,7 +89,7 @@ async def asr_transcription(
             client = _srv.openai_asr_clients_cache[cache_key]
             # --------------------------------
 
-            print(f"Using OpenAI ASR engine ({asr_settings.get('model', 'whisper-1')})")
+            logging.getLogger("app").info(f"Using OpenAI ASR engine ({asr_settings.get('model', 'whisper-1')})")
             
             # 包装音频数据
             audio_file = BytesIO(audio_bytes)
@@ -104,7 +106,7 @@ async def asr_transcription(
         # ASR 引擎分支：FunASR
         # ==========================================
         elif asr_engine == "funasr":
-            print("Using FunASR engine (offline mode)")
+            logging.getLogger("app").info("Using FunASR engine (offline mode)")
             # 假设 funasr_recognize_offline 内部已处理好性能问题
             result = await _srv.funasr_recognize_offline(audio_bytes, asr_settings)
             
@@ -113,7 +115,7 @@ async def asr_transcription(
         # ==========================================
         elif asr_engine == "sherpa":
             from py.sherpa_asr import sherpa_recognize
-            print("Using Sherpa ASR engine")
+            logging.getLogger("app").info("Using Sherpa ASR engine")
             # Sherpa 通常是本地模型推理，损耗在于 CPU/GPU，不在连接建立
             result = await sherpa_recognize(audio_bytes)
         
@@ -139,7 +141,7 @@ async def asr_transcription(
         )
         
     except Exception as e:
-        print(f"ASR HTTP interface error: {e}")
+        logging.getLogger("app").info(f"ASR HTTP interface error: {e}")
         import traceback
         traceback.print_exc()
         
@@ -210,7 +212,7 @@ async def text_to_speech(request: Request):
         index = data.get('index', 0)
         tts_engine = tts_settings.get('engine', 'edgetts')
                 
-        print(f"TTS请求 - 引擎: {tts_engine}, 格式: {target_format}, 移动端优化: {mobile_optimized}")
+        logging.getLogger("app").info(f"TTS请求 - 引擎: {tts_engine}, 格式: {target_format}, 移动端优化: {mobile_optimized}")
                 
         # ==========================================
         # 1. EdgeTTS 引擎
@@ -587,7 +589,7 @@ async def text_to_speech(request: Request):
                             yield chunk
                     except Exception as e:
                         # 注意：在这里如果流传输中断了，不能再 raise HTTPException 了，只需中断流即可
-                        print(f"ElevenLabs 传输中断: {str(e)}")
+                        logging.getLogger("app").info(f"ElevenLabs 传输中断: {str(e)}")
                         break
 
             # 移动端：转换为 opus（需要先收集所有 chunk）
@@ -669,7 +671,7 @@ async def text_to_speech(request: Request):
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
-                    print(f"MOSS TTS 生成错误: {e}")
+                    logging.getLogger("app").info(f"MOSS TTS 生成错误: {e}")
                     raise HTTPException(status_code=500, detail=f"MOSS TTS 错误: {str(e)}")
 
             # 根据返回格式决定响应头
@@ -843,7 +845,7 @@ async def list_tetos_voices(request: Request):
         })
 
     except Exception as e:
-        print(f"获取 {provider} 音色列表失败: {e}")
+        logging.getLogger("app").info(f"获取 {provider} 音色列表失败: {e}")
         # 捕获鉴权失败、网络错误等
         return JSONResponse(status_code=500, content={
             "status": "error", 
@@ -948,10 +950,10 @@ async def get_system_voices():
             return processed_voices
             
         except ImportError:
-            print("错误: 未找到 pyttsx3 驱动")
+            logging.getLogger("app").info("错误: 未找到 pyttsx3 驱动")
             return []
         except Exception as e:
-            print(f"获取系统音色错误: {str(e)}")
+            logging.getLogger("app").info(f"获取系统音色错误: {str(e)}")
             return []
 
     try:

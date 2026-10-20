@@ -451,8 +451,6 @@ from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
 
 from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
-timetamp = time.time()
-log_path = os.path.join(LOG_DIR, f"backend_{timetamp}.log")
 
 logger = None      
 os.environ["no_proxy"] = "localhost,127.0.0.1"
@@ -777,13 +775,13 @@ async def lifespan(app: FastAPI):
                             or _s.get("backupIncludeUploads") or False))
             res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include)
             if res.get("ok"):
-                print(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
+                logging.getLogger("app").info(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
             elif res.get("skipped"):
-                print("[Backup] 启动快照节流跳过（距上次 <1h）")
+                logging.getLogger("app").info("[Backup] 启动快照节流跳过（距上次 <1h）")
             else:
-                print(f"[Backup] 启动快照失败: {res.get('reason')}")
+                logging.getLogger("app").info(f"[Backup] 启动快照失败: {res.get('reason')}")
         except Exception as e:
-            print(f"[Backup] 启动快照异常: {e}")
+            logging.getLogger("app").info(f"[Backup] 启动快照异常: {e}")
     asyncio.create_task(_startup_snapshot())
     
     # --- [M4-B2': 启动对账探针（只读，mismatch 仅告警留证据，不影响启动）] ---
@@ -793,13 +791,13 @@ async def lifespan(app: FastAPI):
             blob_map, rows_map, traces = await asyncio.to_thread(covs_reconcile.load_maps, COVS_PATH)
             r = covs_reconcile.reconcile(blob_map, rows_map, traces)
             if not r["consistent"]:
-                print(f"[Reconcile] 会话 blob/行级影子不一致: blob-only={len(r['blob_only'])} "
+                logging.getLogger("app").info(f"[Reconcile] 会话 blob/行级影子不一致: blob-only={len(r['blob_only'])} "
                       f"rows-only={len(r['rows_only'])} content-mismatch={len(r['content_mismatch'])}"
                       f"；建议运行 python py/covs_reconcile.py --out report.md")
             else:
-                print(f"[Reconcile] 会话一致性对账通过（{r['blob_conversations']} 会话）")
+                logging.getLogger("app").info(f"[Reconcile] 会话一致性对账通过（{r['blob_conversations']} 会话）")
         except Exception as e:
-            print(f"[Reconcile] 对账探针跳过: {e}")
+            logging.getLogger("app").info(f"[Reconcile] 对账探针跳过: {e}")
     asyncio.create_task(_startup_reconcile())
     
     from py.sleep_guard import SleepGuard
@@ -807,11 +805,11 @@ async def lifespan(app: FastAPI):
     try:
         await asyncio.to_thread(sleep_guard.start)
         if sleep_guard.is_running():
-            print("🛡️ 防休眠保护已启动，系统将不会自动休眠")
+            logging.getLogger("app").info("🛡️ 防休眠保护已启动，系统将不会自动休眠")
         else:
-            print("⚠️ 防休眠启动失败，系统可能会在空闲时休眠")
+            logging.getLogger("app").info("⚠️ 防休眠启动失败，系统可能会在空闲时休眠")
     except Exception as e:
-        print(f"防休眠启动异常: {e}")
+        logging.getLogger("app").info(f"防休眠启动异常: {e}")
 
 
     from py.scheduler import AgentScheduler
@@ -821,14 +819,8 @@ async def lifespan(app: FastAPI):
     scheduler_task = asyncio.create_task(scheduler.start_loop())
 
     # --- [日志系统初始化] ---
-    timestamp = time.time()
-    log_path = os.path.join(LOG_DIR, f"backend_{timestamp}.log")
-    logger = logging.getLogger("app")
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        logger.addHandler(handler)
+    from py.log_setup import setup_logger
+    logger = setup_logger(LOG_DIR)
     logger.info("===== 日志系统初始化成功 =====")
 
     # --- [代理与 HTTP 客户端初始化] ---
@@ -1001,7 +993,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- [关闭逻辑] ---
-    print("System shutting down, cleaning up...")
+    logging.getLogger("app").info("System shutting down, cleaning up...")
     try:
         stream_ttl_task.cancel()
     except Exception:
@@ -1009,9 +1001,9 @@ async def lifespan(app: FastAPI):
 
     try:
         await asyncio.to_thread(sleep_guard.stop)
-        print("🛡️ 防休眠保护已停止，系统将恢复正常休眠策略")
+        logging.getLogger("app").info("🛡️ 防休眠保护已停止，系统将恢复正常休眠策略")
     except Exception as e:
-        print(f"防休眠停止异常: {e}")
+        logging.getLogger("app").info(f"防休眠停止异常: {e}")
 
     if 'heartbeat_task' in locals() or 'heartbeat_task' in globals(): # 简单的清理检查
         try:
@@ -1028,7 +1020,7 @@ async def lifespan(app: FastAPI):
         
     if global_http_client:
         await global_http_client.aclose()
-    print("All processes terminated.")
+    logging.getLogger("app").info("All processes terminated.")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1836,7 +1828,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         else:
             _env0 = settings.get("acpSettings", {})
         if normalize_permission_mode(_env0.get("permissionMode", "default")) == "plan":
-            print(f"[Permission] plan mode blocked '{tool_name}'")
+            logging.getLogger("app").info(f"[Permission] plan mode blocked '{tool_name}'")
             return "[Blocked] 你当前处于计划模式（只读），该工具不可用。请使用只读工具完成分析，用自然语言输出执行计划，并等待用户确认后再执行。"
 
     # 只有当调用的工具属于敏感工具列表时才进行拦截检查
@@ -1880,12 +1872,12 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         if not is_allowed and cwd:
             if is_tool_allowed_by_project_config(cwd, tool_name):
                 is_allowed = True
-                print(f"[Permission] Tool '{tool_name}' allowed by project config.")
+                logging.getLogger("app").info(f"[Permission] Tool '{tool_name}' allowed by project config.")
 
         # --- 最终判定 ---
         if not is_allowed:
             # 返回前端特定的 JSON 结构，触发审批 UI
-            print(f"[Permission] Blocked '{tool_name}', requesting approval.")
+            logging.getLogger("app").info(f"[Permission] Blocked '{tool_name}', requesting approval.")
             return _approval_payload(tool_name, tool_params, permission_mode, cwd)
 
     # ==================== 4. 常规工具处理逻辑 (原有代码) ====================
@@ -1895,7 +1887,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         
     if "custom_http_" in tool_name:
         tool_name = tool_name.replace("custom_http_", "")
-        print(tool_name)
+        logging.getLogger("app").info(tool_name)
         settings_custom_http = settings['custom_http']
         for custom in settings_custom_http:
             if custom['name'] == tool_name:
@@ -1913,7 +1905,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         text_input_2 = tool_params.get('text_input_2', None)
         image_input = tool_params.get('image_input', None)
         image_input_2 = tool_params.get('image_input_2', None)
-        print(tool_name)
+        logging.getLogger("app").info(tool_name)
         result = await comfyui_tool_call(tool_name, text_input, image_input,text_input_2,image_input_2)
         return str(result)
         
@@ -2075,7 +2067,7 @@ def process_extra_params(extra_params_list):
             else:
                 extra_body[name] = str(value)
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"Error parsing param {name}: {e}")
+            logging.getLogger("app").info(f"Error parsing param {name}: {e}")
             extra_body[name] = value 
 
     return extra_body
@@ -2600,7 +2592,7 @@ async def read_todos_local(cwd: str) -> list:
     except (json.JSONDecodeError, FileNotFoundError):
         return []
     except Exception as e:
-        print(f"Error reading todos: {e}")
+        logging.getLogger("app").info(f"Error reading todos: {e}")
         return []
 
 async def read_agents_md(cwd: str) -> str:  # 返回str而不是list
@@ -2618,7 +2610,7 @@ async def read_agents_md(cwd: str) -> str:  # 返回str而不是list
         # 文件在检查后又被删除的情况
         return ""
     except Exception as e:
-        print(f"Error reading AGENTS.md: {e}")
+        logging.getLogger("app").info(f"Error reading AGENTS.md: {e}")
         return ""
 
 def get_system_context(cwd: str = None) -> str:
@@ -2768,7 +2760,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                 if mem_content.strip():
                     content_append(request.messages, 'system', f"\n\n**MEMORY.md**:\n{mem_content}\n\n")
             except Exception as e:
-                print(f"读取 MEMORY.md 失败: {e}")
+                logging.getLogger("app").info(f"读取 MEMORY.md 失败: {e}")
 
         # ==================== [新增] 2. 处理 Shortcut 快捷指令 ====================
         if cli_settings.get("shortcut", False):
@@ -2805,7 +2797,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                                 
                             content_append(request.messages, 'system', f"\n\nHint: The user has just saved the following content to the workspace memory using the '#' shortcut command:\n'{mem_content_to_save}'\nPlease briefly confirm in your next reply that you remember this information.\n\n")
                         except Exception as e:
-                            print(f"保存 MEMORY.md 失败: {e}")
+                            logging.getLogger("app").info(f"保存 MEMORY.md 失败: {e}")
 
                 # --- (2) 处理 '/' : 注入特定技能 ---
                 elif user_text_trimmed.startswith('/'):
@@ -2828,7 +2820,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                                         skill_content = await f.read()
                                     content_append(request.messages, 'system', f"\n\n🛠️ **The user actively triggered the workspace skill. [{skill_name}]**:\n\n{skill_content}\n\nPlease strictly follow the above skill instructions to handle the user's current request.\n\n")
                                 except Exception as e:
-                                    print(f"读取技能文档失败: {e}")
+                                    logging.getLogger("app").info(f"读取技能文档失败: {e}")
 
     if request.is_app_bot and request.platform:
         platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流\n\n"
@@ -2995,7 +2987,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
                 content_append(request.messages, 'system', todo_message)
                 
         except Exception as e:
-            print(f"[Todo Loader] 跳过待办事项加载: {e}")
+            logging.getLogger("app").info(f"[Todo Loader] 跳过待办事项加载: {e}")
             pass
 
         try:
@@ -3003,7 +2995,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
             if agents_md:
                 content_append(request.messages, 'system', " **重要事项**（.agent/AGENTS.md）：\n\n"+agents_md+"\n\n")
         except Exception as e:
-            print(f"[Agent Loader] 跳过AGENTS.md加载: {e}")
+            logging.getLogger("app").info(f"[Agent Loader] 跳过AGENTS.md加载: {e}")
             pass
 
         try:
@@ -3014,7 +3006,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
             if skills_message:
                 content_append(request.messages, 'system', skills_message)
         except Exception as e:
-            print(f"[Skill Loader] 扫描技能失败: {e}")
+            logging.getLogger("app").info(f"[Skill Loader] 扫描技能失败: {e}")
 
     if request.messages[-1]['role'] == 'system' and settings['tools']['autoBehavior']['enabled'] and not request.is_app_bot and not request.is_sub_agent:
         language_message = f"\n\n当你看到被插入到对话之间的系统消息，这是自主行为系统向你发送的消息，例如用户主动或者要求你设置了一些定时任务或者延时任务，当你看到自主行为系统向你发送的消息时，说明这些任务到了需要被执行的节点，例如：用户要你三点或五分钟后提醒开会的事情，然后当你看到一个被插入的“提醒用户开会”的系统消息，你需要立刻提醒用户开会，以此类推\n\n"
@@ -3151,7 +3143,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         motions = settings['VRMConfig']['defaultMotions'] + settings['VRMConfig']['userMotions']
         # 2. 给每个动作加上 <>
         motion_tags = [f"<{m.get('name','')}>" for m in motions]
-        print(motion_tags)
+        logging.getLogger("app").info(motion_tags)
         # 3. 拼成可用表情提示
         Motion_messages = (
             "\n\n你可以使用以下动作："
@@ -3485,7 +3477,7 @@ Assistant: 表格如下：
                         content_append(request.messages, 'system',
                                        f"\n\n【任务检查点】此前上下文压缩时落盘的任务态（与更新对话冲突时以对话为准）：\n{_cp['summary'][:3000]}\n")
         except Exception as e:
-            print(f"[Context] 检查点注入失败: {e}")
+            logging.getLogger("app").info(f"[Context] 检查点注入失败: {e}")
 
     # ===== 分层 system prompt：Agent 核心契约置最前，权限模式契约置最后 =====
     _cli_cfg = settings.get("CLISettings", {})
@@ -3500,7 +3492,7 @@ Assistant: 表格如下：
         ))
         content_append(request.messages, 'system', build_mode_footer(_core_mode))
 
-    print(f"系统提示：{request.messages[0]['content']}")
+    logging.getLogger("app").info(f"系统提示：{request.messages[0]['content']}")
     return request
 
 def get_drs_stage(DRS_STAGE):
@@ -3745,9 +3737,9 @@ def _write_context_state(settings: dict, request, res: dict):
             "summary": (res.get("summary") or "")[:6000],
         }
         (state_dir / "context_state.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("[Context] 任务检查点已写入 .agent/context_state.json")
+        logging.getLogger("app").info("[Context] 任务检查点已写入 .agent/context_state.json")
     except Exception as e:
-        print(f"[Context] 检查点写入失败: {e}")
+        logging.getLogger("app").info(f"[Context] 检查点写入失败: {e}")
 
 
 async def _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools=None):
@@ -3765,12 +3757,12 @@ async def _run_context_pipeline(request, settings, client, model, extra_params, 
             return None
         request.messages, pruned_n = prune_tool_results(request.messages, cm["keep_recent_tools"])
         est2 = estimate_tokens(request.messages, tools)
-        print(f"[Context] L1 修剪旧工具结果 {pruned_n} 条: est {est} -> {est2} (budget {budget})")
+        logging.getLogger("app").info(f"[Context] L1 修剪旧工具结果 {pruned_n} 条: est {est} -> {est2} (budget {budget})")
         if est2 <= budget:
             return None
         mode = detect_task_mode(request.messages)
         if not (mode == "agent" and cm["auto_agent_compact"]):
-            print(f"[Context] 超预算但模式={mode}，仅修剪不摘要")
+            logging.getLogger("app").info(f"[Context] 超预算但模式={mode}，仅修剪不摘要")
             return None
         r_cli = reasoner_client if settings.get("reasoner", {}).get("enabled") else None
         r_model = settings["reasoner"]["model"] if r_cli else None
@@ -3782,11 +3774,11 @@ async def _run_context_pipeline(request, settings, client, model, extra_params, 
             return None
         request.messages = res["messages"]
         _write_context_state(settings, request, res)
-        print(f"[Context] L2 自动摘要完成，压缩 {res['compacted_count']} 条消息")
+        logging.getLogger("app").info(f"[Context] L2 自动摘要完成，压缩 {res['compacted_count']} 条消息")
         return {"type": "context_compact", "reason": "auto", "summary": res["summary"],
                 "task_mode": res["task_mode"], "compacted_count": res["compacted_count"]}
     except Exception as e:
-        print(f"[Context] 上下文管线异常（跳过）: {e}")
+        logging.getLogger("app").info(f"[Context] 上下文管线异常（跳过）: {e}")
         return None
 
 
@@ -3798,7 +3790,7 @@ def _cap_tool_result(result):
     if not isinstance(result, str) or len(result) <= TOOL_RESULT_CHAR_CAP:
         return result
     head = result[:TOOL_RESULT_CHAR_CAP]
-    print(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符")
+    logging.getLogger("app").info(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符")
     return (f"{head}\n\n==== [输出已截断：共 {len(result)} 字符，仅显示前 {TOOL_RESULT_CHAR_CAP} 字符。"
             "如需后续内容，请使用工具的 offset/分页参数分段续读] ====")
 
@@ -3816,9 +3808,9 @@ def _apply_ctx_guardrail(extra, messages, settings):
                 key = 'max_completion_tokens' if 'max_completion_tokens' in extra else 'max_tokens'
                 extra = dict(extra)
                 extra[key] = max(512, guard)
-                print(f"[Context] 护栏: max_tokens {mt} -> {extra[key]} (估算 prompt {est}, window {window})")
+                logging.getLogger("app").info(f"[Context] 护栏: max_tokens {mt} -> {extra[key]} (估算 prompt {est}, window {window})")
     except Exception as e:
-        print(f"[Context] 护栏检查异常（跳过）: {e}")
+        logging.getLogger("app").info(f"[Context] 护栏检查异常（跳过）: {e}")
     return extra
 
 
@@ -3898,7 +3890,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 screen_size = v_settings.get('ScreenSize', [0, 0, 1280, 720])
                 is_grid_enabled = vision_control_enabled and v_settings.get('isEnableGrid', False)
 
-                print(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
+                logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
                 
                 # 1. 根据全屏配置决定截取范围，并同步给鼠标工具
                 if not is_full_screen and len(screen_size) == 4:
@@ -3925,7 +3917,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 target_w, target_h = scale_to_fit(logical_width, logical_height, 1280, 720)
                 
                 if screenshot.width > target_w or screenshot.height > target_h:
-                    print(f"检测到高分辨率屏幕，正在从 {screenshot.size} 缩放到 {(target_w, target_h)}")
+                    logging.getLogger("app").info(f"检测到高分辨率屏幕，正在从 {screenshot.size} 缩放到 {(target_w, target_h)}")
                     screenshot = await asyncio.to_thread(
                         screenshot.resize, (target_w, target_h), Image.Resampling.LANCZOS
                     )
@@ -3974,12 +3966,12 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 msg['content'] = new_content[0]['text']
                             else:
                                 msg['content'] = new_content
-                    print("已清理历史上下文中的旧截图。")
+                    logging.getLogger("app").info("已清理历史上下文中的旧截图。")
 
-                print(f"桌面截图已注入: {desktop_url}")
+                logging.getLogger("app").info(f"桌面截图已注入: {desktop_url}")
 
             except Exception as e:
-                print(f"后端桌面截图失败: {e}")
+                logging.getLogger("app").info(f"后端桌面截图失败: {e}")
 
         # =========================================================================
         # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
@@ -4024,7 +4016,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 # 构造初步压缩后的列表
                 compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
                 chat_messages = sys_msgs + compressed_dialog
-                print(f"[Context] Compressed to {len(chat_messages)} msgs.")
+                logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
         request.messages = sanitize_tool_chains(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
@@ -4098,9 +4090,9 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     cur_memory = memory
                     break
             if cur_memory and cur_memory["providerId"]:
-                print("长期记忆启用")
+                logging.getLogger("app").info("长期记忆启用")
                 m0 = llm_gate.get_mem0_instance(memoryId, cur_memory, settings)
-                print("长期记忆配置加载完成")
+                logging.getLogger("app").info("长期记忆配置加载完成")
         open_tag = "<think>"
         close_tag = "</think>"
 
@@ -4119,7 +4111,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         user_prompt = request.messages[-1].get('content') or ""
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != ""  and not request.is_sub_agent:
             if settings["memorySettings"]["userName"]:
-                print("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
+                logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
                 content_append(request.messages, 'system', "与你交流的默认用户名为：\n\n" + settings["memorySettings"]["userName"] + "\n\n注意！除非用户消息中提到了是其他用户发送，否则视为默认用户发送的消息\n\n")
             lore_content = ""
             assistant_reply = ""
@@ -4133,7 +4125,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     # lore['keysRaw'] 按照换行符分割，并去除空字符串
                     lore_keys = lore["keysRaw"].split("\n")
                     lore_keys = [key for key in lore_keys if key != ""]
-                    print(lore_keys)
+                    logging.getLogger("app").info(lore_keys)
                     # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
                     if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
                         lore_content += lore['content'] + "\n\n"
@@ -4143,7 +4135,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换lore_content中的{{char}}为cur_memory["name"]
                 lore_content = lore_content.replace("{{char}}", cur_memory["name"])
-                print("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+                logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
                 content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
             if cur_memory["description"]:
                 if settings["memorySettings"]["userName"]:
@@ -4151,7 +4143,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
                 cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
-                print("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+                logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
                 content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
             if cur_memory["personality"]:
                 if settings["memorySettings"]["userName"]:
@@ -4159,7 +4151,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
                 cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
-                print("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
+                logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
                 content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
             if cur_memory['mesExample']:
                 if settings["memorySettings"]["userName"]:
@@ -4167,7 +4159,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
                 cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
-                print("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+                logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
                 content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
             if cur_memory["systemPrompt"]:
                 if settings["memorySettings"]["userName"]:
@@ -4198,7 +4190,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 except Exception as e:
                     print("m0.search error:",e)
                     relevant_memories = ""
-                print("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
+                logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
                 content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")                   
         request = await tools_change_messages(request, settings)
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
@@ -4534,7 +4526,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 filtered_tools.append(tool)
                         
                         tools = filtered_tools
-                        print(f"[Tool Filter] Enable mode: {original_tool_count} -> {len(tools)} tools (enabled: {request.enable_tools})")
+                        logging.getLogger("app").info(f"[Tool Filter] Enable mode: {original_tool_count} -> {len(tools)} tools (enabled: {request.enable_tools})")
                     
                     # 2. Disable Tools 过滤（黑名单模式）
                     elif request.disable_tools and len(request.disable_tools) > 0:
@@ -4548,7 +4540,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 filtered_tools.append(tool)
                         
                         tools = filtered_tools
-                        print(f"[Tool Filter] Disable mode: {original_tool_count} -> {len(tools)} tools (disabled: {request.disable_tools})")
+                        logging.getLogger("app").info(f"[Tool Filter] Disable mode: {original_tool_count} -> {len(tools)} tools (disabled: {request.disable_tools})")
                     
                     # 3. 子智能体默认策略（如果没有指定 enable/disable）
                     elif request.is_sub_agent:
@@ -4586,10 +4578,10 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 blocked_count += 1
                         
                         tools = filtered_tools
-                        print(f"[SubAgent Safety] Blocked {blocked_count} dangerous tools: {original_tool_count} -> {len(tools)} tools")
+                        logging.getLogger("app").info(f"[SubAgent Safety] Blocked {blocked_count} dangerous tools: {original_tool_count} -> {len(tools)} tools")
             
 
-                print(tools)
+                logging.getLogger("app").info(tools)
 
                 if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
                     deepsearch_messages = copy.deepcopy(request.messages)
@@ -4782,7 +4774,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     extra['tools'] = tools
 
                 if _stream_cancelled():
-                    print("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
+                    logging.getLogger("app").info("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
                     yield "data: [DONE]\n\n"
                     return
 
@@ -5103,7 +5095,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 while tool_calls or search_not_done:
                     _tool_loop_count += 1
                     if tool_calls and _tool_loop_count > _max_tool_iterations:
-                        print(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
+                        logging.getLogger("app").info(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
                         request.messages.append({
                             "role": "user",
                             "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
@@ -5135,7 +5127,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         for _ti, _tc in enumerate(tool_calls):
                             tool_call_id = assistant_tool_calls[_ti]["id"]
                             response_content = _tc.function
-                            print(response_content)
+                            logging.getLogger("app").info(response_content)
                             args_dict, arg_err = parse_tool_arguments(response_content.arguments)
                             if arg_err is not None:
                                 err_text = arg_error_text(arg_err)
@@ -5215,7 +5207,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
                             else:
                                 if _stream_cancelled():
-                                    print(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
+                                    logging.getLogger("app").info(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
                                     yield "data: [DONE]\n\n"
                                     return
                                 try:
@@ -5282,7 +5274,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                                    "done": _td_done, "total": len(_td)}
                                         yield f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
                                     except Exception as _te:
-                                        print(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
+                                        logging.getLogger("app").info(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
                             else:
                                 # 流式工具结果处理 (AsyncIterator)
                                 buffer = []
@@ -5386,7 +5378,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                 # 构造初步压缩后的列表
                                 compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
                                 chat_messages = sys_msgs + compressed_dialog
-                                print(f"[Context] Compressed to {len(chat_messages)} msgs.")
+                                logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
 
                         request.messages = sanitize_tool_chains(chat_messages)
@@ -5541,7 +5533,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                             # ScreenSize 格式为 [x, y, width, height]
                             screen_size = v_settings.get('ScreenSize', [0, 0, 1920, 1080])
                             time.sleep(0.5) # 等待一下，确保截图工具已经准备好
-                            print(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
+                            logging.getLogger("app").info(f"正在执行桌面截图 (全屏: {is_full_screen}, 网格: {is_grid_enabled})...")
                             
                             # --- 1. 区域判定与捕获 ---
                             if not is_full_screen and len(screen_size) == 4:
@@ -5618,7 +5610,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                             msg['content'] = ""
 
                         except Exception as e:
-                            print(f"后端桌面截图失败: {e}")
+                            logging.getLogger("app").info(f"后端桌面截图失败: {e}")
                             
                         images = await images_in_messages(request.messages, fastapi_base_url)
                         request.messages = await message_without_images(request.messages)
@@ -5633,7 +5625,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     if tools and not force_no_tools:
                         extra['tools'] = tools
                     if _stream_cancelled():
-                        print("[Cancel] 流已被用户取消，工具后续轮次终止")
+                        logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
                         yield "data: [DONE]\n\n"
                         return
                     response = await client.chat.completions.create(
@@ -5941,25 +5933,25 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         "breakdown": _breakdown_tokens(request.messages, tools),
                     }
                     yield f"data: {json.dumps(_usage_evt, ensure_ascii=False)}\n\n"
-                    print(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
+                    logging.getLogger("app").info(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
                 except Exception as _ue:
-                    print(f"[Context] usage 事件生成异常（跳过）: {_ue}")
+                    logging.getLogger("app").info(f"[Context] usage 事件生成异常（跳过）: {_ue}")
                 logger.info(f"all msg: {request.messages}")
                 yield "data: [DONE]\n\n"
                 try:
                     from py.turn_log import shadow_append as _shadow_append
                     await _shadow_append(request.conversation_id, request.messages, log=print)
                 except Exception as _tle:
-                    print(f"[TurnLog] stream shadow skip: {_tle}")
+                    logging.getLogger("app").info(f"[TurnLog] stream shadow skip: {_tle}")
                 if settings.get('loveSettings', {}).get('enabled', False) and not request.is_sub_agent:
                     try:
                         from py.affection_system import extract_and_update_affection
                         # full_content 是当前轮次 AI 的完整回复文本
                         await extract_and_update_affection(full_content)
                     except Exception as e:
-                        print(f"解析好感度标签出错: {e}")
+                        logging.getLogger("app").info(f"解析好感度标签出错: {e}")
                 if m0 and not request.is_sub_agent:
-                    print("记忆更新任务开始提交")
+                    logging.getLogger("app").info("记忆更新任务开始提交")
                     messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
                     infer = cur_memory.get('infer', False) or False
                     _m0_job = m0
@@ -5977,7 +5969,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
                                  if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
                         wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
-                    print("记忆更新任务已提交到后台线程")
+                    logging.getLogger("app").info("记忆更新任务已提交到后台线程")
 
                 return
             except Exception as e:
@@ -6138,7 +6130,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 # 构造初步压缩后的列表
                 compressed_dialog = [dialog_msgs[i] for i in sorted(list(keep_indices))]
                 chat_messages = sys_msgs + compressed_dialog
-                print(f"[Context] Compressed to {len(chat_messages)} msgs.")
+                logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
         request.messages = sanitize_tool_chains(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
@@ -6203,7 +6195,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 cur_memory = memory
                 break
         if cur_memory and cur_memory["providerId"]:
-            print("长期记忆启用")
+            logging.getLogger("app").info("长期记忆启用")
             m0 = llm_gate.get_mem0_instance(memoryId, cur_memory, settings)
     images = await images_in_messages(request.messages,fastapi_base_url)
     request.messages = await message_without_images(request.messages)
@@ -6237,7 +6229,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         user_prompt = request.messages[-1].get('content') or ""
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
             if settings["memorySettings"]["userName"] and settings["memorySettings"]["userName"] != "user":
-                print("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
+                logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
                 content_append(request.messages, 'system', "当前与你交流的人的名字为：\n\n" + settings["memorySettings"]["userName"] + "\n\n")
             lore_content = ""
             assistant_reply = ""
@@ -6251,7 +6243,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     # lore['keysRaw'] 按照换行符分割，并去除空字符串
                     lore_keys = lore["keysRaw"].split("\n")
                     lore_keys = [key for key in lore_keys if key != ""]
-                    print(lore_keys)
+                    logging.getLogger("app").info(lore_keys)
                     # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
                     if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
                         lore_content += lore['content'] + "\n\n"
@@ -6261,7 +6253,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换lore_content中的{{char}}为cur_memory["name"]
                 lore_content = lore_content.replace("{{char}}", cur_memory["name"])
-                print("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+                logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
                 content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
             if cur_memory["description"]:
                 if settings["memorySettings"]["userName"]:
@@ -6269,7 +6261,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
                 cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
-                print("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+                logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
                 content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
             if cur_memory["personality"]:
                 if settings["memorySettings"]["userName"]:
@@ -6277,7 +6269,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
                 cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
-                print("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
+                logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
                 content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
             if cur_memory['mesExample']:
                 if settings["memorySettings"]["userName"]:
@@ -6285,7 +6277,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
                 cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
-                print("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+                logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
                 content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
             if cur_memory["systemPrompt"]:
                 if settings["memorySettings"]["userName"]:
@@ -6293,7 +6285,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
                 cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{char}}", cur_memory["name"])
-                print("添加系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
+                logging.getLogger("app").info("添加系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
                 content_append(request.messages, 'system', "系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
             if settings["memorySettings"]["genericSystemPrompt"]:
                 if settings["memorySettings"]["userName"]:
@@ -6301,7 +6293,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
                 # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
                 settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
-                print("添加系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
+                logging.getLogger("app").info("添加系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
                 content_append(request.messages, 'system', "系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
                     
             if m0:
@@ -6319,7 +6311,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 except Exception as e:
                     print("m0.search error:",e)
                     relevant_memories = ""
-                print("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
+                logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
                 content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n") 
         if settings["knowledgeBases"]:
             for kb in settings["knowledgeBases"]:
@@ -6649,7 +6641,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             if _cur_entry and _cur_entry.get("cancelled"):
                 break
             if response.choices[0].message.tool_calls and _ns_loop_count > _ns_max_iterations:
-                print(f"[LoopCap] 非流式工具调用迭代上限({_ns_max_iterations})，强制模型收尾")
+                logging.getLogger("app").info(f"[LoopCap] 非流式工具调用迭代上限({_ns_max_iterations})，强制模型收尾")
                 request.messages.append({
                     "role": "user",
                     "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
@@ -6684,7 +6676,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                         break
                     tool_call_id = ns_tool_calls_meta[_ti]["id"]
                     response_content = _tc.function
-                    print(response_content.name)
+                    logging.getLogger("app").info(response_content.name)
                     args_dict, arg_err = parse_tool_arguments(_tc.function.arguments)
                     if arg_err is not None:
                         err_text = arg_error_text(arg_err)
@@ -6937,7 +6929,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
                 _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
-                print("知识库更新完成")
+                logging.getLogger("app").info("知识库更新完成")
 
             llm_gate.submit_memory_job(
                 _mid, _mem_job, name="mem0-add-complete",
@@ -6948,7 +6940,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             from py.turn_log import shadow_append as _shadow_append
             await _shadow_append(request.conversation_id, request.messages, log=print)
         except Exception as _tle:
-            print(f"[TurnLog] complete shadow skip: {_tle}")
+            logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(
@@ -6970,7 +6962,7 @@ async def execute_tool_manually(request: Request):
     if _appr_stream_id:
         _appr_entry = _active_streams.get(_appr_stream_id)
         if _appr_entry and _appr_entry.get("cancelled"):
-            print(f"[Cancel] 拒绝执行工具 {tool_name}：其生成流 {_appr_stream_id} 已被取消")
+            logging.getLogger("app").info(f"[Cancel] 拒绝执行工具 {tool_name}：其生成流 {_appr_stream_id} 已被取消")
             return {"result": "[Cancelled] 该工具所属的生成已被用户取消，拒绝执行"}
 
     # 获取当前配置
@@ -6983,7 +6975,7 @@ async def execute_tool_manually(request: Request):
         if cwd:
             try:
                 add_tool_to_project_config(cwd, tool_name)
-                print(f"[Permission] Added {tool_name} to whitelist for project {cwd}")
+                logging.getLogger("app").info(f"[Permission] Added {tool_name} to whitelist for project {cwd}")
             except Exception as e:
                 return {"result": f"[System Error] Failed to save permission: {str(e)}"}
         else:
@@ -7275,7 +7267,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         if len(parts) >= 2:
             override_memory_id = parts[1]
             request.model = parts[2] if len(parts) > 2 else 'super-model'
-            print(f"检测到动态 Memory ID: {override_memory_id}, 目标模型更新为: {request.model}")
+            logging.getLogger("app").info(f"检测到动态 Memory ID: {override_memory_id}, 目标模型更新为: {request.model}")
     
     model = request.model or 'super-model'
     enable_thinking = request.enable_thinking or False
@@ -7287,7 +7279,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         if model not in _agents_map and not any((a or {}).get('name') == model for a in _agents_map.values()):
             _fresh_agents = (await load_settings()).get('agents') or {}
             if model not in _fresh_agents and not any((a or {}).get('name') == model for a in _fresh_agents.values()):
-                print(f"[Chat] 警告: Agent '{model}' 不存在于 agents 配置（共 {len(_fresh_agents)} 个），自动回落 super-model")
+                logging.getLogger("app").info(f"[Chat] 警告: Agent '{model}' 不存在于 agents 配置（共 {len(_fresh_agents)} 个），自动回落 super-model")
                 model = 'super-model'
                 request.model = 'super-model'
     await _apply_group_memory_context(request)
@@ -7408,7 +7400,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                 return await generate_stream_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search, async_tools_id)
             return await generate_complete_response(active_client, reasoner_client, request, request_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search)
         except asyncio.CancelledError:
-            print("Client disconnected")
+            logging.getLogger("app").info("Client disconnected")
             raise
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": {"message": str(e), "type": "server_error", "code": 500}})
@@ -7426,7 +7418,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                     agentSettings = current_settings['agents'][agentId]
                     break
         if not agentSettings:
-            print(f"[Chat] 404: Agent '{model}' not found in settings['agents']")
+            logging.getLogger("app").info(f"[Chat] 404: Agent '{model}' not found in settings['agents']")
             return JSONResponse(status_code=404, content={"error": {"message": f"Agent {model} not found", "type": "not_found", "code": 404}})
             
         # 每次读取文件生成新的 agent_settings 字典
@@ -7495,7 +7487,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                 return await generate_stream_response(agent_client, agent_reasoner_client, request, agent_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search, async_tools_id)
             return await generate_complete_response(agent_client, agent_reasoner_client, request, agent_settings, fastapi_base_url, enable_thinking, enable_deep_research, enable_web_search)
         except asyncio.CancelledError:
-            print("Client disconnected")
+            logging.getLogger("app").info("Client disconnected")
             raise
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": {"message": str(e), "type": "server_error", "code": 500}})
@@ -7670,8 +7662,8 @@ async def extension_proxy(request: Request, url: str):
     # 最安全的做法是不发送 Referer，或者设为目标域名的根目录
     headers.pop("Referer", None) 
     
-    print(f"--- [Extension Proxy] ---")
-    print(f"Target: {target_url} | Method: {method} | Mode: Browser Emulation")
+    logging.getLogger("app").info(f"--- [Extension Proxy] ---")
+    logging.getLogger("app").info(f"Target: {target_url} | Method: {method} | Mode: Browser Emulation")
     
     # trust_env=False: 防止你的 Python 代码意外使用了系统层的 HTTP 代理
     async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30.0, trust_env=False) as client:
@@ -7694,7 +7686,7 @@ async def extension_proxy(request: Request, url: str):
             
             # 如果 Reddit 依然返回 403，通常内容里会有错误提示，照样返回给前端便于调试
             if resp.status_code == 403:
-                print(f"[Proxy Warning] Target returned 403. Body sample: {resp.content[:100]}")
+                logging.getLogger("app").info(f"[Proxy Warning] Target returned 403. Body sample: {resp.content[:100]}")
 
             return Response(
                 content=resp.content,
@@ -7709,7 +7701,7 @@ async def extension_proxy(request: Request, url: str):
             return Response(content=f'{{"error": "{err_msg}"}}', status_code=502, media_type="application/json")
             
         except Exception as e:
-            print(f"[Proxy Error] System: {repr(e)}")
+            logging.getLogger("app").info(f"[Proxy Error] System: {repr(e)}")
             return Response(content='{"error": "Internal Proxy Error"}', status_code=500, media_type="application/json")
 
         
@@ -7764,7 +7756,7 @@ def convert_audio_to_pcm16(audio_bytes: bytes, target_sample_rate: int = 16000) 
             os.unlink(temp_file_path)
             
     except Exception as e:
-        print(f"Audio conversion error: {e}")
+        logging.getLogger("app").info(f"Audio conversion error: {e}")
         # 如果转换失败，尝试直接返回原始数据
         return audio_bytes
 
@@ -7781,7 +7773,7 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
         
         # 连接到FunASR服务器
         async with websockets.connect(funasr_url) as websocket:
-            print(f"Connected to FunASR server: {funasr_url}")
+            logging.getLogger("app").info(f"Connected to FunASR server: {funasr_url}")
             
             # 1. 发送初始化配置
             init_config = {
@@ -7795,11 +7787,11 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
             }
             
             await websocket.send(json.dumps(init_config))
-            print("Sent init config")
+            logging.getLogger("app").info("Sent init config")
             
             # 2. 转换音频数据为PCM16格式
             pcm_data = convert_audio_to_pcm16(audio_data)
-            print(f"PCM data length: {len(pcm_data)} bytes")
+            logging.getLogger("app").info(f"PCM data length: {len(pcm_data)} bytes")
             
             # 3. 分块发送音频数据
             chunk_size = 960  # 30ms的音频数据 (16000 * 0.03 * 2 = 960字节)
@@ -7813,7 +7805,7 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
                 await websocket.send(chunk)
                 total_sent = chunk_end
             
-            print(f"Sent all audio data: {total_sent} bytes")
+            logging.getLogger("app").info(f"Sent all audio data: {total_sent} bytes")
             
             # 4. 发送结束信号
             end_config = {
@@ -7821,7 +7813,7 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
             }
             
             await websocket.send(json.dumps(end_config))
-            print("Sent end signal")
+            logging.getLogger("app").info("Sent end signal")
             
             # 5. 等待识别结果
             result_text = ""
@@ -7836,13 +7828,13 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
                     try:
                         # 尝试解析JSON响应
                         json_response = json.loads(response)
-                        print(f"Received response: {json_response}")
+                        logging.getLogger("app").info(f"Received response: {json_response}")
                         
                         if 'text' in json_response:
                             text = json_response['text']
                             if text and text.strip():
                                 result_text += text
-                                print(f"Got text: {text}")
+                                logging.getLogger("app").info(f"Got text: {text}")
                                 # 发送结果
                                 await ws.send_json({
                                     "type": "transcription",
@@ -7852,29 +7844,29 @@ async def funasr_recognize(audio_data: bytes, funasr_settings: dict,ws: WebSocke
                                 })
                             # 检查是否为最终结果
                             if json_response.get('is_final', False):
-                                print("Got final result")
+                                logging.getLogger("app").info("Got final result")
                                 break
                                 
                     except json.JSONDecodeError:
                         # 如果不是JSON格式，可能是二进制数据，忽略
-                        print(f"Non-JSON response: {response}")
+                        logging.getLogger("app").info(f"Non-JSON response: {response}")
                         pass
                         
                 except asyncio.TimeoutError:
                     timeout_count += 1
                     continue
                 except websockets.exceptions.ConnectionClosed:
-                    print("WebSocket connection closed")
+                    logging.getLogger("app").info("WebSocket connection closed")
                     break
             
             if not result_text:
-                print("No recognition result received")
+                logging.getLogger("app").info("No recognition result received")
                 return ""
             
             return result_text.strip()
             
     except Exception as e:
-        print(f"FunASR recognition error: {e}")
+        logging.getLogger("app").info(f"FunASR recognition error: {e}")
         return f"FunASR识别错误: {str(e)}"
 
 def hotwords_to_json(input_str):
@@ -7957,7 +7949,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                             funasr_websocket = await websockets.connect(funasr_url)
                         except Exception as e:
                             funasr_websocket = None
-                            print(f"连接FunASR失败: {e}")
+                            logging.getLogger("app").info(f"连接FunASR失败: {e}")
                 await websocket.send_json({
                     "type": "init_response",
                     "status": "ready"
@@ -7992,11 +7984,11 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                                 "use_itn": True
                             }
                             await funasr_websocket.send(json.dumps(init_config))
-                            print("Sent init config")
+                            logging.getLogger("app").info("Sent init config")
                             # 2. 开启一个异步任务处理FunASR的响应
                             asyncio.create_task(handle_funasr_response(funasr_websocket, websocket))
                         except Exception as e:
-                            print(f"连接FunASR失败: {e}")
+                            logging.getLogger("app").info(f"连接FunASR失败: {e}")
                             await websocket.send_json({
                                 "type": "error",
                                 "message": f"无法连接FunASR服务器: {str(e)}"
@@ -8042,7 +8034,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                                     funasr_websocket = await websockets.connect(funasr_url)
                                 except Exception as e:
                                     funasr_websocket = None
-                                    print(f"连接FunASR失败: {e}")
+                                    logging.getLogger("app").info(f"连接FunASR失败: {e}")
             elif msg_type == "audio_complete":
                 # 处理完整的音频数据（非流式模式）
                 frame_id = message.get("id")
@@ -8052,7 +8044,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                 if audio_b64:
                     # 解码base64数据
                     audio_bytes = base64.b64decode(audio_b64)
-                    print(f"Received audio data: {len(audio_bytes)} bytes, format: {audio_format}")
+                    logging.getLogger("app").info(f"Received audio data: {len(audio_bytes)} bytes, format: {audio_format}")
                     
                     try:
                         # 加载设置
@@ -8085,7 +8077,7 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                             })
                         elif asr_engine == "funasr":
                             # FunASR
-                            print("Using FunASR engine")
+                            logging.getLogger("app").info("Using FunASR engine")
                             funasr_mode = asr_settings.get('funasr_mode', 'offline')
                             if funasr_mode == "offline":
                                 result = await funasr_recognize(audio_bytes, asr_settings,websocket,frame_id)
@@ -8100,16 +8092,16 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                                 }
                                 try:
                                     await funasr_websocket.send(json.dumps(end_config))
-                                    print("Sent end signal")
+                                    logging.getLogger("app").info("Sent end signal")
                                 except websockets.exceptions.ConnectionClosed:
-                                    print("FunASR连接已关闭，无法发送结束信号")
+                                    logging.getLogger("app").info("FunASR连接已关闭，无法发送结束信号")
                             funasr_websocket = None
 
                         elif asr_engine == "sherpa":
                             from py.sherpa_asr import sherpa_recognize
                             # 新增Sherpa处理
                             result = await sherpa_recognize(audio_bytes)
-                            print(f"Sherpa result: {result}")
+                            logging.getLogger("app").info(f"Sherpa result: {result}")
                             await websocket.send_json({
                                 "type": "transcription",
                                 "id": frame_id,
@@ -8118,9 +8110,9 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                             })
 
                     except WebSocketDisconnect:
-                        print(f"ASR WebSocket disconnected: {connection_id}")
+                        logging.getLogger("app").info(f"ASR WebSocket disconnected: {connection_id}")
                     except Exception as e:
-                        print(f"ASR WebSocket error: {e}")
+                        logging.getLogger("app").info(f"ASR WebSocket error: {e}")
     finally:
         # 清理资源
         if connection_id in audio_buffer:
@@ -8144,7 +8136,7 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
         
         # 连接到FunASR服务器
         async with websockets.connect(funasr_url) as websocket:
-            print(f"Connected to FunASR server: {funasr_url}")
+            logging.getLogger("app").info(f"Connected to FunASR server: {funasr_url}")
             
             # 1. 发送初始化配置（强制离线模式）
             init_config = {
@@ -8158,11 +8150,11 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
             }
             
             await websocket.send(json.dumps(init_config))
-            print("Sent init config for offline mode")
+            logging.getLogger("app").info("Sent init config for offline mode")
             
             # 2. 转换音频数据为PCM16格式
             pcm_data = convert_audio_to_pcm16(audio_data)
-            print(f"PCM data length: {len(pcm_data)} bytes")
+            logging.getLogger("app").info(f"PCM data length: {len(pcm_data)} bytes")
             
             # 3. 分块发送音频数据
             chunk_size = 960  # 30ms的音频数据
@@ -8174,14 +8166,14 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
                 await websocket.send(chunk)
                 total_sent = chunk_end
             
-            print(f"Sent all audio data: {total_sent} bytes")
+            logging.getLogger("app").info(f"Sent all audio data: {total_sent} bytes")
             
             # 4. 发送结束信号
             end_config = {
                 "is_speaking": False,
             }
             await websocket.send(json.dumps(end_config))
-            print("Sent end signal")
+            logging.getLogger("app").info("Sent end signal")
             
             # 5. 等待识别结果
             result_text = ""
@@ -8194,17 +8186,17 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
                     
                     try:
                         json_response = json.loads(response)
-                        print(f"Received response: {json_response}")
+                        logging.getLogger("app").info(f"Received response: {json_response}")
                         
                         if 'text' in json_response:
                             text = json_response['text']
                             if text and text.strip():
                                 result_text += text
-                                print(f"Got text: {text}")
+                                logging.getLogger("app").info(f"Got text: {text}")
                             
                             # 检查是否为最终结果
                             if json_response.get('is_final', False):
-                                print("Got final result")
+                                logging.getLogger("app").info("Got final result")
                                 break
                                 
                     except json.JSONDecodeError:
@@ -8215,17 +8207,17 @@ async def funasr_recognize_offline(audio_data: bytes, funasr_settings: dict) -> 
                     timeout_count += 1
                     continue
                 except websockets.exceptions.ConnectionClosed:
-                    print("WebSocket connection closed")
+                    logging.getLogger("app").info("WebSocket connection closed")
                     break
             
             if not result_text:
-                print("No recognition result received")
+                logging.getLogger("app").info("No recognition result received")
                 return ""
             
             return result_text.strip()
             
     except Exception as e:
-        print(f"FunASR offline recognition error: {e}")
+        logging.getLogger("app").info(f"FunASR offline recognition error: {e}")
         return f"FunASR识别错误: {str(e)}"
 
 
@@ -8243,7 +8235,7 @@ async def handle_funasr_response(funasr_websocket,
                         message = message.decode('utf-8')
                     
                     data = json.loads(message)
-                    print(f"FunASR response: {data}")
+                    logging.getLogger("app").info(f"FunASR response: {data}")
                     # 解析 FunASR 响应
                     if "text" in data:  # 普通识别结果
                         if data.get('mode', '') == "2pass-online":
@@ -8259,23 +8251,23 @@ async def handle_funasr_response(funasr_websocket,
                                 "is_final": True
                             })
                     elif "mode" in data:  # 初始化响应
-                        print(f"FunASR initialized: {data}")
+                        logging.getLogger("app").info(f"FunASR initialized: {data}")
                     else:
-                        print(f"Unknown FunASR response: {data}")
+                        logging.getLogger("app").info(f"Unknown FunASR response: {data}")
                 else:
                     # 如果 FunASR 连接关闭，发送错误消息，退出循环，结束任务
             
                     break
             except json.JSONDecodeError:
-                print(f"FunASR sent non-JSON data: {message[:100]}...")
+                logging.getLogger("app").info(f"FunASR sent non-JSON data: {message[:100]}...")
             except Exception as e:
-                print(f"Error processing FunASR response: {e}")
+                logging.getLogger("app").info(f"Error processing FunASR response: {e}")
                 break
 
     except websockets.exceptions.ConnectionClosed:
-        print("FunASR connection closed")
+        logging.getLogger("app").info("FunASR connection closed")
     except Exception as e:
-        print(f"FunASR handler error: {e}")
+        logging.getLogger("app").info(f"FunASR handler error: {e}")
     finally:
         await funasr_websocket.close()
 
@@ -8543,7 +8535,7 @@ async def process_mcp(mcp_id: str):
         if mcp_id in mcp_client_list:
             mcp_client_list[mcp_id].disabled = True
             await mcp_client_list[mcp_id].close()
-            print(f"关闭MCP服务器: {mcp_id}")
+            logging.getLogger("app").info(f"关闭MCP服务器: {mcp_id}")
 
         init_done.set()          # 唤醒主协程
 
@@ -8582,7 +8574,7 @@ async def process_mcp(mcp_id: str):
             try:
                 tool = await mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
             except Exception as e:
-                print(f"获取工具失败: {str(e)}")
+                logging.getLogger("app").info(f"获取工具失败: {str(e)}")
             finally:
                 retry += 1
                 await asyncio.sleep(0.5)
@@ -8703,7 +8695,7 @@ async def remove_kb(kb_id):
     if os.path.exists(kb_dir):
         shutil.rmtree(kb_dir)
     else:
-        print(f"KB directory {kb_dir} does not exist.")
+        logging.getLogger("app").info(f"KB directory {kb_dir} does not exist.")
     return
 
 # 添加状态存储
@@ -9056,9 +9048,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 # 构建新的配置模型并更新
                 new_config = FeishuBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: 飞书机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: 飞书机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (Feishu): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (Feishu): {e}")
 
     # --- 同步微信 (WeChat) ---
     try:
@@ -9070,9 +9062,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = WeChatBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: 微信机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: 微信机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (WeChat): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (WeChat): {e}")
 
     # 2. --- 同步钉钉 (DingTalk) ---
     try:
@@ -9084,9 +9076,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = DingtalkBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: 钉钉机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: 钉钉机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (DingTalk): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (DingTalk): {e}")
 
     # 3. --- 同步 Discord ---
     try:
@@ -9098,9 +9090,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = DiscordBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: Discord 机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: Discord 机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (Discord): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (Discord): {e}")
 
     # 4. --- 同步 Telegram ---
     try:
@@ -9112,9 +9104,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = TelegramBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: Telegram 机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: Telegram 机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (Telegram): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (Telegram): {e}")
 
     # 4.5 --- 同步 XMPP ---
     try:
@@ -9126,9 +9118,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = XmppBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: XMPP 机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: XMPP 机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (XMPP): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (XMPP): {e}")
 
     # 5. --- 同步 Slack ---
     try:
@@ -9140,9 +9132,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = SlackBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: Slack 机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: Slack 机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (Slack): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (Slack): {e}")
 
     # 6. --- 同步 QQ ---
     try:
@@ -9154,9 +9146,9 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 config_data["behaviorSettings"] = behavior_data
                 new_config = QQBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: QQ 机器人行为配置已同步")
+                logging.getLogger("app").info("WebSocket Sync: QQ 机器人行为配置已同步")
     except Exception as e:
-        print(f"WebSocket Sync Error (QQ): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (QQ): {e}")
 
     # 7. --- 同步企业微信 (WeCom) ---
     try:
@@ -9170,11 +9162,11 @@ async def sync_all_bots_behavior(settings_dict: dict):
                 # 校验并同步更新
                 new_config = WeComBotConfig(**config_data)
                 mgr.update_behavior_config(new_config)
-                print("WebSocket Sync: 企微机器人行为配置已同步 (BotContainer 实例同步成功)")
+                logging.getLogger("app").info("WebSocket Sync: 企微机器人行为配置已同步 (BotContainer 实例同步成功)")
             else:
-                print("WebSocket Sync: 企微机器人已初始化但尚未启动 (is_running 为 False)")
+                logging.getLogger("app").info("WebSocket Sync: 企微机器人已初始化但尚未启动 (is_running 为 False)")
     except Exception as e:
-        print(f"WebSocket Sync Error (WeCom): {e}")
+        logging.getLogger("app").info(f"WebSocket Sync Error (WeCom): {e}")
 
 settings_lock = asyncio.Lock()
 @app.websocket("/ws")
@@ -9184,10 +9176,10 @@ async def websocket_endpoint(websocket: WebSocket):
         return
     # 1. 建立连接
     await ws_manager.connect(websocket)
-    print(f"[DEBUG] WebSocket连接建立成功")
+    logging.getLogger("app").info(f"[DEBUG] WebSocket连接建立成功")
     # [状态标记] 为当前连接生成唯一ID并初始化状态
     connection_id = str(shortuuid.ShortUUID().random(length=8))
-    print(f"[DEBUG] 连接ID: {connection_id}")
+    logging.getLogger("app").info(f"[DEBUG] 连接ID: {connection_id}")
     has_sent_prompt = False
     has_start_tts = False
     registered_ext_ids = set()
@@ -9223,11 +9215,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     await ws_manager.send_json({"type": "ping"}, websocket)
                 except Exception:
-                    print(f"[WS] Ping probe failed for {connection_id}, connection is dead")
+                    logging.getLogger("app").info(f"[WS] Ping probe failed for {connection_id}, connection is dead")
                     break
                 continue
             except WebSocketDisconnect as e:
-                print(f"[WS] Client {connection_id} disconnected with code={e.code} reason={e.reason or ''}")
+                logging.getLogger("app").info(f"[WS] Client {connection_id} disconnected with code={e.code} reason={e.reason or ''}")
                 # 1006 = 异常关闭（无close frame），通常意味着连接被中间代理/网络层切断
                 if e.code == 1006:
                     logger.warning(f"[WS] Client {connection_id} 异常断开(1006)，可能原因：心跳超时/事件循环饥饿/网络中断")
@@ -9235,7 +9227,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except RuntimeError as e:
                 # ✨ 核心修复：捕获"接收已断开连接的消息"错误
                 if "receive" in str(e):
-                    print(f"[WS] Client {connection_id} RuntimeError on receive: {e}")
+                    logging.getLogger("app").info(f"[WS] Client {connection_id} RuntimeError on receive: {e}")
                     break # 退出循环
                 raise e # 其他运行时错误继续抛出
             
@@ -9390,7 +9382,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if ext_id and tools:
                     node_ext_mcp_tools[ext_id] = tools
                     registered_ext_ids.add(ext_id)  # 🔥 记录
-                    print(f"[MCP] Node扩展 {ext_id} 注册了 {len(tools)} 个工具")
+                    logging.getLogger("app").info(f"[MCP] Node扩展 {ext_id} 注册了 {len(tools)} 个工具")
                     
                     # 通知所有客户端更新工具列表
                     await ws_manager.broadcast({
@@ -9412,7 +9404,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if ext_id in node_ext_mcp_tools:
                     del node_ext_mcp_tools[ext_id]
                     registered_ext_ids.discard(ext_id)  # 🔥 移除记录
-                    print(f"[MCP] Node扩展 {ext_id} 已主动注销")
+                    logging.getLogger("app").info(f"[MCP] Node扩展 {ext_id} 已主动注销")
                     
                     await ws_manager.broadcast({
                         "type": "node_ext_mcp_unregistered",
@@ -9447,12 +9439,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 }, exclude=websocket)
 
     except Exception as e:
-        print(f"WebSocket error for {connection_id}: {e}")
+        logging.getLogger("app").info(f"WebSocket error for {connection_id}: {e}")
     finally:
         for ext_id in registered_ext_ids:
             if ext_id in node_ext_mcp_tools:
                 del node_ext_mcp_tools[ext_id]
-                print(f"[MCP] 连接断开，自动清理扩展 {ext_id}")
+                logging.getLogger("app").info(f"[MCP] 连接断开，自动清理扩展 {ext_id}")
                 
                 await ws_manager.broadcast({
                     "type": "node_ext_mcp_unregistered",
@@ -9463,14 +9455,14 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
         
         if has_sent_prompt:
-            print(f"Extension {connection_id} disconnected. Removing prompt.")
+            logging.getLogger("app").info(f"Extension {connection_id} disconnected. Removing prompt.")
             await ws_manager.broadcast({
                 "type": "remove_system_prompt",
                 "data": {"id": connection_id}
             })
             
         if has_start_tts:
-            print(f"Extension {connection_id} disconnected. Stopping tts.")
+            logging.getLogger("app").info(f"Extension {connection_id} disconnected. Stopping tts.")
             await ws_manager.broadcast({
                 "type": "stop_tts",
                 "data": {}
@@ -9535,11 +9527,11 @@ if __name__ == "__main__":
     # 格式化显示地址
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
     
-    print("\n" + "="*50)
-    print(f"🚀 后端服务已启动")
-    print(f"🔗 本地运行地址: http://{display_host}:{PORT}")
-    print(f"📖 API 文档地址: http://{display_host}:{PORT}/docs") # 如果是 FastAPI
-    print("="*50 + "\n")
+    logging.getLogger("app").info("\n" + "="*50)
+    logging.getLogger("app").info(f"🚀 后端服务已启动")
+    logging.getLogger("app").info(f"🔗 本地运行地址: http://{display_host}:{PORT}")
+    logging.getLogger("app").info(f"📖 API 文档地址: http://{display_host}:{PORT}/docs") # 如果是 FastAPI
+    logging.getLogger("app").info("="*50 + "\n")
 
     # 使用 uvicorn.Config + uvicorn.Server 方式启动，以支持 websocket_ping_interval 等高级参数
     config = uvicorn.Config(

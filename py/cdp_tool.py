@@ -1,3 +1,5 @@
+
+import logging
 import json
 import os
 import time
@@ -22,7 +24,7 @@ async def get_targets():
         resp = requests.get(f'http://127.0.0.1:{port}/json/list')
         return resp.json()
     except Exception as e:
-        print(f"CDP Connection Error: {e}")
+        logging.getLogger("app").info(f"CDP Connection Error: {e}")
         return []
 
 async def get_main_window_ws():
@@ -61,7 +63,7 @@ async def get_main_window_ws():
         # - 只要不是上面排除的特定窗口，剩下的 page 通常就是主窗口
         return t.get('webSocketDebuggerUrl')
         
-    print("Error: Could not find Main Window in CDP targets.")
+    logging.getLogger("app").info("Error: Could not find Main Window in CDP targets.")
     return None
 
 async def get_webview_ws(index=None):
@@ -140,7 +142,7 @@ async def call_vue_method(method_name, args_list=None):
                 
                 # ★ 关键：如果遇到 Illegal invocation，抛出异常以触发重试
                 if "Illegal invocation" in msg or "GUEST_VIEW_MANAGER_CALL" in msg:
-                    print(f"[Warn] Retrying {method_name} due to Electron error: {msg}")
+                    logging.getLogger("app").info(f"[Warn] Retrying {method_name} due to Electron error: {msg}")
                     raise ValueError("Electron Webview Error") # 触发 except 重试
                 
                 return f"Error executing {method_name}: {msg}"
@@ -151,7 +153,7 @@ async def call_vue_method(method_name, args_list=None):
             
             # 如果返回值是字符串且包含 Electron 内部错误，也视为失败进行重试
             if isinstance(value, str) and ("Illegal invocation" in value or "GUEST_VIEW_MANAGER_CALL" in value):
-                print(f"[Warn] Retrying {method_name} due to JS Result error: {value}")
+                logging.getLogger("app").info(f"[Warn] Retrying {method_name} due to JS Result error: {value}")
                 raise ValueError("Electron Webview Error")
 
             if 'value' in remote_object:
@@ -268,7 +270,7 @@ async def evaluate_script(script_code, args=None):
 
     # 2. 兜底容错：如果 AI 还是只输出了函数体（比如包含 return 但没写 function）
     if not clean_code.startswith("function") and not clean_code.startswith("() =>") and not clean_code.startswith("async function"):
-        print(f"[Agent Warning] AI forgot to wrap function, auto-wrapping it...")
+        logging.getLogger("app").info(f"[Agent Warning] AI forgot to wrap function, auto-wrapping it...")
         # 帮它包一层标准函数
         clean_code = f"function() {{\n{clean_code}\n}}"
         

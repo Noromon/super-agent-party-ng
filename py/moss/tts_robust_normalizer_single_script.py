@@ -47,6 +47,8 @@ TTS 输入鲁棒性正则化器（非语义 TN）
 
 from __future__ import annotations
 
+import logging
+
 import re
 import unicodedata
 
@@ -400,7 +402,7 @@ def run_tests(verbose: bool = True) -> None:
         raise AssertionError("\n".join(lines))
 
     if verbose:
-        print(f"All {len(TEST_CASES)} tests passed.")
+        logging.getLogger("app").info(f"All {len(TEST_CASES)} tests passed.")
 
 
 if __name__ == "__main__":

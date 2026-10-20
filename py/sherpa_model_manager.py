@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import os
 import json
@@ -174,7 +176,7 @@ async def download(source: str):
                         error_msg = f"Error type: {type(e).__name__}"
                     
                     filename = file_map[key].get('filename', 'unknown')
-                    print(f"Cleanup error for {filename}: {error_msg}")
+                    logging.getLogger("app").info(f"Cleanup error for {filename}: {error_msg}")
 
         try:
             while completed_files < num_files:
@@ -214,7 +216,7 @@ async def download(source: str):
                         pass
                     except Exception as e:
                         # 捕获其他可能的线程池或文件系统错误
-                        print(f"Unexpected file read error for {file_info['filename']}: {e}")
+                        logging.getLogger("app").info(f"Unexpected file read error for {file_info['filename']}: {e}")
                         
                     current_progress["files"].append({
                         "filename": file_info["filename"],
@@ -243,7 +245,7 @@ async def download(source: str):
             yield "data: close\n\n"
 
         except Exception as e:
-            print(f"Streaming error: {e}")
+            logging.getLogger("app").info(f"Streaming error: {e}")
             cleanup_progress_files()
 
 

@@ -7,6 +7,8 @@ launched directly, so we bind the OBJECT once and attributes resolve at
 request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
+
+import logging
 import sys as _sys
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -64,7 +66,7 @@ async def compact_conversation_endpoint(request: Request):
         return {"ok": True, "summary": res["summary"], "task_mode": res["task_mode"],
                 "compacted_count": res["compacted_count"]}
     except Exception as e:
-        print(f"[Compact] /api/compact 失败: {e}")
+        logging.getLogger("app").info(f"[Compact] /api/compact 失败: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "reason": str(e)})
 
 

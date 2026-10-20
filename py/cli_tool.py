@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+
+import logging
 import asyncio
 import os
 import re
@@ -57,12 +59,12 @@ def get_shell_environment():
                     if '=' in line:
                         var_name, var_value = line.split('=', 1)
                         os.environ[var_name] = var_value
-                print("Successfully loaded environment from shell")
+                logging.getLogger("app").info("Successfully loaded environment from shell")
                 return
         except Exception as e:
             continue
     
-    print("Warning: Could not load shell environment, using current environment")
+    logging.getLogger("app").info("Warning: Could not load shell environment, using current environment")
 
 get_shell_environment()
 
@@ -1480,7 +1482,7 @@ async def edit_file_tool_local(path: str, content: str) -> str:
                 shutil.copy2(target, backup_path)
                 backup_msg = f" (Backup created: {backup_path.name})"
             except Exception as e:
-                print(f"[Warn] Backup failed: {e}")
+                logging.getLogger("app").info(f"[Warn] Backup failed: {e}")
 
         # 3. 原子写入
         temp_path = target.with_suffix(target.suffix + f".tmp.{uuid.uuid4().hex[:6]}")
@@ -1940,7 +1942,7 @@ async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True)
                 cp_cmd = ["cp", "-r", global_skill_path, f"/workspace/.agent/skills/"]
                 await _exec_docker_cmd_simple(cwd, cp_cmd)
 
-                print(f"[Skill AutoCopy][Docker] Copied global skill '{skill_id}' to workspace.")
+                logging.getLogger("app").info(f"[Skill AutoCopy][Docker] Copied global skill '{skill_id}' to workspace.")
             except Exception as e:
                 # 复制失败或全局技能不存在，继续尝试读取工作区（若不存在则后续报错）
                 pass
@@ -1958,9 +1960,9 @@ async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True)
                         workspace_path,
                         dirs_exist_ok=True
                     )
-                    print(f"[Skill AutoCopy][Local] Copied global skill '{skill_id}' to workspace.")
+                    logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copied global skill '{skill_id}' to workspace.")
                 except Exception as e:
-                    print(f"[Skill AutoCopy][Local] Copy failed: {e}. Will fallback to global read.")
+                    logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copy failed: {e}. Will fallback to global read.")
                     # 降级读取已由主流程处理
 
     # ----- 原有读取逻辑保持不变（读取工作区技能）-----

@@ -1,3 +1,5 @@
+
+import logging
 import requests
 from typing import List, Optional, Union
 from py.get_setting import load_settings
@@ -89,7 +91,7 @@ async def get_random_topics(
         # --- 解析逻辑结束 ---
 
     except requests.exceptions.RequestException as e:
-        print(f"请求发生错误: {e}")
+        logging.getLogger("app").info(f"请求发生错误: {e}")
         return f"⚠️ 网络请求错误: {str(e)}"
     except Exception as e:
         return f"⚠️ 处理数据时发生错误: {str(e)}"
@@ -126,7 +128,7 @@ async def get_categories(
         data = response.json()
         return data.get("data", [])
     except requests.exceptions.RequestException as e:
-        print(f"请求发生错误: {e}")
+        logging.getLogger("app").info(f"请求发生错误: {e}")
         return []
     
 

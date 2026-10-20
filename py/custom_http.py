@@ -1,3 +1,5 @@
+
+import logging
 import aiohttp
 import json
 
@@ -13,7 +15,7 @@ async def fetch_custom_http(method, url, headers=None, body=None):
     if headers is None or headers == "":
         headers = {}
     elif isinstance(headers, str):
-        print(f'headers: {headers}')
+        logging.getLogger("app").info(f'headers: {headers}')
         headers = safe_json_loads(headers)
 
     # 自动处理 Content-Type，默认为 application/json
@@ -33,10 +35,10 @@ async def fetch_custom_http(method, url, headers=None, body=None):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.request(method, url, **kwargs) as response:
-                print(f'Status: {response.status}')
+                logging.getLogger("app").info(f'Status: {response.status}')
                 response_text = await response.text()
-                print(f'Response: {response_text}')
+                logging.getLogger("app").info(f'Response: {response_text}')
                 return response_text
     except Exception as e:
-        print(f'Error: {e}')
+        logging.getLogger("app").info(f'Error: {e}')
         return f'Error: {e}'

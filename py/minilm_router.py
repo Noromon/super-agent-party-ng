@@ -1,3 +1,5 @@
+
+import logging
 import os
 import threading
 import time
@@ -53,10 +55,10 @@ class MiniLMOnnxPredictor:
                 
             self.session = ort.InferenceSession(target_model, providers=providers)
             self.input_names = [i.name for i in self.session.get_inputs()]
-            print(f"MiniLM ONNX Predictor loaded from: {target_model}")
+            logging.getLogger("app").info(f"MiniLM ONNX Predictor loaded from: {target_model}")
             self.is_loaded = True
         except Exception as e:
-            print(f"Error loading MiniLM ONNX Predictor: {e}")
+            logging.getLogger("app").info(f"Error loading MiniLM ONNX Predictor: {e}")
             import traceback
             traceback.print_exc()
             self.is_loaded = False

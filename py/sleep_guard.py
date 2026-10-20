@@ -9,6 +9,8 @@
     guard.stop()   # 停止防休眠（可选）
 """
 
+import logging
+
 import threading
 import platform
 import subprocess
@@ -43,7 +45,7 @@ class _WindowsGuard(_BaseGuard):
             self._thread.start()
             return True
         except Exception as e:
-            print(f"[SleepGuard] Windows 防休眠启动失败: {e}")
+            logging.getLogger("app").info(f"[SleepGuard] Windows 防休眠启动失败: {e}")
             return False
     
     def _keep_awake(self):
@@ -87,7 +89,7 @@ class _MacOSGuard(_BaseGuard):
                 return True
             return False
         except Exception as e:
-            print(f"[SleepGuard] macOS 防休眠启动失败: {e}")
+            logging.getLogger("app").info(f"[SleepGuard] macOS 防休眠启动失败: {e}")
             return False
     
     def stop(self):
@@ -136,7 +138,7 @@ class _LinuxGuard(_BaseGuard):
         except (FileNotFoundError, subprocess.CalledProcessError, Exception):
             pass
         
-        print("[SleepGuard] Linux 防休眠启动失败: 未找到 systemd-inhibit 或 xdotool")
+        logging.getLogger("app").info("[SleepGuard] Linux 防休眠启动失败: 未找到 systemd-inhibit 或 xdotool")
         return False
     
     def _simulate_activity(self):
@@ -189,7 +191,7 @@ class SleepGuard:
         """启动防休眠（非阻塞）"""
         if self._guard is not None:
             if self.verbose:
-                print("[SleepGuard] 防休眠已在运行中")
+                logging.getLogger("app").info("[SleepGuard] 防休眠已在运行中")
             return True
         
         # 根据系统选择对应的实现
@@ -201,14 +203,14 @@ class SleepGuard:
             self._guard = _LinuxGuard()
         else:
             if self.verbose:
-                print(f"[SleepGuard] 不支持的系统: {self._system}")
+                logging.getLogger("app").info(f"[SleepGuard] 不支持的系统: {self._system}")
             return False
         
         success = self._guard.start()
         if success and self.verbose:
-            print(f"[SleepGuard] 防休眠已启动 ({self._system})")
+            logging.getLogger("app").info(f"[SleepGuard] 防休眠已启动 ({self._system})")
         elif not success and self.verbose:
-            print(f"[SleepGuard] 防休眠启动失败 ({self._system})")
+            logging.getLogger("app").info(f"[SleepGuard] 防休眠启动失败 ({self._system})")
         
         return success
     
@@ -217,7 +219,7 @@ class SleepGuard:
         if self._guard is not None:
             self._guard.stop()
             if self.verbose:
-                print(f"[SleepGuard] 防休眠已停止")
+                logging.getLogger("app").info(f"[SleepGuard] 防休眠已停止")
             self._guard = None
     
     def is_running(self) -> bool:
@@ -251,15 +253,15 @@ if __name__ == '__main__':
     guard = SleepGuard(verbose=True)
     guard.start()
     
-    print("防休眠已启动，程序将保持唤醒...")
-    print("按 Ctrl+C 退出")
+    logging.getLogger("app").info("防休眠已启动，程序将保持唤醒...")
+    logging.getLogger("app").info("按 Ctrl+C 退出")
     
     try:
         # 模拟主程序运行
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n正在退出...")
+        logging.getLogger("app").info("\n正在退出...")
     finally:
         guard.stop()
     

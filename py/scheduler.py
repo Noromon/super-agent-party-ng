@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import os
 from datetime import datetime, timedelta
@@ -10,14 +12,14 @@ class AgentScheduler:
         self.settings = settings_ref
 
     async def start_loop(self):
-        print("⏰ [调度中心] 启动成功，监控已就绪...")
+        logging.getLogger("app").info("⏰ [调度中心] 启动成功，监控已就绪...")
         while True:
             try:
                 workspace_dir = self.settings.get("CLISettings", {}).get("cc_path")
                 if workspace_dir and os.path.exists(workspace_dir):
                     await self._scan_and_trigger(workspace_dir)
             except Exception as e:
-                print(f"❌ [调度中心] 轮询异常: {e}")
+                logging.getLogger("app").info(f"❌ [调度中心] 轮询异常: {e}")
             
             await asyncio.sleep(30) # 30秒检查一次
 
@@ -87,7 +89,7 @@ class AgentScheduler:
 
     async def _execute(self, task, workspace_dir, extra_context):
         """执行任务并更新状态"""
-        print(f"🚀 [调度中心] 触发任务: {task.title} (ID: {task.task_id})")
+        logging.getLogger("app").info(f"🚀 [调度中心] 触发任务: {task.title} (ID: {task.task_id})")
         task_center = await get_task_center(workspace_dir)
         
         # 准备新一轮日志

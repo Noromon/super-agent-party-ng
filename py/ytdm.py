@@ -1,5 +1,7 @@
 # py/ytdm.py
 from __future__ import annotations
+
+import logging
 import asyncio, threading, time
 import uuid
 from googleapiclient.discovery import build
@@ -49,13 +51,13 @@ class YouTubeDMClient:
         self._chat_id = self._get_live_chat_id()
         print('[YouTube] got chat_id:', self._chat_id)   # ← 新增
         if not self._chat_id:
-            print('[YouTube] 未开播，线程退出')
+            logging.getLogger("app").info('[YouTube] 未开播，线程退出')
             return
 
         while not self._stop_evt.is_set():
             try:
                 self._poll_once()
-                print('[YouTube] poll_once done')        # ← 新增
+                logging.getLogger("app").info('[YouTube] poll_once done')        # ← 新增
             except Exception as e:
                 print('[YouTube] poll error:', e)
             time.sleep(self.poll_interval)

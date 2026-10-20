@@ -7,6 +7,8 @@ launched directly, so we bind the OBJECT once and attributes resolve at
 request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
+
+import logging
 import sys as _sys
 import asyncio
 import os
@@ -74,7 +76,7 @@ async def stop_HA():
         if _srv.HA_client is not None:
             await _srv.HA_client.close()
             _srv.HA_client = None
-            print(f"HA client stopped")
+            logging.getLogger("app").info(f"HA client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
@@ -123,7 +125,7 @@ async def start_ChromeMCP(request: Request):
 
     if system_npx:
         # --- 方案 A: 系统原生 npx (Docker 或 本地开发) ---
-        print(f"Using system npx: {system_npx}")
+        logging.getLogger("app").info(f"Using system npx: {system_npx}")
         command = system_npx
         # 加上 -y 自动确认安装包
         args = ["-y", target_package] 
@@ -134,7 +136,7 @@ async def start_ChromeMCP(request: Request):
         electron_npm = os.environ.get("ELECTRON_NPM_CLI")
         
         if electron_node and electron_npm:
-            print(f"System npx not found. Falling back to Electron Node.")
+            logging.getLogger("app").info(f"System npx not found. Falling back to Electron Node.")
             command = electron_node
             # 构造: electron node npm-cli.js exec --yes -- @package
             # --yes 是 npm exec 的参数，表示自动安装缺失的包
@@ -186,7 +188,7 @@ async def start_ChromeMCP(request: Request):
 
     except Exception as e:
         _srv.ChromeMCP_client = None
-        print(f"Start ChromeMCP Error: {e}")
+        logging.getLogger("app").info(f"Start ChromeMCP Error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
@@ -196,7 +198,7 @@ async def stop_ChromeMCP():
         if _srv.ChromeMCP_client is not None:
             await _srv.ChromeMCP_client.close()
             _srv.ChromeMCP_client = None
-            print(f"ChromeMCP client stopped")
+            logging.getLogger("app").info(f"ChromeMCP client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
@@ -224,7 +226,7 @@ async def start_sql(request: Request):
         sql_args = ["--from", "mcp-alchemy==2025.8.15.91819",
                "--refresh-package", "mcp-alchemy", "mcp-alchemy"]
         sql_url = f"sqlite:///{dbpath}"
-        print(sql_url)
+        logging.getLogger("app").info(sql_url)
     elif (data['data']['engine']=='mysql'):
         sql_args = ["--from", "mcp-alchemy==2025.8.15.91819", "--with", "pymysql",
                "--refresh-package", "mcp-alchemy", "mcp-alchemy"]
@@ -290,7 +292,7 @@ async def stop_sql():
         if _srv.sql_client is not None:
             await _srv.sql_client.close()
             _srv.sql_client = None
-            print(f"sqlMCP client stopped")
+            logging.getLogger("app").info(f"sqlMCP client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
@@ -414,7 +416,7 @@ async def shutdown_server():
     if IS_DOCKER:
         return {"message": "Not allowed in Docker mode."}
 
-    print("Received shutdown request via API...")
+    logging.getLogger("app").info("Received shutdown request via API...")
     # 获取当前进程 ID 并发送终止信号
     # Windows 和 Linux/Mac 都支持 SIGTERM
     os.kill(os.getpid(), signal.SIGTERM)

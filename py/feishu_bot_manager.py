@@ -147,7 +147,7 @@ class FeishuBotManager:
             except Exception as e:
                 logging.error(f"飞书线程同步行为配置失败: {e}")
                 import traceback
-                print(traceback.format_exc())
+                logging.getLogger("app").info(traceback.format_exc())
             import lark_oapi as lark
             # --- 3. 初始化飞书 SDK ---
             lark_client = lark.Client.builder()\
@@ -177,7 +177,7 @@ class FeishuBotManager:
             
         except Exception as e:
             if not self._stop_requested:
-                print(f"飞书机器人线程异常: {e}")
+                logging.getLogger("app").info(f"飞书机器人线程异常: {e}")
                 if not self._startup_error:
                     self._startup_error = str(e)
             # 确保外部等待能解除
@@ -227,11 +227,11 @@ class FeishuBotManager:
                 logging.info("WebSocket任务被取消")
             except Exception as e:
                 if not self._stop_requested:
-                    print(f"WebSocket任务异常: {e}")
+                    logging.getLogger("app").info(f"WebSocket任务异常: {e}")
                     
         except Exception as e:
             if not self._stop_requested:
-                print(f"WebSocket连接失败: {e}")
+                logging.getLogger("app").info(f"WebSocket连接失败: {e}")
                 self._startup_error = str(e)
             raise
 
@@ -252,14 +252,14 @@ class FeishuBotManager:
                     continue
                 except Exception as e:
                     if not self._stop_requested:
-                        print(f"接收消息异常: {e}")
+                        logging.getLogger("app").info(f"接收消息异常: {e}")
                     break
                     
         except asyncio.CancelledError:
             logging.info("消息接收循环被取消")
         except Exception as e:
             if not self._stop_requested:
-                print(f"消息接收循环异常: {e}")
+                logging.getLogger("app").info(f"消息接收循环异常: {e}")
     
     def _on_bot_ready(self):
         """机器人就绪回调"""
@@ -481,7 +481,7 @@ class FeishuClient:
             # future.result(timeout=30)
         except Exception as e:
             if not self._shutdown_requested:
-                print(f"处理消息时发生异常: {e}")
+                logging.getLogger("app").info(f"处理消息时发生异常: {e}")
 
     @llm_gate.gated
     async def handle_message(self, data) -> None:
@@ -551,7 +551,7 @@ class FeishuClient:
                     logging.info(f"未检测到唤醒词: {self.wakeWord}")
                     return
             except Exception as e:
-                print(f"文本解析失败：{e}")
+                logging.getLogger("app").info(f"文本解析失败：{e}")
                 return
 
         # --- (B) 图片消息 ---
@@ -572,7 +572,7 @@ class FeishuClient:
                         if "text" in json.loads(msg.content):
                             user_text = json.loads(msg.content).get("text", "")
             except Exception as e:
-                print(f"图片处理失败：{e}")
+                logging.getLogger("app").info(f"图片处理失败：{e}")
 
         # --- (C) 富文本消息 (Post) ---
         elif msg_type == "post":
@@ -589,7 +589,7 @@ class FeishuClient:
                         has_image = True
                         user_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}})
             except Exception as e:
-                print(f"富文本处理失败: {e}")
+                logging.getLogger("app").info(f"富文本处理失败: {e}")
 
         # --- (D) 音频消息 (Audio) ---
         elif msg_type == "audio":
@@ -611,7 +611,7 @@ class FeishuClient:
                             await self._send_text(msg, "语音转文字失败")
                             return
             except Exception as e:
-                print(f"音频处理失败：{e}")
+                logging.getLogger("app").info(f"音频处理失败：{e}")
         
         else:
             await self._send_text(msg, f"暂不支持的消息类型：{msg_type}")
@@ -762,7 +762,7 @@ class FeishuClient:
                     await self._send_omni_response(msg, final_audio, is_opus)
                     has_omni_audio = True
                 except Exception as e:
-                    print(f"Omni 音频处理失败: {e}")
+                    logging.getLogger("app").info(f"Omni 音频处理失败: {e}")
 
             # 更新记忆
             full_content = "".join(full_response)
@@ -780,7 +780,7 @@ class FeishuClient:
                     if self.memoryList[chat_id]: self.memoryList[chat_id].pop(0)
             
         except Exception as e:
-            print(f"处理消息异常: {e}")
+            logging.getLogger("app").info(f"处理消息异常: {e}")
             await self._send_text(msg, f"机器人异常: {str(e)}")
     @llm_gate.gated
     async def _send_omni_response(self, original_msg, audio_data: bytes, is_opus: bool):
@@ -815,7 +815,7 @@ class FeishuClient:
             upload_resp = self.lark_client.im.v1.file.create(upload_req)
             
             if not upload_resp.success():
-                print(f"音频上传失败: {upload_resp.code} - {upload_resp.msg}")
+                logging.getLogger("app").info(f"音频上传失败: {upload_resp.code} - {upload_resp.msg}")
                 return
 
             file_key = upload_resp.data.file_key
@@ -850,14 +850,14 @@ class FeishuClient:
                 resp = self.lark_client.im.v1.message.reply(req_builder.build())
 
             if not resp.success():
-                print(f"音频消息发送失败: {resp.code} - {resp.msg}")
+                logging.getLogger("app").info(f"音频消息发送失败: {resp.code} - {resp.msg}")
             else:
                 logging.info(f"音频发送成功，Message ID: {resp.data.message_id}")
 
         except Exception as e:
-            print(f"发送Omni音频异常: {e}")
+            logging.getLogger("app").info(f"发送Omni音频异常: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
 
 
     async def _transcribe_audio(self, audio_data: bytes, file_key: str) -> str:
@@ -887,9 +887,9 @@ class FeishuClient:
                 ) as response:
                     
                     if response.status != 200:
-                        print(f"ASR请求失败，状态码: {response.status}")
+                        logging.getLogger("app").info(f"ASR请求失败，状态码: {response.status}")
                         response_text = await response.text()
-                        print(f"ASR错误响应: {response_text}")
+                        logging.getLogger("app").info(f"ASR错误响应: {response_text}")
                         return None
                     
                     # 解析响应
@@ -906,16 +906,16 @@ class FeishuClient:
                             return None
                     else:
                         error_msg = result.get("error", "未知错误")
-                        print(f"ASR识别失败: {error_msg}")
+                        logging.getLogger("app").info(f"ASR识别失败: {error_msg}")
                         return None
                         
         except asyncio.TimeoutError:
-            print("ASR请求超时")
+            logging.getLogger("app").info("ASR请求超时")
             return None
         except Exception as e:
-            print(f"ASR转换异常: {e}")
+            logging.getLogger("app").info(f"ASR转换异常: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
             return None
 
 
@@ -975,9 +975,9 @@ class FeishuClient:
                     json=payload
                 ) as resp:
                     if resp.status != 200:
-                        print(f"TTS 请求失败: {resp.status}")
+                        logging.getLogger("app").info(f"TTS 请求失败: {resp.status}")
                         error_text = await resp.text()
-                        print(f"TTS 错误响应: {error_text}")
+                        logging.getLogger("app").info(f"TTS 错误响应: {error_text}")
                         await self._send_text(original_msg, "语音生成失败，请稍后重试")
                         return
 
@@ -987,14 +987,14 @@ class FeishuClient:
                     logging.info(f"TTS响应成功，opus大小: {len(opus_data) / 1024:.1f}KB，格式: {audio_format}")
 
                     if len(opus_data) < 100:
-                        print(f"opus数据异常，大小仅 {len(opus_data)} 字节")
+                        logging.getLogger("app").info(f"opus数据异常，大小仅 {len(opus_data)} 字节")
                         await self._send_text(original_msg, "语音生成异常，请重试")
                         return
 
                     # 检查文件大小（飞书限制）
                     max_size = 10 * 1024 * 1024  # 10MB
                     if len(opus_data) > max_size:
-                        print(f"opus文件过大: {len(opus_data) / (1024*1024):.1f}MB")
+                        logging.getLogger("app").info(f"opus文件过大: {len(opus_data) / (1024*1024):.1f}MB")
                         await self._send_text(original_msg, "语音文件过大，请尝试较短的文本")
                         return
 
@@ -1016,13 +1016,13 @@ class FeishuClient:
                         upload_resp = self.lark_client.im.v1.file.create(upload_req)
                         
                     except Exception as upload_error:
-                        print(f"构建opus上传请求失败: {upload_error}")
+                        logging.getLogger("app").info(f"构建opus上传请求失败: {upload_error}")
                         await self._send_text(original_msg, "语音上传失败，请重试")
                         return
 
                     # 检查上传结果
                     if not upload_resp.success():
-                        print(f"上传opus语音失败: {upload_resp.code} - {upload_resp.msg}")
+                        logging.getLogger("app").info(f"上传opus语音失败: {upload_resp.code} - {upload_resp.msg}")
                         
                         # 详细的错误处理
                         if upload_resp.code == 234001:
@@ -1068,7 +1068,7 @@ class FeishuClient:
                             send_resp = self.lark_client.im.v1.message.reply(req)
 
                         if not send_resp.success():
-                            print(f"发送opus语音消息失败: {send_resp.code} - {send_resp.msg}")
+                            logging.getLogger("app").info(f"发送opus语音消息失败: {send_resp.code} - {send_resp.msg}")
                             
                             if send_resp.code == 230002:
                                 await self._send_text(original_msg, "语音消息格式不支持")
@@ -1080,16 +1080,16 @@ class FeishuClient:
                             logging.info(f"opus语音消息发送成功，消息ID: {send_resp.data.message_id}")
 
                     except Exception as send_error:
-                        print(f"发送opus语音消息异常: {send_error}")
+                        logging.getLogger("app").info(f"发送opus语音消息异常: {send_error}")
                         await self._send_text(original_msg, "语音消息发送失败")
 
         except asyncio.TimeoutError:
-            print("opus TTS请求超时")
+            logging.getLogger("app").info("opus TTS请求超时")
             await self._send_text(original_msg, "语音生成超时，请稍后重试")
         except Exception as e:
-            print(f"发送opus语音异常: {e}")
+            logging.getLogger("app").info(f"发送opus语音异常: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
             await self._send_text(original_msg, "语音功能暂时不可用，请稍后重试")
 
 
@@ -1137,7 +1137,7 @@ class FeishuClient:
         except Exception as e:
             logging.warning(f"从富文本提取文本失败: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
         
         return "\n".join(extracted_text)
 
@@ -1171,7 +1171,7 @@ class FeishuClient:
         except Exception as e:
             logging.warning(f"从富文本提取图片失败: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
         
         return image_keys
 
@@ -1250,15 +1250,15 @@ class FeishuClient:
                 resp = self.lark_client.im.v1.message.reply(req)
             
             if not resp.success():
-                print(f"发送 Markdown 文本失败: {resp.code} {resp.msg}")
+                logging.getLogger("app").info(f"发送 Markdown 文本失败: {resp.code} {resp.msg}")
                 # 如果发送失败（可能是 md 语法太复杂或有非法字符），可以考虑回退到纯文本
                 # logging.info("尝试回退到纯文本发送...")
                 # ... (可选的回退逻辑)
                 
         except Exception as e:
-            print(f"发送文本异常: {e}")
+            logging.getLogger("app").info(f"发送文本异常: {e}")
             import traceback
-            print(traceback.format_exc())
+            logging.getLogger("app").info(traceback.format_exc())
                 
     @llm_gate.gated
     async def _send_image(self, original_msg, image_url):
@@ -1268,7 +1268,7 @@ class FeishuClient:
             async with aiohttp.ClientSession() as session:
                 async with session.get(image_url) as response:
                     if response.status != 200:
-                        print(f"下载图片失败: {image_url}")
+                        logging.getLogger("app").info(f"下载图片失败: {image_url}")
                         return
                     
                     image_data = await response.read()
@@ -1288,7 +1288,7 @@ class FeishuClient:
             upload_resp = self.lark_client.im.v1.image.create(upload_req)
             
             if not upload_resp.success():
-                print(f"上传图片失败: {upload_resp.msg}")
+                logging.getLogger("app").info(f"上传图片失败: {upload_resp.msg}")
                 return
             
             image_key = upload_resp.data.image_key
@@ -1322,10 +1322,10 @@ class FeishuClient:
                 resp = self.lark_client.im.v1.message.reply(req)
             
             if not resp.success():
-                print(f"发送图片失败: {resp.code} {resp.msg}")
+                logging.getLogger("app").info(f"发送图片失败: {resp.code} {resp.msg}")
                 
         except Exception as e:
-            print(f"发送图片异常: {e}")
+            logging.getLogger("app").info(f"发送图片异常: {e}")
 
     @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):

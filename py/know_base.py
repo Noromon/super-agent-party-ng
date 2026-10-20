@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import httpx # 核心修复：使用异步 HTTP 客户端
 from typing import List, Dict, Union
@@ -129,7 +131,7 @@ async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vend
         bm25_path = save_dir / "bm25_index.json"
         
         if not docs:
-            print("Warning: No documents provided for BM25.")
+            logging.getLogger("app").info("Warning: No documents provided for BM25.")
         else:
             # 1. 清洗数据，防止 Unicode 错误
             clean_docs_data = []
@@ -151,11 +153,11 @@ async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vend
                     ensure_ascii=False
                 )
             )
-            print(f"BM25 index saved successfully for KB {kb_id}")
+            logging.getLogger("app").info(f"BM25 index saved successfully for KB {kb_id}")
 
     except Exception as e:
         # 即使 BM25 失败，也只打印警告，不中断程序
-        print(f"⚠️ BM25 Index failed (Skipping): {str(e)}")
+        logging.getLogger("app").info(f"⚠️ BM25 Index failed (Skipping): {str(e)}")
         # 尝试清理可能损坏的文件
         if 'bm25_path' in locals() and bm25_path.exists():
             try:
@@ -183,12 +185,12 @@ async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vend
             else:
                 await asyncio.to_thread(vector_db.add_documents, batch)
             
-            print(f"Processed {min(i+batch_size, len(docs))}/{len(docs)} documents")
+            logging.getLogger("app").info(f"Processed {min(i+batch_size, len(docs))}/{len(docs)} documents")
         
         # 最终保存
         if vector_db:
             await asyncio.to_thread(vector_db.save_local, folder_path=str(save_dir), index_name="index")
-            print(f"Vector store saved successfully for KB {kb_id}")
+            logging.getLogger("app").info(f"Vector store saved successfully for KB {kb_id}")
         
     except Exception as e:
         raise RuntimeError(f"Vector store build failed: {str(e)}")
@@ -212,7 +214,7 @@ async def load_retrievers(kb_id, cur_kb, cur_vendor):
                 bm25_retriever = await asyncio.to_thread(BM25Retriever.from_documents, bm25_docs)
                 bm25_retriever.k = cur_kb["chunk_k"]
     except Exception as e:
-        print(f"Error loading BM25 (will fallback): {e}")
+        logging.getLogger("app").info(f"Error loading BM25 (will fallback): {e}")
 
     # 2. 加载向量检索器
     embeddings = MyOpenAICompatibleEmbeddings(
@@ -235,7 +237,7 @@ async def load_retrievers(kb_id, cur_kb, cur_vendor):
     # 3. 如果 BM25 加载失败（比如之前构建时跳过了），使用向量检索器顶替
     # 这样 EnsembleRetriever 相当于用了两个 VectorRetriever，不会报错
     if bm25_retriever is None:
-        print("Fallback: Using Vector Retriever for BM25 slot.")
+        logging.getLogger("app").info("Fallback: Using Vector Retriever for BM25 slot.")
         bm25_retriever = vector_retriever
 
     return bm25_retriever, vector_retriever

@@ -4,6 +4,8 @@
 用法: .venv\\Scripts\\python.exe py\\audit_tools.py
 安全: 冒烟仅调用只读 local 工具，绝不触碰 shell/edit/kill/net/docker_sandbox。
 """
+
+import logging
 import asyncio
 import inspect
 import json
@@ -100,7 +102,7 @@ async def smoke(problems):
         status = "OK" if ok(r) else "FAIL"
         if status == "FAIL":
             problems.append(f"[smoke] {name}({kw}): 结果异常 -> {r[:100]!r}")
-        print(f"  [smoke] {status} {name}({', '.join(f'{k}={v!r}' for k, v in kw.items())})")
+        logging.getLogger("app").info(f"  [smoke] {status} {name}({', '.join(f'{k}={v!r}' for k, v in kw.items())})")
 
 
 async def main():
@@ -110,12 +112,12 @@ async def main():
     for k, e in cli_tool.LOCAL_TOOLS_REGISTRY.items():
         audit_entry(f"local:{k}", e, problems, warns)
     audit_dispatch(problems, warns)
-    print("== 冒烟矩阵（只读, workspace=%s） ==" % SMOKE_WS)
+    logging.getLogger("app").info("== 冒烟矩阵（只读, workspace=%s） ==" % SMOKE_WS)
     await smoke(problems)
-    print("\n== 确定问题 (%d) ==" % len(problems))
+    logging.getLogger("app").info("\n== 确定问题 (%d) ==" % len(problems))
     for p in problems:
         print("  !", p)
-    print("== 提示 (%d) ==" % len(warns))
+    logging.getLogger("app").info("== 提示 (%d) ==" % len(warns))
     for w in warns:
         print("  -", w)
     return 1 if problems else 0

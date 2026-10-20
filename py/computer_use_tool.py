@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import time
 import platform
@@ -17,7 +19,7 @@ try:
     GUI_AVAILABLE = True
 except (KeyError, ImportError, Exception) as e:
     # 如果在 Docker/无显示器环境中，忽略报错，只打印警告
-    print(f"⚠️ [Warning] 桌面鼠标键盘工具已禁用 (缺少 DISPLAY): {e}")
+    logging.getLogger("app").info(f"⚠️ [Warning] 桌面鼠标键盘工具已禁用 (缺少 DISPLAY): {e}")
 
 # 拦截器：如果大模型在 Docker 里试图调用鼠标键盘，给它返回一句话，而不是让系统崩溃
 def require_gui(func):
@@ -288,7 +290,7 @@ async def keyboard_hold(keys: List[str], duration: float) -> str:
                 time.sleep(sleep_time)
                 elapsed = time.time() - start_time
         except Exception as e:
-            print(f"按住按键时出错: {e}")
+            logging.getLogger("app").info(f"按住按键时出错: {e}")
         finally:
             for key in reversed(keys):
                 try:

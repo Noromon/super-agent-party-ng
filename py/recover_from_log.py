@@ -5,6 +5,8 @@
   python py/recover_from_log.py            # 解析+存档到 E:\\Temp\\recovered，不写库
   python py/recover_from_log.py --import   # 另经 WS save_conversations_delta 写入 SAP
 """
+
+import logging
 import ast
 import asyncio
 import json
@@ -189,9 +191,9 @@ def main():
         n_user = sum(1 for m in msgs if m.get("role") == "user")
         n_asst = sum(1 for m in msgs if m.get("role") == "assistant")
         n_tool = sum(1 for m in msgs if m.get("role") == "tool")
-        print(f"[{session}] backend={len(msgs)} (u{n_user}/a{n_asst}/t{n_tool}) ui={len(conv['messages'])} "
+        logging.getLogger("app").info(f"[{session}] backend={len(msgs)} (u{n_user}/a{n_asst}/t{n_tool}) ui={len(conv['messages'])} "
               f"title={conv['title']}")
-        print(f"   first user: {str(msgs[0].get('content'))[:60]}")
+        logging.getLogger("app").info(f"   first user: {str(msgs[0].get('content'))[:60]}")
         convs.append(conv)
     print("archive ->", OUT)
     if do_import:

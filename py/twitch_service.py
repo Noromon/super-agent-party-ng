@@ -1,3 +1,5 @@
+
+import logging
 import asyncio
 import socket
 import ssl
@@ -49,7 +51,7 @@ class SimpleTwitchChat:
             except Exception as exc:
                 if not self._running:
                     break
-                print(f"[Twitch] 连接异常: {exc}，{reconnect_delay}s 后重连")
+                logging.getLogger("app").info(f"[Twitch] 连接异常: {exc}，{reconnect_delay}s 后重连")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 60)
 
@@ -199,7 +201,7 @@ async def start_twitch_task(config: dict, on_msg_cb: Callable[[str, str, str], N
     _twitch_chat = SimpleTwitchChat(token, channel)
     _twitch_chat.set_callback(on_msg_cb)
     await _twitch_chat.start()
-    print("[Twitch] 监听任务已启动")
+    logging.getLogger("app").info("[Twitch] 监听任务已启动")
 
 
 async def stop_twitch_task():
@@ -207,4 +209,4 @@ async def stop_twitch_task():
     if _twitch_chat:
         await _twitch_chat.stop()
         _twitch_chat = None
-        print("[Twitch] 监听任务已停止")
+        logging.getLogger("app").info("[Twitch] 监听任务已停止")
