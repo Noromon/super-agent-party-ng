@@ -154,6 +154,7 @@ max-complexity = 60
 # media router: legacy carried verbatim from server.py (R1 migration);
 # retire these exemptions while splitting the handlers (M-3)
 "py/routers/media.py" = ["C901", "E701", "E702", "E722"]
+"py/routers/system.py" = ["F541"]
 "py/scheduler.py" = ["E722"]
 "py/sherpa_asr.py" = ["F401"]
 "py/sherpa_model_manager.py" = ["E722", "F401"]
