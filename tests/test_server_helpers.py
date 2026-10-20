@@ -147,7 +147,9 @@ class TestStreamTtlSweep:
         assert t.cancelled
 
     def test_release_helper_defined_and_used(self):
+        # R1 router migration: the resume call site moved to py/routers/tasks.py
         src = (ROOT / "server.py").read_text(encoding="utf-8")
+        src += (ROOT / "py" / "routers" / "tasks.py").read_text(encoding="utf-8")
         assert src.count("_release_consumer(stream_id)") >= 2
 
 

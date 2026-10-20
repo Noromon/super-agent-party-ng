@@ -14,12 +14,16 @@ SRC = (ROOT / "server.py").read_text(encoding="utf-8")
 
 
 def _func_src(name):
-    tree = ast.parse(SRC)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            seg = ast.get_source_segment(SRC, node)
-            assert seg
-            return seg
+    # R1 router migration: endpoint functions may live in py/routers/*.py
+    sources = [SRC] + [f.read_text(encoding="utf-8")
+                       for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
+    for src in sources:
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+                seg = ast.get_source_segment(src, node)
+                assert seg
+                return seg
     raise AssertionError(f"function not found: {name}")
 
 SCRIPT_TOOL_OK = [
