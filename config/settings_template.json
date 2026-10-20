@@ -270,7 +270,6 @@
     "sqlSettings":{
       "enabled": false,
       "engine": "sqlite",
-      "dbPath": "",
       "user": "",
       "password": "",
       "host":"",

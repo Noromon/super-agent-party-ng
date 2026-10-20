@@ -60,7 +60,7 @@ DEFAULT_EBD_DIR = os.path.join(USER_DATA_DIR, 'ebd')
 
 # --- 跨平台全局Skills路径 ---
 def get_global_skills_dir():
-    """
+    r"""
     获取标准的全局Agent Skills目录，支持跨平台
     标准路径: ~/.agents/skills (macOS/Linux) 或 %USERPROFILE%\.agents\skills (Windows)
     """
@@ -494,6 +494,19 @@ def _quarantine_raw(db_path, raw, tag):
 
 
 
+def _migrate_legacy_keys(target_dict):
+    """E-6：旧键→新键一次性迁移通道（load_settings 合并默认值后执行，幂等）。
+    未来任何键改名/搬家都追加到此表，勿在读取点散写兼容。返回是否有修改。"""
+    changed = False
+    sql = target_dict.get("sqlSettings")
+    if isinstance(sql, dict) and "dbPath" in sql:
+        legacy = sql.pop("dbPath")
+        if legacy and not str(sql.get("dbpath", "")).strip():
+            sql["dbpath"] = legacy
+        changed = True
+    return changed
+
+
 async def load_settings():
     await init_db()
     defaults = get_default_settings_sync().copy()
@@ -522,6 +535,8 @@ async def load_settings():
                             merge_defaults(value, target_dict[key])
                 
                 merge_defaults(defaults, user_settings)
+                if _migrate_legacy_keys(user_settings):
+                    has_changes[0] = True
                 if has_changes[0] and parse_ok:
                     asyncio.create_task(save_settings(user_settings))
                 if not parse_ok:
