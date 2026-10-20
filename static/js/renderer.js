@@ -1097,11 +1097,13 @@ const app = Vue.createApp({
     activeMenu(newVal) {
       this.handleExtensionsPolling(newVal, this.subMenu);
       this.handleSkillsPolling(newVal, this.subMenu, this.activeCLITab);
+      this.handleAutoLoadOnMenu(newVal, this.subMenu);
     },
     // 监听子菜单
     subMenu(newVal) {
       this.handleExtensionsPolling(this.activeMenu, newVal);
       this.handleSkillsPolling(this.activeMenu,newVal, this.activeCLITab);
+      this.handleAutoLoadOnMenu(this.activeMenu, newVal);
     },
     // 监听 CLI 内部的 Tab
     activeCLITab(newVal) {

@@ -17430,6 +17430,16 @@ handleSkillsPolling(activeMenu, menu, tab) {
     }
   },
 
+  // 进入设置类页面时自动拉取原本需手动点「刷新」才加载的列表
+  handleAutoLoadOnMenu(menu, sub) {
+    if (menu === 'system') {
+      this.loadBackupList();
+    } else if (menu === 'deploy-bot' && sub === 'im_bot') {
+      this.fetchBotConversations();
+      this.fetchXmppCertPending();
+    }
+  },
+
   // 启动扩展轮询
   startExtensionsPolling() {
     if (this.extensionsPollingTimer) return;
