@@ -6188,13 +6188,9 @@ async def generate_complete_response(*args, **kwargs):
                 asyncio.create_task(_cleanup_stream(complete_stream_id, delay=5.0))
 
 
-async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
-    global mcp_client_list,HA_client,ChromeMCP_client,sql_client
-    
-    # 设置对话上下文，供 review_image 等工具使用
-    current_request_messages.set(request.messages)
-    
-    DRS_STAGE = 1 # 1: 明确用户需求阶段 2: 工具调用阶段 3: 生成结果阶段
+
+def _apply_context_compression(request, DRS_STAGE):
+    """L1 context window compression (complete channel). (M-3 split)"""
     if len(request.messages) > 2:
         DRS_STAGE = 2
 
@@ -6243,6 +6239,532 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
 
         request.messages = sanitize_tool_chains(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
+    return DRS_STAGE
+
+
+async def _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):
+    """Character-book lore + persona fields + mem0 relevant-memory recall."""
+    if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
+        if settings["memorySettings"]["userName"] and settings["memorySettings"]["userName"] != "user":
+            logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
+            content_append(request.messages, 'system', "当前与你交流的人的名字为：\n\n" + settings["memorySettings"]["userName"] + "\n\n")
+        lore_content = ""
+        assistant_reply = ""
+        # 找出request.messages中上次的assistant回复
+        for i in range(len(request.messages)-1, -1, -1):
+            if request.messages[i]['role'] == 'assistant':
+                assistant_reply = request.messages[i]['content']
+                break
+        if cur_memory["characterBook"]:
+            for lore in cur_memory["characterBook"]:
+                # lore['keysRaw'] 按照换行符分割，并去除空字符串
+                lore_keys = lore["keysRaw"].split("\n")
+                lore_keys = [key for key in lore_keys if key != ""]
+                logging.getLogger("app").info(lore_keys)
+                # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
+                if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
+                    lore_content += lore['content'] + "\n\n"
+        if lore_content:
+            if settings["memorySettings"]["userName"]:
+                # 替换lore_content中的{{user}}为settings["memorySettings"]["userName"]
+                lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换lore_content中的{{char}}为cur_memory["name"]
+            lore_content = lore_content.replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+            content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
+        if cur_memory["description"]:
+            if settings["memorySettings"]["userName"]:
+                # 替换cur_memory["description"]中的{{user}}为settings["memorySettings"]["userName"]
+                cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
+            cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+            content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
+        if cur_memory["personality"]:
+            if settings["memorySettings"]["userName"]:
+                # 替换cur_memory["personality"]中的{{user}}为settings["memorySettings"]["userName"]
+                cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
+            cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
+            content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
+        if cur_memory['mesExample']:
+            if settings["memorySettings"]["userName"]:
+                # 替换cur_memory["mesExample"]中的{{user}}为settings["memorySettings"]["userName"]
+                cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
+            cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+            content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
+        if cur_memory["systemPrompt"]:
+            if settings["memorySettings"]["userName"]:
+                # 替换cur_memory["systemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
+                cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
+            cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
+            content_append(request.messages, 'system', "系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
+        if settings["memorySettings"]["genericSystemPrompt"]:
+            if settings["memorySettings"]["userName"]:
+                # 替换settings["memorySettings"]["genericSystemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
+                settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
+            # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
+            settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
+            logging.getLogger("app").info("添加系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
+            content_append(request.messages, 'system', "系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
+                    
+        if m0:
+            memoryLimit = settings["memorySettings"]["memoryLimit"]
+            try:
+                # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
+                # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
+                relevant_memories = await asyncio.to_thread(
+                    m0.search, 
+                    query=user_prompt, 
+                    user_id=memoryId, 
+                    limit=memoryLimit
+                )
+                relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
+            except Exception as e:
+                print("m0.search error:",e)
+                relevant_memories = ""
+            logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
+            content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n") 
+
+
+async def _complete_web_search_setup(request, settings, user_prompt, tools, enable_web_search):
+    """before_thinking search execution + after_thinking tool announcements."""
+    from py.web_search import (
+        DDGsearch, searxng, Tavily_search, Bing_search, Google_search,
+        Brave_search, Exa_search, Serper_search, bochaai_search,
+        duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
+        brave_tool, exa_tool, serper_tool, bochaai_tool, jina_crawler_tool,
+        simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
+    )
+    if settings['webSearch']['enabled'] or enable_web_search:
+        if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
+            if settings['webSearch']['engine'] == 'duckduckgo':
+                results = await DDGsearch(user_prompt)
+            elif settings['webSearch']['engine'] == 'searxng':
+                results = await searxng(user_prompt)
+            elif settings['webSearch']['engine'] == 'tavily':
+                results = await Tavily_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'bing':
+                results = await Bing_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'google':
+                results = await Google_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'brave':
+                results = await Brave_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'exa':
+                results = await Exa_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'serper':
+                results = await Serper_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'bochaai':
+                results = await bochaai_search(user_prompt)
+            if results:
+                content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}")
+        if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
+            if settings['webSearch']['engine'] == 'duckduckgo':
+                tools.append(duckduckgo_tool)
+            elif settings['webSearch']['engine'] == 'searxng':
+                tools.append(searxng_tool)
+            elif settings['webSearch']['engine'] == 'tavily':
+                tools.append(tavily_tool)
+            elif settings['webSearch']['engine'] == 'bing':
+                tools.append(bing_tool)
+            elif settings['webSearch']['engine'] == 'google':
+                tools.append(google_tool)
+            elif settings['webSearch']['engine'] == 'brave':
+                tools.append(brave_tool)
+            elif settings['webSearch']['engine'] == 'exa':
+                tools.append(exa_tool)
+            elif settings['webSearch']['crawler'] == 'serper':
+                tools.append(serper_tool)
+            elif settings['webSearch']['crawler'] == 'bochaai':
+                tools.append(bochaai_tool)
+
+            if settings['webSearch']['crawler'] == 'jina':
+                tools.append(jina_crawler_tool)
+            elif settings['webSearch']['crawler'] == 'crawl4ai':
+                tools.append(Crawl4Ai_tool)
+            elif settings['webSearch']['crawler'] == 'firecrawl':
+                tools.append(firecrawl_tool)
+            elif settings['webSearch']['crawler'] == 'simpleRequest':
+                tools.append(simple_fetch_tool)
+            elif settings['webSearch']['crawler'] == 'mdnew':
+                tools.append(markdown_new_tool)
+
+
+async def _complete_reasoner_prep(request, reasoner_client, settings, chat_vendor, reasoner_vendor, images, tools, extra, reasoner_extra, open_tag, close_tag, enable_deep_research, enable_thinking, DRS_STAGE, user_prompt):
+    """First reasoner pass: build reasoner_messages, fetch reasoning, prepend."""
+    reasoner_messages = copy.deepcopy(request.messages)
+    if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+        drs_msg = get_drs_stage(DRS_STAGE)
+        if drs_msg:
+            content_append(reasoner_messages, 'user',  f"\n\n{drs_msg}\n\n")
+        content_append(reasoner_messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
+    if tools:
+        content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
+    for modelProvider in settings['modelProviders']: 
+        if modelProvider['id'] == settings['reasoner']['selectedProvider']:
+            vendor = modelProvider['vendor']
+            break
+    msg = await images_add_in_messages(reasoner_messages, images,settings)   
+    if chat_vendor == 'OpenAI':
+        extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
+    else:
+        extra['max_tokens'] = request.max_tokens or settings['max_tokens']
+    if reasoner_vendor == 'OpenAI':
+        reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
+    else:
+        reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
+    if request.reasoning_effort or settings['reasoning_effort']:
+        extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
+    if settings['reasoner']['reasoning_effort'] is not None:
+        reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort'] 
+    if vendor == 'Ollama':
+        reasoner_response = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=False,
+            temperature=settings['reasoner']['temperature'],
+            **reasoner_extra
+        )
+        reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
+        if reasoning_buffer:
+            content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+        else:
+            reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning']
+            if reasoning_buffer:
+                content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+            else:
+                # 将推理结果中的思考内容提取出来
+                reasoning_content = reasoner_response.model_dump()['choices'][0]['message']['content']
+                # open_tag和close_tag之间的内容
+                start_index = reasoning_content.find(open_tag) + len(open_tag)
+                end_index = reasoning_content.find(close_tag)
+                if start_index != -1 and end_index != -1:
+                    reasoning_content = reasoning_content[start_index:end_index]
+                else:
+                    reasoning_content = ""
+                content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
+    else:
+        reasoner_response = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=False,
+            stop=settings['reasoner']['stop_words'],
+            temperature=settings['reasoner']['temperature'],
+            **reasoner_extra
+        )
+        reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
+        if reasoning_buffer:
+            content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+        else:
+            reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning']
+            if reasoning_buffer:
+                content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+            else:
+                reasoning_buffer = ""
+                content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+    return vendor
+
+
+async def _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty):
+    """Deep-research stage machine shared by the pre-loop and in-loop copies.
+    none_to_empty=True preserves the pre-loop copy's None guard; the in-loop
+    copy never had one (raw behaviour kept)."""
+    search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
+    research_response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+            "role": "user",
+            "content": search_prompt,
+            }
+        ],
+        temperature=0.5,
+        extra_body = extra_params, # 其他参数
+    )
+    response_content = research_response.choices[0].message.content
+    if none_to_empty and response_content is None:
+        response_content = ""
+
+    # 用re 提取```json 包裹json字符串 ```
+    if "```json" in response_content:
+        try:
+            response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
+        except:
+            # 用re 提取```json 之后的内容
+            response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
+    response_content = json.loads(response_content)
+    if response_content["status"] == "done":
+        search_not_done = False
+    elif response_content["status"] == "not_done":
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": research_response.choices[0].message.content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "need_more_info":
+        DRS_STAGE = 2
+        search_not_done = False
+    elif response_content["status"] == "need_work":
+        DRS_STAGE = 2
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": research_response.choices[0].message.content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+            }
+        )
+    elif response_content["status"] == "need_more_work":
+        DRS_STAGE = 2
+        search_not_done = True
+        search_task = response_content["unfinished_task"]
+        task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": research_response.choices[0].message.content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": task_prompt,
+            }
+        )
+    elif response_content["status"] == "answer":
+        DRS_STAGE = 3
+        search_not_done = True
+        drs_msg = get_drs_stage(DRS_STAGE)
+        request.messages.append(
+            {
+                "role": "assistant",
+                "content": research_response.choices[0].message.content,
+                "reasoning_content": "",
+            }
+        )
+        request.messages.append(
+            {
+                "role": "user",
+                "content": drs_msg,
+            }
+        )
+    return DRS_STAGE, search_not_done, search_task
+
+
+async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, response):
+    """Non-stream tool_calls round: dispatch, ack, approval abort. Returns abort."""
+    from py.know_base import rerank_knowledge_base
+    assistant_message = response.choices[0].message
+    ns_tool_calls_meta = []
+    for _tc in assistant_message.tool_calls:
+        ns_tool_calls_meta.append({
+            "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
+            "function": {
+                "arguments": _tc.function.arguments or "",
+                "name": _tc.function.name,
+            },
+            "type": getattr(_tc, "type", None) or "function",
+        })
+    request.messages.append({
+        "role": "assistant",
+        "content": assistant_message.content or "",
+        "tool_calls": ns_tool_calls_meta,
+        "reasoning_content": "",
+    })
+    ns_pending_abort = False
+    ns_acked_ids = set()
+    for _ti, _tc in enumerate(assistant_message.tool_calls):
+        # T-8: 取消围栏——取消后不再调度任何工具
+        _cur_entry = _current_stream_entry.get()
+        if _cur_entry and _cur_entry.get("cancelled"):
+            ns_pending_abort = True
+            break
+        tool_call_id = ns_tool_calls_meta[_ti]["id"]
+        response_content = _tc.function
+        logging.getLogger("app").info(response_content.name)
+        args_dict, arg_err = parse_tool_arguments(_tc.function.arguments)
+        if arg_err is not None:
+            err_text = arg_error_text(arg_err)
+            ns_acked_ids.add(tool_call_id)
+            reasoner_messages.append({
+                "role": "assistant",
+                "content": f"{response_content.name}({_tc.function.arguments})",
+                "reasoning_content": "",
+            })
+            reasoner_messages.append({
+                "role": "user",
+                "content": f"{response_content.name}工具结果：" + truncate_tool_result(err_text, 8000),
+            })
+            request.messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": response_content.name,
+                "content": err_text,
+            })
+            continue
+        try:
+            results = await dispatch_tool(response_content.name, args_dict, settings)
+        except Exception as e:
+            results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
+        if isinstance(results, AsyncIterator):
+            buffer = []
+            async for chunk in results:
+                buffer.append(chunk)
+            results = "".join(buffer)
+        if results is None:
+            ns_acked_ids.add(tool_call_id)
+            request.messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "name": response_content.name,
+                "content": NONE_TEXT,
+            })
+            ns_pending_abort = True
+            break
+        if response_content.name in ["query_knowledge_base"] and isinstance(results, list):
+            if settings["KBSettings"]["is_rerank"]:
+                results = await rerank_knowledge_base(user_prompt, results)
+            results = json.dumps(results, ensure_ascii=False, indent=4)
+        tool_result_text = str(results)
+        ns_acked_ids.add(tool_call_id)
+        request.messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": response_content.name,
+            "content": truncate_tool_result(tool_result_text),
+        })
+        reasoner_messages.append({
+            "role": "assistant",
+            "content": f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})",
+            "reasoning_content": "",
+        })
+        reasoner_messages.append({
+            "role": "user",
+            "content": f"{response_content.name}工具结果：" + truncate_tool_result(tool_result_text, 8000),
+        })
+        # T-9: 结构化哨兵判定（与 stream 路径同源）
+        if _is_approval_result(results) is not None:
+            ns_pending_abort = True
+            break
+    # 为未执行的调用补上说明性 tool 结果，保证成对闭合
+    append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
+    if ns_pending_abort:
+        return True
+    return False
+
+
+async def _ns_reasoner_pass(request, reasoner_client, reasoner_messages, settings, images, reasoner_extra, open_tag, close_tag, tools, vendor):
+    """In-loop reasoner refresh: re-run reasoner, prepend its reasoning."""
+    if tools:
+        content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
+    for modelProvider in settings['modelProviders']: 
+        if modelProvider['id'] == settings['reasoner']['selectedProvider']:
+            vendor = modelProvider['vendor']
+            break
+    msg = await images_add_in_messages(reasoner_messages, images,settings)
+    if vendor == 'Ollama':
+        reasoner_response = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=False,
+            temperature=settings['reasoner']['temperature'],
+            **reasoner_extra
+        )
+        # 将推理结果中的思考内容提取出来
+        reasoning_content = reasoner_response.model_dump()['choices'][0]['message']['content']
+        # open_tag和close_tag之间的内容
+        start_index = reasoning_content.find(open_tag) + len(open_tag)
+        end_index = reasoning_content.find(close_tag)
+        if start_index != -1 and end_index != -1:
+            reasoning_content = reasoning_content[start_index:end_index]
+        else:
+            reasoning_content = ""
+        content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
+    else:
+        reasoner_response = await reasoner_client.chat.completions.create(
+            model=settings['reasoner']['model'],
+            messages=msg,
+            stream=False,
+            stop=settings['reasoner']['stop_words'],
+            temperature=settings['reasoner']['temperature'],
+            **reasoner_extra
+        )
+        content_prepend(request.messages, 'assistant', reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']) # 可参考的推理过程
+    return vendor
+
+
+async def _complete_finalize(request, settings, response, m0, memoryId, cur_memory, user_prompt, open_tag, close_tag):
+    """response_dict normalization + mem0 write job + turn-log shadow append."""
+    response_dict = response.model_dump()
+    content = response_dict["choices"][0]['message']['content']
+    if response_dict["choices"][0]['message'].get('reasoning_content',""):
+        pass
+    else:
+        response_dict["choices"][0]['message']['reasoning_content'] = response_dict["choices"][0]['message'].get('reasoning',"")
+    if open_tag in content and close_tag in content:
+        reasoning_content = re.search(fr'{open_tag}(.*?)\{close_tag}', content, re.DOTALL)
+        if reasoning_content:
+            # 存储到 reasoning_content 字段
+            response_dict["choices"][0]['message']['reasoning_content'] = reasoning_content.group(1).strip()
+            # 移除原内容中的标签部分
+            response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
+    if m0:
+        messages=f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}"
+        infer = cur_memory.get('infer') or False
+        _m0_job = m0
+        _mid = memoryId
+        _job_msgs = messages
+
+        def _mem_job():
+            metadata = {
+                "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
+            logging.getLogger("app").info("知识库更新完成")
+
+        llm_gate.submit_memory_job(
+            _mid, _mem_job, name="mem0-add-complete",
+            debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
+                     if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
+            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
+    try:
+        from py.turn_log import shadow_append as _shadow_append
+        await _shadow_append(request.conversation_id, request.messages, log=print)
+    except Exception as _tle:
+        logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
+    return response_dict
+async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
+    global mcp_client_list,HA_client,ChromeMCP_client,sql_client
+    
+    # 设置对话上下文，供 review_image 等工具使用
+    current_request_messages.set(request.messages)
+    
+    DRS_STAGE = 1 # 1: 明确用户需求阶段 2: 工具调用阶段 3: 生成结果阶段
+    DRS_STAGE = _apply_context_compression(request, DRS_STAGE)
         # =========================================================================
 
     from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool
@@ -6296,6 +6818,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
     from py.mode_change import mode_change_tool
     from py.acpx_tools import acp_agent_tool
     m0 = None
+    memoryId = None
+    cur_memory = None
     if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
         memoryId = settings["memorySettings"]["selectedMemory"]
         cur_memory = None
@@ -6337,91 +6861,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         kb_list = []
         user_prompt = request.messages[-1].get('content') or ""
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
-            if settings["memorySettings"]["userName"] and settings["memorySettings"]["userName"] != "user":
-                logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
-                content_append(request.messages, 'system', "当前与你交流的人的名字为：\n\n" + settings["memorySettings"]["userName"] + "\n\n")
-            lore_content = ""
-            assistant_reply = ""
-            # 找出request.messages中上次的assistant回复
-            for i in range(len(request.messages)-1, -1, -1):
-                if request.messages[i]['role'] == 'assistant':
-                    assistant_reply = request.messages[i]['content']
-                    break
-            if cur_memory["characterBook"]:
-                for lore in cur_memory["characterBook"]:
-                    # lore['keysRaw'] 按照换行符分割，并去除空字符串
-                    lore_keys = lore["keysRaw"].split("\n")
-                    lore_keys = [key for key in lore_keys if key != ""]
-                    logging.getLogger("app").info(lore_keys)
-                    # 如果lore_keys不为空，并且lore_keys的任意一个元素在user_prompt或者assistant_reply中，则添加lore['content']到lore_content中
-                    if lore_keys != [] and any(key in user_prompt or key in assistant_reply for key in lore_keys):
-                        lore_content += lore['content'] + "\n\n"
-            if lore_content:
-                if settings["memorySettings"]["userName"]:
-                    # 替换lore_content中的{{user}}为settings["memorySettings"]["userName"]
-                    lore_content = lore_content.replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换lore_content中的{{char}}为cur_memory["name"]
-                lore_content = lore_content.replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
-                content_append(request.messages, 'system', "世界观设定：\n\n" + lore_content + "\n\n世界观设定结束\n\n")
-            if cur_memory["description"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["description"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["description"] = cur_memory["description"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["description"]中的{{char}}为cur_memory["name"]
-                cur_memory["description"] = cur_memory["description"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
-                content_append(request.messages, 'system', "角色设定：\n\n" + cur_memory["description"] + "\n\n角色设定结束\n\n")
-            if cur_memory["personality"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["personality"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["personality"] = cur_memory["personality"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["personality"]中的{{char}}为cur_memory["name"]
-                cur_memory["personality"] = cur_memory["personality"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n")
-                content_append(request.messages, 'system', "性格设定：\n\n" + cur_memory["personality"] + "\n\n性格设定结束\n\n") 
-            if cur_memory['mesExample']:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["mesExample"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["mesExample"]中的{{char}}为cur_memory["name"]
-                cur_memory["mesExample"] = cur_memory["mesExample"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
-                content_append(request.messages, 'system', "对话示例：\n\n" + cur_memory['mesExample'] + "\n\n对话示例结束\n\n")
-            if cur_memory["systemPrompt"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换cur_memory["systemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
-                    cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
-                cur_memory["systemPrompt"] = cur_memory["systemPrompt"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
-                content_append(request.messages, 'system', "系统提示：\n\n" + cur_memory["systemPrompt"] + "\n\n系统提示结束\n\n")
-            if settings["memorySettings"]["genericSystemPrompt"]:
-                if settings["memorySettings"]["userName"]:
-                    # 替换settings["memorySettings"]["genericSystemPrompt"]中的{{user}}为settings["memorySettings"]["userName"]
-                    settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{user}}", settings["memorySettings"]["userName"])
-                # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
-                settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
-                logging.getLogger("app").info("添加系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
-                content_append(request.messages, 'system', "系统提示：\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n系统提示结束\n\n")
-                    
-            if m0:
-                memoryLimit = settings["memorySettings"]["memoryLimit"]
-                try:
-                    # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
-                    # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
-                    relevant_memories = await asyncio.to_thread(
-                        m0.search, 
-                        query=user_prompt, 
-                        user_id=memoryId, 
-                        limit=memoryLimit
-                    )
-                    relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
-                except Exception as e:
-                    print("m0.search error:",e)
-                    relevant_memories = ""
-                logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
-                content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n") 
+            await _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0)
         if settings["knowledgeBases"]:
             for kb in settings["knowledgeBases"]:
                 if kb["enabled"] and kb["processingStatus"] == "completed":
@@ -6473,58 +6913,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                             request.messages[1]['content'] = "系统提示：\n" +request.messages[0]['content'] + "\n系统提示结束\n\n用户：" + request.messages[1]['content']
             except Exception as e:
                 print("Dify error:",e)
-        if settings['webSearch']['enabled'] or enable_web_search:
-            if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
-                if settings['webSearch']['engine'] == 'duckduckgo':
-                    results = await DDGsearch(user_prompt)
-                elif settings['webSearch']['engine'] == 'searxng':
-                    results = await searxng(user_prompt)
-                elif settings['webSearch']['engine'] == 'tavily':
-                    results = await Tavily_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'bing':
-                    results = await Bing_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'google':
-                    results = await Google_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'brave':
-                    results = await Brave_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'exa':
-                    results = await Exa_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'serper':
-                    results = await Serper_search(user_prompt)
-                elif settings['webSearch']['engine'] == 'bochaai':
-                    results = await bochaai_search(user_prompt)
-                if results:
-                    content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}")
-            if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
-                if settings['webSearch']['engine'] == 'duckduckgo':
-                    tools.append(duckduckgo_tool)
-                elif settings['webSearch']['engine'] == 'searxng':
-                    tools.append(searxng_tool)
-                elif settings['webSearch']['engine'] == 'tavily':
-                    tools.append(tavily_tool)
-                elif settings['webSearch']['engine'] == 'bing':
-                    tools.append(bing_tool)
-                elif settings['webSearch']['engine'] == 'google':
-                    tools.append(google_tool)
-                elif settings['webSearch']['engine'] == 'brave':
-                    tools.append(brave_tool)
-                elif settings['webSearch']['engine'] == 'exa':
-                    tools.append(exa_tool)
-                elif settings['webSearch']['crawler'] == 'serper':
-                    tools.append(serper_tool)
-                elif settings['webSearch']['crawler'] == 'bochaai':
-                    tools.append(bochaai_tool)
-
-                if settings['webSearch']['crawler'] == 'jina':
-                    tools.append(jina_crawler_tool)
-                elif settings['webSearch']['crawler'] == 'crawl4ai':
-                    tools.append(Crawl4Ai_tool)
-                elif settings['webSearch']['crawler'] == 'firecrawl':
-                    tools.append(firecrawl_tool)
-                elif settings['webSearch']['crawler'] == 'simpleRequest':
-                    tools.append(simple_fetch_tool)
-                elif settings['webSearch']['crawler'] == 'mdnew':
-                    tools.append(markdown_new_tool)
+        await _complete_web_search_setup(request, settings, user_prompt, tools, enable_web_search)
         if kb_list:
             tools.append(kb_tool)
         if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
@@ -6539,76 +6928,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             user_prompt = response.choices[0].message.content
             content_append(request.messages, 'user',  f"\n\n如果用户没有提出问题或者任务，直接闲聊即可，如果用户提出了问题或者任务，任务描述不清晰或者你需要进一步了解用户的真实需求，你可以暂时不完成任务，而是分析需要让用户进一步明确哪些需求。")
         if settings['reasoner']['enabled'] or enable_thinking:
-            reasoner_messages = copy.deepcopy(request.messages)
-            if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                drs_msg = get_drs_stage(DRS_STAGE)
-                if drs_msg:
-                    content_append(reasoner_messages, 'user',  f"\n\n{drs_msg}\n\n")
-                content_append(reasoner_messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
-            if tools:
-                content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
-            for modelProvider in settings['modelProviders']: 
-                if modelProvider['id'] == settings['reasoner']['selectedProvider']:
-                    vendor = modelProvider['vendor']
-                    break
-            msg = await images_add_in_messages(reasoner_messages, images,settings)   
-            if chat_vendor == 'OpenAI':
-                extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
-            else:
-                extra['max_tokens'] = request.max_tokens or settings['max_tokens']
-            if reasoner_vendor == 'OpenAI':
-                reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
-            else:
-                reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
-            if request.reasoning_effort or settings['reasoning_effort']:
-                extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
-            if settings['reasoner']['reasoning_effort'] is not None:
-                reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort'] 
-            if vendor == 'Ollama':
-                reasoner_response = await reasoner_client.chat.completions.create(
-                    model=settings['reasoner']['model'],
-                    messages=msg,
-                    stream=False,
-                    temperature=settings['reasoner']['temperature'],
-                    **reasoner_extra
-                )
-                reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
-                if reasoning_buffer:
-                    content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
-                else:
-                    reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning']
-                    if reasoning_buffer:
-                        content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
-                    else:
-                        # 将推理结果中的思考内容提取出来
-                        reasoning_content = reasoner_response.model_dump()['choices'][0]['message']['content']
-                        # open_tag和close_tag之间的内容
-                        start_index = reasoning_content.find(open_tag) + len(open_tag)
-                        end_index = reasoning_content.find(close_tag)
-                        if start_index != -1 and end_index != -1:
-                            reasoning_content = reasoning_content[start_index:end_index]
-                        else:
-                            reasoning_content = ""
-                        content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
-            else:
-                reasoner_response = await reasoner_client.chat.completions.create(
-                    model=settings['reasoner']['model'],
-                    messages=msg,
-                    stream=False,
-                    stop=settings['reasoner']['stop_words'],
-                    temperature=settings['reasoner']['temperature'],
-                    **reasoner_extra
-                )
-                reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
-                if reasoning_buffer:
-                    content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
-                else:
-                    reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning']
-                    if reasoning_buffer:
-                        content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
-                    else:
-                        reasoning_buffer = ""
-                        content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
+            vendor = await _complete_reasoner_prep(request, reasoner_client, settings, chat_vendor, reasoner_vendor, images, tools, extra, reasoner_extra, open_tag, close_tag, enable_deep_research, enable_thinking, DRS_STAGE, user_prompt)
         if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             content_append(request.messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
             drs_msg = get_drs_stage(DRS_STAGE)
@@ -6641,104 +6961,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         if response.choices[0].message.tool_calls:
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-            search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
-            research_response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                    "role": "user",
-                    "content": search_prompt,
-                    }
-                ],
-                temperature=0.5,
-                extra_body = extra_params, # 其他参数
-            )
-            response_content = research_response.choices[0].message.content
-            if response_content is None:
-                response_content = ""
-
-            # 用re 提取```json 包裹json字符串 ```
-            if "```json" in response_content:
-                try:
-                    response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                except:
-                    # 用re 提取```json 之后的内容
-                    response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
-            response_content = json.loads(response_content)
-            if response_content["status"] == "done":
-                search_not_done = False
-            elif response_content["status"] == "not_done":
-                search_not_done = True
-                search_task = response_content["unfinished_task"]
-                task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
-                request.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": research_response.choices[0].message.content,
-                        "reasoning_content": "",
-                    }
-                )
-                request.messages.append(
-                    {
-                        "role": "user",
-                        "content": task_prompt,
-                    }
-                )
-            elif response_content["status"] == "need_more_info":
-                DRS_STAGE = 2
-                search_not_done = False
-            elif response_content["status"] == "need_work":
-                DRS_STAGE = 2
-                search_not_done = True
-                drs_msg = get_drs_stage(DRS_STAGE)
-                request.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": research_response.choices[0].message.content,
-                        "reasoning_content": "",
-                    }
-                )
-                request.messages.append(
-                    {
-                        "role": "user",
-                        "content": drs_msg,
-                    }
-                )
-            elif response_content["status"] == "need_more_work":
-                DRS_STAGE = 2
-                search_not_done = True
-                search_task = response_content["unfinished_task"]
-                task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
-                request.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": research_response.choices[0].message.content,
-                        "reasoning_content": "",
-                    }
-                )
-                request.messages.append(
-                    {
-                        "role": "user",
-                        "content": task_prompt,
-                    }
-                )
-            elif response_content["status"] == "answer":
-                DRS_STAGE = 3
-                search_not_done = True
-                drs_msg = get_drs_stage(DRS_STAGE)
-                request.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": research_response.choices[0].message.content,
-                        "reasoning_content": "",
-                    }
-                )
-                request.messages.append(
-                    {
-                        "role": "user",
-                        "content": drs_msg,
-                    }
-                )
+            DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=True)
         reasoner_messages = copy.deepcopy(request.messages)
         _ns_loop_count = 0
         _ns_max_iterations = int(settings.get("max_tool_iterations", 100) or 100)
@@ -6758,140 +6981,13 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 ns_force_no_tools = True
                 response.choices[0].message.tool_calls = None
             if response.choices[0].message.tool_calls:
-                assistant_message = response.choices[0].message
-                ns_tool_calls_meta = []
-                for _tc in assistant_message.tool_calls:
-                    ns_tool_calls_meta.append({
-                        "id": _tc.id or f"call_{uuid.uuid4().hex[:12]}",
-                        "function": {
-                            "arguments": _tc.function.arguments or "",
-                            "name": _tc.function.name,
-                        },
-                        "type": getattr(_tc, "type", None) or "function",
-                    })
-                request.messages.append({
-                    "role": "assistant",
-                    "content": assistant_message.content or "",
-                    "tool_calls": ns_tool_calls_meta,
-                    "reasoning_content": "",
-                })
-                ns_pending_abort = False
-                ns_acked_ids = set()
-                for _ti, _tc in enumerate(assistant_message.tool_calls):
-                    # T-8: 取消围栏——取消后不再调度任何工具
-                    _cur_entry = _current_stream_entry.get()
-                    if _cur_entry and _cur_entry.get("cancelled"):
-                        ns_pending_abort = True
-                        break
-                    tool_call_id = ns_tool_calls_meta[_ti]["id"]
-                    response_content = _tc.function
-                    logging.getLogger("app").info(response_content.name)
-                    args_dict, arg_err = parse_tool_arguments(_tc.function.arguments)
-                    if arg_err is not None:
-                        err_text = arg_error_text(arg_err)
-                        ns_acked_ids.add(tool_call_id)
-                        reasoner_messages.append({
-                            "role": "assistant",
-                            "content": f"{response_content.name}({_tc.function.arguments})",
-                            "reasoning_content": "",
-                        })
-                        reasoner_messages.append({
-                            "role": "user",
-                            "content": f"{response_content.name}工具结果：" + truncate_tool_result(err_text, 8000),
-                        })
-                        request.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": response_content.name,
-                            "content": err_text,
-                        })
-                        continue
-                    try:
-                        results = await dispatch_tool(response_content.name, args_dict, settings)
-                    except Exception as e:
-                        results = TOOL_EXC_TMPL.format(type=type(e).__name__, exc=e)
-                    if isinstance(results, AsyncIterator):
-                        buffer = []
-                        async for chunk in results:
-                            buffer.append(chunk)
-                        results = "".join(buffer)
-                    if results is None:
-                        ns_acked_ids.add(tool_call_id)
-                        request.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": response_content.name,
-                            "content": NONE_TEXT,
-                        })
-                        ns_pending_abort = True
-                        break
-                    if response_content.name in ["query_knowledge_base"] and isinstance(results, list):
-                        if settings["KBSettings"]["is_rerank"]:
-                            results = await rerank_knowledge_base(user_prompt, results)
-                        results = json.dumps(results, ensure_ascii=False, indent=4)
-                    tool_result_text = str(results)
-                    ns_acked_ids.add(tool_call_id)
-                    request.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": response_content.name,
-                        "content": truncate_tool_result(tool_result_text),
-                    })
-                    reasoner_messages.append({
-                        "role": "assistant",
-                        "content": f"{response_content.name}({json.dumps(args_dict, ensure_ascii=False)})",
-                        "reasoning_content": "",
-                    })
-                    reasoner_messages.append({
-                        "role": "user",
-                        "content": f"{response_content.name}工具结果：" + truncate_tool_result(tool_result_text, 8000),
-                    })
-                    # T-9: 结构化哨兵判定（与 stream 路径同源）
-                    if _is_approval_result(results) is not None:
-                        ns_pending_abort = True
-                        break
-                # 为未执行的调用补上说明性 tool 结果，保证成对闭合
-                append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
-                if ns_pending_abort:
+                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response)
+                if abort:
                     break
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
                 content_append(request.messages, 'user',  f"\n对于联网搜索的结果，如果联网搜索的信息不足以回答问题时，你可以进一步使用联网搜索查询还未给出的必要信息。如果已经足够回答问题，请直接回答问题。")
             if settings['reasoner']['enabled'] or enable_thinking:
-                if tools:
-                    content_append(reasoner_messages, 'system',  f"可用工具：{json.dumps(tools)}")
-                for modelProvider in settings['modelProviders']: 
-                    if modelProvider['id'] == settings['reasoner']['selectedProvider']:
-                        vendor = modelProvider['vendor']
-                        break
-                msg = await images_add_in_messages(reasoner_messages, images,settings)
-                if vendor == 'Ollama':
-                    reasoner_response = await reasoner_client.chat.completions.create(
-                        model=settings['reasoner']['model'],
-                        messages=msg,
-                        stream=False,
-                        temperature=settings['reasoner']['temperature'],
-                        **reasoner_extra
-                    )
-                    # 将推理结果中的思考内容提取出来
-                    reasoning_content = reasoner_response.model_dump()['choices'][0]['message']['content']
-                    # open_tag和close_tag之间的内容
-                    start_index = reasoning_content.find(open_tag) + len(open_tag)
-                    end_index = reasoning_content.find(close_tag)
-                    if start_index != -1 and end_index != -1:
-                        reasoning_content = reasoning_content[start_index:end_index]
-                    else:
-                        reasoning_content = ""
-                    content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
-                else:
-                    reasoner_response = await reasoner_client.chat.completions.create(
-                        model=settings['reasoner']['model'],
-                        messages=msg,
-                        stream=False,
-                        stop=settings['reasoner']['stop_words'],
-                        temperature=settings['reasoner']['temperature'],
-                        **reasoner_extra
-                    )
-                    content_prepend(request.messages, 'assistant', reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']) # 可参考的推理过程
+                vendor = await _ns_reasoner_pass(request, reasoner_client, reasoner_messages, settings, images, reasoner_extra, open_tag, close_tag, tools, vendor)
             msg = await images_add_in_messages(request.messages, images,settings)
             if request.top_p != 1 or settings['top_p'] != 1:
                 extra['top_p'] = request.top_p or settings['top_p']
@@ -6917,139 +7013,9 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             if response.choices[0].message.tool_calls:
                 pass
             elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
-                search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
-                research_response = await client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {
-                        "role": "user",
-                        "content": search_prompt,
-                        }
-                    ],
-                    temperature=0.5,
-                    extra_body = extra_params, # 其他参数
-                )
-                response_content = research_response.choices[0].message.content
-                # 用re 提取```json 包裹json字符串 ```
-                if "```json" in response_content:
-                    try:
-                        response_content = re.search(r'```json(.*?)```', response_content, re.DOTALL).group(1)
-                    except:
-                        # 用re 提取```json 之后的内容
-                        response_content = re.search(r'```json(.*?)', response_content, re.DOTALL).group(1)
-                response_content = json.loads(response_content)
-                if response_content["status"] == "done":
-                    search_not_done = False
-                elif response_content["status"] == "not_done":
-                    search_not_done = True
-                    search_task = response_content["unfinished_task"]
-                    task_prompt = f"请继续完成初始任务中未完成的任务：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n最后，请给出完整的初始任务的最终结果。"
-                    request.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": research_response.choices[0].message.content,
-                            "reasoning_content": "",
-                        }
-                    )
-                    request.messages.append(
-                        {
-                            "role": "user",
-                            "content": task_prompt,
-                        }
-                    )
-                elif response_content["status"] == "need_more_info":
-                    DRS_STAGE = 2
-                    search_not_done = False
-                elif response_content["status"] == "need_work":
-                    DRS_STAGE = 2
-                    search_not_done = True
-                    drs_msg = get_drs_stage(DRS_STAGE)
-                    request.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": research_response.choices[0].message.content,
-                            "reasoning_content": "",
-                        }
-                    )
-                    request.messages.append(
-                        {
-                            "role": "user",
-                            "content": drs_msg,
-                        }
-                    )
-                elif response_content["status"] == "need_more_work":
-                    DRS_STAGE = 2
-                    search_not_done = True
-                    search_task = response_content["unfinished_task"]
-                    task_prompt = f"请继续查询如下信息：\n\n{search_task}\n\n初始任务：{user_prompt}\n\n"
-                    request.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": research_response.choices[0].message.content,
-                            "reasoning_content": "",
-                        }
-                    )
-                    request.messages.append(
-                        {
-                            "role": "user",
-                            "content": task_prompt,
-                        }
-                    )
-                elif response_content["status"] == "answer":
-                    DRS_STAGE = 3
-                    search_not_done = True
-                    drs_msg = get_drs_stage(DRS_STAGE)
-                    request.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": research_response.choices[0].message.content,
-                            "reasoning_content": "",
-                        }
-                    )
-                    request.messages.append(
-                        {
-                            "role": "user",
-                            "content": drs_msg,
-                        }
-                    )
+                DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=False)
        # 处理响应内容
-        response_dict = response.model_dump()
-        content = response_dict["choices"][0]['message']['content']
-        if response_dict["choices"][0]['message'].get('reasoning_content',""):
-            pass
-        else:
-            response_dict["choices"][0]['message']['reasoning_content'] = response_dict["choices"][0]['message'].get('reasoning',"")
-        if open_tag in content and close_tag in content:
-            reasoning_content = re.search(fr'{open_tag}(.*?)\{close_tag}', content, re.DOTALL)
-            if reasoning_content:
-                # 存储到 reasoning_content 字段
-                response_dict["choices"][0]['message']['reasoning_content'] = reasoning_content.group(1).strip()
-                # 移除原内容中的标签部分
-                response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
-        if m0:
-            messages=f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}"
-            infer = cur_memory.get('infer') or False
-            _m0_job = m0
-            _mid = memoryId
-            _job_msgs = messages
-
-            def _mem_job():
-                metadata = {
-                    "timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                }
-                _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
-                logging.getLogger("app").info("知识库更新完成")
-
-            llm_gate.submit_memory_job(
-                _mid, _mem_job, name="mem0-add-complete",
-                debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
-                         if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
-                wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
-        try:
-            from py.turn_log import shadow_append as _shadow_append
-            await _shadow_append(request.conversation_id, request.messages, log=print)
-        except Exception as _tle:
-            logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
+        response_dict = await _complete_finalize(request, settings, response, m0, memoryId, cur_memory, user_prompt, open_tag, close_tag)
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(

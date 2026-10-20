@@ -110,10 +110,11 @@ class TestDriftRadar:
 
     def test_complete_has_cancel_fence(self):
         # M3d: fence lives in the impl body, entry (cancelled flag) in the wrapper
+        # M-3 split: the second fence + abort marking moved into _ns_tool_round
         wrapper = _func_src("generate_complete_response")
         assert '"cancelled": False' in wrapper
         assert "_current_stream_entry.set(entry)" in wrapper
-        impl = _func_src("_generate_complete_impl")
+        impl = _func_src("_generate_complete_impl") + _func_src("_ns_tool_round")
         assert impl.count('_cur_entry.get("cancelled")') >= 2
         assert "ns_pending_abort = True" in impl
 

@@ -6,7 +6,6 @@ REMOVE an entry (never add). tools_change_messages split (2026-10-20) moved
 768 -> 205 lines into 11 module-level helpers, all verified here.
 """
 import ast
-import io
 import pathlib
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -14,8 +13,18 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 # remaining M-3 targets, (name -> approximate line count at freeze time)
 GIANT_WHITELIST = {
     "generate_stream_response": 2206,   # includes nested stream_generator
-    "_generate_complete_impl": 867,
 }
+
+COMPLETE_HELPERS = [
+    "_apply_context_compression",
+    "_complete_character_context",
+    "_complete_web_search_setup",
+    "_complete_reasoner_prep",
+    "_complete_drs_step",
+    "_ns_tool_round",
+    "_ns_reasoner_pass",
+    "_complete_finalize",
+]
 
 DISPATCH_HELPERS = [
     "_build_tool_hooks",
@@ -82,3 +91,11 @@ def test_dispatch_split_helpers_and_hooks_literal():
     # py/audit_tools.py parses this literal to audit hook-table consistency
     src = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
     assert "_TOOL_HOOKS = {" in src
+
+
+def test_complete_split_helpers_present_and_small():
+    funcs = {n.name: n for n in _module_funcs()}
+    assert funcs["_generate_complete_impl"].end_lineno - funcs["_generate_complete_impl"].lineno + 1 < 300
+    for h in COMPLETE_HELPERS:
+        assert h in funcs, "helper %s missing" % h
+        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
