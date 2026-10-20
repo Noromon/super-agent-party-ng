@@ -8505,6 +8505,16 @@ def hotwords_to_json(input_str):
     return json.dumps(result, ensure_ascii=False)
 
 # ASR WebSocket处理
+async def _close_ws_quiet(ws):
+    """T-3: 关闭旧 websockets 连接并安全弃引用（异常静默；close 幂等）。"""
+    if ws:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+    return None
+
+
 @app.websocket("/ws/asr")
 async def asr_websocket_endpoint(websocket: WebSocket):
     if not sap_auth.ws_auth_ok(websocket):
@@ -8588,11 +8598,11 @@ async def asr_websocket_endpoint(websocket: WebSocket):
                             # 标记连接失败，避免后续操作
                             funasr_websocket = None
                     else:
-                        # 关闭异步任务处理FunASR的响应
-                        funasr_websocket = None
+                        # T-3: 换模式=关闭旧 funasr 会话（否则悬挂泄漏+读取任务永挂）
+                        funasr_websocket = await _close_ws_quiet(funasr_websocket)
                 else:
-                    # 关闭异步任务处理FunASR的响应
-                    funasr_websocket = None
+                    # T-3: 换引擎=关闭旧 funasr 会话
+                    funasr_websocket = await _close_ws_quiet(funasr_websocket)
             # 修改点：增加流式音频处理前的检查
             elif msg_type == "audio_stream":
                 frame_id = message.get("id")
@@ -8711,9 +8721,8 @@ async def asr_websocket_endpoint(websocket: WebSocket):
             del audio_buffer[connection_id]
         if websocket in asr_connections:
             asr_connections.remove(websocket)
-        # 新增：确保关闭FunASR连接
-        if funasr_websocket:
-            await funasr_websocket.close()
+        # 新增：确保关闭FunASR连接（T-3: 静默关闭，失败不阻断其余清理）
+        await _close_ws_quiet(funasr_websocket)
 
 @app.post("/asr")
 async def asr_transcription(
