@@ -1038,7 +1038,8 @@ app = FastAPI(lifespan=lifespan)
 _EXTERNAL_PREFIXES = ("/v1", "/mcp")
 
 from py.routers import (media, bots, memories, system, files,
-                        bot_conversations, tasks)
+                        bot_conversations, tasks, agents, workflows,
+                        status)
 app.include_router(media.router)
 app.include_router(bots.router)
 app.include_router(memories.router)
@@ -1046,6 +1047,9 @@ app.include_router(system.router)
 app.include_router(files.router)
 app.include_router(bot_conversations.router)
 app.include_router(tasks.router)
+app.include_router(agents.router)
+app.include_router(workflows.router)
+app.include_router(status.router)
 
 @app.middleware("http")
 async def external_api_cors(request: Request, call_next):
@@ -7249,135 +7253,10 @@ async def execute_tool_manually(request: Request):
         return {"result": f"Error executing {tool_name}: {str(e)}"}
 
 # 在现有路由后添加以下代码
-@app.get("/v1/models")
-async def get_models():
-    """
-    获取模型列表
-    """
-    from openai.types import Model
-    from openai.pagination import SyncPage
-    try:
-        # 重新加载最新设置
-        current_settings = await load_settings()
-        agents = current_settings['agents']
-        # 构造符合 OpenAI 格式的 Model 对象
-        model_data = [
-            Model(
-                id=agent["name"],  
-                created=0,  
-                object="model",
-                owned_by="super-agent-party"  # 非空字符串
-            )
-            for agent in agents.values()  
-        ]
-        # 添加默认的 'super-model'
-        model_data.append(
-            Model(
-                id='super-model',
-                created=0,
-                object="model",
-                owned_by="super-agent-party"  # 非空字符串
-            )
-        )
-
-        # 构造完整 SyncPage 响应
-        response = SyncPage[Model](
-            object="list",
-            data=model_data,
-            has_more=False  # 添加分页标记
-        )
-        # 直接返回模型字典，由 FastAPI 自动序列化为 JSON
-        return response.model_dump()  
-        
-    except Exception as e:
-        return JSONResponse(
-            status_code=e.status_code,
-            content={
-                "error": {
-                    "message": str(e),
-                    "type": "api_error",
-                }
-            }
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": {
-                    "message": str(e),
-                    "type": "server_error",
-                    "code": 500
-                }
-            }
-        )
 
 # 在现有路由后添加以下代码
-@app.get("/v1/agents",operation_id="get_agents")
-async def get_agents():
-    """
-    获取模型列表
-    """
-    from openai.types import Model
-    from openai.pagination import SyncPage
-    try:
-        # 重新加载最新设置
-        current_settings = await load_settings()
-        agents = current_settings['agents']
-        # 构造符合 OpenAI 格式的 Model 对象
-        model_data = [
-            {
-                "name": agent["name"],
-                "description": agent["system_prompt"],
-            }
-            for agent in agents.values()  
-        ]
-        # 添加默认的 'super-model'
-        model_data.append(
-            {
-                "name": 'super-model',
-                "description": "Super-Agent-Party default agent",
-            }
-        )
-        return model_data
-        
-    except Exception as e:
-        return JSONResponse(
-            status_code=e.status_code,
-            content={
-                "error": {
-                    "message": str(e),
-                    "type": "api_error",
-                }
-            }
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": {
-                    "message": str(e),
-                    "type": "server_error",
-                    "code": 500
-                }
-            }
-        )
 
-class ProviderModelRequest(BaseModel):
-    url: str
-    api_key: str
 
-@app.post("/v1/providers/models")
-async def fetch_provider_models(request: ProviderModelRequest):
-    try:
-        # 使用传入的provider配置创建AsyncOpenAI客户端
-        client = AsyncOpenAI(api_key=request.api_key, base_url=request.url)
-        # 获取模型列表
-        model_list = await client.models.list()
-        # 提取模型ID并返回
-        return JSONResponse(content={"data": [model.id for model in model_list.data]})
-    except Exception as e:
-        # 处理异常，返回错误信息
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/v1/chat/completions", operation_id="chat_with_agent_party")
 async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
@@ -8727,39 +8606,7 @@ async def process_mcp(mcp_id: str):
 
 
 
-@app.delete("/remove_agent")
-async def remove_agent_endpoint(request: Request):
-    data = await request.json()
-    agent_id = data.get("agentId")
-    if agent_id:
-        try:
-            # 删除AGENT_CACHE_DIR目录下的agent_id文件夹
-            agent_dir = os.path.join(AGENT_DIR, f"{agent_id}.json")
-            shutil.rmtree(agent_dir)
-            return JSONResponse({"success": True, "message": "Agent removed"})
-        except Exception as e:
-            return JSONResponse({"success": False, "message": str(e)})
-    else:
-        return JSONResponse({"success": False, "message": "No agentId provided"})
 
-@app.post("/a2a")
-async def initialize_a2a(request: Request):
-    from python_a2a import A2AClient
-    data = await request.json()
-    try:
-        client = A2AClient(data['url'])
-        agent_card = client.agent_card.to_json()
-        agent_card = json.loads(agent_card)
-        return JSONResponse({
-            **agent_card,
-            "status": "ready",
-            "enabled": True
-        })
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
-        )
 
     
 
@@ -8872,90 +8719,6 @@ async def process_kb(kb_id):
     except Exception as e:
         kb_status[kb_id] = f"failed: {str(e)}"
 
-@app.post("/create_sticker_pack")
-async def create_sticker_pack(
-    request: Request,
-    files: List[UploadFile] = File(..., description="表情文件列表"),
-    pack_name: str = Form(..., description="表情包名称"),
-    descriptions: List[str] = Form(..., description="表情描述列表")
-):
-    """
-    创建新表情包
-    - files: 上传的图片文件列表
-    - pack_name: 表情包名称
-    - descriptions: 每个表情的描述列表
-    """
-    fastapi_base_url = str(request.base_url)
-    imageFiles = []
-    stickers_data = []
-    
-    try:
-        # 验证输入数据
-        if not pack_name:
-            raise HTTPException(status_code=400, detail="表情包名称不能为空")
-        if len(files) == 0:
-            raise HTTPException(status_code=400, detail="至少需要上传一个表情")
-        if len(descriptions) != len(files):
-            raise HTTPException(
-                status_code=400, 
-                detail=f"描述数量({len(descriptions)})与文件数量({len(files)})不匹配"
-            )
-
-        # 处理上传的表情文件
-        for idx, file in enumerate(files):
-            # 获取文件扩展名
-            file_extension = os.path.splitext(file.filename)[1].lower()
-            
-            # 验证文件类型
-            if file_extension not in ['.png', '.jpg', '.jpeg', '.gif', '.webp']:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"不支持的文件类型: {file_extension}"
-                )
-            
-            # 生成唯一文件名
-            unique_filename = f"{uuid.uuid4()}{file_extension}"
-            destination = os.path.join(UPLOAD_FILES_DIR, unique_filename)
-
-            # 保存文件
-            with open(destination, "wb") as buffer:
-                content = await file.read()
-                buffer.write(content)
-
-            # 构建返回数据
-            imageFiles.append({
-                "unique_filename": unique_filename,
-                "original_filename": file.filename,
-            })
-            
-            # 获取对应的描述（处理可能的索引越界）
-            description = descriptions[idx] if idx < len(descriptions) else ""
-
-            # 构建表情数据
-            stickers_data.append({
-                "unique_filename": unique_filename,
-                "original_filename": file.filename,
-                "url": f"{fastapi_base_url}uploaded_files/{unique_filename}",
-                "description": description
-            })
-
-        # 创建表情包ID（可替换为数据库存储逻辑）
-        sticker_pack_id = str(uuid.uuid4())
-        
-        return JSONResponse(content={
-            "success": True,
-            "id": sticker_pack_id,
-            "name": pack_name,
-            "stickers": stickers_data,
-            "imageFiles": imageFiles,
-            "cover": stickers_data[0]["url"] if stickers_data else None
-        })
-    
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        logger.error(f"创建表情包时出错: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}")
 
 # ==========================================
 # 机器人管理器延迟加载容器 (Lazy Container)
@@ -9155,83 +8918,9 @@ def _bot_conv_meta(conv_id: str) -> dict:
 
 
 
-@app.post("/add_workflow")
-async def add_workflow(file: UploadFile = File(...), workflow_data: str = Form(...)):
-    # 检查文件类型是否为 JSON
-    if file.content_type != "application/json":
-        raise HTTPException(
-            status_code=400,
-            detail="Only JSON files are allowed."
-        )
-
-    # 生成唯一文件名，uuid.uuid4()，没有连词符
-    unique_filename = str(uuid.uuid4()).replace('-', '')
-
-    # 拼接文件路径
-    file_path = os.path.join(UPLOAD_FILES_DIR, unique_filename + ".json")
-
-    # 保存文件
-    try:
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save file: {str(e)}"
-        )
-
-    # 解析 workflow_data
-    workflow_data_dict = json.loads(workflow_data)
-
-    # 返回文件信息
-    return JSONResponse(
-        status_code=200,
-        content={
-            "success": True,
-            "message": "File uploaded successfully",
-            "file": {
-                "unique_filename": unique_filename,
-                "original_filename": file.filename,
-                "url": f"/uploaded_files/{unique_filename}",
-                "enabled": True,
-                "text_input": workflow_data_dict.get("textInput"),
-                "text_input_2": workflow_data_dict.get("textInput2"),
-                "image_input": workflow_data_dict.get("imageInput"),
-                "image_input_2": workflow_data_dict.get("imageInput2"),
-                "seed_input": workflow_data_dict.get("seedInput"),
-                "seed_input2": workflow_data_dict.get("seedInput2"),
-                "description": workflow_data_dict.get("description")
-            }
-        }
-    )
-
-@app.delete("/delete_workflow/{filename}")
-async def delete_workflow(filename: str):
-    file_path = os.path.join(UPLOAD_FILES_DIR, filename + ".json")
-    if not sap_auth.path_under(file_path, [UPLOAD_FILES_DIR]):
-        raise HTTPException(status_code=403, detail="path outside uploads dir")
-    # 检查文件是否存在
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # 删除文件
-    try:
-        os.remove(file_path)
-        return JSONResponse(
-            status_code=200,
-            content={"success": True, "message": "File deleted successfully"}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete file: {str(e)}"
-        )
 
 
-@app.get("/vrm_config")
-async def vrm_config():
-    settings = await load_settings()
-    return {"VRMConfig": settings.get("VRMConfig", {})}
+
 
 from py.live_router import router as live_router, ws_router as live_ws_router
 
@@ -9320,30 +9009,8 @@ def list_to_dict(meta_list: List[Dict[str, Any]]) -> Dict[str, Any]:
 # ---------- 1.5 新增原始记忆行（C-5：此前双端皆缺=新增按钮静默必败） ----------
 
 # ---------- M4-lite: 数据快照滚动备份（列表 / 手动快照 / 校验演练） ----------
-@app.get("/api/backup/list")
-async def backup_list() -> dict:
-    from py.data_backup import list_snapshots
-    snaps = await asyncio.to_thread(list_snapshots, USER_DATA_DIR)
-    return {"snapshots": snaps}
 
-@app.post("/api/backup/now")
-async def backup_now() -> dict:
-    from py.data_backup import snapshot_data_dir
-    cur_settings = await load_settings()
-    include = bool(((cur_settings.get("systemSettings") or {}).get("backupIncludeUploads")
-                    or cur_settings.get("backupIncludeUploads") or False))
-    return await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include, 0.0)
 
-@app.post("/api/backup/verify")
-async def backup_verify(body: dict = Body(...)) -> dict:
-    from py.data_backup import backups_root, verify_snapshot
-    name = str((body or {}).get("name") or "")
-    root = os.path.abspath(backups_root(USER_DATA_DIR))
-    target = os.path.abspath(os.path.join(root, name))
-    # 路径围栏：只允许 backups/ 直属子目录，拒绝穿越与绝对路径
-    if not target.startswith(root + os.sep) or not os.path.isdir(target):
-        raise HTTPException(status_code=400, detail="invalid snapshot name")
-    return await asyncio.to_thread(verify_snapshot, target)
 
 # ---------- 2. 修改（只改 data） ----------
 
@@ -9811,10 +9478,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 from py.acpx_tools import check_acpx_available
-@app.get("/api/acpx/status")
-async def acpx_status():
-    """返回 ACPX 的安装状态和环境信息"""
-    return check_acpx_available()
 
 from py.uv_api import router as uv_router
 app.include_router(uv_router)

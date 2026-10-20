@@ -233,5 +233,7 @@ class TestC5C15Pins:
 
     def test_backup_toggle_domain_consistency(self):
         # Data Guard switch persists under systemSettings (frontend domain);
-        # both backend readers (startup snapshot + backup_now) must read it there
-        assert SRC.count('("systemSettings") or {}).get("backupIncludeUploads"') >= 2
+        # both backend readers (startup snapshot in server + backup_now in the
+        # status router since the R1 migration) must read it there
+        both = SRC + (ROOT / "py" / "routers" / "status.py").read_text(encoding="utf-8")
+        assert both.count('("systemSettings") or {}).get("backupIncludeUploads"') >= 2
