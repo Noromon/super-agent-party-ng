@@ -2726,334 +2726,207 @@ async def get_project_skills_summary(cwd: str, visibility_scope: str = "workspac
     
     return summary
 
-async def tools_change_messages(request: ChatRequest, settings: dict):
-    global HA_client, ChromeMCP_client, sql_client
-    
-    if request.messages and request.messages[0]['role'] == 'system' and request.messages[0]['content'] != '':
-        basic_message = " "
-        request.messages[0]['content'] += basic_message
 
-    cli_settings = settings.get("CLISettings", {})
-    cwd = cli_settings.get("cc_path")
-    visibilityScope = cli_settings.get("visibilityScope", "workspace")
-    # 修复：local 环境应该从 localEnvSettings 读取权限模式
-    engine = cli_settings.get("engine", "")
-    
-    if engine == "local":
-        env_settings = settings.get("localEnvSettings", {})
-    elif engine == "ds":
-        env_settings = settings.get("dsSettings", {})
-    else:
-        env_settings = settings.get("acpSettings", {})
-    
-    permissionMode = cli_permission_mode_for(settings)
-    
-    if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
-        
-        # ==================== [新增] 1. 总是注入 MEMORY.md ====================
-        memory_file = Path(cwd) / ".agent" / "MEMORY.md"
-        if memory_file.exists() and memory_file.is_file():
-            try:
-                import aiofiles
-                async with aiofiles.open(memory_file, 'r', encoding='utf-8') as mf:
-                    mem_content = await mf.read()
-                if mem_content.strip():
-                    content_append(request.messages, 'system', f"\n\n**MEMORY.md**:\n{mem_content}\n\n")
-            except Exception as e:
-                logging.getLogger("app").info(f"读取 MEMORY.md 失败: {e}")
+async def _inject_workspace_memory(request, cwd, cli_settings):
+    """CLI workspace: MEMORY.md injection + '#'/'/' shortcut handling. (M-3 split)"""
+    # ==================== [新增] 1. 总是注入 MEMORY.md ====================
+    memory_file = Path(cwd) / ".agent" / "MEMORY.md"
+    if memory_file.exists() and memory_file.is_file():
+        try:
+            import aiofiles
+            async with aiofiles.open(memory_file, 'r', encoding='utf-8') as mf:
+                mem_content = await mf.read()
+            if mem_content.strip():
+                content_append(request.messages, 'system', f"\n\n**MEMORY.md**:\n{mem_content}\n\n")
+        except Exception as e:
+            logging.getLogger("app").info(f"读取 MEMORY.md 失败: {e}")
 
-        # ==================== [新增] 2. 处理 Shortcut 快捷指令 ====================
-        if cli_settings.get("shortcut", False):
-            # 获取最新一条用户消息
-            user_text = ""
-            if request.messages and request.messages[-1]['role'] == 'user':
-                user_msg_content = request.messages[-1].get('content', '')
-                if isinstance(user_msg_content, str):
-                    user_text = user_msg_content
-                elif isinstance(user_msg_content, list):
-                    # 兼容图文混合消息
-                    user_text = "".join([item.get('text', '') for item in user_msg_content if item.get('type') == 'text'])
+    # ==================== [新增] 2. 处理 Shortcut 快捷指令 ====================
+    if cli_settings.get("shortcut", False):
+        # 获取最新一条用户消息
+        user_text = ""
+        if request.messages and request.messages[-1]['role'] == 'user':
+            user_msg_content = request.messages[-1].get('content', '')
+            if isinstance(user_msg_content, str):
+                user_text = user_msg_content
+            elif isinstance(user_msg_content, list):
+                # 兼容图文混合消息
+                user_text = "".join([item.get('text', '') for item in user_msg_content if item.get('type') == 'text'])
 
-            user_text_trimmed = user_text.strip()
+        user_text_trimmed = user_text.strip()
             
-            if user_text_trimmed:
-                import datetime
-                import re
+        if user_text_trimmed:
+            import datetime
+            import re
                 
-                # --- (1) 处理 '#' : 直接保存为记忆 ---
-                if user_text_trimmed.startswith('#'):
-                    mem_content_to_save = user_text_trimmed[1:].strip()
-                    if mem_content_to_save:
-                        try:
-                            agent_dir = Path(cwd) / ".agent"
-                            agent_dir.mkdir(parents=True, exist_ok=True)
+            # --- (1) 处理 '#' : 直接保存为记忆 ---
+            if user_text_trimmed.startswith('#'):
+                mem_content_to_save = user_text_trimmed[1:].strip()
+                if mem_content_to_save:
+                    try:
+                        agent_dir = Path(cwd) / ".agent"
+                        agent_dir.mkdir(parents=True, exist_ok=True)
                             
-                            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            append_text = f"\n- [{timestamp}] {mem_content_to_save}"
+                        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        append_text = f"\n- [{timestamp}] {mem_content_to_save}"
                             
-                            import aiofiles
-                            async with aiofiles.open(memory_file, 'a', encoding='utf-8') as mf:
-                                await mf.write(append_text)
+                        import aiofiles
+                        async with aiofiles.open(memory_file, 'a', encoding='utf-8') as mf:
+                            await mf.write(append_text)
                                 
-                            content_append(request.messages, 'system', f"\n\nHint: The user has just saved the following content to the workspace memory using the '#' shortcut command:\n'{mem_content_to_save}'\nPlease briefly confirm in your next reply that you remember this information.\n\n")
-                        except Exception as e:
-                            logging.getLogger("app").info(f"保存 MEMORY.md 失败: {e}")
+                        content_append(request.messages, 'system', f"\n\nHint: The user has just saved the following content to the workspace memory using the '#' shortcut command:\n'{mem_content_to_save}'\nPlease briefly confirm in your next reply that you remember this information.\n\n")
+                    except Exception as e:
+                        logging.getLogger("app").info(f"保存 MEMORY.md 失败: {e}")
 
-                # --- (2) 处理 '/' : 注入特定技能 ---
-                elif user_text_trimmed.startswith('/'):
-                    parts = user_text_trimmed[1:].split()
-                    if parts:
-                        skill_name = parts[0]
-                        skill_dir = Path(cwd) / ".agent" / "skills" / skill_name
-                        if skill_dir.exists() and skill_dir.is_dir():
-                            doc_file_path = None
-                            # 尝试匹配常见的技能说明文档命名
-                            for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
-                                if (skill_dir / name).exists():
-                                    doc_file_path = skill_dir / name
-                                    break
+            # --- (2) 处理 '/' : 注入特定技能 ---
+            elif user_text_trimmed.startswith('/'):
+                parts = user_text_trimmed[1:].split()
+                if parts:
+                    skill_name = parts[0]
+                    skill_dir = Path(cwd) / ".agent" / "skills" / skill_name
+                    if skill_dir.exists() and skill_dir.is_dir():
+                        doc_file_path = None
+                        # 尝试匹配常见的技能说明文档命名
+                        for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
+                            if (skill_dir / name).exists():
+                                doc_file_path = skill_dir / name
+                                break
                             
-                            if doc_file_path:
-                                try:
-                                    import aiofiles
-                                    async with aiofiles.open(doc_file_path, 'r', encoding='utf-8') as f:
-                                        skill_content = await f.read()
-                                    content_append(request.messages, 'system', f"\n\n🛠️ **The user actively triggered the workspace skill. [{skill_name}]**:\n\n{skill_content}\n\nPlease strictly follow the above skill instructions to handle the user's current request.\n\n")
-                                except Exception as e:
-                                    logging.getLogger("app").info(f"读取技能文档失败: {e}")
+                        if doc_file_path:
+                            try:
+                                import aiofiles
+                                async with aiofiles.open(doc_file_path, 'r', encoding='utf-8') as f:
+                                    skill_content = await f.read()
+                                content_append(request.messages, 'system', f"\n\n🛠️ **The user actively triggered the workspace skill. [{skill_name}]**:\n\n{skill_content}\n\nPlease strictly follow the above skill instructions to handle the user's current request.\n\n")
+                            except Exception as e:
+                                logging.getLogger("app").info(f"读取技能文档失败: {e}")
 
-    if request.is_app_bot and request.platform:
-        platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流\n\n"
-        content_append(request.messages, 'system', platform_message)
 
-    if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
-        permission_message = ""
-        # 权限模式提示：描述必须与实际工具可见性和强制行为一致
-        if permissionMode == "yolo":
-            permission_message = "你当前处于最高权限（YOLO）模式：所有工具都会直接执行，不会请求用户批准。请谨慎操作，能使用更安全的专用工具时不要直接跑 bash 命令。"
+def _append_permission_mode_message(request, permissionMode):
+    """Permission-mode contract message. (M-3 split)"""
+    permission_message = ""
+    # 权限模式提示：描述必须与实际工具可见性和强制行为一致
+    if permissionMode == "yolo":
+        permission_message = "你当前处于最高权限（YOLO）模式：所有工具都会直接执行，不会请求用户批准。请谨慎操作，能使用更安全的专用工具时不要直接跑 bash 命令。"
+        content_append(request.messages, 'system', permission_message)
+    elif permissionMode == "auto-approve":
+        permission_message = "你当前处于接受编辑（Auto-approve）模式：文件编辑类工具会直接执行；shell 命令与进程/端口管理工具在本模式下不可用，请勿尝试。"
+        content_append(request.messages, 'system', permission_message)
+    elif permissionMode != "plan" and permissionMode != "cowork":
+        permission_message = "你当前处于默认（每次确认）模式：只读工具直接执行；文件写入与命令执行类工具在执行前会请求用户批准。请优先使用只读/专用工具，避免无谓的审批打扰。"
+        content_append(request.messages, 'system', permission_message)
+    elif permissionMode == "cowork":
+        if not request.is_sub_agent:
+            permission_message += "你当前处于协作模式，create_subtask工具可以帮你完成几乎任何任务（比如查资料、写代码、生成报告等），当你遇到难题时，可以尝试把它分解成一个个小任务，交给create_subtask工具去完成！当用户再次询问进度时，你可以用query_task_progress工具查询任务进度和获取详细结果\n\n"
             content_append(request.messages, 'system', permission_message)
-        elif permissionMode == "auto-approve":
-            permission_message = "你当前处于接受编辑（Auto-approve）模式：文件编辑类工具会直接执行；shell 命令与进程/端口管理工具在本模式下不可用，请勿尝试。"
-            content_append(request.messages, 'system', permission_message)
-        elif permissionMode != "plan" and permissionMode != "cowork":
-            permission_message = "你当前处于默认（每次确认）模式：只读工具直接执行；文件写入与命令执行类工具在执行前会请求用户批准。请优先使用只读/专用工具，避免无谓的审批打扰。"
-            content_append(request.messages, 'system', permission_message)
-        elif permissionMode == "cowork":
-            if not request.is_sub_agent:
-                permission_message += "你当前处于协作模式，create_subtask工具可以帮你完成几乎任何任务（比如查资料、写代码、生成报告等），当你遇到难题时，可以尝试把它分解成一个个小任务，交给create_subtask工具去完成！当用户再次询问进度时，你可以用query_task_progress工具查询任务进度和获取详细结果\n\n"
-                content_append(request.messages, 'system', permission_message)
-                if request.is_app_bot and request.platform:
-                    task_platform_message = f"\n\n使用create_subtask工具时请将platforms参数设置为[{request.platform}]，从而将子任务的结果及时发给用户。\n\n"
-                    content_append(request.messages, 'system', task_platform_message)
-            else:
-                permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
-                content_append(request.messages, 'system', permission_message)
+            if request.is_app_bot and request.platform:
+                task_platform_message = f"\n\n使用create_subtask工具时请将platforms参数设置为[{request.platform}]，从而将子任务的结果及时发给用户。\n\n"
+                content_append(request.messages, 'system', task_platform_message)
         else:
-            permission_message = "你当前处于计划模式：只有只读工具可用，写入与执行类工具已被禁用（调用会被直接拦截）。请使用只读工具了解项目，用自然语言描述你的需求和计划，并等待用户确认后再执行！"
+            permission_message = "你当前处于执行模式，你可以自由地使用所有工具，但请注意不要滥用权限！如果有更安全的工具，请不要直接使用bash命令！"
             content_append(request.messages, 'system', permission_message)
+    else:
+        permission_message = "你当前处于计划模式：只有只读工具可用，写入与执行类工具已被禁用（调用会被直接拦截）。请使用只读工具了解项目，用自然语言描述你的需求和计划，并等待用户确认后再执行！"
+        content_append(request.messages, 'system', permission_message)
 
-    if permissionMode == "cowork" and not request.is_sub_agent:
-        if cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
-            sub_task_context = await query_task_progress(cwd)
-            content_append(request.messages, 'system', sub_task_context)
-    elif cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
+
+async def _append_todos_context(request, cwd):
+    """ai_todos.json open-items digest. (M-3 split)"""
+    todos = []
         
-        if engine == "local":
-            # 在本地环境下，首先注入系统环境信息
-            system_context = get_system_context(cwd=cwd)
-            content_append(request.messages, 'system', system_context)
-        elif engine == "ds":
-            # 在 Docker 环境下，注入系统环境信息
-            system_context = """【环境信息】操作系统：Linux | Shell：bash
-
-⚠️ 重要提示：
-1. 当前为 Docker 环境，请使用 Linux 命令和工具链
-2. 执行 docker_sandbox 时，命令必须符合 Linux 的语法规范
-3. 路径分隔符：Unix 使用正斜杠(/)
-4. 请尽量使用相对路径，避免使用绝对路径，以免在跨平台时出现问题
-
-### ✅ **已安装的主要开发工具**
-
-#### **编程语言和运行时**
-1. **Python**
-   - Python
-   - pip
-   - uv
-
-2. **Node.js**
-   - Node.js
-   - npm
-   - npx
-
-3. **Go**
-   - Go
-
-4. **Perl**
-   - Perl
-
-#### **版本控制和协作工具**
-1. **Git**
-   - git
-   - GitHub CLI (gh)
-
-#### **包管理和构建工具**
-1. **Python 包管理**
-   - pip / pip3
-   - uv
-
-2. **Node.js 包管理**
-   - npm / npx
-
-3. **系统包管理**
-   - apt-get / dpkg
-
-#### **文本处理和命令行工具**
-1. **文本处理**
-   - jq
-   - awk / sed / grep
-   - cat / less / more / head / tail
-
-2. **文件操作**
-   - tar / unzip
-   - rsync
-   - 所有基本 Unix 命令（ls, cp, mv, rm, mkdir, chmod 等）
-
-3. **系统工具**
-   - bash shell
-   - make
-   - which / whereis
-
-#### **网络工具**
-1. **HTTP 客户端**
-   - curl
-
-2. **安全工具**
-   - openssl
-   - gpg
-
-#### **系统监控**
-1. **进程和资源监控**
-   - top / ps
-   - free / df / du
-   
-"""
-            content_append(request.messages, 'system', system_context)
-
-        todos = []
-        
-        try:
-            todos = await read_todos_local(cwd)
+    try:
+        todos = await read_todos_local(cwd)
             
-            # 处理待办事项（原有逻辑）
-            if isinstance(todos, list) and len(todos) > 0:
-                priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
-                status_icons = {
-                    "pending": "⏳", 
-                    "in_progress": "🔄", 
-                    "done": "✅", 
-                    "cancelled": "❌"
-                }
+        # 处理待办事项（原有逻辑）
+        if isinstance(todos, list) and len(todos) > 0:
+            priority_icons = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+            status_icons = {
+                "pending": "⏳", 
+                "in_progress": "🔄", 
+                "done": "✅", 
+                "cancelled": "❌"
+            }
                 
-                priority_order = {"high": 0, "medium": 1, "low": 2}
-                todos_sorted = sorted(
-                    todos, 
-                    key=lambda x: (
-                        priority_order.get(x.get('priority', 'medium'), 1),
-                        x.get('created_at', '')
-                    )
+            priority_order = {"high": 0, "medium": 1, "low": 2}
+            todos_sorted = sorted(
+                todos, 
+                key=lambda x: (
+                    priority_order.get(x.get('priority', 'medium'), 1),
+                    x.get('created_at', '')
                 )
+            )
                 
-                todo_lines = ["\n\n当你完成一个事项后，请记得使用todo_write_tool更新项目待办事项，所有事项结束后，可以删除本事项文件\n\n📋 **当前项目待办事项**（.agent/ai_todos.json）：\n"]
-                pending_count = 0
+            todo_lines = ["\n\n当你完成一个事项后，请记得使用todo_write_tool更新项目待办事项，所有事项结束后，可以删除本事项文件\n\n📋 **当前项目待办事项**（.agent/ai_todos.json）：\n"]
+            pending_count = 0
                 
-                for todo in todos_sorted:
-                    status = todo.get('status', 'pending')
-                    if status != 'done':
-                        pending_count += 1
-                        icon = status_icons.get(status, "⏳")
-                        priority = priority_icons.get(todo.get('priority', 'medium'), "🟡")
-                        content_text = todo.get('content', '无内容')[:50]
-                        if len(todo.get('content', '')) > 50:
-                            content_text += "..."
+            for todo in todos_sorted:
+                status = todo.get('status', 'pending')
+                if status != 'done':
+                    pending_count += 1
+                    icon = status_icons.get(status, "⏳")
+                    priority = priority_icons.get(todo.get('priority', 'medium'), "🟡")
+                    content_text = todo.get('content', '无内容')[:50]
+                    if len(todo.get('content', '')) > 50:
+                        content_text += "..."
                         
-                        todo_lines.append(f"{icon} {priority} [{todo.get('id', 'unknown')}] {content_text}")
+                    todo_lines.append(f"{icon} {priority} [{todo.get('id', 'unknown')}] {content_text}")
                 
-                if pending_count == 0:
-                    todo_lines.append("✨ 当前没有待办事项，所有任务已完成！")
-                else:
-                    todo_lines.append(f"\n*共有 {pending_count} 个未完成任务*")
+            if pending_count == 0:
+                todo_lines.append("✨ 当前没有待办事项，所有任务已完成！")
+            else:
+                todo_lines.append(f"\n*共有 {pending_count} 个未完成任务*")
                 
-                todo_message = "\n".join(todo_lines)
-                content_append(request.messages, 'system', todo_message)
+            todo_message = "\n".join(todo_lines)
+            content_append(request.messages, 'system', todo_message)
                 
-        except Exception as e:
-            logging.getLogger("app").info(f"[Todo Loader] 跳过待办事项加载: {e}")
-            pass
+    except Exception as e:
+        logging.getLogger("app").info(f"[Todo Loader] 跳过待办事项加载: {e}")
+        pass
 
-        try:
-            agents_md = await read_agents_md(cwd)
-            if agents_md:
-                content_append(request.messages, 'system', " **重要事项**（.agent/AGENTS.md）：\n\n"+agents_md+"\n\n")
-        except Exception as e:
-            logging.getLogger("app").info(f"[Agent Loader] 跳过AGENTS.md加载: {e}")
-            pass
 
-        try:
-            # 无论是在 docker 还是 local，逻辑路径通常是一致的（通过挂载）
-            # 如果是 Docker 环境且 backend 无法直接访问 cwd，则需通过 docker exec ls 扫描，
-            # 但通常项目路径是共享的。
-            skills_message = await get_project_skills_summary(cwd, visibilityScope)
-            if skills_message:
-                content_append(request.messages, 'system', skills_message)
-        except Exception as e:
-            logging.getLogger("app").info(f"[Skill Loader] 扫描技能失败: {e}")
+async def _append_agents_md(request, cwd):
+    """.agent/AGENTS.md injection. (M-3 split)"""
+    try:
+        agents_md = await read_agents_md(cwd)
+        if agents_md:
+            content_append(request.messages, 'system', " **重要事项**（.agent/AGENTS.md）：\n\n"+agents_md+"\n\n")
+    except Exception as e:
+        logging.getLogger("app").info(f"[Agent Loader] 跳过AGENTS.md加载: {e}")
+        pass
 
-    if request.messages[-1]['role'] == 'system' and settings['tools']['autoBehavior']['enabled'] and not request.is_app_bot and not request.is_sub_agent:
-        language_message = f"\n\n当你看到被插入到对话之间的系统消息，这是自主行为系统向你发送的消息，例如用户主动或者要求你设置了一些定时任务或者延时任务，当你看到自主行为系统向你发送的消息时，说明这些任务到了需要被执行的节点，例如：用户要你三点或五分钟后提醒开会的事情，然后当你看到一个被插入的“提醒用户开会”的系统消息，你需要立刻提醒用户开会，以此类推\n\n"
-        content_append(request.messages, 'system', language_message)
 
-    # 先统一获取当前选中的 memory 对象（后面多处会用到）
-    cur_memory = None
-    if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"]:
-        memoryId = settings["memorySettings"]["selectedMemory"]
-        for memory in settings["memories"]:
-            if memory["id"] == memoryId:
-                cur_memory = memory
-                break
-    
-    # 获取角色名称（用于显示），如果找不到就用 id 兜底
-    selectedMemoryName = cur_memory["name"] if cur_memory else settings["memorySettings"]["selectedMemory"]
+async def _append_project_skills(request, cwd, visibilityScope):
+    """project skills summary injection. (M-3 split)"""
+    try:
+        # 无论是在 docker 还是 local，逻辑路径通常是一致的（通过挂载）
+        # 如果是 Docker 环境且 backend 无法直接访问 cwd，则需通过 docker exec ls 扫描，
+        # 但通常项目路径是共享的。
+        skills_message = await get_project_skills_summary(cwd, visibilityScope)
+        if skills_message:
+            content_append(request.messages, 'system', skills_message)
+    except Exception as e:
+        logging.getLogger("app").info(f"[Skill Loader] 扫描技能失败: {e}")
 
-    # 辅助函数：从 memory/{id}/model 格式解析 id，并查找 name
-    def resolve_agent_name(raw_model):
-        if raw_model.startswith("memory/"):
-            # 分解 memory/{id}/rest 格式
-            parts = raw_model.split('/', 2)  # ['memory', 'id', 'rest']
-            if len(parts) >= 2:
-                memory_id = parts[1]
-                # 在 memories 中查找
-                for memory in settings["memories"]:
-                    if memory["id"] == memory_id:
-                        return memory["name"]
-                # 找不到返回原始字符串（兜底）
-                return raw_model
-        # 不是 memory/ 开头的（如普通模型名或用户自定义名），直接返回
-        return raw_model
 
-    if settings["isGroupMode"] and not request.is_app_bot and not request.is_sub_agent:
-        selectedGroupAgents = settings['selectedGroupAgents']
-        if selectedGroupAgents:
-            userName = "user"
-            if settings["memorySettings"]["userName"]:
-                userName = settings["memorySettings"]["userName"]
-            selectedGroupAgents.append(userName)
-            
-            # 修复：把每个 agent 的 id 转成 name
-            agent_names = [resolve_agent_name(agent) for agent in selectedGroupAgents]
-            
-            group_message = f"\n\n你当前处于群聊模式，群聊中的角色有：{agent_names}\n\n你在扮演{selectedMemoryName}"
-            content_append(request.messages, 'system', group_message)
+def _resolve_agent_name(raw_model, settings):
+    """Resolve memory/{id}/rest to display name, fallback raw. (M-3 split)"""
+    if raw_model.startswith("memory/"):
+        # 分解 memory/{id}/rest 格式
+        parts = raw_model.split('/', 2)  # ['memory', 'id', 'rest']
+        if len(parts) >= 2:
+            memory_id = parts[1]
+            # 在 memories 中查找
+            for memory in settings["memories"]:
+                if memory["id"] == memory_id:
+                    return memory["name"]
+            # 找不到返回原始字符串（兜底）
+            return raw_model
+    # 不是 memory/ 开头的（如普通模型名或用户自定义名），直接返回
+    return raw_model
 
+
+def _append_tts_voice_prompts(request, settings, selectedMemoryName):
+    """TTS voice-tag XML contract. (M-3 split)"""
     newttsList = []
     Narrator_label = "Narrator"
     if settings['ttsSettings']['enabled']  and not request.is_sub_agent:
@@ -3111,30 +2984,10 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 
 <silence></silence>标签最好用于图片的markdown语法、网页链接等不适合语音合成的部分，并且<silence></silence>标签必须另起一行，并且独占一行！<silence></silence>标签与图片的markdown语法之间不能有空格和回车，否则会导致解析失败！比如<silence>![example](https://example.com/example.png)</silence>\n\n就可以正确解析图片，但是<silence>\n![example](https://example.com/example.png)\n</silence>就会导致前端无法显示这个图片！\n\n"""
             content_prepend(request.messages, 'system', tts_messages)
-    if settings['vision']['desktopVision'] and not request.is_app_bot  and not request.is_sub_agent:
-        desktop_message = "\n\n用户与你对话时，如果发了图片给你，有可能是给你发当前的桌面截图。\n\n"
-        content_append(request.messages, 'system', desktop_message)
-    if settings['tools']['time']['enabled'] and settings['tools']['time']['triggerMode'] == 'beforeThinking':
-        time_message = f"\n\n最后一条消息发送时间：{local_timezone}  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n"
-        content_prepend(request.messages, 'system', time_message)
-    if settings['tools']['inference']['enabled']:
-        inference_message = "回答用户前请先思考推理，再回答问题，你的思考推理的过程必须放在<think>与</think>之间。\n\n"
-        content_prepend(request.messages, 'user', f"{inference_message}\n\n用户：")
-    if settings['tools']['formula']['enabled']:
-        latex_message = "\n\n当你想使用latex公式时，你必须是用 ['$', '$'] 作为行内公式定界符，以及 ['$$', '$$'] 作为行间公式定界符。\n\n"
-        content_append(request.messages, 'system', latex_message)
-    if settings['tools']['language']['enabled']:
-        language_message = f"请使用{settings['tools']['language']['language']}语言说话！，不要使用其他语言，语气风格为{settings['tools']['language']['tone']}\n\n"
-        content_append(request.messages, 'system', language_message)
-    if settings["stickerPacks"]:
-        for stickerPack in settings["stickerPacks"]:
-            if stickerPack["enabled"]:
-                sticker_message = f"\n\n图片库名称：{stickerPack['name']}，包含的图片：{json.dumps(stickerPack['stickers'])}\n\n"
-                content_append(request.messages, 'system', sticker_message)
-        content_append(request.messages, 'system', "\n\n当你需要使用图片时，请将图片的URL放在markdown的图片标签中，例如：\n\n<silence>![图片名](图片URL)</silence>\n\n，图片markdown必须另起并且独占一行！<silence>和</silence>是控制TTS的静音标签，表示这个图片部分不会进入语音合成\n\n你必须在回复中正确使用 <silence> 标签来包裹图片的 Markdown 语法\n\n<silence>和</silence>与图片的 Markdown 语法之间不能有空格和回车，会导致解析失败！\n\n")
-    if settings['text2imgSettings']['enabled']:
-        text2img_messages = "\n\n当你使用画图工具后，必须将图片的URL放在markdown的图片标签中，例如：\n\n<silence>![图片名](图片URL)</silence>\n\n，图片markdown必须另起并且独占一行！请主动发给用户，工具返回的结果，用户看不到！<silence>和</silence>是控制TTS的静音标签，表示这个图片部分不会进入语音合成\n\n你必须在回复中正确使用 <silence> 标签来包裹图片的 Markdown 语法\n\n注意！！！<silence>和</silence>与图片的 Markdown 语法之间不能有空格和回车，会导致解析失败！\n\n"
-        content_append(request.messages, 'system', text2img_messages)
+
+
+def _append_avatar_prompts(request, settings):
+    """VRM expressions/motions + VTube Studio injection. (M-3 split)"""
     if settings['VRMConfig']['enabledExpressions'] and not request.is_app_bot and not request.is_sub_agent:
         Expression_messages = "\n\n你可以使用以下表情：<happy> <angry> <sad> <neutral> <surprised> <relaxed>\n\n你可以在句子开头插入表情符号以驱动人物的当前表情，注意！你需要将表情符号放到句子的开头（如果有音色标签，就放到音色标签之后即可），才能在说这句话的时候同步做表情，例如：<angry>我真的生气了。<surprised>哇！<happy>我好开心。\n\n一定要把表情符号跟要做表情的句子放在同一行，如果表情符号和要做表情的句子中间有换行符，表情也将不会生效，例如：\n\n<happy>\n我好开心。\n\n此时，表情符号将不会生效。"
         content_append(request.messages, 'system', Expression_messages)
@@ -3188,7 +3041,8 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
             content_append(request.messages, 'system', vts_prompt)
 
 
-    # ==================== 好感度/数值系统注入 ====================
+async def _append_affection_prompt(request, settings):
+    """Affection/attribute system with dynamic speaker detection. (M-3 split)"""
     love_settings = settings.get('loveSettings', {})
     if love_settings.get('enabled', False) and not request.is_app_bot and not request.is_sub_agent:
         
@@ -3252,8 +3106,10 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 """
         # 将提示词追加到 system prompt 中
         content_append(request.messages, 'system', affection_message)
-    # ==================== 好感度系统注入结束 ====================
 
+
+def _append_a2ui_prompt(request):
+    """A2UI component reference + examples. (M-3 split)"""
     if settings['tools']['a2ui']['enabled'] and not request.is_app_bot and not request.is_sub_agent:
         A2UI_messages = """
 除了使用自然语言回答用户问题外，你还拥有一个特殊能力：**渲染 A2UI 界面**。
@@ -3460,7 +3316,9 @@ Assistant: 表格如下：
 """
         content_append(request.messages, 'system', A2UI_messages)
 
-    # ===== L3 任务检查点：注入此前压缩落盘的任务态（7 天内、当前或未知会话、且历史中尚无摘要时） =====
+
+def _inject_task_checkpoint(request, cli_settings, engine):
+    """L3 checkpoint: replay task state compressed within 7 days. (M-3 split)"""
     if cli_settings.get("enabled", False) and engine in ("local", "ds"):
         try:
             from py.context_manager import SUMMARY_HEADER
@@ -3478,6 +3336,196 @@ Assistant: 表格如下：
                                        f"\n\n【任务检查点】此前上下文压缩时落盘的任务态（与更新对话冲突时以对话为准）：\n{_cp['summary'][:3000]}\n")
         except Exception as e:
             logging.getLogger("app").info(f"[Context] 检查点注入失败: {e}")
+
+async def tools_change_messages(request: ChatRequest, settings: dict):
+    
+    if request.messages and request.messages[0]['role'] == 'system' and request.messages[0]['content'] != '':
+        basic_message = " "
+        request.messages[0]['content'] += basic_message
+
+    cli_settings = settings.get("CLISettings", {})
+    cwd = cli_settings.get("cc_path")
+    visibilityScope = cli_settings.get("visibilityScope", "workspace")
+    # 修复：local 环境应该从 localEnvSettings 读取权限模式
+    engine = cli_settings.get("engine", "")
+    
+    if engine == "local":
+        env_settings = settings.get("localEnvSettings", {})
+    elif engine == "ds":
+        env_settings = settings.get("dsSettings", {})
+    else:
+        env_settings = settings.get("acpSettings", {})
+    
+    permissionMode = cli_permission_mode_for(settings)
+    
+    if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
+        
+        await _inject_workspace_memory(request, cwd, cli_settings)
+
+    if request.is_app_bot and request.platform:
+        platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流\n\n"
+        content_append(request.messages, 'system', platform_message)
+
+    if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
+        _append_permission_mode_message(request, permissionMode)
+
+    if permissionMode == "cowork" and not request.is_sub_agent:
+        if cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
+            sub_task_context = await query_task_progress(cwd)
+            content_append(request.messages, 'system', sub_task_context)
+    elif cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
+        
+        if engine == "local":
+            # 在本地环境下，首先注入系统环境信息
+            system_context = get_system_context(cwd=cwd)
+            content_append(request.messages, 'system', system_context)
+        elif engine == "ds":
+            # 在 Docker 环境下，注入系统环境信息
+            system_context = """【环境信息】操作系统：Linux | Shell：bash
+
+⚠️ 重要提示：
+1. 当前为 Docker 环境，请使用 Linux 命令和工具链
+2. 执行 docker_sandbox 时，命令必须符合 Linux 的语法规范
+3. 路径分隔符：Unix 使用正斜杠(/)
+4. 请尽量使用相对路径，避免使用绝对路径，以免在跨平台时出现问题
+
+### ✅ **已安装的主要开发工具**
+
+#### **编程语言和运行时**
+1. **Python**
+   - Python
+   - pip
+   - uv
+
+2. **Node.js**
+   - Node.js
+   - npm
+   - npx
+
+3. **Go**
+   - Go
+
+4. **Perl**
+   - Perl
+
+#### **版本控制和协作工具**
+1. **Git**
+   - git
+   - GitHub CLI (gh)
+
+#### **包管理和构建工具**
+1. **Python 包管理**
+   - pip / pip3
+   - uv
+
+2. **Node.js 包管理**
+   - npm / npx
+
+3. **系统包管理**
+   - apt-get / dpkg
+
+#### **文本处理和命令行工具**
+1. **文本处理**
+   - jq
+   - awk / sed / grep
+   - cat / less / more / head / tail
+
+2. **文件操作**
+   - tar / unzip
+   - rsync
+   - 所有基本 Unix 命令（ls, cp, mv, rm, mkdir, chmod 等）
+
+3. **系统工具**
+   - bash shell
+   - make
+   - which / whereis
+
+#### **网络工具**
+1. **HTTP 客户端**
+   - curl
+
+2. **安全工具**
+   - openssl
+   - gpg
+
+#### **系统监控**
+1. **进程和资源监控**
+   - top / ps
+   - free / df / du
+   
+"""
+            content_append(request.messages, 'system', system_context)
+
+        await _append_todos_context(request, cwd)
+
+        await _append_agents_md(request, cwd)
+
+        await _append_project_skills(request, cwd, visibilityScope)
+
+    if request.messages[-1]['role'] == 'system' and settings['tools']['autoBehavior']['enabled'] and not request.is_app_bot and not request.is_sub_agent:
+        language_message = f"\n\n当你看到被插入到对话之间的系统消息，这是自主行为系统向你发送的消息，例如用户主动或者要求你设置了一些定时任务或者延时任务，当你看到自主行为系统向你发送的消息时，说明这些任务到了需要被执行的节点，例如：用户要你三点或五分钟后提醒开会的事情，然后当你看到一个被插入的“提醒用户开会”的系统消息，你需要立刻提醒用户开会，以此类推\n\n"
+        content_append(request.messages, 'system', language_message)
+
+    # 先统一获取当前选中的 memory 对象（后面多处会用到）
+    cur_memory = None
+    if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"]:
+        memoryId = settings["memorySettings"]["selectedMemory"]
+        for memory in settings["memories"]:
+            if memory["id"] == memoryId:
+                cur_memory = memory
+                break
+    
+    # 获取角色名称（用于显示），如果找不到就用 id 兜底
+    selectedMemoryName = cur_memory["name"] if cur_memory else settings["memorySettings"]["selectedMemory"]
+
+
+    if settings["isGroupMode"] and not request.is_app_bot and not request.is_sub_agent:
+        selectedGroupAgents = settings['selectedGroupAgents']
+        if selectedGroupAgents:
+            userName = "user"
+            if settings["memorySettings"]["userName"]:
+                userName = settings["memorySettings"]["userName"]
+            selectedGroupAgents.append(userName)
+            
+            # 修复：把每个 agent 的 id 转成 name
+            agent_names = [_resolve_agent_name(agent, settings) for agent in selectedGroupAgents]
+            
+            group_message = f"\n\n你当前处于群聊模式，群聊中的角色有：{agent_names}\n\n你在扮演{selectedMemoryName}"
+            content_append(request.messages, 'system', group_message)
+
+    _append_tts_voice_prompts(request, settings, selectedMemoryName)
+    if settings['vision']['desktopVision'] and not request.is_app_bot  and not request.is_sub_agent:
+        desktop_message = "\n\n用户与你对话时，如果发了图片给你，有可能是给你发当前的桌面截图。\n\n"
+        content_append(request.messages, 'system', desktop_message)
+    if settings['tools']['time']['enabled'] and settings['tools']['time']['triggerMode'] == 'beforeThinking':
+        time_message = f"\n\n最后一条消息发送时间：{local_timezone}  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n"
+        content_prepend(request.messages, 'system', time_message)
+    if settings['tools']['inference']['enabled']:
+        inference_message = "回答用户前请先思考推理，再回答问题，你的思考推理的过程必须放在<think>与</think>之间。\n\n"
+        content_prepend(request.messages, 'user', f"{inference_message}\n\n用户：")
+    if settings['tools']['formula']['enabled']:
+        latex_message = "\n\n当你想使用latex公式时，你必须是用 ['$', '$'] 作为行内公式定界符，以及 ['$$', '$$'] 作为行间公式定界符。\n\n"
+        content_append(request.messages, 'system', latex_message)
+    if settings['tools']['language']['enabled']:
+        language_message = f"请使用{settings['tools']['language']['language']}语言说话！，不要使用其他语言，语气风格为{settings['tools']['language']['tone']}\n\n"
+        content_append(request.messages, 'system', language_message)
+    if settings["stickerPacks"]:
+        for stickerPack in settings["stickerPacks"]:
+            if stickerPack["enabled"]:
+                sticker_message = f"\n\n图片库名称：{stickerPack['name']}，包含的图片：{json.dumps(stickerPack['stickers'])}\n\n"
+                content_append(request.messages, 'system', sticker_message)
+        content_append(request.messages, 'system', "\n\n当你需要使用图片时，请将图片的URL放在markdown的图片标签中，例如：\n\n<silence>![图片名](图片URL)</silence>\n\n，图片markdown必须另起并且独占一行！<silence>和</silence>是控制TTS的静音标签，表示这个图片部分不会进入语音合成\n\n你必须在回复中正确使用 <silence> 标签来包裹图片的 Markdown 语法\n\n<silence>和</silence>与图片的 Markdown 语法之间不能有空格和回车，会导致解析失败！\n\n")
+    if settings['text2imgSettings']['enabled']:
+        text2img_messages = "\n\n当你使用画图工具后，必须将图片的URL放在markdown的图片标签中，例如：\n\n<silence>![图片名](图片URL)</silence>\n\n，图片markdown必须另起并且独占一行！请主动发给用户，工具返回的结果，用户看不到！<silence>和</silence>是控制TTS的静音标签，表示这个图片部分不会进入语音合成\n\n你必须在回复中正确使用 <silence> 标签来包裹图片的 Markdown 语法\n\n注意！！！<silence>和</silence>与图片的 Markdown 语法之间不能有空格和回车，会导致解析失败！\n\n"
+        content_append(request.messages, 'system', text2img_messages)
+    _append_avatar_prompts(request, settings)
+    await _append_affection_prompt(request, settings)
+    # ==================== 好感度系统注入结束 ====================
+
+    _append_a2ui_prompt(request)
+
+    # ===== L3 任务检查点：注入此前压缩落盘的任务态（7 天内、当前或未知会话、且历史中尚无摘要时） =====
+    _inject_task_checkpoint(request, cli_settings, engine)
 
     # ===== 分层 system prompt：Agent 核心契约置最前，权限模式契约置最后 =====
     _cli_cfg = settings.get("CLISettings", {})
