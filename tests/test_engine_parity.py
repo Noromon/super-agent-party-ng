@@ -149,7 +149,8 @@ class TestDriftRadar:
         assert "_is_approval_result(results)" in SRC
 
     def test_t9_emit_site_uses_sentinel(self):
-        emit = _func_src("dispatch_tool")
+        # M-3 split: approval emit moved from dispatch_tool into _sensitive_approval
+        emit = _func_src("_sensitive_approval")
         assert "_approval_payload(tool_name, tool_params, permission_mode, cwd)" in emit
 
 

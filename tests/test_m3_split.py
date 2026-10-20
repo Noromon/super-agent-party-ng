@@ -15,8 +15,16 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 GIANT_WHITELIST = {
     "generate_stream_response": 2206,   # includes nested stream_generator
     "_generate_complete_impl": 867,
-    "dispatch_tool": 462,
 }
+
+DISPATCH_HELPERS = [
+    "_build_tool_hooks",
+    "_plan_mode_block",
+    "_sensitive_approval",
+    "_dispatch_external_tool",
+    "_dispatch_task_center_tool",
+    "_dispatch_unknown_tool",
+]
 
 TCM_HELPERS = [
     "_inject_workspace_memory",
@@ -63,3 +71,14 @@ def test_tcm_split_helpers_present_and_small():
     for h in TCM_HELPERS:
         assert h in funcs, "helper %s missing" % h
         assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+
+
+def test_dispatch_split_helpers_and_hooks_literal():
+    funcs = {n.name: n for n in _module_funcs()}
+    assert funcs["dispatch_tool"].end_lineno - funcs["dispatch_tool"].lineno + 1 < 300
+    for h in DISPATCH_HELPERS:
+        assert h in funcs, "helper %s missing" % h
+        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+    # py/audit_tools.py parses this literal to audit hook-table consistency
+    src = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
+    assert "_TOOL_HOOKS = {" in src

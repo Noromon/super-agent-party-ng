@@ -1579,11 +1579,15 @@ async def call_node_extension_tool(ext_id: str, tool_name: str, tool_params: dic
         if call_id in mcp_call_results:
             del mcp_call_results[call_id]
 
-async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
-    global mcp_client_list,_TOOL_HOOKS,HA_client,ChromeMCP_client,sql_client, node_ext_mcp_clients, node_ext_mcp_tools
-    print("dispatch_tool",tool_name,tool_params)
-    
-    # ==================== 1. 导入所有工具函数 ====================
+
+def _build_tool_hooks():
+    """Tool-name -> callable table (audit 09 M-3: built once on first use).
+
+    Imports stay function-local so aliases (e.g. py.utility_tools.time) do
+    not leak into module scope; only the resulting dict is published to the
+    module-level _TOOL_HOOKS that dispatch_tool and audit tooling read.
+    """
+    global _TOOL_HOOKS
     from py.web_search import (
         DDGsearch, 
         searxng, 
@@ -1814,10 +1818,11 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         "update_workspace_settings":update_workspace_settings,
         "acpx_agent":acpx_agent,
     }
-    
-    # ==================== 3. 权限拦截逻辑 (Human-in-the-loop) ====================
-    # 敏感/受限工具清单单一来源=py/tool_registry.py（E-1，顶部已导入）
-    # 规则 0: 计划模式只读硬拦截（对全部写入/执行类工具生效，不经审批弹窗）
+
+
+
+def _plan_mode_block(tool_name, settings):
+    """Plan-mode read-only hard block (rule 0). Returns message or None."""
     if tool_name in PLAN_BLOCKED_TOOLS:
         from py.cli_tool import normalize_permission_mode
         _engine0 = settings.get("CLISettings", {}).get("engine", "")
@@ -1831,7 +1836,11 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
             logging.getLogger("app").info(f"[Permission] plan mode blocked '{tool_name}'")
             return "[Blocked] 你当前处于计划模式（只读），该工具不可用。请使用只读工具完成分析，用自然语言输出执行计划，并等待用户确认后再执行。"
 
-    # 只有当调用的工具属于敏感工具列表时才进行拦截检查
+    return None
+
+
+def _sensitive_approval(tool_name, tool_params, settings):
+    """Human-in-the-loop approval gate for SENSITIVE_TOOLS."""
     if tool_name in SENSITIVE_TOOLS:
         
         # 获取相关配置
@@ -1880,8 +1889,16 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
             logging.getLogger("app").info(f"[Permission] Blocked '{tool_name}', requesting approval.")
             return _approval_payload(tool_name, tool_params, permission_mode, cwd)
 
-    # ==================== 4. 常规工具处理逻辑 (原有代码) ====================
+    return None
 
+
+async def _dispatch_external_tool(tool_name, tool_params, settings):
+    """Prefix aliases + custom_http/comfyui/HA/ChromeMCP/SQL clients.
+
+    Returns (possibly-renamed tool_name, handled_result-or-None).
+    """
+    from py.custom_http import fetch_custom_http
+    from py.comfyui_tool import comfyui_tool_call
     if "multi_tool_use." in tool_name:
         tool_name = tool_name.replace("multi_tool_use.", "")
         
@@ -1897,7 +1914,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         url = tool_custom_http['url']
         headers = tool_custom_http['headers']
         result = await fetch_custom_http(method, url, headers, tool_params)
-        return str(result)
+        return tool_name, str(result)
         
     if "comfyui_" in tool_name:
         tool_name = tool_name.replace("comfyui_", "")
@@ -1907,121 +1924,165 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         image_input_2 = tool_params.get('image_input_2', None)
         logging.getLogger("app").info(tool_name)
         result = await comfyui_tool_call(tool_name, text_input, image_input,text_input_2,image_input_2)
-        return str(result)
+        return tool_name, str(result)
         
     if settings["HASettings"]["enabled"]:
         ha_tool_list = HA_client._tools
         if tool_name in ha_tool_list:
             result = await HA_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
-                return result
+                return tool_name, result
             elif hasattr(result, 'model_dump'):
-                return str(result.model_dump())
+                return tool_name, str(result.model_dump())
             else:
-                return str(result)
+                return tool_name, str(result)
                 
     if settings['chromeMCPSettings']['enabled'] and settings['chromeMCPSettings']['type']=='external':
         Chrome_tool_list = ChromeMCP_client._tools
         if tool_name in Chrome_tool_list:
             result = await ChromeMCP_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
-                return result
+                return tool_name, result
             elif hasattr(result, 'model_dump'):
-                return str(result.model_dump())
+                return tool_name, str(result.model_dump())
             else:
-                return str(result)
+                return tool_name, str(result)
                 
     if settings["sqlSettings"]["enabled"]:
         sql_tool_list = sql_client._tools
         if tool_name in sql_tool_list:
             result = await sql_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
+                return tool_name, result
+            elif hasattr(result, 'model_dump'):
+                return tool_name, str(result.model_dump())
+            else:
+                return tool_name, str(result)
+
+    return tool_name, None
+
+
+async def _dispatch_task_center_tool(tool_name, tool_params, settings):
+    """create_subtask / query_task_progress / cancel_subtask / finish_task."""
+    from py.task_tools import (
+        create_subtask,
+        query_task_progress,
+        cancel_subtask,
+        finish_task
+    )
+    cli_settings = settings.get("CLISettings", {})
+    cwd = cli_settings.get("cc_path")
+        
+    if tool_name == "create_subtask":
+        # 读取共识文件（如果存在）
+        from pathlib import Path
+        import aiofiles
+            
+        consensus_content = None
+        consensus_file = Path(cwd) / ".agent" / "consensus.md"
+        if consensus_file.exists():
+            async with aiofiles.open(consensus_file, 'r', encoding='utf-8') as f:
+                consensus_content = await f.read()
+            
+        result = await create_subtask(
+            workspace_dir=cwd,
+            settings=settings, 
+            consensus_content=consensus_content,
+            **tool_params  # 这行是关键：它会把 AI 传的 title, platforms 等全部解包传入
+        )
+        return result
+
+        
+    elif tool_name == "query_task_progress":
+        result = await query_task_progress(
+            workspace_dir=cwd,
+            **tool_params
+        )
+        return result
+        
+    elif tool_name == "cancel_subtask":
+        result = await cancel_subtask(
+            workspace_dir=cwd,
+            task_id=tool_params.get("task_id")
+        )
+        return result
+    elif tool_name == "finish_task":
+        result = await finish_task(
+            workspace_dir=cwd,
+            task_id=tool_params.get("task_id"),
+            result=tool_params.get("result"),
+        )
+        return result
+
+
+
+async def _dispatch_unknown_tool(tool_name, tool_params):
+    """MCP clients, node-extension tools, then the C-19 correction hint."""
+    for server_name, mcp_client in mcp_client_list.items():
+        if hasattr(mcp_client, '_conn') and mcp_client._conn and tool_name in mcp_client._conn.tools:
+            result = await mcp_client.call_tool(tool_name, tool_params)
+            if isinstance(result, str):
                 return result
             elif hasattr(result, 'model_dump'):
                 return str(result.model_dump())
             else:
                 return str(result)
+        
+    # 2. 🔥 查询 Node 扩展的 MCP 工具
+    for ext_id, tools in node_ext_mcp_tools.items():
+        for tool in tools:
+            if tool['name'] == tool_name:
+                # 找到对应的扩展，通过WebSocket调用
+                return await call_node_extension_tool(ext_id, tool_name, tool_params)
+
+    # C-19: 未知工具不再静默返回 None——给 LLM 可自我纠错的显式指引（含近似名建议）
+    import difflib as _difflib
+    _avail = set(_TOOL_HOOKS)
+    for _mc in mcp_client_list.values():
+        if hasattr(_mc, '_conn') and _mc._conn:
+            _tl = getattr(_mc._conn, 'tools', None) or {}
+            _avail.update(_tl.keys() if isinstance(_tl, dict) else _tl)
+    for _ext_tools in node_ext_mcp_tools.values():
+        for _t_meta in _ext_tools:
+            if isinstance(_t_meta, dict) and _t_meta.get('name'):
+                _avail.add(_t_meta['name'])
+    _guess = _difflib.get_close_matches(tool_name, sorted(_avail), n=3, cutoff=0.6)
+    _hint = f" 最接近的可用工具：{', '.join(_guess)}。" if _guess else ""
+    return (f"[Unknown Tool] 工具 '{tool_name}' 不存在，无法执行。{_hint}"
+            f"请从工具列表中选择一个真实存在的工具名重试（不要新造或拼接工具名）。")
+
+async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
+    global mcp_client_list,_TOOL_HOOKS,HA_client,ChromeMCP_client,sql_client, node_ext_mcp_clients, node_ext_mcp_tools
+    print("dispatch_tool",tool_name,tool_params)
+    
+    # ==================== 1. 工具映射表（首次使用时构建一次，M-3 拆分） ====================
+    if not _TOOL_HOOKS:
+        _build_tool_hooks()
+    
+    # ==================== 3. 权限拦截逻辑 (Human-in-the-loop) ====================
+    # 敏感/受限工具清单单一来源=py/tool_registry.py（E-1，顶部已导入）
+    # 规则 0: 计划模式只读硬拦截（对全部写入/执行类工具生效，不经审批弹窗）
+    blocked = _plan_mode_block(tool_name, settings)
+    if blocked is not None:
+        return blocked
+
+    # 只有当调用的工具属于敏感工具列表时才进行拦截检查
+    approval = _sensitive_approval(tool_name, tool_params, settings)
+    if approval is not None:
+        return approval
+
+    # ==================== 4. 常规工具处理逻辑 (原有代码) ====================
+
+    tool_name, handled = await _dispatch_external_tool(tool_name, tool_params, settings)
+    if handled is not None:
+        return handled
                 
     # ==================== 5. 任务中心工具特殊处理 ====================
     if tool_name in ["create_subtask", "query_task_progress", "cancel_subtask","finish_task"]:
-        cli_settings = settings.get("CLISettings", {})
-        cwd = cli_settings.get("cc_path")
-        
-        if tool_name == "create_subtask":
-            # 读取共识文件（如果存在）
-            from pathlib import Path
-            import aiofiles
-            
-            consensus_content = None
-            consensus_file = Path(cwd) / ".agent" / "consensus.md"
-            if consensus_file.exists():
-                async with aiofiles.open(consensus_file, 'r', encoding='utf-8') as f:
-                    consensus_content = await f.read()
-            
-            result = await create_subtask(
-                workspace_dir=cwd,
-                settings=settings, 
-                consensus_content=consensus_content,
-                **tool_params  # 这行是关键：它会把 AI 传的 title, platforms 等全部解包传入
-            )
-            return result
-
-        
-        elif tool_name == "query_task_progress":
-            result = await query_task_progress(
-                workspace_dir=cwd,
-                **tool_params
-            )
-            return result
-        
-        elif tool_name == "cancel_subtask":
-            result = await cancel_subtask(
-                workspace_dir=cwd,
-                task_id=tool_params.get("task_id")
-            )
-            return result
-        elif tool_name == "finish_task":
-            result = await finish_task(
-                workspace_dir=cwd,
-                task_id=tool_params.get("task_id"),
-                result=tool_params.get("result"),
-            )
-            return result
+        return await _dispatch_task_center_tool(tool_name, tool_params, settings)
 
     if tool_name not in _TOOL_HOOKS:
-        # 1. 先查询常规的 MCP 客户端
-        for server_name, mcp_client in mcp_client_list.items():
-            if hasattr(mcp_client, '_conn') and mcp_client._conn and tool_name in mcp_client._conn.tools:
-                result = await mcp_client.call_tool(tool_name, tool_params)
-                if isinstance(result, str):
-                    return result
-                elif hasattr(result, 'model_dump'):
-                    return str(result.model_dump())
-                else:
-                    return str(result)
-        
-        # 2. 🔥 查询 Node 扩展的 MCP 工具
-        for ext_id, tools in node_ext_mcp_tools.items():
-            for tool in tools:
-                if tool['name'] == tool_name:
-                    # 找到对应的扩展，通过WebSocket调用
-                    return await call_node_extension_tool(ext_id, tool_name, tool_params)
-
-        # C-19: 未知工具不再静默返回 None——给 LLM 可自我纠错的显式指引（含近似名建议）
-        import difflib as _difflib
-        _avail = set(_TOOL_HOOKS)
-        for _mc in mcp_client_list.values():
-            if hasattr(_mc, '_conn') and _mc._conn:
-                _tl = getattr(_mc._conn, 'tools', None) or {}
-                _avail.update(_tl.keys() if isinstance(_tl, dict) else _tl)
-        for _ext_tools in node_ext_mcp_tools.values():
-            for _t_meta in _ext_tools:
-                if isinstance(_t_meta, dict) and _t_meta.get('name'):
-                    _avail.add(_t_meta['name'])
-        _guess = _difflib.get_close_matches(tool_name, sorted(_avail), n=3, cutoff=0.6)
-        _hint = f" 最接近的可用工具：{', '.join(_guess)}。" if _guess else ""
-        return (f"[Unknown Tool] 工具 '{tool_name}' 不存在，无法执行。{_hint}"
-                f"请从工具列表中选择一个真实存在的工具名重试（不要新造或拼接工具名）。")
+        return await _dispatch_unknown_tool(tool_name, tool_params)
         
     tool_call = _TOOL_HOOKS[tool_name]
     try:
