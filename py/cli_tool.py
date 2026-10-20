@@ -602,9 +602,21 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
             await process.wait()
 
         except asyncio.TimeoutError:
-            process.kill()
+            # T-2: 与本地 shell 同源的统一树 kill
+            await _kill_process_tree(process)
             yield f"\n\n[TIMEOUT] The Docker command was killed after {effective_timeout} s. It did NOT finish - the step is still incomplete. Rerun the long part with 'background': true (then poll get_process_logs) or split it into shorter commands. Do not give up on the step."
             yield "\nTip: for servers/apps/large downloads use 'background': true and poll get_process_logs instead of waiting."
+        finally:
+            # T-2: cancel/断连/异常等任何退出路径都必须收掉 docker exec 进程与读流任务
+            for _t in (stdout_task, stderr_task):
+                if not _t.done():
+                    _t.cancel()
+            if process.returncode is None:
+                await _kill_process_tree(process)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except Exception:
+                pass
     except Exception as e:
         yield f"[Error] Could not start the command in the sandbox: {e}. Verify the sandbox is up (run 'echo ok') and retry - this is not a task failure."
 
@@ -1174,6 +1186,26 @@ async def read_stream(stream, *, is_error: bool = False):
         yield f"{prefix}{decoded}"
 
 
+async def _kill_process_tree(process, system=None):
+    """T-2: 杀整棵进程树。Windows=taskkill /T /F；POSIX=killpg（spawn 侧已
+    start_new_session=独立进程组，杀组覆盖全部孙进程）。幂等、异常静默。"""
+    try:
+        if process.returncode is not None:
+            return
+        system = system or platform.system()
+        if system == "Windows":
+            await asyncio.to_thread(
+                subprocess.run, f"taskkill /F /T /PID {process.pid}",
+                shell=True, capture_output=True)
+        else:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except Exception:
+                process.kill()
+    except Exception:
+        pass
+
+
 async def shell_tool_local(command: str, background: bool = False, timeout: int = 600) -> AsyncIterator[str]:
     """
     [Local] 执行本地命令（支持动态超时）
@@ -1256,14 +1288,22 @@ async def shell_tool_local(command: str, background: bool = False, timeout: int 
                 yield f"\n--- Command exited with code {process.returncode} (NON-ZERO means this step FAILED: read the output above, adjust and retry with a changed command; zero means this step succeeded - continue the task, do not summarize yet) ---"
                 yield get_detailed_exit_info(process.returncode, command)
         except asyncio.TimeoutError:
-            # 杀进程树逻辑保持不变...
-            if system == "Windows":
-                subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, capture_output=True)
-            else:
-                try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                except: process.kill()
+            # T-2: 统一走进程树 kill（与原逻辑同源）
+            await _kill_process_tree(process, system)
             yield f"\n\n[TIMEOUT] The command was killed after {effective_timeout} s. It did NOT finish - the step is still incomplete. Rerun the long part with 'background': true (then poll get_process_logs) or split it into shorter commands. Do not give up on the step."
             yield "\nTip: for servers/apps/large downloads use 'background': true and poll get_process_logs instead of waiting."
+        finally:
+            # T-2: 任何退出路径（cancel 围栏 break / 前端断连 GeneratorExit /
+            # 异常）都必须杀进程树+收读流任务——取消只拦新调用的漏洞封堵
+            for _t in (stdout_task, stderr_task):
+                if not _t.done():
+                    _t.cancel()
+            if process.returncode is None:
+                await _kill_process_tree(process, system)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except Exception:
+                pass
     except Exception as e: 
         yield f"[Error] Could not launch the process: {e}. Simplify the command and retry; this is not a task failure."
 
