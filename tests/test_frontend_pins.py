@@ -141,6 +141,40 @@ class TestBackupUiPins:
         assert used and used <= zh_keys, f"missing i18n keys: {used - zh_keys}"
 
 
+class TestScopeFixPins:
+    """R1 undefined-reference sweep: real defects fixed, implicit globals
+    declared, legacy eslint exemptions removed (repo-wide no-undef active)."""
+
+    RENDERER = (ROOT / "static" / "js" / "renderer.js").read_text(encoding="utf-8")
+    DATA = (ROOT / "static" / "js" / "vue_data.js").read_text(encoding="utf-8")
+
+    def test_no_python_style_named_args_left(self):
+        assert "isEnd=false" not in SRC and "isEnd = false)" not in SRC
+        assert "role = 'system')" not in SRC
+        assert "this.sendMessage('system')" in SRC
+
+    def test_implicit_globals_now_declared(self):
+        # fileName trio + url family + storage response/data
+        assert SRC.count("const fileName = ") >= 3
+        assert "\n        url = " not in SRC and "\n      fileName = " not in SRC
+        assert "const HOST = " in self.DATA and "const PORT = " in self.DATA
+
+    def test_catch_scope_fixes(self):
+        # addA2AServer: newurl declared before try (catch cleanup needs it)
+        head = SRC[SRC.index("async addA2AServer() {"):]
+        assert head.index("const newurl") < head.index("try {")
+        # batchDeleteFiles catch logs the exception, not an out-of-scope var
+        batch = SRC[SRC.index("async batchDeleteFiles()"):]
+        batch = batch[: batch.index("} catch (e) {") + 900]
+        assert "console.log('batchDeleteFiles error:', e)" in batch
+
+    def test_wecom_separators_computed_complete(self):
+        seg = self.RENDERER[self.RENDERER.index("filteredWeComSeparators()"):]
+        seg = seg[: seg.index("},")]
+        assert "const custom = current" in seg
+        assert self.RENDERER.count("...custom];") >= 2  # feishu + wecom
+
+
 class TestResumeScopePin:
     """resume state must be declared BEFORE the main try so the catch-side
     resume branch can see it (was a ReferenceError swallowed-handler bug,

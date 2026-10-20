@@ -256,7 +256,7 @@ let vue_methods = {
         this.conversationId = uuid.v4();
         const newConv = {
             id: this.conversationId,
-            title: this.generateConversationTitle(messagesPayload),
+            title: this.generateConversationTitle(this.messages),
             mainAgent: this.mainAgent,
             groupId: this.activeConversationGroupId || this.draftConversationGroupId || 'default',
             timestamp: Date.now(),
@@ -1190,7 +1190,7 @@ let vue_methods = {
       else if (key === 'storage') {
         this.activeMenu = 'storage';
         this.subMenu = 'text'; // 默认显示第一个子菜单
-        response = await fetch(`/update_storage`, {
+        const response = await fetch(`/update_storage`, {
             method: 'GET',
             headers: {
               'Content-Type': 'application/json'
@@ -1198,7 +1198,7 @@ let vue_methods = {
         });
         if (response.ok) {
           console.log('Storage files updated successfully');
-          data = await response.json();
+          const data = await response.json();
           this.textFiles = data.textFiles;
           this.imageFiles = data.imageFiles;
           this.videoFiles = data.videoFiles;
@@ -2199,7 +2199,7 @@ let vue_methods = {
         // 新增：处理工具输入
         else if (data.type === 'update_tool_input') {
           this.userInput = data.data.text;
-          this.sendMessage(role = 'system')
+          this.sendMessage('system')
         }
         // 新增：处理TTS输入
         else if (data.type === 'start_tts') {
@@ -2631,7 +2631,7 @@ let vue_methods = {
             if (this.isReadRunning){
                 this.pauseRead();
             } else {
-                this.stopSegmentTTS(isEnd=false);
+                this.stopSegmentTTS(false);
             }
             this.isReadInterruption = true;
         }
@@ -6401,9 +6401,11 @@ let vue_methods = {
       }
     },
     async addA2AServer() {
+      // newurl 必须声明在 try 之前：catch 的失败清理分支需要可见（原声明在 try 体内=
+      // 初始化失败时 catch 抛 ReferenceError，清理与报错提示双双失效）
+      const newurl = this.newA2AUrl;
       try {
         this.showAddA2ADialog = false;
-        const newurl = this.newA2AUrl;
         this.newA2AUrl = '';
         this.a2aServers = {
           ...this.a2aServers,
@@ -6444,7 +6446,7 @@ let vue_methods = {
       console.log('deleteFile:', file);
       this.textFiles = this.textFiles.filter(f => f !== file);
       await this.autoSaveSettings();
-      fileName = file.unique_filename
+      const fileName = file.unique_filename
       try {
         // 向/delete_file发送请求
         const response = await fetch(`/delete_file`, {
@@ -6493,7 +6495,7 @@ let vue_methods = {
           showNotification(this.t('batchDeleteFailed'), 'error');
         }
       } catch (e) {
-        console.log('batchDeleteFiles error:', data);
+        console.log('batchDeleteFiles error:', e);
         showNotification(this.t('batchDeleteFailed'), 'error');
       }
     },
@@ -6563,7 +6565,7 @@ let vue_methods = {
     async deleteImage(img) {
       this.imageFiles = this.imageFiles.filter(i => i !== img);
       await this.autoSaveSettings();
-      fileName = img.unique_filename
+      const fileName = img.unique_filename
       try {
         // 向/delete_file发送请求
         const response = await fetch(`/delete_file`, {
@@ -8226,7 +8228,7 @@ handleCreateSlackSeparator(val) {
     async deleteVideo(video) {
       this.videoFiles = this.videoFiles.filter(i => i !== video);
       await this.autoSaveSettings();
-      fileName = video.unique_filename
+      const fileName = video.unique_filename
       try {
         // 向/delete_file发送请求
         const response = await fetch(`/delete_file`, {
@@ -8246,6 +8248,7 @@ handleCreateSlackSeparator(val) {
     },
 
     goToURL(provider) {
+        let url = '';
         if (provider.vendor === 'custom') {
           url = provider.url;
           // 移除url尾部的/v1
@@ -8266,7 +8269,7 @@ handleCreateSlackSeparator(val) {
         }
     },
     goToMCPURL(value) {
-        url = this.MCPpage[value]
+        const url = this.MCPpage[value]
         if (isElectron) {
           window.electronAPI.openExternal(url);
         } else {
@@ -8274,7 +8277,7 @@ handleCreateSlackSeparator(val) {
         }
     },
     goToPromptURL(value) {
-        url = this.promptPage[value]
+        const url = this.promptPage[value]
         if (isElectron) {
           window.electronAPI.openExternal(url);
         } else {
@@ -8282,7 +8285,7 @@ handleCreateSlackSeparator(val) {
         }
     },
     goToCardURL(value) {
-        url = this.cardPage[value]
+        const url = this.cardPage[value]
         if (isElectron) {
           window.electronAPI.openExternal(url);
         } else {
@@ -12125,7 +12128,9 @@ resumeRead() {
         this.checkReadAudioPlayback();
       } catch (e) {
         console.error(`Read TTS chunk ${index} error`, e);
-        this.readState.audioChunks[index] = { url: null, expressions: chunk_expressions, text: chunk_text, index };
+        // chunk_text/chunk_expressions 声明在 try 的 else 块内，catch 不可见：
+        // 错误槽位直接用原始 chunk 回填（url:null 不会被缓存命中）
+        this.readState.audioChunks[index] = { url: null, expressions: [], text: this.readState.ttsChunks[index] ?? "", index };
         this.cur_audioDatas[index] = null;
         
         /* 新增: 处理错误时也增加计数 */
@@ -13908,7 +13913,7 @@ async playSingleSegment(idx) {
 /* -------------------------------------------------- */
 async toggleContinuousPlay() {
   if (this.readState.isPlaying) {          // 暂停
-    this.stopSegmentTTS(isEnd=false);
+    this.stopSegmentTTS(false);
     return;
   }
   this.readState.isPlaying   = true;
@@ -14075,7 +14080,7 @@ async doPlayAudio(url, idx, continuous = false) {
             this.stopSegmentTTS();
           }
         } else {
-          this.stopSegmentTTS(isEnd = false);
+          this.stopSegmentTTS(false);
         }
         resolve();
       });

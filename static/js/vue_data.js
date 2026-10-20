@@ -16,8 +16,8 @@ if (isElectron) {
       }
     });
   
-    HOST = "127.0.0.1"
-    PORT = window.location.port
+    const HOST = "127.0.0.1"
+    const PORT = window.location.port
     document.addEventListener('click', async (event) => {
       const link = event.target.closest('a[href]');
       if (!link) return;
@@ -55,8 +55,8 @@ if (isElectron) {
     });
   }
   else {
-    HOST = window.location.hostname
-    PORT = window.location.port
+    const HOST = window.location.hostname
+    const PORT = window.location.port
   }
   // 判断协议
   const protocol = window.location.protocol;

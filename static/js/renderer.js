@@ -1577,7 +1577,15 @@ const app = Vue.createApp({
         return this.weComBotConfig.bot_id && this.weComBotConfig.secret;
       },
       filteredWeComSeparators() {
-        // 逻辑与飞书完全相同
+        // 逻辑与飞书完全相同（原版漏抄 custom 计算=调用即 ReferenceError）
+        const current = this.weComBotConfig.separators || [];
+        const defaults = this.defaultSeparators || [];
+        const custom = current
+          .filter(s => !defaults.some(d => d.value === s))
+          .map(s => ({
+            label: `(${this.formatSeparator(s)})`,
+            value: s
+          }));
         return [...this.defaultSeparators, ...custom];
       },
 
