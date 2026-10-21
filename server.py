@@ -718,6 +718,35 @@ def get_client_class(config, provider_id):
         return AsyncOpenAI
 
 from py.node_runner import node_mgr
+async def _t10_shutdown(temp_sweep_task):
+    """T-10（D4）：统一关停钩子——bot 渠道 → MCP 长连接 → 周期清扫任务。"""
+    try:
+        await asyncio.wait_for(asyncio.to_thread(BotContainer.stop_all), timeout=90)
+    except Exception as e:
+        logging.getLogger("app").warning(f"T-10: 机器人批量停止异常: {e}")
+    for _mcp in [app_state.HA_client, app_state.ChromeMCP_client, app_state.sql_client] \
+            + list(app_state.mcp_client_list.values()):
+        if _mcp is None:
+            continue
+        try:
+            await asyncio.wait_for(_mcp.close(), timeout=5)
+        except Exception as e:
+            logging.getLogger("app").warning(f"T-10: MCP 连接关闭异常: {e}")
+    app_state.mcp_client_list.clear()
+    app_state.HA_client = app_state.ChromeMCP_client = app_state.sql_client = None
+    temp_sweep_task.cancel()
+
+
+async def _temp_sweep_loop():
+    """T-10：tool_temp/桌面截图等临时目录的周期清扫（原仅启动一次）。"""
+    while True:
+        await asyncio.sleep(24 * 3600)
+        try:
+            await clean_temp_files_task()
+        except Exception as e:
+            logging.getLogger("app").warning(f"T-10 周期临时目录清扫失败: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sap_auth.write_token_file(USER_DATA_DIR)
@@ -737,6 +766,7 @@ async def lifespan(app: FastAPI):
     from tzlocal import get_localzone
     
     asyncio.create_task(clean_temp_files_task())
+    temp_sweep_task = asyncio.create_task(_temp_sweep_loop())  # T-10
     
     # 并行执行耗时操作
     init_db_task = init_db()
@@ -1004,6 +1034,7 @@ async def lifespan(app: FastAPI):
         try: await node_mgr.stop(ext_id)
         except: pass
         
+    await _t10_shutdown(temp_sweep_task)
     if app_state.global_http_client:
         await app_state.global_http_client.aclose()
     logging.getLogger("app").info("All processes terminated.")

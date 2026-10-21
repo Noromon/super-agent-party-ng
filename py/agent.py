@@ -2,7 +2,12 @@
 import logging
 import json
 import os
+import threading
 from pathlib import Path
+
+# T-10：.party/config.json 的读-改-写并发保护（"始终允许"并发点击
+# 互覆盖丢白名单）。进程级单锁——写入频率极低，无需按 cwd 细分。
+_PROJECT_CONFIG_LOCK = threading.Lock()
 
 def _get_project_config_path(cwd: str) -> Path:
     """获取 .party/config.json 的路径"""
@@ -49,20 +54,22 @@ def add_tool_to_project_config(cwd: str, tool_name: str):
         except:
             pass
 
-    # 2. 读取现有配置
-    data = {"allowed_tools": []}
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except:
-            pass
-            
-    # 3. 更新并写入
-    if tool_name not in data.get("allowed_tools", []):
-        if "allowed_tools" not in data:
-            data["allowed_tools"] = []
-        data["allowed_tools"].append(tool_name)
-        
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+    # 2/3) 读-改-写同一临界区 + 原子替换（T-10）
+    with _PROJECT_CONFIG_LOCK:
+        data = {"allowed_tools": []}
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+
+        if tool_name not in data.get("allowed_tools", []):
+            if "allowed_tools" not in data:
+                data["allowed_tools"] = []
+            data["allowed_tools"].append(tool_name)
+
+            tmp_path = str(config_path) + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            os.replace(tmp_path, config_path)

@@ -105,6 +105,28 @@ class BotContainer:
             cls._xmpp = XmppBotManager()
         return cls._xmpp
 
+    @classmethod
+    def stop_all(cls):
+        """T-10（D4）：关停统一——停止所有已实例化的 manager。
+
+        各平台 stop_bot 自带 join/超时兜底；单平台失败不阻断其余。
+        返回实际执行过 stop 的配置键列表。
+        """
+        stopped = []
+        for cfg_key, _mod, _cls, getter in BOT_AUTOSTART_TABLE:
+            mgr = getattr(cls, "_" + getter[3:].lower(), None)
+            if mgr is None:
+                continue
+            try:
+                if mgr.is_running or mgr.bot_thread:
+                    mgr.stop_bot()
+                    stopped.append(cfg_key)
+            except Exception as e:
+                logging.getLogger("app").warning(f"T-10: {cfg_key} 停止失败: {e}")
+        if stopped:
+            logging.getLogger("app").info(f"T-10: 已停止机器人渠道 {stopped}")
+        return stopped
+
 # ==========================================
 # 2.5 XMPP 机器人全量路由（第九通道）
 # ==========================================
