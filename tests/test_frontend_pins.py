@@ -10,7 +10,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+# F2 分片后聚合方法体全文（宿主 + js/methods/*.js，按加载顺序）
 SRC = (ROOT / "static" / "js" / "vue_methods.js").read_text(encoding="utf-8")
+for _part in sorted((ROOT / "static" / "js" / "methods").glob("*.js")):
+    SRC += "\n" + _part.read_text(encoding="utf-8")
 
 
 def _slice(name, src=SRC):
