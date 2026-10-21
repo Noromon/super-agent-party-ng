@@ -480,5 +480,97 @@ async togglePlugin(plugin) {
     } finally {
       plugin._updating = false
     }
+  },
+
+// 核心逻辑：判断并控制扩展页面的轮询
+  handleExtensionsPolling(menu, sub) {
+    if (menu === 'api-group' && sub === 'extension') {
+      this.startExtensionsPolling();
+    } else {
+      this.stopExtensionsPolling();
+    }
+  },
+
+  // 进入设置类页面时自动拉取原本需手动点「刷新」才加载的列表
+  handleAutoLoadOnMenu(menu, sub) {
+    if (menu === 'system') {
+      this.loadBackupList();
+    } else if (menu === 'deploy-bot' && sub === 'im_bot') {
+      this.fetchBotConversations();
+      this.fetchXmppCertPending();
+    }
+  },
+
+  // 启动扩展轮询
+  startExtensionsPolling() {
+    if (this.extensionsPollingTimer) return;
+    
+    // 立即执行一次刷新
+    this.scanExtensions(); 
+
+    this.extensionsPollingTimer = setInterval(() => {
+      console.log('正在轮询获取 Extensions...');
+      this.scanExtensions();
+    }, 5000);
+  },
+
+  // 停止扩展轮询
+  stopExtensionsPolling() {
+    if (this.extensionsPollingTimer) {
+      clearInterval(this.extensionsPollingTimer);
+      this.extensionsPollingTimer = null;
+      console.log('已停止轮询 Extensions');
+    }
+  },
+
+  // 辅助方法：对比本地和远程，同步更新状态
+  syncExtensionUpdateStatus() {
+    if (!this.extensions || !this.remotePlugins) return;
+
+    // 1. 遍历远程列表，标记 "installed" 和 "hasUpdate" 状态
+    this.remotePlugins = this.remotePlugins.map(r => {
+      const local = this.extensions.find(l => 
+          (l.repository && r.repository && l.repository.trim().toLowerCase() === r.repository.trim().toLowerCase()) || 
+          (l.id && r.id && l.id === r.id)
+      );
+      let installed = !!local;
+      let hasUpdate = false;
+      
+      if (local && local.version && r.version) {
+        if (this.compareVersions(local.version, r.version) < 0) {
+          hasUpdate = true;
+        }
+      }
+      return { ...r, installed, hasUpdate };
+    });
+
+    // 2. 遍历本地列表，标记 "hasUpdate" 状态
+    this.extensions = this.extensions.map(l => {
+      const remote = this.remotePlugins.find(r => 
+          (l.repository && r.repository && l.repository.trim().toLowerCase() === r.repository.trim().toLowerCase()) || 
+          (l.id && r.id && l.id === r.id)
+      );
+      let hasUpdate = false;
+      if (remote && l.version && remote.version) {
+        if (this.compareVersions(l.version, remote.version) < 0) {
+          hasUpdate = true;
+        }
+      }
+      return { ...l, hasUpdate };
+    });
+  },
+
+  // 辅助方法：语义化版本比较
+  compareVersions(v1, v2) {
+    if (!v1 || !v2) return 0;
+    const parts1 = v1.toString().replace(/[^0-9.]/g, '').split('.').map(Number);
+    const parts2 = v2.toString().replace(/[^0-9.]/g, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+      const num1 = parts1[i] || 0;
+      const num2 = parts2[i] || 0;
+      if (num1 < num2) return -1;
+      if (num1 > num2) return 1;
+    }
+    return 0;
   }
 });

@@ -72,6 +72,9 @@
    "js/methods/90_panel_resize.js",
    "js/methods/92_model_downloads.js",
    "js/methods/94_vector_logs.js",
+   "js/methods/96_table_a2ui.js",
+   "js/methods/98_browser_tabs.js",
+   "js/methods/99_skills.js",
    "js/renderer.js"
   ],
   "chat.html": [
@@ -146,6 +149,9 @@
    "js/methods/90_panel_resize.js",
    "js/methods/92_model_downloads.js",
    "js/methods/94_vector_logs.js",
+   "js/methods/96_table_a2ui.js",
+   "js/methods/98_browser_tabs.js",
+   "js/methods/99_skills.js",
    "js/renderer.js"
   ]
  },
@@ -1605,7 +1611,7 @@
   "methods/50_bots_lifecycle.js": 4,
   "methods/54_ui_nav.js": 4,
   "methods/58_shortcuts_input.js": 1,
-  "methods/60_system_settings.js": 8,
+  "methods/60_system_settings.js": 9,
   "methods/64_conversation_groups.js": 1,
   "methods/66_render_preview.js": 7,
   "methods/72_live_danmu.js": 11,
@@ -1613,13 +1619,16 @@
   "methods/78_behavior.js": 2,
   "methods/84_quickgen.js": 3,
   "methods/86_segment_player.js": 1,
-  "methods/88_extensions.js": 9,
+  "methods/88_extensions.js": 11,
   "methods/90_panel_resize.js": 1,
+  "methods/96_table_a2ui.js": 2,
+  "methods/98_browser_tabs.js": 9,
+  "methods/99_skills.js": 3,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 29
+  "vue_methods.js": 12
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

@@ -533,5 +533,40 @@ openEnvPage(menu) {
     // 4. 操作成功后保存配置
     // ==========================================
     this.autoSaveSettings();
-  }
+  },
+
+    openBrainEdit(brainKey) {
+      this.currentEditingKey = brainKey;
+      this.showBrainEditDialog = true;
+    },
+
+    handleFirecrawlPresetChange(val) {
+      if (val === 'official') {
+        this.webSearchSettings.firecrawl_url = 'https://api.firecrawl.dev/v2';
+      } else {
+        this.webSearchSettings.firecrawl_url = 'http://localhost:3002/v1';
+      }
+      this.autoSaveSettings();
+    },
+
+    async initChromeMCPSettings() {
+        if (!window.electronAPI) return;
+
+        // 1. 询问主进程：你现在开 CDP 了吗？端口是多少？
+        const cdpInfo = await window.electronAPI.getInternalCDPInfo();
+        
+        // 2. 如果主进程确实开启了内部模式
+        if (cdpInfo.active) {
+            console.log(`[Frontend] 检测到内部 CDP 已激活，端口: ${cdpInfo.port}`);
+            
+            // 强制同步前端数据
+            this.chromeMCPSettings.type = 'internal'; 
+            this.chromeMCPSettings.CDPport = cdpInfo.port;
+            
+            // 这里不一定强制 enabled = true，因为 enabled 代表“Python服务是否在运行”
+            // 但如果 Electron 开了端口，通常意味着配置里 enabled 是 true
+            // 我们更新配置文件，确保端口是最新的
+            await this.autoSaveSettings();
+        }
+    }
 });
