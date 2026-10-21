@@ -245,6 +245,8 @@ window.lang_enUS = {
         'sseServer': 'Server-Sent Events (SSE)',
         'wsServer': 'WebSocket',
         'mcpAdded': 'MCP server added successfully',
+        'mcpCallTimeout': 'Call timeout (s)',
+        'mcpCallTimeoutHint': 'Global timeout in seconds for MCP tool calls; a single server can override it with callTimeout in its config JSON. On timeout the call returns an error result and the conversation continues.',
         'invalidCommand': 'Invalid command path',
         'duplicateServer': 'Server name already exists',
         'mcpServersManagement': 'MCP Servers Management',

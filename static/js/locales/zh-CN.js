@@ -245,6 +245,8 @@ window.lang_zhCN = {
         'sseServer': '服务器发送事件 (SSE)',
         'wsServer': 'WebSocket',
         'mcpAdded': 'MCP服务器添加成功',
+        'mcpCallTimeout': '调用超时(秒)',
+        'mcpCallTimeoutHint': 'MCP 工具调用的全局超时秒数；单个服务器可在配置 JSON 中用 callTimeout 单独覆盖。超时后该工具调用以错误结果返回，对话继续。',
         'invalidCommand': '无效的命令路径',
         'duplicateServer': '服务器名称已存在',
         'mcpServersManagement': 'MCP服务器管理',

@@ -2912,6 +2912,16 @@
                   </div>
                   <div class="plugin-header">
                     <h3>MCP</h3>
+                    <div style="flex:1;display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:0 16px;">
+                      <el-tooltip :content="t('mcpCallTimeoutHint')" placement="top">
+                        <span>{{ t('mcpCallTimeout') }}</span>
+                      </el-tooltip>
+                      <el-input-number
+                        v-model="settings.mcpCallTimeout"
+                        :min="10" :max="3600" :step="10" size="small"
+                        @change="autoSaveSettings">
+                      </el-input-number>
+                    </div>
                     <div class="plugin-button-group">
                       <el-button 
                         @click="showAddMCPDialo = true" 

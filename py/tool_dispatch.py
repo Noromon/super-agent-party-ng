@@ -152,16 +152,22 @@ async def dispatch_task_center_tool(tool_name, tool_params, settings):
         )
 
 
-async def dispatch_unknown_tool(tool_name, tool_params, hook_names, ext_mcp_tools, node_tool_caller):
+async def dispatch_unknown_tool(tool_name, tool_params, hook_names, ext_mcp_tools, node_tool_caller,
+                                settings=None):
     """MCP clients, node-extension tools, then the C-19 correction hint.
 
     hook_names      : 本地工具注册表的名称快照（server 的 _TOOL_HOOKS）
     ext_mcp_tools   : {ext_id: [tool_meta]} Node 扩展工具注册表（活引用）
     node_tool_caller: async (ext_id, tool_name, tool_params) -> str
+    settings        : 当前请求 settings，用于解析全局 mcpCallTimeout（S63）
     """
+    settings = settings or {}
     for server_name, mcp_client in app_state.mcp_client_list.items():
         if hasattr(mcp_client, '_conn') and mcp_client._conn and tool_name in mcp_client._conn.tools:
-            return _stringify_result(await mcp_client.call_tool(tool_name, tool_params))
+            # 超时三级解析（S63）：server 配置 callTimeout → 全局 mcpCallTimeout → call_tool 默认值
+            _timeout = (getattr(mcp_client, '_config', None) or {}).get("callTimeout") \
+                or settings.get("mcpCallTimeout")
+            return _stringify_result(await mcp_client.call_tool(tool_name, tool_params, timeout=_timeout))
 
     # 2. 🔥 查询 Node 扩展的 MCP 工具
     for ext_id, tools in ext_mcp_tools.items():

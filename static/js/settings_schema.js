@@ -117,6 +117,7 @@
     reasoning_effort: null,
     enableOmniTTS: false,
     omniVoice: 'Cherry',
+    mcpCallTimeout: 180,
     extra_params: function () { return []; }
   };
 

@@ -13,6 +13,21 @@ from mcp.client.websocket import websocket_client
 from mcp.client.streamable_http import streamablehttp_client
 from contextlib import AsyncExitStack, asynccontextmanager
 
+# ---------- 超时与日志（S63）----------
+DEFAULT_CALL_TIMEOUT = 180   # call_tool 默认超时（秒）；可被 settings['mcpCallTimeout'] 或 server 配置 callTimeout 覆盖
+LIST_TOOLS_TIMEOUT = 10      # 装配路径 list_tools 超时：一次工具公告不该挂起整个引擎
+MONITOR_LOCK_TIMEOUT = 30    # 重连循环清理拿锁超时：防止被挂死的 call_tool 链成僵尸锁
+
+
+def _fmt_args(tool_params: Any) -> str:
+    """日志用参数摘要：序列化并截断，长命令一行可读。"""
+    try:
+        s = json.dumps(tool_params, ensure_ascii=False)
+    except Exception:
+        s = str(tool_params)
+    return s if len(s) <= 120 else s[:120] + "..."
+
+
 # ---------- 工具 ----------
 def get_command_path(command_name: str, default_command: str = "uv") -> str:
     path = shutil.which(command_name) or shutil.which(default_command)
@@ -91,9 +106,11 @@ class McpClient:
         self._on_failure_callback: Optional[callable] = None  # 新增：失败回调
         self._tools: list[str] = []
         self._tools_list = []
+        self._name: str = "?"  # 日志标识（initialize 时记录 server_name）
 
     async def initialize(self, server_name: str, server_config: dict, on_failure_callback: Optional[callable] = None) -> None:
         """非阻塞初始化：拉起连接监控协程"""
+        self._name = server_name
         self._config = server_config
         self._on_failure_callback = on_failure_callback  # 设置回调
         if self._monitor_task is None or self._monitor_task.done():
@@ -127,8 +144,17 @@ class McpClient:
                 if self._on_failure_callback:
                     await self._on_failure_callback(str(e))  # 调用回调
             finally:
-                async with self._lock:
+                # 拿锁带超时（S63）：即便上一个 call_tool 处于挂死边缘，
+                # 重连循环也不被链成永久僵尸锁；超时则强制重置连接引用。
+                try:
+                    await asyncio.wait_for(self._lock.acquire(), MONITOR_LOCK_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logging.getLogger("app").warning(
+                        "MCP %s 重连清理拿锁超时(%ss)，强制重置连接", self._name, MONITOR_LOCK_TIMEOUT)
                     self._conn = None
+                else:
+                    self._conn = None
+                    self._lock.release()
             if not self._shutdown:
                 await asyncio.sleep(5)
 
@@ -137,7 +163,12 @@ class McpClient:
         async with self._lock:
             if not self._conn or not self._conn.session:
                 return []
-            tools = (await self._conn.session.list_tools()).tools
+            try:
+                listed = await asyncio.wait_for(self._conn.session.list_tools(), LIST_TOOLS_TIMEOUT)
+            except asyncio.TimeoutError:
+                logging.getLogger("app").warning("MCP list_tools 超时(>%ss): %s", LIST_TOOLS_TIMEOUT, self._name)
+                return []
+            tools = listed.tools
             self._tools = [t.name for t in tools]
             self._tools_list = [{"name": t.name, "description": t.description,"enabled":True} for t in tools]
             tools_list = []
@@ -156,12 +187,31 @@ class McpClient:
 
             return tools_list
 
-    async def call_tool(self, tool_name: str, tool_params: Dict[str, Any]) -> Any:
+    async def call_tool(self, tool_name: str, tool_params: Dict[str, Any],
+                        timeout: Optional[float] = None) -> Any:
+        """调用工具。timeout 解析优先级（S63）：入参（dispatch 已按 settings 解析）
+        → 本 server 配置 callTimeout → DEFAULT_CALL_TIMEOUT。
+        超时返回 [Error] 字符串给 LLM（回合继续走），不再无限悬挂并僵尸化 _lock。
+        """
+        cfg_timeout = (self._config or {}).get("callTimeout")
+        timeout = timeout or cfg_timeout or DEFAULT_CALL_TIMEOUT
         async with self._lock:
             if not self._conn or not self._conn.session:
                 return None
+            log = logging.getLogger("app")
+            log.info("MCP 调用 %s.%s (timeout=%ss) 参数: %s",
+                     self._name, tool_name, timeout, _fmt_args(tool_params))
+            loop = asyncio.get_running_loop()
+            t0 = loop.time()
             try:
-                return await self._conn.session.call_tool(tool_name, tool_params)
+                result = await asyncio.wait_for(
+                    self._conn.session.call_tool(tool_name, tool_params), timeout)
+                log.info("MCP 调用完成 %s.%s 耗时 %.1fs", self._name, tool_name, loop.time() - t0)
+                return result
+            except asyncio.TimeoutError:
+                log.error("MCP 调用超时 %s.%s (>%ss)，server 可能未返回响应",
+                          self._name, tool_name, timeout)
+                return "[Error] MCP call %s.%s timed out after %ss" % (self._name, tool_name, timeout)
             except Exception as e:
                 logging.error("Failed to call tool %s: %s", tool_name, e)
                 return "Failed to call tool %s: %s" % (tool_name, e)

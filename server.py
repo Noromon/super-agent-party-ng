@@ -1759,7 +1759,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
     if tool_name not in _TOOL_HOOKS:
         return await _dispatch_unknown_tool(tool_name, tool_params,
                                             set(_TOOL_HOOKS), node_ext_mcp_tools,
-                                            call_node_extension_tool)
+                                            call_node_extension_tool, settings)
         
     tool_call = _TOOL_HOOKS[tool_name]
     try:
