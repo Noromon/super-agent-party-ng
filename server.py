@@ -4133,11 +4133,11 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
                 tools.append(brave_tool)
             elif settings['webSearch']['engine'] == 'exa':
                 tools.append(exa_tool)
-            elif settings['webSearch']['crawler'] == 'serper':
+            elif settings['webSearch']['engine'] == 'serper':
                 tools.append(serper_tool)
-            elif settings['webSearch']['crawler'] == 'bochaai':
+            elif settings['webSearch']['engine'] == 'bochaai':
                 tools.append(bochaai_tool)
-            elif settings['webSearch']['crawler'] == 'youcom':
+            elif settings['webSearch']['engine'] == 'youcom':
                 tools.append(youcom_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
@@ -6361,11 +6361,11 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
                 tools.append(brave_tool)
             elif settings['webSearch']['engine'] == 'exa':
                 tools.append(exa_tool)
-            elif settings['webSearch']['crawler'] == 'serper':
+            elif settings['webSearch']['engine'] == 'serper':
                 tools.append(serper_tool)
-            elif settings['webSearch']['crawler'] == 'bochaai':
+            elif settings['webSearch']['engine'] == 'bochaai':
                 tools.append(bochaai_tool)
-            elif settings['webSearch']['crawler'] == 'youcom':
+            elif settings['webSearch']['engine'] == 'youcom':
                 tools.append(youcom_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
