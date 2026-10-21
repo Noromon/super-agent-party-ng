@@ -216,5 +216,12 @@ Object.assign(vue_methods, {
     }
     this.sidePanelOpen = false;
     this.isCapsuleMode = !this.isCapsuleMode;
-  }
+  },
+
+openAiBrowser(){
+  this.activeMenu = 'ai-browser';
+  this.chromeMCPSettings.type = 'internal';
+  this.chromeMCPSettings.enabled = true;
+  this.changeChromeMCPEnabled();
+}
 });

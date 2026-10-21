@@ -572,5 +572,50 @@ async togglePlugin(plugin) {
       if (num1 > num2) return 1;
     }
     return 0;
+  },
+
+// 4. 扩展收藏逻辑
+toggleFavoriteExtension(ext) {
+  const index = this.favoriteExtensionIds.indexOf(ext.id);
+  if (index > -1) {
+    this.favoriteExtensionIds.splice(index, 1);
+  } else {
+    this.favoriteExtensionIds.push(ext.id);
   }
+  // 持久化存储
+  localStorage.setItem('favorite_extensions', JSON.stringify(this.favoriteExtensionIds));
+},
+
+gotoAddExtension(){
+  this.activeMenu = 'api-group';
+  this.subMenu = 'extension';
+  this.openAddExtensionDialog();
+},
+
+  // 2. 添加这两个处理鼠标状态的方法
+  handleExtMouseMove() {
+    this.extButtonVisible = true;
+    
+    // 清除上一次的定时器
+    if (this.extMouseTimer) {
+      clearTimeout(this.extMouseTimer);
+    }
+    
+    // 如果鼠标停止移动 1.5 秒，自动隐藏按钮
+    this.extMouseTimer = setTimeout(() => {
+      this.extButtonVisible = false;
+    }, 1500);
+  },
+
+  hideExtButton() {
+    this.extButtonVisible = false;
+    if (this.extMouseTimer) {
+      clearTimeout(this.extMouseTimer);
+    }
+  },
+
+connectToChatApp(){
+  this.activeMenu = 'deploy-bot';
+  this.subMenu = 'im_bot';
+}
 });

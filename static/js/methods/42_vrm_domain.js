@@ -606,5 +606,57 @@ async deleteGaussSceneOption(sceneId) {
   } else {
     showNotification(res.message || '删除失败', 'error');
   }
-}
+},
+
+  async toggleVTSConnection() {
+    // 如果正在连接中，禁止重复点击
+    if (this.isVTSStarting) return;
+    
+    this.isVTSStarting = true; // 开启 Loading 动画 (按钮转圈)
+    
+    try {
+      if (this.VTSConfig.enabled) {
+        // 动作：停止连接
+        // 注意：这里不直接设 enabled = false，而是等待后端确认后再改
+        this.sendTTSStatusToVRM('stopVTS_Driver', {});
+      } else {
+        // 动作：发起连接
+        this.sendTTSStatusToVRM('startVTS_Driver', this.VTSConfig);
+        
+        // 设置一个 10 秒的超时逻辑
+        // 如果 10 秒内后端没有通过 WS 返回任何 status 消息，则自动回退状态
+        setTimeout(() => {
+          if (this.isVTSStarting) {
+            this.isVTSStarting = false;
+            showNotification('VTS 连接超时，请检查后端程序是否运行', 'warning', '连接超时');
+          }
+        }, 10000);
+      }
+    } catch (e) {
+      console.error("VTS 操作失败:", e);
+      this.isVTSStarting = false;
+      showNotification('指令发送失败，请检查网络', 'error');
+    }
+  },
+
+  async startVTS() {
+    // 模拟或实际发送 WS 指令
+    this.sendTTSStatusToVRM('startVTS_Driver', this.VTSConfig);
+    this.VTSConfig.enabled = true;
+    this.autoSaveSettings();
+  },
+
+  async stopVTS() {
+    this.sendTTSStatusToVRM('stopVTS_Driver', {});
+    this.VTSConfig.enabled = false;
+    this.autoSaveSettings();
+  },
+
+  connectToVTS() {
+      this.activeMenu = 'deploy-bot';
+      this.subMenu = 'vts_config';
+      if(!this.VTSConfig.enabled){
+        this.toggleVTSConnection();
+      }
+  }
 });

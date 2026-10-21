@@ -225,5 +225,183 @@ openTaskDetailView(task) {
 // 关闭详情页回到列表
 closeTaskDetail() {
     this.viewingTaskDetail = null;
+},
+
+// 1. 懒加载读取文件目录
+  async loadWorkspaceNode(node, resolve) {
+    // 顶层节点：加载工作区根目录
+    if (node.level === 0) {
+      if (!this.CLISettings || !this.CLISettings.cc_path) {
+        return resolve([]); 
+      }
+      
+      // ⚠️ 暴力触发：只要根节点加载，就立刻启动监听器！
+      console.log('准备启动文件监听:', this.CLISettings.cc_path);
+      this.setupWorkspaceWatcher(this.CLISettings.cc_path);
+
+      try {
+        const res = await window.electronAPI.readDirectory(this.CLISettings.cc_path);
+        if (res.success) {
+          return resolve(res.data);
+        } else {
+          this.$message?.error(this.t('readDirError') || '读取工作区目录失败: ' + res.error);
+          return resolve([]);
+        }
+      } catch (error) {
+        console.error(error);
+        return resolve([]);
+      }
+    }
+
+    // 子节点：加载被点击的子目录
+    if (node.level > 0 && node.data.isDirectory) {
+      try {
+        const res = await window.electronAPI.readDirectory(node.data.path);
+        if (res.success) {
+          return resolve(res.data);
+        } else {
+          this.$message?.error(this.t('readDirError') || '读取子目录失败: ' + res.error);
+          return resolve([]);
+        }
+      } catch (error) {
+        console.error(error);
+        return resolve([]);
+      }
+    }
+    
+    resolve([]);
+  },
+
+  // 2. 使用系统默认程序打开文件
+  openWorkspaceFile(filePath) {
+    if (window.electronAPI && window.electronAPI.openPath) {
+      window.electronAPI.openPath(filePath);
+    }
+  },
+
+  // 3. 删除文件/文件夹
+  async deleteWorkspaceFile(data, node) {
+    try {
+      // 弹出确认框 (兼容 Element Plus 的 this.$confirm)
+      await this.$confirm(
+        (this.t('confirmDelete') || '确认将该文件放入回收站吗？') + `\n${data.name}`,
+        this.t('warning') || '警告',
+        { 
+          confirmButtonText: this.t('confirm') || '确定', 
+          cancelButtonText: this.t('cancel') || '取消', 
+          type: 'warning' 
+        }
+      );
+      
+      const res = await window.electronAPI.deleteWorkspaceFile(data.path);
+      if (res.success) {
+        showNotification(this.t('deleteSuccess'),'success');
+        // 从前端界面中动态移除该节点，避免重新读取整个目录树
+        const parent = node.parent;
+        const children = parent.data.children || parent.childNodes;
+        const index = children.findIndex(d => d.data.path === data.path);
+        if (index !== -1) {
+          children.splice(index, 1);
+        }
+        
+      } else {
+        showNotification(this.t('deleteFailed'),'error');
+      }
+    } catch (error) {
+      // 用户点击了取消，不做任何处理
+    }
+  },
+
+  // 5. 刷新整个工作区树
+  refreshWorkspaceTree() {
+    // 改变 key 值会让 Vue 销毁并重建 el-tree，从而重新触发 load()
+    this.workspaceTreeKey += 1;
+  },
+
+    // 核心上传逻辑
+    async executeUpload(targetPath) {
+        try {
+            // 1. 调用选择文件对话框
+            const result = await window.electronAPI.openFileDialog();
+            
+            if (result.canceled || result.filePaths.length === 0) return;
+
+            // 2. 执行上传
+            const uploadRes = await window.electronAPI.uploadToWorkspace(targetPath, result.filePaths);
+            
+            if (uploadRes.success) {
+                showNotification(this.t('uploadSuccess'),'success');
+                this.refreshWorkspaceTree(); // 刷新显示新文件
+            } else {
+                showNotification(this.t('uploadFailed'),'error');
+            }
+        } catch (err) {
+            console.error('Upload Error:', err);
+            this.$message.error('操作失败，请检查控制台日志');
+        }
+    },
+
+    // 顶部按钮：上传到根目录
+    handleRootUpload() {
+        const rootPath = this.CLISettings.cc_path;
+        if (!rootPath) {
+            showNotification(this.t('pleaseConfigWorkspace'),'error');
+            return;
+        }
+        this.executeUpload(rootPath);
+    },
+
+    // 文件夹按钮：上传到子目录
+    handleFolderUpload(folderPath) {
+        console.log("正在上传到子目录:", folderPath);
+        this.executeUpload(folderPath);
+    },
+
+    // 开启工作区监控
+    setupWorkspaceWatcher(path) {
+      if (window.electronAPI && window.electronAPI.startWorkspaceWatch) {
+        window.electronAPI.startWorkspaceWatch(path);
+        
+        window.electronAPI.onWorkspaceChanged((data) => {
+          console.log('前端收到文件系统变化:', data.action, data.path);
+          
+          // ⚠️ 关键修复：使用原生定时器彻底解决 this 指向丢失的问题
+          if (this.workspaceRefreshTimer) {
+            clearTimeout(this.workspaceRefreshTimer);
+          }
+          
+          this.workspaceRefreshTimer = setTimeout(() => {
+            console.log('触发防抖更新 UI ...');
+            this.refreshWorkspaceTreeKeepExpanded();
+          }, 500);
+        });
+      }
+    },
+
+    // 刷新前保留展开状态
+    refreshWorkspaceTreeKeepExpanded() {
+      const treeRef = this.$refs.workspaceTreeRef;
+      if (treeRef) {
+        const store = treeRef.store;
+        const expandedKeys = [];
+        for (const key in store.nodesMap) {
+          if (store.nodesMap[key].expanded) {
+            expandedKeys.push(key);
+          }
+        }
+        this.expandedNodeKeys = expandedKeys;
+        console.log('当前记录的展开文件夹节点:', this.expandedNodeKeys);
+      } else {
+        console.warn('未找到 el-tree 的引用 (workspaceTreeRef)');
+      }
+      
+      this.refreshWorkspaceTree();
+    },
+
+createNewTask(){
+  this.activeMenu = 'home';
+  this.expandSidePanel();
+  this.activeSideView = 'tasks';
+
 }
 });

@@ -57,6 +57,8 @@
    "js/methods/64_conversation_groups.js",
    "js/methods/66_render_preview.js",
    "js/methods/68_scroll.js",
+   "js/methods/67_affection.js",
+   "js/methods/69_dashboard.js",
    "js/methods/70_memory_io.js",
    "js/methods/72_live_danmu.js",
    "js/methods/74_read_aloud.js",
@@ -135,6 +137,8 @@
    "js/methods/64_conversation_groups.js",
    "js/methods/66_render_preview.js",
    "js/methods/68_scroll.js",
+   "js/methods/67_affection.js",
+   "js/methods/69_dashboard.js",
    "js/methods/70_memory_io.js",
    "js/methods/72_live_danmu.js",
    "js/methods/74_read_aloud.js",
@@ -1616,9 +1620,10 @@
   "methods/60_system_settings.js": 9,
   "methods/64_conversation_groups.js": 1,
   "methods/66_render_preview.js": 7,
+  "methods/67_affection.js": 1,
   "methods/72_live_danmu.js": 11,
   "methods/74_read_aloud.js": 5,
-  "methods/77_task_center.js": 2,
+  "methods/77_task_center.js": 7,
   "methods/78_behavior.js": 2,
   "methods/84_quickgen.js": 3,
   "methods/86_segment_player.js": 1,
@@ -1631,7 +1636,7 @@
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 10
+  "vue_methods.js": 4
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

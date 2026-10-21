@@ -568,5 +568,260 @@ openEnvPage(menu) {
             // 我们更新配置文件，确保端口是最新的
             await this.autoSaveSettings();
         }
+    },
+
+  // 处理启动开关的点击事件
+  handleEnableToggle(newValue) {
+    // 只有在用户试图“开启”开关时 (newValue === true) 才进行校验
+    if (newValue === true) {
+      // 检查 cc_path 是否为空
+      if (!this.CLISettings.cc_path || this.CLISettings.cc_path.trim() === '') {
+        
+        // 1. 调用你提供的报错函数 
+        // 这里的提示语使用了你模板里现成的 t('pleaseSelectWorkspaceFirst')
+        const errorMsg = this.t ? this.t('pleaseSelectWorkspaceFirst') : '请先配置 Workspace 工作区路径';
+        showNotification(errorMsg, 'error', 'Error');
+
+        // 2. 强制把开关重置回关闭状态 (阻止启动)
+        // 使用 $nextTick 确保 Vue 能正确更新 DOM
+        this.$nextTick(() => {
+          this.CLISettings.enabled = false;
+        });
+
+        // 3. 拦截执行，直接 return，不触发后续的保存
+        return; 
+      }
+    }
+
+    // 如果校验通过（或者用户只是在关闭开关），则正常执行原来的保存逻辑
+    this.autoSaveSettings();
+  },
+
+  handleVisionControlEnableToggle(newValue){
+    if (newValue === true && this.visionSettings.enabled === true) {
+      this.visionSettings.enabled = false;
+      showNotification(this.t('autoDisableVisionSettings'), 'warning');
+    }
+    this.autoSaveSettings();
+  },
+
+  handleVisionEnableToggle(newValue){
+    if (newValue === true && this.visionControlSettings.enabled === true) {
+      this.visionControlSettings.enabled = false;
+      showNotification(this.t('autoDisableVisionControlSettings'), 'warning');
+    }
+    this.autoSaveSettings();
+  },
+
+  handleWebSearchToggle(newValue) {
+    if (newValue === true) {
+      const settings = this.webSearchSettings;
+      let errorMsg = '';
+
+      // --- 1. 校验搜索引擎配置 ---
+      switch (settings.engine) {
+        case 'searxng':
+          if (!settings.searxng_url?.trim()) errorMsg = this.t('pleaseConfigSearxngUrl');
+          break;
+        case 'tavily':
+          if (!settings.tavily_api_key?.trim()) errorMsg = this.t('pleaseConfigTavilyApiKey');
+          break;
+        case 'bing':
+          if (!settings.bing_api_key?.trim()) errorMsg = this.t('pleaseConfigBingApiKey');
+          else if (!settings.bing_search_url?.trim()) errorMsg = this.t('pleaseConfigBingSearchUrl');
+          break;
+        case 'google':
+          if (!settings.google_api_key?.trim()) errorMsg = this.t('pleaseConfigGoogleApiKey');
+          else if (!settings.google_cse_id?.trim()) errorMsg = this.t('pleaseConfigGoogleCseId');
+          break;
+        case 'brave':
+          if (!settings.brave_api_key?.trim()) errorMsg = this.t('pleaseConfigBraveApiKey');
+          break;
+        case 'exa':
+          if (!settings.exa_api_key?.trim()) errorMsg = this.t('pleaseConfigExaApiKey');
+          break;
+        case 'serper':
+          if (!settings.serper_api_key?.trim()) errorMsg = this.t('pleaseConfigSerperApiKey');
+          break;
+        case 'bochaai':
+          if (!settings.bochaai_api_key?.trim()) errorMsg = this.t('pleaseConfigBochaaiApiKey');
+          break;
+        // duckduckgo 无需强制配置，直接放行
+      }
+
+      // --- 2. 校验网页解析器配置 (前提是搜索引擎已经通过校验) ---
+      if (!errorMsg) {
+        switch (settings.crawler) {
+          case 'crawl4ai':
+            if (!settings.Crawl4Ai_url?.trim()) errorMsg = this.t('pleaseConfigCrawl4aiUrl');
+            break;
+          case 'firecrawl':
+            if (!settings.firecrawl_url?.trim()) errorMsg = this.t('pleaseConfigFirecrawlUrl');
+            // 如果你觉得 Firecrawl 的 API Key 也必须强制填写，可以解除下面这行的注释：
+            // else if (!settings.firecrawl_api_key?.trim()) errorMsg = this.t('pleaseConfigFirecrawlApiKey');
+            break;
+          
+          // 注意：jina API Key 是可选的，所以这里不写 case 'jina' 的报错逻辑，直接放行
+          // simpleRequest 和 mdnew 也没有必填项，直接放行
+        }
+      }
+
+      // --- 3. 拦截与报错 ---
+      if (errorMsg) {
+        // 报错提醒，标题也国际化
+        const errorTitle = this.t ? this.t('configIncomplete') : 'Config Incomplete';
+        showNotification(errorMsg, 'error', errorTitle);
+
+        // 强制重置开关为关闭状态
+        this.$nextTick(() => {
+          this.webSearchSettings.enabled = false;
+        });
+
+        // 阻断执行，不触发保存
+        return;
+      }
+    }
+
+    // 校验全部通过，或者用户是主动关闭开关，则正常执行保存
+    this.autoSaveSettings();
+  },
+
+  // 代码解释器启动开关的拦截处理
+  handleInterpreterToggle(newValue) {
+    if (newValue === true) {
+      const settings = this.codeSettings;
+      let errorMsg = '';
+
+      // 根据选择的引擎校验必填项
+      switch (settings.engine) {
+        case 'e2b':
+          if (!settings.e2b_api_key?.trim()) {
+            errorMsg = this.t('pleaseConfigE2bApiKey');
+          }
+          break;
+        case 'sandbox':
+          if (!settings.sandbox_url?.trim()) {
+            errorMsg = this.t('pleaseConfigSandboxUrl');
+          }
+          break;
+      }
+
+      // 如果有报错信息，进行拦截
+      if (errorMsg) {
+        // 报错提醒 (复用刚才加的 configIncomplete)
+        const errorTitle = this.t ? this.t('configIncomplete') : 'Config Incomplete';
+        showNotification(errorMsg, 'error', errorTitle);
+
+        // 强制重置开关为关闭状态
+        this.$nextTick(() => {
+          this.codeSettings.enabled = false;
+        });
+
+        // 阻断执行，不触发保存
+        return;
+      }
+    }
+
+    // 校验通过或关闭开关，正常执行保存
+    this.autoSaveSettings();
+  },
+
+    // 处理单击文件自动添加 @ 快捷方式
+    handleFileShortcut(fullPath) {
+        if (!fullPath) return;
+
+        // 1. 获取工作区根路径
+        const rootPath = this.CLISettings.cc_path;
+        let relativePath = fullPath;
+
+        // 2. 将绝对路径转换为相对于工作区的路径
+        if (rootPath && fullPath.startsWith(rootPath)) {
+            // 截掉根目录部分，并去掉路径开头多余的斜杠
+            relativePath = fullPath.substring(rootPath.length).replace(/^[/\\]+/, '');
+        }
+
+        // 3. 统一将路径分隔符替换为正斜杠 / (方便 AI 识别并保持跨平台一致性)
+        relativePath = relativePath.replace(/\\/g, '/');
+
+        // 4. 构造快捷指令字符串
+        const shortcut = `@${relativePath} `;
+
+        // 5. 将指令追加到输入框
+        if (!this.userInput) {
+            // 如果输入框是空的，直接赋值
+            this.userInput = shortcut;
+        } else if (this.userInput.endsWith(' ')) {
+            // 如果末尾已经有空格，直接加内容
+            this.userInput += shortcut;
+        } else {
+            // 如果末尾没有空格，先加个空格再加内容
+            this.userInput += ' ' + shortcut;
+        }
+
+        // 6. (可选) 自动聚焦聊天输入框，让用户可以直接接着打字
+        // 如果你的输入框组件设置了 ref="chatInput"
+        this.$nextTick(() => {
+            if (this.$refs.chatInput) {
+                // 如果是 el-input 需要访问内部的 input 元素
+                const inputEl = this.$refs.chatInput.$el.querySelector('input') || this.$refs.chatInput.$el.querySelector('textarea');
+                if (inputEl) inputEl.focus();
+                else this.$refs.chatInput.focus();
+            }
+        });
+    },
+
+    handleOmniTTSenabled(newValue){
+      if (newValue === true && this.ttsSettings.enabled === true) {
+        this.ttsSettings.enabled = false;
+        showNotification(this.t('autoDisableTtsSettings'), 'warning');
+      }
+      this.autoSaveSettings();
+    },
+
+    async handleFullScreenChange(val) {
+      if (!val) {
+        // 如果开关变成 false（关闭全屏），主动调起选区界面
+        await this.reselectRegion();
+      } else {
+        // 如果开关变成 true（开启全屏），直接保存设置
+        this.autoSaveSettings();
+      }
+    },
+
+    /**
+     * 呼出边框让用户重新选择屏幕区域
+     */
+    async reselectRegion() {
+      try {
+        // 调用 preload 暴露的方法，传入 true 让主窗口暂时隐藏
+        const rect = await window.electronAPI.showScreenshotOverlay(true);
+        
+        // 选区结束后，恢复显示主窗口
+        window.electronAPI.windowAction('show');
+        
+        if (rect) {
+          // 用户成功框选，记录选区：[x, y, 宽度, 高度]
+          this.visionControlSettings.ScreenSize = [
+            Math.floor(rect.x), 
+            Math.floor(rect.y), 
+            Math.floor(rect.width), 
+            Math.floor(rect.height)
+          ];
+          this.visionControlSettings.isFullScreen = false;
+        } else {
+          // 如果 rect 为空（比如用户按 Esc 取消了截图），自动恢复为全屏模式
+          this.visionControlSettings.isFullScreen = true;
+        }
+        
+        // 触发自动保存
+        this.autoSaveSettings();
+        
+      } catch (error) {
+        console.error("选区失败:", error);
+        // 如果发生错误，确保主窗口重新出现并恢复状态
+        window.electronAPI.windowAction('show');
+        this.visionControlSettings.isFullScreen = true;
+        this.autoSaveSettings();
+      }
     }
 });

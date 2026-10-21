@@ -391,5 +391,10 @@ copySubtitleOverlayEndpoint(){
         this.danmu = this.danmu.slice(0, this.liveConfig.danmakuQueueLimit);
       }
     }
-  }
+  },
+
+startLiveStream(){
+  this.activeMenu = 'deploy-bot';
+  this.subMenu = 'live_stream';
+}
 });

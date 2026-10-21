@@ -395,5 +395,15 @@ async openSkillsFolder() {
   } catch (error) {
     console.error("Failed to open skills folder:", error);
   }
+},
+
+async handleRefreshSkills() {
+  this.skillsLoading = true;
+  try {
+    // 假设你已定义了 fetchSkills 方法来获取列表
+    await this.fetchSkills(); 
+  } finally {
+    this.skillsLoading = false;
+  }
 }
 });

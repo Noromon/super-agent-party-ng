@@ -205,5 +205,28 @@ Object.assign(vue_methods, {
     async removeA2AServer(url) {
       this.a2aServers = Object.fromEntries(Object.entries(this.a2aServers).filter(([k]) => k !== url));
       await this.autoSaveSettings();
+    },
+
+  async checkAcpxStatus() {
+    this.checkingAcpx = true
+    try {
+      const host = window.location.hostname || '127.0.0.1'
+      const port = window.location.port || '3456'
+      const res = await fetch(`http://${host}:${port}/api/acpx/status`)
+      const data = await res.json()
+      
+      if (data.available) {
+        this.acpxStatus = 'available'
+        showNotification(`ACPM Ready - Environment: ${data.environment}`)
+      } else {
+        this.acpxStatus = 'unavailable'
+        showNotification(`ACPM Not Found: ${data.error}`,'error')
+      }
+    } catch (err) {
+      this.acpxStatus = 'unavailable'
+      showNotification('Failed to check ACPX status','error')
+    } finally {
+      this.checkingAcpx = false
     }
+  }
 });
