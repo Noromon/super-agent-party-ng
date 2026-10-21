@@ -399,6 +399,8 @@ window.lang_zhCN = {
         'reasoningProvider': '推理模型供应商',
         'visionProvider': '视觉模型供应商',
         'gotoAPI': '获取API密钥或相关文档',
+        'enableShortcutsGlobal': '启用快捷指令',
+        'shortcutGlobalNotice': '统一快捷指令总开关，对聊天界面和所有 IM 平台（飞书、QQ、Telegram 等）生效。',
     'DiarySystem': '日记系统',
     'diaryConfig': '系统配置',
     'diaryBook': '日记本',

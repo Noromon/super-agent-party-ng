@@ -2515,7 +2515,9 @@ async def _inject_workspace_memory(request, cwd, cli_settings):
             logging.getLogger("app").info(f"读取 MEMORY.md 失败: {e}")
 
     # ==================== [新增] 2. 处理 Shortcut 快捷指令 ====================
-    if cli_settings.get("shortcut", False):
+    # A11：总开关=系统设置全局 enableShortcuts（上游 3e58049f），fork 保留 CLI shortcut 子开关做与门
+    from py.shortcut_commands import im_shortcuts_enabled as _im_shortcuts_enabled
+    if cli_settings.get("shortcut", False) and await _im_shortcuts_enabled():
         # 获取最新一条用户消息
         user_text = ""
         if request.messages and request.messages[-1]['role'] == 'user':

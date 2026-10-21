@@ -148,6 +148,36 @@ class WeComClient:
             if "/id" in user_text.lower():
                 await self.ws_client.reply_stream(frame, generate_req_id('stream'), f"ID: `{chat_id}`", True)
                 return
+            # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+            from py import shortcut_commands
+            _sub = shortcut_commands.parse_subscribe_action(user_text)
+            if _sub:
+                _reply = await shortcut_commands.handle_subscribe_command("wecom", chat_id, _sub == "sub", "zh")
+                if _reply:
+                    await self.ws_client.reply_stream(frame, generate_req_id('stream'), _reply, True)
+                return
+
+            if await shortcut_commands.im_shortcuts_enabled():
+                _act = shortcut_commands.parse_im_action(user_text)
+                if _act:
+                    if _act == "stop":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.STOP_MSG_ZH, True)
+                    elif _act == "reset":
+                        self.memoryList[chat_id] = []
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.RESET_MSG_ZH, True)
+                    elif _act == "help":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.build_help_text("zh"), True)
+                    elif _act == "skills":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), await shortcut_commands.build_skills_text("zh"), True)
+                    elif _act == "model":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), await shortcut_commands.handle_model_command(user_text, "zh"), True)
+                    elif _act == "personality":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), await shortcut_commands.handle_personality_command(user_text, "zh"), True)
+                    elif _act == "retry":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.retry_hint("zh"), True)
+                    elif _act == "mode":
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), await shortcut_commands.build_mode_info_text("zh"), True)
+                    return
             if self.quickRestart and ("/重启" in user_text or "/restart" in user_text):
                 self.memoryList[chat_id] = []
                 await self.ws_client.reply_stream(frame, generate_req_id('stream'), "对话已重置。", True)

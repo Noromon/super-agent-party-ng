@@ -488,6 +488,30 @@ class XmppClient:
         if text.lower() == "/help":
             await self._send_text(frm, "/new 清空对话  /id 查看目标ID  /help 帮助")
             return
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(text)
+            if _act:
+                if _act == "stop":
+                    await self._send_text(frm, shortcut_commands.STOP_MSG_ZH)
+                elif _act == "reset":
+                    self.memoryList[frm] = []
+                    await self._persist_conv(frm)
+                    await self._send_text(frm, shortcut_commands.RESET_MSG_ZH)
+                elif _act == "help":
+                    await self._send_text(frm, shortcut_commands.build_help_text("zh"))
+                elif _act == "skills":
+                    await self._send_text(frm, await shortcut_commands.build_skills_text("zh"))
+                elif _act == "model":
+                    await self._send_text(frm, await shortcut_commands.handle_model_command(text, "zh"))
+                elif _act == "personality":
+                    await self._send_text(frm, await shortcut_commands.handle_personality_command(text, "zh"))
+                elif _act == "retry":
+                    await self._send_text(frm, shortcut_commands.retry_hint("zh"))
+                elif _act == "mode":
+                    await self._send_text(frm, await shortcut_commands.build_mode_info_text("zh"))
+                return
         if self.wakeWord and self.wakeWord not in text:
             return
 

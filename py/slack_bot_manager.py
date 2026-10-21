@@ -128,6 +128,36 @@ class SlackBotManager(BaseBotManager):
             await web_client.chat_postMessage(channel=cid, text=info_msg)
             return
 
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        _sub = shortcut_commands.parse_subscribe_action(text)
+        if _sub:
+            _reply = await shortcut_commands.handle_subscribe_command("slack", cid, _sub == "sub", "en")
+            if _reply:
+                await web_client.chat_postMessage(channel=cid, text=_reply)
+            return
+
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(text)
+            if _act:
+                if _act == "stop":
+                    await web_client.chat_postMessage(channel=cid, text=shortcut_commands.STOP_MSG_EN)
+                elif _act == "reset":
+                    self.memory[cid].clear()
+                    await web_client.chat_postMessage(channel=cid, text=shortcut_commands.RESET_MSG_EN)
+                elif _act == "help":
+                    await web_client.chat_postMessage(channel=cid, text=shortcut_commands.build_help_text("en"))
+                elif _act == "skills":
+                    await web_client.chat_postMessage(channel=cid, text=await shortcut_commands.build_skills_text("en"))
+                elif _act == "model":
+                    await web_client.chat_postMessage(channel=cid, text=await shortcut_commands.handle_model_command(text, "en"))
+                elif _act == "personality":
+                    await web_client.chat_postMessage(channel=cid, text=await shortcut_commands.handle_personality_command(text, "en"))
+                elif _act == "retry":
+                    await web_client.chat_postMessage(channel=cid, text=shortcut_commands.retry_hint("en"))
+                elif _act == "mode":
+                    await web_client.chat_postMessage(channel=cid, text=await shortcut_commands.build_mode_info_text("en"))
+                return
         if self.config.wakeWord and self.config.wakeWord not in text: return
 
         if self.config.quick_restart and text in ["/重启", "/restart"]:

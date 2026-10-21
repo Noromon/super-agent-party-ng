@@ -134,6 +134,38 @@ class DiscordClient(discord.Client):
             logging.exception("处理 Discord 消息失败")
             await msg.channel.send(f"处理消息失败：{e}")
 
+    async def _try_shortcut_command(self, msg, cid, content_strip) -> bool:
+        """A11：返回 True 表示消息已被快捷指令消化（不再进入对话流程）。"""
+        from py import shortcut_commands
+        _sub = shortcut_commands.parse_subscribe_action(content_strip)
+        if _sub:
+            _reply = await shortcut_commands.handle_subscribe_command("discord", cid, _sub == "sub", "en")
+            if _reply:
+                await msg.reply(_reply)
+            return True
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(content_strip)
+            if _act:
+                if _act == "stop":
+                    await msg.reply(shortcut_commands.STOP_MSG_EN)
+                elif _act == "reset":
+                    self.memory[cid].clear()
+                    await msg.reply(shortcut_commands.RESET_MSG_EN)
+                elif _act == "help":
+                    await msg.reply(shortcut_commands.build_help_text("en"))
+                elif _act == "skills":
+                    await msg.reply(await shortcut_commands.build_skills_text("en"))
+                elif _act == "model":
+                    await msg.reply(await shortcut_commands.handle_model_command(content_strip, "en"))
+                elif _act == "personality":
+                    await msg.reply(await shortcut_commands.handle_personality_command(content_strip, "en"))
+                elif _act == "retry":
+                    await msg.reply(shortcut_commands.retry_hint("en"))
+                elif _act == "mode":
+                    await msg.reply(await shortcut_commands.build_mode_info_text("en"))
+                return True
+        return False
+
     # ---------- 消息主处理 ----------
     @llm_gate.gated
     async def _handle_message(self, msg: discord.Message):
@@ -160,6 +192,9 @@ class DiscordClient(discord.Client):
                 await msg.reply(info_msg)
                 return
 
+            # A11 IM 快捷指令（上游 3e58049f fork 适配；抽私有方法保 C901 复杂度不升）
+            if await self._try_shortcut_command(msg, cid, content_strip):
+                return
             # 快速重启
             if self.config.quick_restart:
                 if content_strip in {"/重启", "/restart"}:

@@ -339,6 +339,29 @@ class MyClient(botpy.Client):
             "image_cache": []
         }
 
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(message.content.strip())
+            if _act:
+                if _act == "stop":
+                    await self._send_text_message(message, shortcut_commands.STOP_MSG_ZH)
+                elif _act == "reset":
+                    self.memoryList[c_id] = []
+                    await self._send_text_message(message, shortcut_commands.RESET_MSG_ZH)
+                elif _act == "help":
+                    await self._send_text_message(message, shortcut_commands.build_help_text("zh"))
+                elif _act == "skills":
+                    await self._send_text_message(message, await shortcut_commands.build_skills_text("zh"))
+                elif _act == "model":
+                    await self._send_text_message(message, await shortcut_commands.handle_model_command(message.content.strip(), "zh"))
+                elif _act == "personality":
+                    await self._send_text_message(message, await shortcut_commands.handle_personality_command(message.content.strip(), "zh"))
+                elif _act == "retry":
+                    await self._send_text_message(message, shortcut_commands.retry_hint("zh"))
+                elif _act == "mode":
+                    await self._send_text_message(message, await shortcut_commands.build_mode_info_text("zh"))
+                return
         if self.quickRestart:
             if "/重启" in message.content:
                 self.memoryList[c_id] = []
@@ -600,6 +623,29 @@ class MyClient(botpy.Client):
             "image_cache": []
         }
         state = self.group_states[g_id]
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(message.content.strip())
+            if _act:
+                if _act == "stop":
+                    await self._send_group_text(message, shortcut_commands.STOP_MSG_ZH, state)
+                elif _act == "reset":
+                    self.memoryList[g_id] = []
+                    await self._send_group_text(message, shortcut_commands.RESET_MSG_ZH, state)
+                elif _act == "help":
+                    await self._send_group_text(message, shortcut_commands.build_help_text("zh"), state)
+                elif _act == "skills":
+                    await self._send_group_text(message, await shortcut_commands.build_skills_text("zh"), state)
+                elif _act == "model":
+                    await self._send_group_text(message, await shortcut_commands.handle_model_command(message.content.strip(), "zh"), state)
+                elif _act == "personality":
+                    await self._send_group_text(message, await shortcut_commands.handle_personality_command(message.content.strip(), "zh"), state)
+                elif _act == "retry":
+                    await self._send_group_text(message, shortcut_commands.retry_hint("zh"), state)
+                elif _act == "mode":
+                    await self._send_group_text(message, await shortcut_commands.build_mode_info_text("zh"), state)
+                return
         if self.quickRestart:
             if "/重启" in message.content:
                 self.memoryList[g_id] = []

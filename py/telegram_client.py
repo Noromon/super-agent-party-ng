@@ -115,6 +115,37 @@ class TelegramClient:
             await self._send_text(chat_id, info_msg)
             return
 
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        _sub = shortcut_commands.parse_subscribe_action(text)
+        if _sub:
+            _reply = await shortcut_commands.handle_subscribe_command("telegram", chat_id, _sub == "sub", "zh")
+            if _reply:
+                await self._send_text(chat_id, _reply)
+            return
+
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(text)
+            if _act:
+                if _act == "stop":
+                    await self._send_text(chat_id, shortcut_commands.STOP_MSG_ZH)
+                elif _act == "reset":
+                    self.memoryList[chat_id] = []
+                    await self._send_text(chat_id, shortcut_commands.RESET_MSG_ZH)
+                elif _act == "help":
+                    await self._send_text(chat_id, shortcut_commands.build_help_text("zh"))
+                elif _act == "skills":
+                    await self._send_text(chat_id, await shortcut_commands.build_skills_text("zh"))
+                elif _act == "model":
+                    await self._send_text(chat_id, await shortcut_commands.handle_model_command(text, "zh"))
+                elif _act == "personality":
+                    await self._send_text(chat_id, await shortcut_commands.handle_personality_command(text, "zh"))
+                elif _act == "retry":
+                    await self._send_text(chat_id, shortcut_commands.retry_hint("zh"))
+                elif _act == "mode":
+                    await self._send_text(chat_id, await shortcut_commands.build_mode_info_text("zh"))
+                return
+
         if self.wakeWord:
             if self.wakeWord not in text:
                 logging.info(f"未检测到唤醒词: {self.wakeWord}")

@@ -124,6 +124,11 @@
               </div>
               <div class="tool-content">
 
+                <el-form-item :label="t('enableShortcutsGlobal')" class="form-item-align" label-position="left">
+                  <el-switch v-model="systemSettings.enableShortcuts" @change="autoSaveSettings"></el-switch>
+                </el-form-item>
+                <el-alert type="info" :closable="false" style="margin-bottom: 12px;">{{ t('shortcutGlobalNotice') }}</el-alert>
+
                 <el-form-item :label="t('isChinaProxy')" class="form-item-align" label-position="left">
                   <el-switch v-model="systemSettings.isChinaProxy"  @change="autoSaveSettings"></el-switch>
                 </el-form-item>

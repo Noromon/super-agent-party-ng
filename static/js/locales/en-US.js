@@ -399,6 +399,8 @@ window.lang_enUS = {
         'reasoningProvider': 'Reasoning Provider',
         'visionProvider': 'Vision Provider',
         'gotoAPI': 'Obtain API key or relevant documentation',
+        'enableShortcutsGlobal': 'Enable shortcut commands',
+        'shortcutGlobalNotice': 'Master switch for unified shortcut commands. Applies to the chat UI and all IM platforms (Feishu, QQ, Telegram, etc.).',
     'DiarySystem': 'Diary System',
     'diaryConfig': 'Configuration',
     'diaryBook': 'Diary',

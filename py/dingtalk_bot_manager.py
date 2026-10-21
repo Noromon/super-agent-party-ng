@@ -266,6 +266,36 @@ class DingtalkClientLogic:
             handler.reply_markdown("ID 抓取助手", msg, incoming_message)
             return
 
+        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        from py import shortcut_commands
+        _sub = shortcut_commands.parse_subscribe_action(user_text)
+        if _sub:
+            _reply = await shortcut_commands.handle_subscribe_command("dingtalk", cid, _sub == "sub", "zh")
+            if _reply:
+                handler.reply_text(_reply, incoming_message)
+            return
+
+        if await shortcut_commands.im_shortcuts_enabled():
+            _act = shortcut_commands.parse_im_action(user_text)
+            if _act:
+                if _act == "stop":
+                    handler.reply_text(shortcut_commands.STOP_MSG_ZH, incoming_message)
+                elif _act == "reset":
+                    self.memoryList[cid] = []
+                    handler.reply_text(shortcut_commands.RESET_MSG_ZH, incoming_message)
+                elif _act == "help":
+                    handler.reply_text(shortcut_commands.build_help_text("zh"), incoming_message)
+                elif _act == "skills":
+                    handler.reply_text(await shortcut_commands.build_skills_text("zh"), incoming_message)
+                elif _act == "model":
+                    handler.reply_text(await shortcut_commands.handle_model_command(user_text, "zh"), incoming_message)
+                elif _act == "personality":
+                    handler.reply_text(await shortcut_commands.handle_personality_command(user_text, "zh"), incoming_message)
+                elif _act == "retry":
+                    handler.reply_text(shortcut_commands.retry_hint("zh"), incoming_message)
+                elif _act == "mode":
+                    handler.reply_text(await shortcut_commands.build_mode_info_text("zh"), incoming_message)
+                return
         if self.config.quickRestart and user_text and ("/重启" in user_text or "/restart" in user_text):
             self.memoryList[cid] = []
             handler.reply_text("对话记录已重置。", incoming_message)
