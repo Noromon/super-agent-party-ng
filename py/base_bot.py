@@ -38,6 +38,7 @@ class BaseBotManager:
     READY_TIMEOUT = 30
     STOP_JOIN_TIMEOUT = 5
     AUTO_START_ENGINE = True     # False=行为引擎生命周期由平台 run_client 自行编排
+    SYNC_BEHAVIOR_ON_START = True  # False=启动时不做全局行为配置同步（qq 无行为接入）
 
     def __init__(self):
         self.bot_thread = None
@@ -98,7 +99,7 @@ class BaseBotManager:
                 await self.pre_client_setup()
 
                 # 行为配置同步（各平台原逐份复制的同一段逻辑，字段名参数化）
-                behavior_data = settings.get("behaviorSettings", {})
+                behavior_data = settings.get("behaviorSettings", {}) if self.SYNC_BEHAVIOR_ON_START else {}
                 target_ids = getattr(config, self.TARGET_FIELD, None) if self.TARGET_FIELD else None
                 if not target_ids and self.SETTINGS_KEY:
                     target_ids = (settings.get(self.SETTINGS_KEY, {}) or {}).get(self.TARGET_FIELD, [])

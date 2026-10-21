@@ -366,8 +366,6 @@ BOTS = [
                      secret="sec", separators=["。"], reasoningVisible=False,
                      quickRestart=True, is_sandbox=False),
         "patches": _qq_patches,
-        "no_hot_update": True,  # R2-9 漂移钉：qq 缺行为热更
-        "ready_settle": 3.0,    # delayed_connection_check 固定 2 秒
     },
     {
         "id": "wechat", "mod": "py.wechat_bot_manager",

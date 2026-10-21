@@ -28,6 +28,7 @@ except ImportError:
 
 # 拦截控制台输出的终极杀器
 from py import llm_gate
+from py.base_bot import BaseBotManager
 
 class StreamInterceptor:
     def __init__(self, original_stream, qr_callback, success_callback):
@@ -66,6 +67,8 @@ class StreamInterceptor:
         return getattr(self.original_stream, attr)
 
 # 配置模型增加了 force_relogin 字段
+
+
 class WeChatBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
     WeChatAgent: str = "super-model"
@@ -79,183 +82,78 @@ class WeChatBotConfig(BaseModel):
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
-class WeChatBotManager:
+class WeChatBotManager(BaseBotManager):
+    """批 2 起为 BaseBotManager 的 WeChat adapter。
+
+    扫码登录拦截（StreamInterceptor）、force_relogin SDK 热重载、
+    bot.run 线程/协程分派等平台对抗逻辑保留在本类；
+    就绪语义=乐观置位（与企微同模式：startup/ready/is_running 同步）。
+    """
+    PLATFORM_LABEL = "微信"
+    THREAD_NAME = "WeChatBotThread"
+    SETTINGS_KEY = "wechatBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "wechat"
+    STOP_JOIN_TIMEOUT = 3
+    AUTO_START_ENGINE = False    # run_client 内 stop+start 编排（原语义）
+
     def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
-        self.bot_client: Optional['WeChatClient'] = None
-        self.is_running = False
-        self.config = None
-        self.loop = None
-        self._shutdown_event = threading.Event()
-        self._startup_complete = threading.Event()
-        self._ready_complete = threading.Event()
-        self._startup_error = None
-        self._stop_requested = False
-        
+        super().__init__()
         self.qr_url = None
         self.qr_base64 = None
         self.is_logged_in = False
-        
-    def start_bot(self, config: WeChatBotConfig):
+
+    def start_bot(self, config):
         logging.info("========================================")
         logging.info("正在初始化微信机器人...")
-        
-        if self.is_running: raise Exception("微信机器人已在运行")
-        if WeChatBot is None: raise Exception("尚未安装 wechatbot-sdk")
-
-        self.config = config
-        self._shutdown_event.clear()
-        self._startup_complete.clear()
-        self._ready_complete.clear()
-        self._startup_error = None
-        self._stop_requested = False
-        
+        if WeChatBot is None:
+            raise Exception("尚未安装 wechatbot-sdk")
         self.qr_url = None
         self.qr_base64 = None
         self.is_logged_in = False
-        
-        self.bot_thread = threading.Thread(
-            target=self._run_bot_thread,
-            args=(config,),
-            daemon=True,
-            name="WeChatBotThread"
-        )
-        self.bot_thread.start()
-        
-        if not self._startup_complete.wait(timeout=30):
-            self.stop_bot()
-            raise Exception("微信机器人连接超时")
-            
-        if self._startup_error:
-            self.stop_bot()
-            raise Exception(f"启动失败: {self._startup_error}")
+        super().start_bot(config)
 
-    def _clear_wechat_cache(self):
-        """物理粉碎机：全盘清理所有可能的微信 SDK 缓存凭证文件"""
-        try:
-            home_dir = os.path.expanduser("~")
-            
-            # 常见存放目录 (项目下 和 电脑主目录下)
-            dirs_to_remove =[
-                ".wechatbot", 
-                "wechat_storage",
-                "session",
-                os.path.join(home_dir, ".wechatbot"),
-                os.path.join(home_dir, ".wechat")
-            ]
-            
-            # 常见存放文件
-            files_to_remove =[
-                "wechat.pkl", 
-                "itchat.pkl", 
-                "wechatbot.pkl",
-                "wx_session.pkl",
-                "device.json",
-                "auth.json",
-                "token.json",
-                "cookie.json",
-                os.path.join(home_dir, "wechat.pkl")
-            ]
-            
-            cleaned = False
-            
-            # 删除目录
-            for d in dirs_to_remove:
-                if os.path.exists(d):
-                    try:
-                        shutil.rmtree(d, ignore_errors=True)
-                        cleaned = True
-                        logging.info(f"已清理缓存目录: {d}")
-                    except Exception as e:
-                        logging.warning(f"清理目录失败 {d}: {e}")
-                        
-            # 删除文件
-            for f in files_to_remove:
-                if os.path.exists(f):
-                    try:
-                        os.remove(f)
-                        cleaned = True
-                        logging.info(f"已删除缓存文件: {f}")
-                    except: pass
-                    
-            # 模糊匹配当前目录所有疑似微信隐藏文件
-            for pat in["*.pkl", ".wechat*", "*wechat*.json"]:
-                for f in glob.glob(pat):
-                    if os.path.isfile(f):
-                        try:
-                            os.remove(f)
-                            cleaned = True
-                            logging.info(f"已删除匹配缓存: {f}")
-                        except: pass
-                        
-            if cleaned:
-                logging.info("♻️ 强制清除微信登录缓存成功！")
-            else:
-                logging.info("♻️ 未发现实体缓存文件，将直接拉取新二维码。")
-                
-        except Exception as e:
-            logging.warning(f"清理微信缓存时出现异常 (可能被占用): {e}")
-
-    def _run_bot_thread(self, config):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        
-        try:
-            # ======= 核心对抗逻辑 =======
-            # 如果收到了强制重登指令，先清空实体文件，再重载内存模块
-            if config.force_relogin:
-                self._clear_wechat_cache()
-                config.force_relogin = False 
-                
-                try:
-                    global WeChatBot
-                    if wechatbot is not None:
-                        importlib.reload(wechatbot)
-                        WeChatBot = wechatbot.WeChatBot
-                        logging.info("🔄 已强制热重载 SDK 模块，摧毁残留在内存里的单例状态")
-                except Exception as e:
-                    logging.warning(f"重载 wechatbot 模块失败: {e}")
-            # ============================
-
-            bot = WeChatBot()
-            self.bot_client = WeChatClient(bot)
-            self.bot_client.WeChatAgent = config.WeChatAgent
-            self.bot_client.memoryLimit = config.memoryLimit
-            self.bot_client.separators = config.separators if config.separators else ['。', '\n', '？', '！']
-            self.bot_client.reasoningVisible = config.reasoningVisible
-            self.bot_client.quickRestart = config.quickRestart
-            self.bot_client.enableTTS = config.enableTTS
-            self.bot_client.wakeWord = config.wakeWord
-            self.bot_client._manager_ref = weakref.ref(self)
-
+    def build_client(self, config: WeChatBotConfig):
+        # ======= 核心对抗逻辑 =======
+        # 如果收到了强制重登指令，先清空实体文件，再重载内存模块
+        if config.force_relogin:
+            self._clear_wechat_cache()
+            config.force_relogin = False
             try:
-                settings = self.loop.run_until_complete(load_settings())
-                behavior_data = settings.get("behaviorSettings", {})
-                target_ids = config.behaviorTargetChatIds or settings.get("wechatBotConfig", {}).get("behaviorTargetChatIds",[])
-                if behavior_data:
-                    global_behavior_engine.update_config(behavior_data, {"wechat": target_ids})
+                global WeChatBot
+                if wechatbot is not None:
+                    importlib.reload(wechatbot)
+                    WeChatBot = wechatbot.WeChatBot
+                    logging.info("🔄 已强制热重载 SDK 模块，摧毁残留在内存里的单例状态")
             except Exception as e:
-                logging.error(f"同步行为配置失败: {e}")
+                logging.warning(f"重载 wechatbot 模块失败: {e}")
+        # ============================
 
-            @bot.on_message
-            async def handle_message_wrapper(msg):
-                await self.bot_client.handle_message(msg)
+        bot = WeChatBot()
+        client = WeChatClient(bot)
+        client.WeChatAgent = config.WeChatAgent
+        client.memoryLimit = config.memoryLimit
+        client.separators = config.separators if config.separators else ['。', '\n', '？', '！']
+        client.reasoningVisible = config.reasoningVisible
+        client.quickRestart = config.quickRestart
+        client.enableTTS = config.enableTTS
+        client.wakeWord = config.wakeWord
 
-            self.loop.run_until_complete(self._async_run_websocket())
-        except Exception as e:
-            if not self._startup_error: self._startup_error = str(e)
-            if not self._startup_complete.is_set(): self._startup_complete.set()
-        finally:
-            self._cleanup()  
+        @bot.on_message
+        async def handle_message_wrapper(msg):
+            await self.bot_client.handle_message(msg)
+        return client
 
-    async def _async_run_websocket(self):
+    async def run_client(self):
+        from py.behavior_engine import global_behavior_engine
         original_stdout, original_stderr = sys.stdout, sys.stderr
         try:
-            self._startup_complete.set()
             self.is_running = True
-            
+            self._ready_complete.set()  # 乐观置位（原 start_bot 不等 ready）
+
             def _handle_qr(url):
-                if self.qr_url: return  
+                if self.qr_url:
+                    return
                 self.qr_url = url
                 logging.info("🚀 成功拦截登录链接！正在生成前端二维码图像...")
                 try:
@@ -265,11 +163,11 @@ class WeChatBotManager:
                     qr = qrcode.QRCode(border=1)
                     qr.add_data(url)
                     qr.make(fit=True)
-                    logging.getLogger("app").info("\n\n" + "="*50)
+                    logging.getLogger("app").info("\n\n" + "=" * 50)
                     logging.getLogger("app").info("👉 微信机器人验证: 请扫码登录 👈")
                     qr.print_ascii(invert=True)
-                    logging.getLogger("app").info("="*50 + "\n\n")
-                    
+                    logging.getLogger("app").info("=" * 50 + "\n\n")
+
                     img = qr.make_image(fill_color="black", back_color="white")
                     buffered = io.BytesIO()
                     img.save(buffered, format="PNG")
@@ -280,70 +178,80 @@ class WeChatBotManager:
             def _handle_success():
                 if not self.is_logged_in:
                     self.is_logged_in = True
-                    self.qr_base64 = None  
+                    self.qr_base64 = None
                     self.qr_url = None
                     logging.info("✅ 检测到微信登录成功信号，等待前端关闭弹窗...")
 
             sys.stdout = StreamInterceptor(original_stdout, _handle_qr, _handle_success)
             sys.stderr = StreamInterceptor(original_stderr, _handle_qr, _handle_success)
-            
-            if global_behavior_engine.is_running: global_behavior_engine.stop()
+
+            if global_behavior_engine.is_running:
+                global_behavior_engine.stop()
             behavior_task = asyncio.create_task(global_behavior_engine.start())
-            
+
             bot = self.bot_client.bot
             if hasattr(bot, 'run') and asyncio.iscoroutinefunction(bot.run):
                 bot_task = asyncio.create_task(bot.run())
             else:
                 bot_task = asyncio.create_task(asyncio.to_thread(bot.run))
-                
+
             await asyncio.gather(behavior_task, bot_task, return_exceptions=True)
-                    
+
         finally:
             sys.stdout = original_stdout
             sys.stderr = original_stderr
-
-    def _cleanup(self):
-        self.is_running = False
-        try:
-            if global_behavior_engine.is_running: global_behavior_engine.stop()
-        except: pass
-        if self.loop and not self.loop.is_closed():
-            try:
-                for task in asyncio.all_tasks(self.loop): task.cancel()
-                self.loop.close()
-            except: pass
-        self._shutdown_event.set()
 
     def stop_bot(self):
         logging.info("正在停止微信机器人服务...")
         self._stop_requested = True
         self._shutdown_event.set()
-        
+
         # 主动断开当前的 SDK 连接
         if self.bot_client and hasattr(self.bot_client, 'bot'):
             bot = self.bot_client.bot
-            for method in['stop', 'logout', 'exit', 'close']:
+            for method in ['stop', 'logout', 'exit', 'close']:
                 if hasattr(bot, method):
                     try:
                         getattr(bot, method)()
                         logging.info(f"已触发微信实例的 {method}()")
-                    except: pass
-        
+                    except Exception:
+                        pass
+
         self.is_running = False
-        
+
         # 强制摧毁事件循环
         if self.loop and not self.loop.is_closed():
             try:
                 for task in asyncio.all_tasks(self.loop):
                     task.cancel()
                 self.loop.call_soon_threadsafe(self.loop.stop)
-            except: pass
-            
+            except Exception:
+                pass
+
         # 等待后台纯净退出释放文件锁
         if self.bot_thread and self.bot_thread.is_alive():
-            self.bot_thread.join(timeout=3.0)
-            
+            self.bot_thread.join(timeout=self.STOP_JOIN_TIMEOUT)
+
         self._stop_requested = False
+
+    def _cleanup(self):
+        from py.behavior_engine import global_behavior_engine
+        self.is_running = False
+        try:
+            if global_behavior_engine.is_running:
+                global_behavior_engine.stop()
+        except Exception:
+            pass
+        if self.loop and not self.loop.is_closed():
+            try:
+                for task in asyncio.all_tasks(self.loop):
+                    task.cancel()
+                self.loop.close()
+            except Exception:
+                pass
+        self.bot_client = None
+        self.loop = None
+        self._shutdown_event.set()
 
     def get_status(self):
         return {
@@ -351,13 +259,13 @@ class WeChatBotManager:
             "startup_error": self._startup_error,
             "qr_url": self.qr_url,
             "qr_base64": getattr(self, 'qr_base64', None),
-            "is_logged_in": getattr(self, 'is_logged_in', False)
+            "is_logged_in": getattr(self, 'is_logged_in', False),
         }
 
     def update_behavior_config(self, config: WeChatBotConfig):
         self.config = config
-        target_map = { "wechat": config.behaviorTargetChatIds }
-        global_behavior_engine.update_config(config.behaviorSettings, target_map)
+        from py.behavior_engine import global_behavior_engine
+        global_behavior_engine.update_config(config.behaviorSettings, {"wechat": config.behaviorTargetChatIds})
 
 
 class WeChatClient:
