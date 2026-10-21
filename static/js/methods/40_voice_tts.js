@@ -1114,5 +1114,86 @@ Object.assign(vue_methods, {
     if (this.newGsvAudio.path) {
       this.newGsvAudio.name = this.newGsvAudio.path;
     }
-  }
+  },
+
+    async playPCMChunk(b64, currentText = '', message = null) {
+        this.isOmniPlaying = true;
+        if (message) {
+            message.isPlaying = true;
+            if (message.omniDuration === undefined) message.omniDuration = 0;
+            if (message.omniCurrentTime === undefined) message.omniCurrentTime = 0;
+            if (!message.generationFinished) message.omniAudioChunks.push(b64);
+        }
+
+        try {
+            if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
+
+            // 解码数据
+            const raw = atob(b64);
+            const pcm16 = new Int16Array(raw.length / 2);
+            for (let i = 0; i < raw.length; i += 2) {
+                pcm16[i >> 1] = raw.charCodeAt(i) | (raw.charCodeAt(i + 1) << 8);
+            }
+
+            const sampleRate = 24000;
+            const buf = this.audioCtx.createBuffer(1, pcm16.length, sampleRate);
+            const floatData = buf.getChannelData(0);
+            for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768;
+
+            const chunkDuration = buf.duration;
+            if (message && message.isOmni && !message.generationFinished) {
+                message.omniDuration += chunkDuration;
+            }
+
+            // ======= 【核心修改：利用二进制同步到 VRM】 =======
+            if ((this.vrmOnline || this.vtsOnline) && this.ttsWebSocket) {
+                const pcmUint8 = new Uint8Array(raw.length);
+                for(let i=0; i<raw.length; i++) pcmUint8[i] = raw.charCodeAt(i);
+                
+                this.sendBinaryToVRM({
+                    type: 'omni_chunk',
+                    text: currentText, // 传入当前文本
+                    sampleRate: sampleRate
+                }, pcmUint8.buffer);
+            }
+            // ===============================================
+
+            const now = this.audioCtx.currentTime;
+            if (this.audioStartTime < now) this.audioStartTime = now;
+
+            const src = this.audioCtx.createBufferSource();
+            src.buffer = buf;
+            if (!this.activeSources) this.activeSources = [];
+            this.activeSources.push(src);
+
+            const gainNode = this.audioCtx.createGain();
+            gainNode.gain.value = this.vrmOnline ? 0.000001 : 1.0;
+
+            src.connect(gainNode);
+            gainNode.connect(this.audioCtx.destination);
+
+            src.onended = () => {
+                if (this.activeSources) this.activeSources = this.activeSources.filter(s => s !== src);
+                if (message && message.isOmni && !src.isForceStopped) {
+                    message.omniCurrentTime += chunkDuration;
+                    if (message.omniCurrentTime > message.omniDuration) message.omniCurrentTime = message.omniDuration;
+
+                    if (message.generationFinished && this.activeSources.length === 0) {
+                        message.isPlaying = false;
+                        message.omniCurrentTime = message.omniDuration;
+                        if (this.vrmOnline || this.vtsOnline) this.sendTTSStatusToVRM('allChunksCompleted', {});
+                        this.isOmniPlaying = false;
+                    }
+                }
+                try { src.disconnect(); gainNode.disconnect(); } catch (e) {}
+            };
+
+            src.start(this.audioStartTime);
+            this.audioStartTime += buf.duration;
+        } catch (error) {
+            console.error('Error in playPCMChunk:', error);
+            if (message) message.isPlaying = false;
+        }
+    }
 });

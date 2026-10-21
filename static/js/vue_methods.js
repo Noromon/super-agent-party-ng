@@ -2109,98 +2109,9 @@ let vue_methods = {
       };
     },
 
-   async updateGlobalShortcut() {
-      if (this.asrSettings.interactionMethod === 'globalKeyTriggered' || this.asrSettings.interactionMethod === 'keyTriggered'){
-        this.stopASR();
-      }else if (this.asrSettings.enabled){
-        await this.startASR();
-      }
 
-      if (!window.electronAPI?.unregisterGlobalShortcut) return;
-      
-      // 每次更新前，先注销旧的
-      await window.electronAPI.unregisterGlobalShortcut();
 
-      // 如果启用了 ASR 且为全局快捷键模式
-      if (this.asrSettings.interactionMethod === 'globalKeyTriggered') {
-        const globalKeyCombo = this.getGlobalAccelerator(this.asrSettings.hotkey);
-        
-        const success = await window.electronAPI.registerGlobalShortcut(globalKeyCombo);
-        if (!success) {
-          this.$message.error(`全局快捷键 ${globalKeyCombo} 注册失败，可能被系统或其他软件占用`);
-        } else {
-          console.log(`全局快捷键已更新为: ${globalKeyCombo}`);
-        }
-      }
-    },
 
-    // 【新增】将你的单键转换为 Electron 系统的组合键格式
-    getGlobalAccelerator(localKey) {
-      if (localKey === 'Alt') return 'Alt+Space';
-      if (localKey === 'Control') return 'Control+Space';
-      if (localKey === 'Shift') return 'Shift+Space';
-      return 'Alt+Space'; // 默认 fallback
-    },
-
-    // 【修改】键盘按下事件 (只处理局部 keyTriggered)
-    async handleKeyDown(event) {
-      if (event?.repeat) return; 
-      if (event.isComposing || event.keyCode === 229) return;
-
-      // ====== 局部模式 (按住说话) ======
-      if (this.asrSettings.interactionMethod === "keyTriggered") {
-        // 如果按下的键和设置的键严格匹配 (例如 'Alt' === 'Alt')
-        if (event.key === this.asrSettings.hotkey) {
-          event.preventDefault(); 
-          await this.handlePttPress(event); // 开始录音
-          return; 
-        }
-      }
-
-      // -- 下方是你原有的播放控制及回车发送逻辑，保持不变 --
-      if (event.code === 'Space' && event.shiftKey) {
-        event.preventDefault();
-        if (this.readState.ttsChunks.length > 0 && !this.readState.isPlaying) {
-          this.playNextSegmentOnce();
-        }
-        return;
-      }
-      
-      const isTextArea = event.target.tagName === 'TEXTAREA';
-      if (event.key === 'Enter' && (this.activeMenu === 'home' || this.activeMenu ==='ai-browser')) {
-        if (isTextArea) {
-            if (event.shiftKey) {
-              return;
-            } else {
-              event.preventDefault();
-              await this.sendMessage();
-            }
-        }
-      }
-
-      if (event.key === 'Enter' && this.activeMenu ==='dashboard') {
-            if (event.shiftKey) {
-              return;
-            } else {
-              event.preventDefault();
-              this.handleDashboardSend();
-            }
-      }
-    },
-
-    // 【修改】键盘松开事件 (只处理局部 keyTriggered)
-    async handleKeyUp(event) {
-      if (event?.repeat) return;
-
-      // ====== 局部模式 (松开结束) ======
-      if (this.asrSettings.interactionMethod === "keyTriggered") {
-        if (event.key === this.asrSettings.hotkey) {
-          event.preventDefault();
-          await this.handlePttRelease(event); // 结束录音
-          return;
-        }
-      }  
-    },
     escapeHtml(unsafe) {
       return unsafe
         .replace(/&/g, "&amp;")
@@ -2426,86 +2337,6 @@ let vue_methods = {
         return 'source/Avatar.png';
     },
 
-    async playPCMChunk(b64, currentText = '', message = null) {
-        this.isOmniPlaying = true;
-        if (message) {
-            message.isPlaying = true;
-            if (message.omniDuration === undefined) message.omniDuration = 0;
-            if (message.omniCurrentTime === undefined) message.omniCurrentTime = 0;
-            if (!message.generationFinished) message.omniAudioChunks.push(b64);
-        }
-
-        try {
-            if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
-
-            // 解码数据
-            const raw = atob(b64);
-            const pcm16 = new Int16Array(raw.length / 2);
-            for (let i = 0; i < raw.length; i += 2) {
-                pcm16[i >> 1] = raw.charCodeAt(i) | (raw.charCodeAt(i + 1) << 8);
-            }
-
-            const sampleRate = 24000;
-            const buf = this.audioCtx.createBuffer(1, pcm16.length, sampleRate);
-            const floatData = buf.getChannelData(0);
-            for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768;
-
-            const chunkDuration = buf.duration;
-            if (message && message.isOmni && !message.generationFinished) {
-                message.omniDuration += chunkDuration;
-            }
-
-            // ======= 【核心修改：利用二进制同步到 VRM】 =======
-            if ((this.vrmOnline || this.vtsOnline) && this.ttsWebSocket) {
-                const pcmUint8 = new Uint8Array(raw.length);
-                for(let i=0; i<raw.length; i++) pcmUint8[i] = raw.charCodeAt(i);
-                
-                this.sendBinaryToVRM({
-                    type: 'omni_chunk',
-                    text: currentText, // 传入当前文本
-                    sampleRate: sampleRate
-                }, pcmUint8.buffer);
-            }
-            // ===============================================
-
-            const now = this.audioCtx.currentTime;
-            if (this.audioStartTime < now) this.audioStartTime = now;
-
-            const src = this.audioCtx.createBufferSource();
-            src.buffer = buf;
-            if (!this.activeSources) this.activeSources = [];
-            this.activeSources.push(src);
-
-            const gainNode = this.audioCtx.createGain();
-            gainNode.gain.value = this.vrmOnline ? 0.000001 : 1.0;
-
-            src.connect(gainNode);
-            gainNode.connect(this.audioCtx.destination);
-
-            src.onended = () => {
-                if (this.activeSources) this.activeSources = this.activeSources.filter(s => s !== src);
-                if (message && message.isOmni && !src.isForceStopped) {
-                    message.omniCurrentTime += chunkDuration;
-                    if (message.omniCurrentTime > message.omniDuration) message.omniCurrentTime = message.omniDuration;
-
-                    if (message.generationFinished && this.activeSources.length === 0) {
-                        message.isPlaying = false;
-                        message.omniCurrentTime = message.omniDuration;
-                        if (this.vrmOnline || this.vtsOnline) this.sendTTSStatusToVRM('allChunksCompleted', {});
-                        this.isOmniPlaying = false;
-                    }
-                }
-                try { src.disconnect(); gainNode.disconnect(); } catch (e) {}
-            };
-
-            src.start(this.audioStartTime);
-            this.audioStartTime += buf.duration;
-        } catch (error) {
-            console.error('Error in playPCMChunk:', error);
-            if (message) message.isPlaying = false;
-        }
-    },
     // --- [4] 辅助函数：二进制打包打包器 ---
     sendBinaryToVRM(metadata, audioArrayBuffer) {
         if (!this.ttsWebSocket || this.ttsWebSocket.readyState !== WebSocket.OPEN) return;
@@ -2599,46 +2430,6 @@ let vue_methods = {
 
 
 
-    async autoSaveSettings() {
-      if (this.isElectron) {
-        await window.electronAPI.saveChromeSettings(JSON.parse(JSON.stringify(this.chromeMCPSettings)));
-      }
-      return new Promise((resolve, reject) => {
-        this.ensureConversationGroups();
-        // payload 由 settings_schema.js 单一事实源生成（批 0-④，替代 71 对手写清单）
-        const payload = window.SETTINGS_SCHEMA.buildSettingsPayload(this);
-        const correlationId = uuid.v4();
-        // 发送保存请求
-        this.ws.send(JSON.stringify({
-          type: 'save_settings',
-          data: payload,
-          correlationId: correlationId // 添加唯一请求 ID
-        }));
-        // 设置响应监听器
-        const handler = (event) => {
-          const response = JSON.parse(event.data);
-          
-          // 匹配对应请求的确认消息
-          if (response.type === 'settings_saved' && 
-              response.correlationId === correlationId) {
-            this.ws.removeEventListener('message', handler);
-            resolve();
-          }
-          
-          // 错误处理（根据后端实现）
-          if (response.type === 'save_error') {
-            this.ws.removeEventListener('message', handler);
-            reject(new Error('保存失败'));
-          }
-        };
-        // 设置 10 秒超时
-        const timeout = setTimeout(() => {
-          this.ws.removeEventListener('message', handler);
-          reject(new Error('保存超时'));
-        }, 10000);
-        this.ws.addEventListener('message', handler);
-      });
-    },
 
 
 
@@ -2647,83 +2438,9 @@ let vue_methods = {
 
 
 
-    // 修改copyEndpoint方法
-    copyEndpoint() {
-      navigator.clipboard.writeText(`${this.partyURL}/v1`)
-        .then(() => {
-          showNotification(this.t('copy_success'), 'success');
-        })
-        .catch(() => {
-          showNotification(this.t('copy_fail'), 'error');
-        });
-    },
 
-    copyMCPEndpoint(){
-      navigator.clipboard.writeText(`${this.partyURL}/mcp`)
-        .then(() => {
-          showNotification(this.t('copy_success'), 'success');
-        })
-        .catch(() => {
-          showNotification(this.t('copy_fail'), 'error');
-        });
-    },
-    copyVrmEndpoint(){
-      navigator.clipboard.writeText(`${this.partyURL}/vrm.html`)
-        .then(() => {
-          showNotification(this.t('copy_success'), 'success');
-        })
-        .catch(() => {
-          showNotification(this.t('copy_fail'), 'error');
-        });
-    },
-    copyURL(url) {
-      navigator.clipboard.writeText(url)
-        .then(() => {
-          showNotification(this.t('copy_success'), 'success');
-        })
-        .catch(() => {
-          showNotification(this.t('copy_fail'), 'error');
-        });
-    },
-    copyModel() {
-      navigator.clipboard.writeText('super-model')
-        .then(() => {
-          showNotification(this.t('copy_success'));
-        })
-        .catch(() => {
-          showNotification(this.t('copy_fail'), 'error');
-        });
-    },
 
-    toggleSection(section) {
-      this.expandedSections[section] = !this.expandedSections[section]
-      this.autoSaveSettings()
-    },
     
-    // 新增点击头部的处理
-    handleHeaderClick(section) {
-      this.toggleSection(section)
-    },
-    async clearMessages(groupId = null) {
-      this.stopGenerate();
-      const targetGroupId = groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
-      this.activeConversationGroupId = targetGroupId;
-      this.draftConversationGroupId = targetGroupId;
-      if (this.system_prompt){
-        this.messages = [{ role: 'system', content: this.system_prompt }];
-      } else {
-        this.messages = [{ role: 'system', content: ' ' }];
-      }
-      this.conversationId = null;
-      this.fileLinks = [];
-      this.isThinkOpen = false; // 重置思考模式状态
-      this.asyncToolsID = [];
-      this.inAutoMode = false; // 重置自动模式状态
-      this.randomGreetings(); // 重新生成随机问候语
-      this.requestScrollToBottom();    // 触发界面更新
-      this.autoSaveSettings();
-      this.sendMessagesToExtension(true); // 发送消息到插件
-    },
 
 
 
@@ -2754,20 +2471,7 @@ let vue_methods = {
   },
 
 
-    switchToApiBox() {
-      // 切换到 API 钥匙箱界面
-      this.activeMenu = 'model-config';
-      this.subMenu = 'service';
-    },
 
-    highlightCode() {
-      this.$nextTick(() => {
-        document.querySelectorAll('pre code').forEach(block => {
-          hljs.highlightElement(block);
-        });
-        this.initCopyButtons();
-      });
-    },
 
 
 
@@ -2784,128 +2488,8 @@ let vue_methods = {
       const fallback = this.translations['en-US'];
       return (lang && lang[key]) || (fallback && fallback[key]) || key;
     },
-    async handleSystemLanguageChange(val) {
-      this.systemSettings.language = val;
-      if (val === 'auto') {
-        // 获取系统设置，默认是'en-US'，如果系统语言是中文，则设置为'zh-CN'
-        const systemLanguage = navigator.language || navigator.userLanguage || 'en-US';
-        val = systemLanguage.startsWith('zh') ? 'zh-CN' : 'en-US';
-      }
-      this.currentLanguage = val; // 更新当前语言
-      await this.autoSaveSettings();
-      this.$forceUpdate();
-    },
-    // --- 数据安全网（M4-lite 快照备份 UI）---
-    async loadBackupList() {
-      this.backupListLoading = true;
-      try {
-        const resp = await fetch('/api/backup/list');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-        this.backupSnapshots = (data.snapshots || []).slice().reverse();
-      } catch (e) {
-        this.$message?.error(this.t('dataGuardLoadFail') + ': ' + e.message);
-      } finally {
-        this.backupListLoading = false;
-      }
-    },
-    async backupNow() {
-      if (this.backupNowRunning) return;
-      this.backupNowRunning = true;
-      try {
-        const resp = await fetch('/api/backup/now', { method: 'POST' });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || data.ok === false) {
-          throw new Error(data.reason || ('HTTP ' + resp.status));
-        }
-        this.$message?.success(this.t('dataGuardBackupOk') + ` (${data.files} ${this.t('dataGuardFiles')} / ${this.formatBackupBytes(data.bytes)})`);
-        await this.loadBackupList();
-      } catch (e) {
-        this.$message?.error(this.t('dataGuardBackupFail') + ': ' + e.message);
-      } finally {
-        this.backupNowRunning = false;
-      }
-    },
-    async verifyBackup(name) {
-      this.verifyBackupName = name;
-      try {
-        const resp = await fetch('/api/backup/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
-        if (data.ok) this.$message?.success(`${name}: ` + this.t('dataGuardVerifyOk'));
-        else this.$message?.error(`${name}: ` + this.t('dataGuardVerifyFail'));
-      } catch (e) {
-        this.$message?.error(this.t('dataGuardVerifyFail') + ': ' + e.message);
-      } finally {
-        this.verifyBackupName = '';
-      }
-    },
-    formatBackupBytes(n) {
-      n = Number(n) || 0;
-      if (n < 1024) return n + ' B';
-      if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-      if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB';
-      return (n / 1073741824).toFixed(2) + ' GB';
-    },
-    // renderer.js 增强方法
-    async handleThemeChange(val) {
-      // 更新根属性
-      document.documentElement.setAttribute('data-theme', val);
-      
-      this.systemSettings.theme = val;
 
-      await this.autoSaveSettings();
-    },
-    async handleNetworkChange(val) {
-      this.systemSettings.network = val;
-      await window.electronAPI.setNetworkVisibility(val);
-      this.showRestartDialog = true;
-      await this.autoSaveSettings();
-    },
 
-    restartApp() {
-      window.electronAPI.restartApp();
-    },
-
-    // 方法替换为：
-    launchBrowserMode() {
-      this.isBrowserOpening = true;
-      
-      setTimeout(() => {
-        const url = this.partyURL;
-        if (isElectron) {
-          window.electronAPI.openExternal(url);
-        } else {
-          window.open(url, '_blank');
-        }
-        
-        // 2秒后恢复状态
-        setTimeout(() => {
-          this.isBrowserOpening = false;
-        }, 2000);
-      }, 500);
-    },
-    launchAPIKeyManager() {
-      this.isBrowserOpening = true;
-      
-      setTimeout(() => {
-        const url = this.partyURL + '/token.html';
-        if (isElectron) {
-          window.electronAPI.openExternal(url);
-        } else {
-          window.open(url, '_blank');
-        }
-        
-        // 2秒后恢复状态
-        setTimeout(() => {
-          this.isBrowserOpening = false;
-        }, 2000);
-      }, 500);
-    },
 
 
 
@@ -2950,42 +2534,8 @@ let vue_methods = {
 
 
 
-async fetchXmppCertPending() {
-  try {
-    const res = await fetch('/xmpp_cert_pending');
-    const json = await res.json();
-    this.xmppCertPending = json.pending || [];
-  } catch (e) {
-    this.xmppCertPending = [];
-  }
-},
 openEnvPage(menu) {
   this.activeMenu = menu;
-},
-async xmppCertDecision(key, decision) {
-  try {
-    const res = await fetch('/xmpp_cert_decision', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, decision })
-    });
-    const json = await res.json();
-    if (!json.success) {
-      showNotification(`证书决策失败：${json.message}`, 'error');
-      return;
-    }
-    await this.fetchXmppCertPending();
-    if (decision === 'once') showNotification('本次运行内信任该证书（重启后需重新确认）', 'info');
-    if (decision === 'always') showNotification('已永久信任该证书，正在重新启动机器人...', 'success');
-    if (decision !== 'reject') {
-      await this.startXmppBot();
-      await this.fetchXmppCertPending();
-    } else {
-      showNotification('已拒绝该证书', 'info');
-    }
-  } catch (e) {
-    showNotification('网络错误：证书决策未送达', 'error');
-  }
 },
 
 
