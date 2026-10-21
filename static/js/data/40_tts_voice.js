@@ -334,6 +334,7 @@ Object.assign(vue_data, {
         { id: 'behavior', title: 'CharacterBehavior', icon: 'fa-solid fa-person-running' },
         { id: 'vision', title: 'CharacterVision', icon: 'fa-solid fa-eye'},
         { id: 'affection', title: 'affectionSystem', icon: 'fa-solid fa-heart' },
+        { id: 'diary', title: 'DiarySystem', icon: 'fa-solid fa-book' },
     ],
 
     modelTiles: [

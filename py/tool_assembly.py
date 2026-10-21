@@ -120,6 +120,10 @@ async def build_llm_tools(request, settings, tk):
         tools.extend(tk["random_topics_tools"])
     if settings["tools"]["arxiv"]['enabled']:
         tools.append(tk["arxiv_tool"])
+    # A5 日记系统（上游 3840/6177 两公告点，fork 单点=两引擎共用）
+    if (settings.get("diarySettings") or {}).get("enabled", False):
+        tools.append(tk["diary_query_tool"])
+        tools.append(tk["diary_books_tool"])
     if settings['text2imgSettings']['enabled']:
         if settings['text2imgSettings']['engine'] == 'pollinations':
             tools.append(tk["pollinations_image_tool"])

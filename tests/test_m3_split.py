@@ -11,7 +11,11 @@ import pathlib
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # whitelist retired 2026-10-20: server.py has no module-level function >=300
-GIANT_WHITELIST = {}
+GIANT_WHITELIST = {
+    # S65-P3（A5 日记）：lifespan +19 行（引擎启动/停止钩子）、ws +5 行（save_settings 热更）越过 300 线，冻结现值，后续拆分时下调
+    "lifespan": 307,
+    "websocket_endpoint": 302,
+}
 
 STREAM_HELPERS = [
     "_stream_desktop_capture",

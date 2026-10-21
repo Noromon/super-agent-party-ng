@@ -1832,6 +1832,33 @@ const app = Vue.createApp({
     });
   },
 
+    // A5 日记本：按时间倒序 + 搜索过滤
+    filteredDiaryEntries() {
+      let list = Array.isArray(this.diaryEntries) ? this.diaryEntries.slice() : [];
+      list.sort((a, b) => new Date(b.time) - new Date(a.time));
+      if (this.diarySearchQuery) {
+        const q = this.diarySearchQuery.toLowerCase();
+        list = list.filter(e =>
+          (e.content && e.content.toLowerCase().includes(q)) ||
+          (e.title && e.title.toLowerCase().includes(q)) ||
+          (e.type && e.type.toLowerCase().includes(q))
+        );
+      }
+      return list;
+    },
+    // A5 日记触发间隔范围（供 el-slider range 双向绑定）
+    diaryIntervalRange: {
+      get() {
+        return [this.diarySettings.minMinutes, this.diarySettings.maxMinutes];
+      },
+      set(val) {
+        if (!Array.isArray(val)) return;
+        this.diarySettings.minMinutes = val[0];
+        this.diarySettings.maxMinutes = val[1];
+        this.autoSaveSettings();
+      }
+    },
+
     MCPvendorOptions() {
       return this.MCPvendorValues.map(value => ({
         label: this.t(`MCPvendor.${value}`), // 使用统一的翻译键

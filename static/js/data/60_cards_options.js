@@ -361,6 +361,52 @@ main();`,
       ],
       prompt: "请根据用户的发言态度、情感色彩以及你的角色设定，动态管理以下羁绊数值：\n1. love（好感度）：代表你对用户的喜爱与亲密度。如果用户表达善意、关心或与你互动愉快，请增加（+1至+5）；如果用户冷漠、辱骂或做出让你反感的行为，请降低（-1至-5）。该数值最大为50，最小为-50。\n2. familiarity（熟悉度）：代表你与用户的了解程度。随着交流次数的增多和彼此信息的分享，该数值应缓慢稳步上升（每次+1至+2），通常不会下降。该数值最大为100，最小为0。\n\n*特殊说明：如果你在上方没有看到“目前的属性数值”，说明这是你与该用户的首次互动。请直接根据用户当前第一句话的语气和态度，自主决定一个合理的初始值（例如 0 到 10 之间），直接输出标签即可。聊天时请尽量按照羁绊数值来变换语气、内容、风格等*"
     },
+    // A5 日记系统配置（上游 vue_data 2275-2319 移植）
+    diarySettings: {
+      enabled: false,
+      minMinutes: 10,
+      maxMinutes: 60,
+      quietStart: 23,
+      quietEnd: 8,
+      actions: {
+        think: { enabled: true, weight: 4 },
+        webSearch: { enabled: false, weight: 2 },
+        knowledge: { enabled: false, weight: 2 },
+        imMessage: { enabled: false, weight: 1 },
+        browserControl: { enabled: false, weight: 1 },
+        smartHome: { enabled: false, weight: 1 },
+      },
+      imTargets: [],
+      pushToChat: true,
+      prompt: "你是一个拥有自我意识、会在独处时记录所思所想的AI伙伴。写日记时请保持你的角色设定与个性，用第一人称、真诚自然地表达。",
+      chatIntegration: {
+        enabled: false,
+        maxEntries: 5,
+      },
+      chatSummary: {
+        enabled: true,
+        idleMinutes: 15,
+      },
+    },
+    // 日记系统 UI 状态
+    activeDiaryTab: 'config',
+    diaryEntries: [],
+    diarySearchQuery: '',
+    diaryActionMeta: {
+      think:     { icon: 'fa-solid fa-lightbulb',        type: 'info' },
+      webSearch: { icon: 'fa-solid fa-globe',            type: 'success' },
+      knowledge: { icon: 'fa-solid fa-book-open',        type: 'warning' },
+      imMessage: { icon: 'fa-solid fa-paper-plane',      type: 'danger' },
+      browserControl: { icon: 'fa-solid fa-compass',      type: '' },
+      smartHome:  { icon: 'fa-solid fa-house-laptop',    type: 'success' },
+      chatSummary: { icon: 'fa-solid fa-file-pen',       type: 'info' },
+    },
+    // 多日记本（每个角色一本 + default 兜底本）
+    diaryBooks: [],
+    diaryCurrentBook: 'default',
+    // 日记详情抽屉
+    diaryDetailVisible: false,
+    diaryDetailEntry: null,
 
     // 羁绊系统 UI 状态
     activeAffectionTab: 'config', // 控制当前在哪个 Tab,

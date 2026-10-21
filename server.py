@@ -52,6 +52,8 @@ def _assemble_toolkit():
         "all_cdp_tools": all_cdp_tools,
         "acp_agent_tool": acp_agent_tool,
         "mode_change_tool": mode_change_tool,
+        "diary_query_tool": diary_query_tool,
+        "diary_books_tool": diary_books_tool,
         "computer_use_tools": computer_use_tools,
         "mouse_use_tools": mouse_use_tools,
         "keyboard_use_tools": keyboard_use_tools,
@@ -451,6 +453,9 @@ from py.dify_openai import DifyOpenAIAsync
 from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
 from py.GeminiAsOpenAI import AsyncGeminiAsOpenAI
 from py.ResponsesAsOpenAI import AsyncResponsesAsOpenAI
+from py.diary_query_tool import diary_query_tool, diary_books_tool, handle_query_diary, handle_list_diary_books
+from py.diary_chat_integration import append_to_chat_buffer, update_buffer_identity, get_chat_buffer
+from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK
 
 from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
@@ -481,6 +486,7 @@ node_ext_mcp_tools: Dict[str, List[Dict]] = {}  # 存储每个扩展的工具列
 locales = {}
 sleep_guard = None
 scheduler_task = None
+diary_engine_task = None
 _TOOL_HOOKS = {}
 # 1. 先清空系统可能给错的条目
 for ext in ("js", "mjs", "css", "html", "htm", "json", "xml", "map", "svg"):
@@ -787,7 +793,7 @@ async def lifespan(app: FastAPI):
     )
     
     # 2. 解包结果
-    global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard
+    global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard, diary_engine_task
     _, _, locales, settings, local_timezone = results
     
     # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
@@ -842,6 +848,16 @@ async def lifespan(app: FastAPI):
     # 因为 python 字典是引用传递，后续 UI 修改了 settings，这里拿到的也是最新的
     scheduler = AgentScheduler(settings)
     scheduler_task = asyncio.create_task(scheduler.start_loop())
+
+    # --- [日记系统引擎初始化] ---
+    # 引擎循环常驻，未启用时空转；保存设置时通过 update_config 热更新。
+    try:
+        from py.diary_engine import global_diary_engine
+        global_diary_engine.update_config((settings or {}).get("diarySettings"))
+        diary_engine_task = asyncio.create_task(global_diary_engine.start())
+    except Exception as e:
+        logging.getLogger("app").error(f"日记引擎启动异常: {e}")
+        diary_engine_task = None
 
     # --- [日志系统初始化] ---
     from py.log_setup import setup_logger
@@ -1032,6 +1048,13 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
+    try:
+        if diary_engine_task:
+            from py.diary_engine import global_diary_engine
+            global_diary_engine.stop()
+            diary_engine_task.cancel()
+    except Exception as e:
+        logging.getLogger("app").info(f"日记引擎停止异常: {e}")
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
@@ -1072,6 +1095,8 @@ app.include_router(agents.router)
 app.include_router(workflows.router)
 app.include_router(status.router)
 app.include_router(voice_router)  # 批 1c：/ws/asr /ws/tts /ws/vrm /ws/subtitles
+from py.diary_api import router as diary_router  # A5：/api/diary/*（book CRUD + 查询）
+app.include_router(diary_router)
 
 @app.middleware("http")
 async def external_api_cors(request: Request, call_next):
@@ -1570,6 +1595,8 @@ def _build_tool_hooks():
         "local_run_code": local_run_code,
         "openai_image": openai_image,
         "openai_chat_image":openai_chat_image,
+        "query_diary": handle_query_diary,
+        "list_diary_books": handle_list_diary_books,
         "Bing_search": Bing_search,
         "Google_search": Google_search,
         "Brave_search": Brave_search,
@@ -5520,6 +5547,16 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
             await extract_and_update_affection(full_content)
         except Exception as e:
             logging.getLogger("app").info(f"解析好感度标签出错: {e}")
+    # ========== 对话缓冲：记录助手回复用于闲时自动总结 ==========
+    try:
+        diary_settings_inner = (settings.get("diarySettings", {}) or {})
+        if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True):
+            ms = (settings or {}).get("memorySettings", {}) or {}
+            buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
+            if full_content:
+                append_to_chat_buffer(buffer_key, "assistant", full_content)
+    except Exception as e:
+        logging.getLogger("app").info(f"[DiaryBuffer] 记录助手回复失败: {e}")
     if m0 and not request.is_sub_agent:
         logging.getLogger("app").info("记忆更新任务开始提交")
         messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
@@ -5958,7 +5995,41 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         user_prompt = request.messages[-1].get('content') or ""
         if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != ""  and not request.is_sub_agent:
             await _stream_character_context(request, settings, user_prompt, cur_memory, memoryId, m0)
+        # ========== 日记集成：将近期日记注入对话上下文 ==========
+        diary_cfg = (settings.get("diarySettings", {}) or {}).get("chatIntegration", {}) or {}
+        if diary_cfg.get("enabled", False) and not request.is_sub_agent:
+            try:
+                ms = (settings or {}).get("memorySettings", {}) or {}
+                diary_book_id = DIARY_DEFAULT_BOOK
+                if ms.get("is_memory") and ms.get("selectedMemory"):
+                    diary_book_id = ms.get("selectedMemory")
+                max_entries = max(1, int(diary_cfg.get("maxEntries", 5) or 5))
+                recent = await get_recent_diary_entries(diary_book_id, max_entries)
+                if recent:
+                    diary_lines = []
+                    for e in recent:
+                        diary_title = e.get("title", "") or e.get("content", "")[:24]
+                        diary_lines.append(f"- [{e.get('time', '')[:16]}] ({e.get('type', '')}) {diary_title}: {e.get('content', '')[:200]}")
+                    diary_text = "\n".join(diary_lines)
+                    content_append(request.messages, 'system',
+                        "\n\n[角色日记 - 近期回忆]\n以下是该角色最近的日记记录，可供你参考其心境和经历：\n" + diary_text + "\n")
+                    logging.getLogger("app").info(f"📔 [日记集成] 已注入 {len(recent)} 条日记到对话上下文")
+            except Exception as e:
+                logging.getLogger("app").info(f"[日记集成] 提取日记失败: {e}")
         request = await tools_change_messages(request, settings)
+        # ========== 对话缓冲：记录用户消息用于闲时自动总结 ==========
+        try:
+            diary_settings = (settings.get("diarySettings", {}) or {})
+            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True):
+                ms = (settings or {}).get("memorySettings", {}) or {}
+                buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
+                update_buffer_identity(buffer_key, book_id=buffer_key,
+                                       character_name=(ms.get("userName") or ""))
+                last_msg = request.messages[-1] if request.messages else None
+                if last_msg and last_msg.get("role") == "user":
+                    append_to_chat_buffer(buffer_key, "user", _extract_text_content(last_msg.get("content", "")))
+        except Exception as e:
+            logging.getLogger("app").info(f"[DiaryBuffer] 记录对话缓冲失败: {e}")
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
@@ -7113,6 +7184,8 @@ async def execute_tool_manually(request: Request):
         "local_run_code": local_run_code,
         "openai_image": openai_image,
         "openai_chat_image":openai_chat_image,
+        "query_diary": handle_query_diary,
+        "list_diary_books": handle_list_diary_books,
         "Bing_search": Bing_search,
         "Google_search": Google_search,
         "Brave_search": Brave_search,
@@ -7969,6 +8042,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     await save_settings(settings_dict)
                     await sync_all_bots_behavior(settings_dict)
+                    try:
+                        from py.diary_engine import global_diary_engine
+                        global_diary_engine.update_config(settings_dict.get("diarySettings"))
+                    except Exception as _de:
+                        logger.info(f"日记引擎配置同步异常: {_de}")
                 except Exception as _save_e:
                     logger.error(f"[WS] save_settings 失败: {_save_e}")
                     await ws_manager.send_json({

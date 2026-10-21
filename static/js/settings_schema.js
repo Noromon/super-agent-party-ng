@@ -50,6 +50,7 @@
     ['acpSettings', 'acpSettings'],
     ['visionControlSettings', 'visionControlSettings'],
     ['loveSettings', 'loveSettings'],
+    ['diarySettings', 'diarySettings'],
     ['ccSettings', 'ccSettings'],
     ['qcSettings', 'qcSettings'],
     ['dsSettings', 'dsSettings'],
