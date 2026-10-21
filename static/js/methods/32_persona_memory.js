@@ -183,5 +183,76 @@ Object.assign(vue_methods, {
       }
       const provider = this.modelProviders.find(p => p.id === providerId);
       return provider ? `${this.t("model")}:${provider.modelId}` : this.t("NoLongTermMemory");
+    },
+
+    // 处理回车键冲突
+    handleEnter(e) {
+      if (e.target.value) {
+        e.stopPropagation()
+      }
+    },
+
+    // 一键重置
+    resetNewMemory() {
+      this.newMemory = {
+        id: null,
+        name: '',
+        infer:false,
+        providerId: null,
+        model: '',
+        base_url: '',
+        api_key: '',
+        vendor: '',
+        description: '',
+        avatar: '',
+        personality: '',
+        mesExample: '',
+        systemPrompt: '',
+        firstMes: '',
+        alternateGreetings: [],
+        characterBook: [{ keysRaw: '', content: '' }]
+      };
+    },
+
+    copyExistingMemoryData(selectedId) {
+      const src = this.memories.find(m => m.id === selectedId);
+      if (src) {
+        /* 把旧字段映射到新字段，没有的就给默认值 */
+        this.newMemory = {
+          id: null,
+          name: src.name || '',
+          infer: src.infer || false,
+          providerId: src.providerId || null,
+          model: src.model || '',
+          base_url: src.base_url || '',
+          api_key: src.api_key || '',
+          vendor: src.vendor || '',
+
+          /* 旧→新 */
+          description: src.basic_character || src.description || '',
+          avatar: src.avatar || '',
+          personality: src.personality || '',
+          mesExample: src.mesExample || '',
+          systemPrompt: src.systemPrompt || '',
+          firstMes: src.firstMes || (Array.isArray(src.random) ? src.random[0]?.value : ''),
+          alternateGreetings:
+            Array.isArray(src.alternateGreetings)
+              ? src.alternateGreetings
+              : (src.random || []).slice(1).map(r => r.value),
+          characterBook:
+            Array.isArray(src.characterBook)
+              ? src.characterBook
+              : (src.lorebook || []).map(l => ({
+                  keysRaw: l.name,
+                  content: l.value
+                }))  
+        };
+           if (this.newMemory.characterBook.length == 0 ){
+              this.newMemory.characterBook = [{ keysRaw: '', content: '' }]
+           }   
+      } else {
+        /* 新建：直接给空模板 */
+        this.resetNewMemory();
+      }
     }
 });

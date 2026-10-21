@@ -207,5 +207,9 @@ Object.assign(vue_methods, {
           this.isBrowserOpening = false;
         }, 2000);
       }, 500);
-    }
+    },
+
+openEnvPage(menu) {
+  this.activeMenu = menu;
+}
 });

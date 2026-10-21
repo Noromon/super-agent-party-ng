@@ -70,5 +70,54 @@ Object.assign(vue_methods, {
 
     closeWindow() {
       if (isElectron) window.electronAPI.windowAction('close');
+    },
+
+    goToURL(provider) {
+        let url = '';
+        if (provider.vendor === 'custom') {
+          url = provider.url;
+          // 移除url尾部的/v1
+          if (url.endsWith('/v1')) {
+            url = url.slice(0, -3);
+          }
+        }
+        else if (provider.vendor === 'customAnthropic'){
+          url = provider.url;
+        }
+        else {
+          url = this.vendorAPIpage[provider.vendor];
+        }
+        if (isElectron) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
+    },
+
+    goToMCPURL(value) {
+        const url = this.MCPpage[value]
+        if (isElectron) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
+    },
+
+    goToPromptURL(value) {
+        const url = this.promptPage[value]
+        if (isElectron) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
+    },
+
+    goToCardURL(value) {
+        const url = this.cardPage[value]
+        if (isElectron) {
+          window.electronAPI.openExternal(url);
+        } else {
+          window.open(url, '_blank');
+        }
     }
 });

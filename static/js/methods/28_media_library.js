@@ -170,5 +170,27 @@ Object.assign(vue_methods, {
     handleSelectVendor(vendor) {
       this.newProviderTemp.vendor = vendor;
       this.handleVendorChange(vendor);
+    },
+
+    async deleteVideo(video) {
+      this.videoFiles = this.videoFiles.filter(i => i !== video);
+      await this.autoSaveSettings();
+      const fileName = video.unique_filename
+      try {
+        // 向/delete_file发送请求
+        const response = await fetch(`/delete_file`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: fileName })
+        });
+        // 处理响应
+        if (response.ok) {
+          console.log('File deleted successfully');
+          showNotification(this.t('fileDeleted'), 'success');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showNotification(this.t('fileDeleteFailed'), 'error');
+      }
     }
 });
