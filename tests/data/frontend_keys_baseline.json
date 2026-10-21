@@ -1577,9 +1577,10 @@
   "methods/30_voice_asr.js": 14,
   "methods/32_persona_memory.js": 1,
   "methods/40_voice_tts.js": 12,
-  "methods/42_vrm_domain.js": 1,
+  "methods/42_vrm_domain.js": 3,
   "methods/50_bots_lifecycle.js": 4,
   "methods/58_shortcuts_input.js": 1,
+  "methods/60_system_settings.js": 8,
   "methods/64_conversation_groups.js": 1,
   "methods/66_render_preview.js": 7,
   "methods/72_live_danmu.js": 11,
@@ -1587,7 +1588,7 @@
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 66
+  "vue_methods.js": 56
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

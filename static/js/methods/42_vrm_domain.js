@@ -283,5 +283,180 @@ Object.assign(vue_methods, {
         totalBuffer.set(metadataBytes, 4);
         totalBuffer.set(new Uint8Array(audioArrayBuffer), 4 + metadataBytes.byteLength);
         this.ttsWebSocket.send(totalBuffer);
+    },
+
+    // 加载默认动作列表
+  async loadDefaultMotions() {
+    try {
+      const response = await fetch(`/get_default_vrma_motions`);
+      const result = await response.json();
+      
+      if (result.success) {
+        this.VRMConfig.defaultMotions = result.motions;
+        console.log('默认动作列表:', this.VRMConfig.defaultMotions);
+        await this.autoSaveSettings();
+      }
+    } catch (error) {
+      console.error('加载默认动作失败:', error);
     }
+  },
+
+  // 处理动作选择改变
+  handleMotionChange(value) {
+    console.log('选中的动作:', value);
+    // 自动保存设置
+    this.autoSaveSettings();
+  },
+
+  // 浏览VRMA动作文件
+  browseVrmaMotionFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.vrma';
+    input.multiple = true; // 允许多选
+    input.onchange = (event) => {
+      const files = event.target.files;
+      if (files.length > 0) {
+        // 如果选择了多个文件，只处理第一个（或者你可以修改为支持批量上传）
+        const file = files[0];
+        // 检查文件扩展名
+        if (!file.name.toLowerCase().endsWith('.vrma')) {
+          showNotification('只支持.vrma格式的文件', 'error');
+          return;
+        }
+        this.newVrmaMotion.name = file.name;
+        this.newVrmaMotion.file = file;
+        // 自动设置显示名称（去掉扩展名）
+        this.newVrmaMotion.displayName = file.name.replace(/\.vrma$/i, '');
+      }
+    };
+    input.click();
+  },
+
+  // 处理VRMA动作拖拽
+  handleVrmaMotionDrop(event) {
+    event.preventDefault();
+    const files = event.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      // 检查文件扩展名
+      if (!file.name.toLowerCase().endsWith('.vrma')) {
+        showNotification('只支持.vrma格式的文件', 'error');
+        return;
+      }
+      this.newVrmaMotion.name = file.name;
+      this.newVrmaMotion.file = file;
+      // 自动设置显示名称（去掉扩展名）
+      this.newVrmaMotion.displayName = file.name.replace(/\.vrma$/i, '');
+    }
+  },
+
+  // 移除已选择的VRMA动作
+  removeNewVrmaMotion() {
+    this.newVrmaMotion.name = '';
+    this.newVrmaMotion.displayName = '';
+    this.newVrmaMotion.file = null;
+  },
+
+  // 取消VRMA动作上传
+  cancelVrmaMotionUpload() {
+    this.showVrmaMotionDialog = false;
+    this.newVrmaMotion.name = '';
+    this.newVrmaMotion.displayName = '';
+    this.newVrmaMotion.file = null;
+  },
+
+  // 上传VRMA动作
+  async uploadVrmaMotion() {
+    if (!this.newVrmaMotion.file) {
+      showNotification('请先选择VRMA动作文件', 'error');
+      return;
+    }
+    
+    if (!this.newVrmaMotion.displayName.trim()) {
+      showNotification('请输入动作显示名称', 'error');
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', this.newVrmaMotion.file);
+    formData.append('display_name', this.newVrmaMotion.displayName.trim());
+    
+    try {
+      const response = await fetch(`/upload_vrma_motion`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // 添加新动作到用户动作列表
+        const newMotionOption = {
+          id: result.file.unique_filename,
+          name: result.file.display_name,
+          path: result.file.path,
+          type: 'user' // 标记为用户上传的动作
+        };
+        
+        this.VRMConfig.userMotions.push(newMotionOption);
+        
+        // 自动选中新上传的动作
+        if (!this.VRMConfig.selectedMotionIds.includes(newMotionOption.id)) {
+          this.VRMConfig.selectedMotionIds.push(newMotionOption.id);
+        }
+        
+        // 关闭对话框并重置状态
+        this.cancelVrmaMotionUpload();
+        
+        // 自动保存设置
+        await this.autoSaveSettings();
+        
+        showNotification('VRMA动作上传成功');
+      } else {
+        showNotification(`上传失败: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('上传VRMA动作失败:', error);
+      showNotification('上传失败，请检查网络连接', 'error');
+    }
+  },
+
+  // 删除动作选项（只能删除用户上传的动作）
+  async deleteMotionOption(motionId) {
+    try {
+      // 查找要删除的动作选项（只在用户动作中查找）
+      const motionIndex = this.VRMConfig.userMotions.findIndex(
+        motion => motion.id === motionId
+      );
+      
+      // 调用后端API删除文件
+      const response = await fetch(`/delete_vrma_motion/${motionId}`, {
+        method: 'DELETE'
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // 从用户动作列表中移除
+        this.VRMConfig.userMotions.splice(motionIndex, 1);
+        
+        // 如果当前选中的动作中包含被删除的动作，则从选中列表中移除
+        const selectedIndex = this.VRMConfig.selectedMotionIds.indexOf(motionId);
+        if (selectedIndex > -1) {
+          this.VRMConfig.selectedMotionIds.splice(selectedIndex, 1);
+        }
+        
+        // 自动保存设置
+        await this.autoSaveSettings();
+        
+        showNotification(this.t("VRMAactionDeleted"));
+      } else {
+        showNotification(`error: ${result.message}`, 'error');
+      }
+    } catch (error) {
+      console.error('删除VRMA动作失败:', error);
+      showNotification(error, 'error');
+    }
+  }
 });

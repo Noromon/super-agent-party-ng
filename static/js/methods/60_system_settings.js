@@ -211,5 +211,327 @@ Object.assign(vue_methods, {
 
 openEnvPage(menu) {
   this.activeMenu = menu;
-}
+},
+
+      toggleInputExpand() {
+        this.isInputExpanded = !this.isInputExpanded
+    },
+
+    checkMobile() {
+      this.isMobile = window.innerWidth <= 768;
+      this.isAssistantMode = window.innerWidth <= 350 && window.innerHeight <= 820;
+      this.isCapsuleMode = window.innerWidth <= 220 && window.innerHeight <= 100;
+      if (this.isMobile) {
+        this.MoreButtonDict = this.smallMoreButtonDict;
+      }
+      else{
+        this.MoreButtonDict = this.largeMoreButtonDict;
+      }
+      if (this.isAssistantMode){
+        if(!this.isFixedWindow){
+          this.isFixedWindow = true;
+          if (isElectron){
+            window.electronAPI.setAlwaysOnTop(this.isFixedWindow);
+          }
+        }
+        
+      }else{
+        if(this.isFixedWindow){
+          this.isFixedWindow = false;
+          if (isElectron){
+            window.electronAPI.setAlwaysOnTop(this.isFixedWindow);
+          }
+        }
+      }
+      if(this.isMobile) this.sidebarVisible = false;
+    },
+
+  toggleBriefly(index){
+    if (this.messages[index].briefly){
+      this.messages[index].briefly = !this.messages[index].briefly;
+    }else{
+      this.messages[index].briefly = true;
+    }
+  },
+
+  async rewrite(index){
+    if (index != 1){
+      // 删除this.messages中从index起之后的所有元素，包括index
+      this.messages.splice(index);
+      this.userInput = this.messages[index-1].pure_content??this.messages[index-1].content;
+      // 删除this.messages中最后一个元素
+      this.messages.pop();
+    }else{
+      // 替换开场白
+      this.randomGreetings();
+    }
+
+    await this.sendMessage();
+  },
+
+  async updateProxy(){
+    await this.autoSaveSettings();
+    const response = await fetch('/api/update_proxy',{
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      console.log(data);
+    }else {
+      console.error('更新代理失败');
+    }
+  },
+
+  async openUserfile(){
+    const response = await fetch('/api/get_userfile',{
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      // 拿到userfile
+      const data = await response.json();
+      let userfile = data.userfile;    // 打开文件夹
+      if (this.isElectron){
+        window.electronAPI.openPath(userfile);
+      }
+    }
+  },
+
+  async openLogfile(){
+    const response = await fetch('/api/get_userfile',{
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      // 拿到userfile
+      const data = await response.json();
+      let userfile = data.userfile;    // 打开文件夹
+      if (this.isElectron){
+        window.electronAPI.openPath(userfile+'/logs');
+      }
+    }
+  },
+
+  async openExtfile(){
+    const response = await fetch('/api/get_extfile',{
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    if (response.ok) {
+      // 拿到Extfile
+      const data = await response.json();
+      let extfile = data.extfile;    // 打开文件夹
+      if (this.isElectron){
+        window.electronAPI.openPath(extfile);
+      }
+    }
+  },
+
+  async changeHAEnabled(){
+    if (this.HASettings.enabled){
+      const response = await fetch('/start_HA',{
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: this.HASettings
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(data);
+        showNotification(this.t('success_start_HA'));
+      }else {
+        this.HASettings.enabled = false;
+        console.error('启动HA失败');
+        showNotification(this.t('error_start_HA'), 'error');
+      }
+    }else{
+      const response = await fetch('/stop_HA',{
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(data);
+        showNotification(this.t('success_stop_HA'));
+      }else {
+        this.HASettings.enabled = true;
+        console.error('停止HA失败');
+        showNotification(this.t('error_stop_HA'), 'error');
+      }
+    }
+    this.autoSaveSettings();
+  },
+
+  async changeChromeMCPEnabled(){
+
+    if (this.chromeMCPSettings.enabled && this.chromeMCPSettings.type === 'internal' && this.isElectron) {
+        if (!window.electronAPI) return;
+        await this.autoSaveSettings();
+        // 获取主进程实际状态
+        const cdpInfo = await window.electronAPI.getInternalCDPInfo();
+
+        if (!cdpInfo.active) {
+            // 严重情况：前端想开，但主进程没开端口（说明没重启）
+            // this.chromeMCPSettings.enabled = false; // 回滚开关
+            this.showCDPRestartDialog = true;
+            
+            return; // 终止后续流程
+        }
+
+        // 主进程已开启端口 -> 关键步骤：同步随机端口！
+        // 这样发给后端的 JSON 里 CDPport 才是主进程真正监听的端口 (例如 9527)
+        this.chromeMCPSettings.CDPport = cdpInfo.port;
+        console.log(`[CDP] 准备启动 MCP，使用实际端口: ${cdpInfo.port}`);
+        
+        // 保存最新的端口到配置文件 (可选，为了稳妥)
+        await this.autoSaveSettings();
+        showNotification(this.t('success_start_browserControl'));
+    }
+    if (this.chromeMCPSettings.enabled && this.chromeMCPSettings.type === 'external'){
+      const response = await fetch('/start_ChromeMCP',{
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: this.chromeMCPSettings
+        })
+      });
+      if (response.ok){
+        const data = await response.json();
+        console.log(data);
+        showNotification(this.t('success_start_browserControl'));
+      }else {
+        this.chromeMCPSettings.enabled = false;
+        console.error('启动ChromeMCP失败');
+        showNotification(this.t('error_start_browserControl'), 'error');
+      }
+    }else{
+      const response = await fetch('/stop_ChromeMCP',{
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+      });
+      if (response.ok){
+        const data = await response.json();
+        console.log(data);
+        if (this.chromeMCPSettings.type === 'external'||!this.chromeMCPSettings.enabled){
+          showNotification(this.t('success_stop_browserControl'));
+        }
+      }else {
+        this.chromeMCPSettings.enabled = true;
+        console.error('停止ChromeMCP失败');
+        if (this.chromeMCPSettings.type === 'external'||!this.chromeMCPSettings.enabled){
+          showNotification(this.t('error_stop_browserControl'), 'error');
+        }
+      }
+    }
+    this.autoSaveSettings();
+  },
+
+  async changeSqlEnabled() {
+    if (this.sqlSettings.enabled) {
+      
+      // ==========================================
+      // 1. 启动前置校验 (新增逻辑)
+      // ==========================================
+      const settings = this.sqlSettings;
+      let errorMsg = '';
+
+      if (settings.engine === 'sqlite') {
+        // SQLite 只需要校验 dbpath
+        if (!settings.dbpath?.trim()) {
+          errorMsg = this.t('pleaseConfigSqliteDbpath');
+        }
+      } else {
+        // 其他数据库校验 host, port, user, password, dbname
+        if (!settings.host?.trim()) {
+          errorMsg = this.t('pleaseConfigSqlHost');
+        } else if (settings.port === undefined || settings.port === null || settings.port === '') {
+          errorMsg = this.t('pleaseConfigSqlPort');
+        } else if (!settings.user?.trim()) {
+          errorMsg = this.t('pleaseConfigSqlUser');
+        } else if (!settings.password?.trim()) {
+          errorMsg = this.t('pleaseConfigSqlPassword');
+        } else if (!settings.dbname?.trim()) {
+          errorMsg = this.t('pleaseConfigSqlDbname');
+        }
+      }
+
+      // 校验失败：弹窗报错，重置开关并阻断执行
+      if (errorMsg) {
+        const errorTitle = this.t ? this.t('configIncomplete') : 'Configuration Incomplete';
+        showNotification(errorMsg, 'error', errorTitle);
+
+        this.$nextTick(() => {
+          this.sqlSettings.enabled = false;
+        });
+        
+        return; // ⚠️ 必须 return，防止继续执行下方的 fetch 请求
+      }
+
+      // ==========================================
+      // 2. 原有的启动逻辑 (校验通过后执行)
+      // ==========================================
+      const response = await fetch('/start_sql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: this.sqlSettings
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(data);
+        showNotification(this.t('success_start_sqlControl'));
+      } else {
+        this.sqlSettings.enabled = false;
+        console.error('启动sql失败');
+        showNotification(this.t('error_start_sqlControl'), 'error');
+      }
+
+    } else {
+      
+      // ==========================================
+      // 3. 原有的停止逻辑 (用户关闭开关时执行)
+      // ==========================================
+      const response = await fetch('/stop_sql', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        console.log(data);
+        showNotification(this.t('success_stop_sqlControl'));
+      } else {
+        this.sqlSettings.enabled = true;
+        console.error('停止sql失败');
+        showNotification(this.t('error_stop_sqlControl'), 'error');
+      }
+    }
+    
+    // ==========================================
+    // 4. 操作成功后保存配置
+    // ==========================================
+    this.autoSaveSettings();
+  }
 });
