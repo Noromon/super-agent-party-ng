@@ -7,7 +7,7 @@ launched directly, so we bind the OBJECT once and attributes resolve
 at request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
-import sys as _sys
+import logging
 import json
 import os
 import uuid
@@ -20,7 +20,7 @@ from fastapi import APIRouter
 
 # bind the server module OBJECT once (see docstring); attributes
 # resolve per request so lifespan rebinds stay visible
-_srv = _sys.modules.get('server') or _sys.modules['__main__']
+logger = logging.getLogger("app")
 
 router = APIRouter()
 
@@ -106,7 +106,7 @@ async def create_sticker_pack(
     except HTTPException as he:
         raise he
     except Exception as e:
-        _srv.logger.error(f"创建表情包时出错: {str(e)}", exc_info=True)
+        logger.error(f"创建表情包时出错: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"服务器错误: {str(e)}")
 
 

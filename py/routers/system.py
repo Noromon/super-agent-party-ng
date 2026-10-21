@@ -10,6 +10,8 @@ module, never the other way around.
 
 import logging
 import sys as _sys
+
+from py import app_state
 import asyncio
 import os
 import shutil
@@ -36,7 +38,7 @@ async def start_HA(request: Request):
         "headers": {"Authorization": f"Bearer {API_TOKEN}"}
     }
 
-    if _srv.HA_client is not None:
+    if app_state.HA_client is not None:
         # 已初始化过
         return JSONResponse({"status": "ready", "enabled": True})
 
@@ -50,8 +52,8 @@ async def start_HA(request: Request):
         conn_failed_event.set()
 
     try:
-        _srv.HA_client = McpClient()
-        await _srv.HA_client.initialize("HA", ha_config, on_failure_callback=on_failure)
+        app_state.HA_client = McpClient()
+        await app_state.HA_client.initialize("HA", ha_config, on_failure_callback=on_failure)
 
         # 等一小段时间验证连接确实活了
         try:
@@ -66,23 +68,23 @@ async def start_HA(request: Request):
         return JSONResponse({"status": "ready", "enabled": True})
 
     except Exception as e:
-        _srv.HA_client = None
+        app_state.HA_client = None
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/stop_HA")
 async def stop_HA():
     try:
-        if _srv.HA_client is not None:
-            await _srv.HA_client.close()
-            _srv.HA_client = None
+        if app_state.HA_client is not None:
+            await app_state.HA_client.close()
+            app_state.HA_client = None
             logging.getLogger("app").info(f"HA client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
         })
     except Exception as e:
-        _srv.HA_client = None
+        app_state.HA_client = None
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
@@ -158,7 +160,7 @@ async def start_ChromeMCP(request: Request):
     }
 
     # ... (后续连接逻辑保持不变) ...
-    if _srv.ChromeMCP_client is not None:
+    if app_state.ChromeMCP_client is not None:
         return JSONResponse({"status": "ready", "enabled": True})
 
     conn_failed_event = asyncio.Event()
@@ -170,8 +172,8 @@ async def start_ChromeMCP(request: Request):
         conn_failed_event.set()
 
     try:
-        _srv.ChromeMCP_client = McpClient()
-        await _srv.ChromeMCP_client.initialize(
+        app_state.ChromeMCP_client = McpClient()
+        await app_state.ChromeMCP_client.initialize(
             "ChromeMCP", 
             Chrome_config, 
             on_failure_callback=on_failure
@@ -187,7 +189,7 @@ async def start_ChromeMCP(request: Request):
         return JSONResponse({"status": "ready", "enabled": True})
 
     except Exception as e:
-        _srv.ChromeMCP_client = None
+        app_state.ChromeMCP_client = None
         logging.getLogger("app").info(f"Start ChromeMCP Error: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -195,16 +197,16 @@ async def start_ChromeMCP(request: Request):
 @router.get("/stop_ChromeMCP")
 async def stop_ChromeMCP():
     try:
-        if _srv.ChromeMCP_client is not None:
-            await _srv.ChromeMCP_client.close()
-            _srv.ChromeMCP_client = None
+        if app_state.ChromeMCP_client is not None:
+            await app_state.ChromeMCP_client.close()
+            app_state.ChromeMCP_client = None
             logging.getLogger("app").info(f"ChromeMCP client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
         })
     except Exception as e:
-        _srv.ChromeMCP_client = None
+        app_state.ChromeMCP_client = None
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
@@ -253,7 +255,7 @@ async def start_sql(request: Request):
         }
     }
 
-    if _srv.sql_client is not None:
+    if app_state.sql_client is not None:
         # 已初始化过
         return JSONResponse({"status": "ready", "enabled": True})
 
@@ -267,8 +269,8 @@ async def start_sql(request: Request):
         conn_failed_event.set()
 
     try:
-        _srv.sql_client = McpClient()
-        await _srv.sql_client.initialize("sqlMCP", sql_config, on_failure_callback=on_failure)
+        app_state.sql_client = McpClient()
+        await app_state.sql_client.initialize("sqlMCP", sql_config, on_failure_callback=on_failure)
 
         # 等一小段时间验证连接确实活了
         try:
@@ -282,23 +284,23 @@ async def start_sql(request: Request):
 
         return JSONResponse({"status": "ready", "enabled": True})
     except Exception as e:
-        _srv.sql_client = None
+        app_state.sql_client = None
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @router.get("/stop_sql")
 async def stop_sql():
     try:
-        if _srv.sql_client is not None:
-            await _srv.sql_client.close()
-            _srv.sql_client = None
+        if app_state.sql_client is not None:
+            await app_state.sql_client.close()
+            app_state.sql_client = None
             logging.getLogger("app").info(f"sqlMCP client stopped")
         return JSONResponse({
             "status": "stopped",
             "enabled": False
         })
     except Exception as e:
-        _srv.sql_client = None
+        app_state.sql_client = None
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}

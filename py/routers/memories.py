@@ -10,6 +10,8 @@ module, never the other way around.
 
 import logging
 import sys as _sys
+
+from py import app_state
 import asyncio
 import json
 import os
@@ -47,6 +49,8 @@ class TextUpdate(BaseModel):
 # bind the server module OBJECT once (see docstring); attributes
 # resolve per request so lifespan rebinds stay visible
 _srv = _sys.modules.get('server') or _sys.modules['__main__']
+
+logger = logging.getLogger("app")
 
 router = APIRouter()
 
@@ -107,11 +111,11 @@ async def create_mcp_endpoint(request: Request, background_tasks: BackgroundTask
 
 @router.get("/mcp_status/{mcp_id}")
 async def get_mcp_status(mcp_id: str):
-    status = _srv.mcp_status.get(mcp_id, "not_found")
+    status = app_state.mcp_status.get(mcp_id, "not_found")
     if status == "ready":
         # 保证 _tools 里都是可序列化的 dict / list / 基本类型
-        tools = await _srv.mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
-        tools = json.dumps(_srv.mcp_client_list[mcp_id]._tools_list)
+        tools = await app_state.mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
+        tools = json.dumps(app_state.mcp_client_list[mcp_id]._tools_list)
         return {"mcp_id": mcp_id, "status": status, "tools": tools}
     return {"mcp_id": mcp_id, "status": status, "tools": []}
 
@@ -133,10 +137,10 @@ async def remove_mcp_server(request: Request):
             _srv.settings = current_settings
 
             # 从mcp_client_list中移除
-            if server_name in _srv.mcp_client_list:
-                _srv.mcp_client_list[server_name].disabled = True
-                await _srv.mcp_client_list[server_name].close()
-                del _srv.mcp_client_list[server_name]
+            if server_name in app_state.mcp_client_list:
+                app_state.mcp_client_list[server_name].disabled = True
+                await app_state.mcp_client_list[server_name].close()
+                del app_state.mcp_client_list[server_name]
                 logging.getLogger("app").info(f"关闭MCP服务器: {server_name}")
 
             return JSONResponse({"success": True, "removed": server_name})
@@ -145,7 +149,7 @@ async def remove_mcp_server(request: Request):
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     except Exception as e:
-        _srv.logger.error(f"移除MCP服务器失败: {str(e)}")
+        logger.error(f"移除MCP服务器失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -195,7 +199,7 @@ async def remove_kb_endpoint(request: Request, background_tasks: BackgroundTasks
 
 @router.get("/kb_status/{kb_id}")
 async def get_kb_status(kb_id):
-    status = _srv.kb_status.get(kb_id, "not_found")
+    status = app_state.kb_status.get(kb_id, "not_found")
     logging.getLogger("app").info (f"kb_status: {kb_id} - {status}")
     return {"kb_id": kb_id, "status": status}
 
@@ -225,7 +229,7 @@ async def add_memory_text(memory_id: str, body: MemoryAddBody = Body(...)) -> di
             infer=False)
         return {"message": "added"}
     except Exception as e:
-        _srv.logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
+        logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
         raise HTTPException(status_code=500, detail=f"add failed: {e}")
 
 

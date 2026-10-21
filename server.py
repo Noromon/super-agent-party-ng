@@ -37,11 +37,11 @@ def _assemble_toolkit():
     from py.mode_change import mode_change_tool
     from py.acpx_tools import acp_agent_tool
     return {
-        "mcp_client_list": mcp_client_list,
+        "mcp_client_list": app_state.mcp_client_list,
         "node_ext_mcp_tools": node_ext_mcp_tools,
-        "HA_client": HA_client,
-        "ChromeMCP_client": ChromeMCP_client,
-        "sql_client": sql_client,
+        "HA_client": app_state.HA_client,
+        "ChromeMCP_client": app_state.ChromeMCP_client,
+        "sql_client": app_state.sql_client,
         "get_llm_tool": get_llm_tool,
         "get_agent_tool": get_agent_tool,
         "get_a2a_tool": get_a2a_tool,
@@ -459,19 +459,11 @@ settings = None
 client = None
 fast_client = None 
 reasoner_client = None
-HA_client = None
-ChromeMCP_client = None
-sql_client = None
-mcp_client_list = {}
 node_ext_mcp_clients: Dict[str, McpClient] = {}
 node_ext_mcp_tools: Dict[str, List[Dict]] = {}  # 存储每个扩展的工具列表
 locales = {}
 sleep_guard = None
 scheduler_task = None
-global_http_client = None  # 用于共享底层的 TCP 连接池
-openai_tts_clients_cache = {}  # 缓存 OpenAI TTS Client
-tetos_speakers_cache = {}      # 缓存 Tetos Speaker 对象
-openai_asr_clients_cache = {}
 _TOOL_HOOKS = {}
 ALLOWED_EXTENSIONS = [
   # 办公文档
@@ -762,7 +754,7 @@ async def lifespan(app: FastAPI):
     )
     
     # 2. 解包结果
-    global settings, client, reasoner_client, fast_client, mcp_client_list, local_timezone, logger, locales, global_http_client,scheduler_task,sleep_guard
+    global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard
     _, _, locales, settings, local_timezone = results
     
     # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
@@ -854,16 +846,16 @@ async def lifespan(app: FastAPI):
 
     # 初始化全局带连接池的 HTTP 客户端
     timeout_config = httpx.Timeout(None, connect=10.0)
-    global_http_client = httpx.AsyncClient(
+    app_state.global_http_client = httpx.AsyncClient(
         timeout=timeout_config,
         proxy=proxy_url,
         trust_env=trust_env
     )
 
     # --- [模型 Client 初始化] ---
-    # 辅助函数：统一注入 global_http_client
+    # 辅助函数：统一注入 app_state.global_http_client
     def create_model_client(provider_key, config_node=None):
-        if not settings: return AsyncOpenAI(http_client=global_http_client)
+        if not settings: return AsyncOpenAI(http_client=app_state.global_http_client)
         
         target_cfg = config_node if config_node else settings
         p_name = target_cfg.get('selectedProvider', settings.get('selectedProvider'))
@@ -872,7 +864,7 @@ async def lifespan(app: FastAPI):
         return c_cls(
             api_key=target_cfg.get('api_key') or settings.get('api_key', ''),
             base_url=target_cfg.get('base_url') or settings.get('base_url') or "https://api.openai.com/v1",
-            http_client=global_http_client  # 强制使用我们定义的带代理控制的客户端
+            http_client=app_state.global_http_client  # 强制使用我们定义的带代理控制的客户端
         )
 
     if settings:
@@ -885,9 +877,9 @@ async def lifespan(app: FastAPI):
         else:
             fast_client = None
     else:
-        client = AsyncOpenAI(http_client=global_http_client)
-        reasoner_client = AsyncOpenAI(http_client=global_http_client)
-        fast_client = AsyncOpenAI(http_client=global_http_client)
+        client = AsyncOpenAI(http_client=app_state.global_http_client)
+        reasoner_client = AsyncOpenAI(http_client=app_state.global_http_client)
+        fast_client = AsyncOpenAI(http_client=app_state.global_http_client)
 
     # --- [其他初始化：ASR / MCP] ---
     try:
@@ -903,15 +895,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"尝试预热 MOSS TTS 失败: {e}")
 
-    # MCP 初始化逻辑 (保持你原有的逻辑，但内部会复用 global_http_client)
+    # MCP 初始化逻辑 (保持你原有的逻辑，但内部会复用 app_state.global_http_client)
     mcp_init_tasks = []
 
     async def init_mcp_with_timeout(server_name: str, server_config: dict, timeout=6.0, max_wait_failure=5.0):
         if server_config.get("disabled"):
             return server_name, None, "disabled"
         
-        mcp_client = mcp_client_list.get(server_name) or McpClient()
-        mcp_client_list[server_name] = mcp_client
+        mcp_client = app_state.mcp_client_list.get(server_name) or McpClient()
+        app_state.mcp_client_list[server_name] = mcp_client
         failure_event = asyncio.Event()
         first_error = None
 
@@ -944,7 +936,7 @@ async def lifespan(app: FastAPI):
             if err:
                 settings['mcpServers'][name]['processingStatus'] = 'server_error'
             elif m_client:
-                mcp_client_list[name] = m_client
+                app_state.mcp_client_list[name] = m_client
         await save_settings(settings)
         await ws_manager.broadcast_settings_update(settings)
 
@@ -1012,8 +1004,8 @@ async def lifespan(app: FastAPI):
         try: await node_mgr.stop(ext_id)
         except: pass
         
-    if global_http_client:
-        await global_http_client.aclose()
+    if app_state.global_http_client:
+        await app_state.global_http_client.aclose()
     logging.getLogger("app").info("All processes terminated.")
 
 
@@ -1023,6 +1015,7 @@ app = FastAPI(lifespan=lifespan)
 # 内部 API 一律同源 + session token；OPTIONS 预检只对这两个前缀应答。
 _EXTERNAL_PREFIXES = ("/v1", "/mcp")
 
+from py import app_state
 from py.stream_relay import (
     _active_streams, _active_streams_lock, _current_stream_entry, _stream_cancelled,
     _stream_producer_wrapper, _stream_consumer_generator, _release_consumer,
@@ -1767,9 +1760,9 @@ async def _dispatch_external_tool(tool_name, tool_params, settings):
         return tool_name, str(result)
         
     if settings["HASettings"]["enabled"]:
-        ha_tool_list = HA_client._tools
+        ha_tool_list = app_state.HA_client._tools
         if tool_name in ha_tool_list:
-            result = await HA_client.call_tool(tool_name, tool_params)
+            result = await app_state.HA_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
                 return tool_name, result
             elif hasattr(result, 'model_dump'):
@@ -1778,9 +1771,9 @@ async def _dispatch_external_tool(tool_name, tool_params, settings):
                 return tool_name, str(result)
                 
     if settings['chromeMCPSettings']['enabled'] and settings['chromeMCPSettings']['type']=='external':
-        Chrome_tool_list = ChromeMCP_client._tools
+        Chrome_tool_list = app_state.ChromeMCP_client._tools
         if tool_name in Chrome_tool_list:
-            result = await ChromeMCP_client.call_tool(tool_name, tool_params)
+            result = await app_state.ChromeMCP_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
                 return tool_name, result
             elif hasattr(result, 'model_dump'):
@@ -1789,9 +1782,9 @@ async def _dispatch_external_tool(tool_name, tool_params, settings):
                 return tool_name, str(result)
                 
     if settings["sqlSettings"]["enabled"]:
-        sql_tool_list = sql_client._tools
+        sql_tool_list = app_state.sql_client._tools
         if tool_name in sql_tool_list:
-            result = await sql_client.call_tool(tool_name, tool_params)
+            result = await app_state.sql_client.call_tool(tool_name, tool_params)
             if isinstance(result,str):
                 return tool_name, result
             elif hasattr(result, 'model_dump'):
@@ -1858,7 +1851,7 @@ async def _dispatch_task_center_tool(tool_name, tool_params, settings):
 
 async def _dispatch_unknown_tool(tool_name, tool_params):
     """MCP clients, node-extension tools, then the C-19 correction hint."""
-    for server_name, mcp_client in mcp_client_list.items():
+    for server_name, mcp_client in app_state.mcp_client_list.items():
         if hasattr(mcp_client, '_conn') and mcp_client._conn and tool_name in mcp_client._conn.tools:
             result = await mcp_client.call_tool(tool_name, tool_params)
             if isinstance(result, str):
@@ -1878,7 +1871,7 @@ async def _dispatch_unknown_tool(tool_name, tool_params):
     # C-19: 未知工具不再静默返回 None——给 LLM 可自我纠错的显式指引（含近似名建议）
     import difflib as _difflib
     _avail = set(_TOOL_HOOKS)
-    for _mc in mcp_client_list.values():
+    for _mc in app_state.mcp_client_list.values():
         if hasattr(_mc, '_conn') and _mc._conn:
             _tl = getattr(_mc._conn, 'tools', None) or {}
             _avail.update(_tl.keys() if isinstance(_tl, dict) else _tl)
@@ -1892,7 +1885,7 @@ async def _dispatch_unknown_tool(tool_name, tool_params):
             f"请从工具列表中选择一个真实存在的工具名重试（不要新造或拼接工具名）。")
 
 async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
-    global mcp_client_list,_TOOL_HOOKS,HA_client,ChromeMCP_client,sql_client, node_ext_mcp_clients, node_ext_mcp_tools
+    global _TOOL_HOOKS, node_ext_mcp_clients, node_ext_mcp_tools
     print("dispatch_tool",tool_name,tool_params)
     
     # ==================== 1. 工具映射表（首次使用时构建一次，M-3 拆分） ====================
@@ -5995,7 +5988,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
     try:
-        global mcp_client_list, HA_client, ChromeMCP_client, sql_client
+        # (global decl cleared: migrated to py/app_state.py)
         
         # 设置对话上下文，供 review_image 等工具使用
         current_request_messages.set(request.messages)
@@ -6815,7 +6808,7 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
         logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
     return response_dict
 async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
-    global mcp_client_list,HA_client,ChromeMCP_client,sql_client
+    # (global decl cleared: migrated to py/app_state.py)
     
     # 设置对话上下文，供 review_image 等工具使用
     current_request_messages.set(request.messages)
@@ -7389,7 +7382,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     """
     fastapi_base_url = str(fastapi_request.base_url)
     # 【注意】引入全局 fast_client
-    global client, reasoner_client, fast_client, settings, mcp_client_list
+    global client, reasoner_client, fast_client, settings
     
     raw_model = request.model or 'super-model'
     override_memory_id = None
@@ -8642,14 +8635,11 @@ async def subtitles_websocket_endpoint(websocket: WebSocket):
 
 
 # 添加状态存储
-mcp_status = {}
-
-
 async def process_mcp(mcp_id: str):
     """
     初始化单个 MCP 服务器，带失败回调同步，无需 sleep。
     """
-    global mcp_client_list, mcp_status
+    # (global decl cleared: migrated to py/app_state.py)
 
     # 1. 同步原语：事件 + 失败原因
     init_done = asyncio.Event()
@@ -8661,25 +8651,25 @@ async def process_mcp(mcp_id: str):
         if fail_reason is not None:
             return
         fail_reason = error_message
-        mcp_status[mcp_id] = f"failed: {error_message}"
+        app_state.mcp_status[mcp_id] = f"failed: {error_message}"
 
         # 容错：只有客户端已创建才标记 disabled
-        if mcp_id in mcp_client_list:
-            mcp_client_list[mcp_id].disabled = True
-            await mcp_client_list[mcp_id].close()
+        if mcp_id in app_state.mcp_client_list:
+            app_state.mcp_client_list[mcp_id].disabled = True
+            await app_state.mcp_client_list[mcp_id].close()
             logging.getLogger("app").info(f"关闭MCP服务器: {mcp_id}")
 
         init_done.set()          # 唤醒主协程
 
     # 2. 开始初始化
-    mcp_status[mcp_id] = "initializing"
+    app_state.mcp_status[mcp_id] = "initializing"
     try:
         cur_settings = await load_settings()
         server_config = cur_settings["mcpServers"][mcp_id]
 
-        mcp_client_list[mcp_id] = McpClient()
+        app_state.mcp_client_list[mcp_id] = McpClient()
         init_task = asyncio.create_task(
-            mcp_client_list[mcp_id].initialize(
+            app_state.mcp_client_list[mcp_id].initialize(
                 mcp_id,
                 server_config,
                 on_failure_callback=on_failure
@@ -8698,26 +8688,26 @@ async def process_mcp(mcp_id: str):
         # 3. 最终状态判定
         if fail_reason:
             # 回调里已经关过 client，这里只需保证状态一致
-            mcp_client_list[mcp_id].disabled = True
+            app_state.mcp_client_list[mcp_id].disabled = True
             return
         tool = []
         retry = 0 
         while tool == [] and retry < 10:
             try:
-                tool = await mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
+                tool = await app_state.mcp_client_list[mcp_id].get_openai_functions(disable_tools=[])
             except Exception as e:
                 logging.getLogger("app").info(f"获取工具失败: {str(e)}")
             finally:
                 retry += 1
                 await asyncio.sleep(0.5)
-        mcp_status[mcp_id] = "ready"
-        mcp_client_list[mcp_id].disabled = False
+        app_state.mcp_status[mcp_id] = "ready"
+        app_state.mcp_client_list[mcp_id].disabled = False
 
     except Exception as e:
         # 任何异常（超时、崩溃）都走这里
-        mcp_status[mcp_id] = f"failed: {str(e)}"
-        mcp_client_list[mcp_id].disabled = True
-        await mcp_client_list[mcp_id].close()
+        app_state.mcp_status[mcp_id] = f"failed: {str(e)}"
+        app_state.mcp_client_list[mcp_id].disabled = True
+        await app_state.mcp_client_list[mcp_id].close()
 
     finally:
         # 如果任务还活着，保险起见取消掉
@@ -8831,17 +8821,15 @@ async def remove_kb(kb_id):
     return
 
 # 添加状态存储
-kb_status = {}
-
 # 修改 process_kb
 async def process_kb(kb_id):
-    kb_status[kb_id] = "processing"
+    app_state.kb_status[kb_id] = "processing"
     try:
         from py.know_base import process_knowledge_base
         await process_knowledge_base(kb_id)
-        kb_status[kb_id] = "completed"
+        app_state.kb_status[kb_id] = "completed"
     except Exception as e:
-        kb_status[kb_id] = f"failed: {str(e)}"
+        app_state.kb_status[kb_id] = f"failed: {str(e)}"
 
 
 # ==========================================

@@ -7,7 +7,6 @@ launched directly, so we bind the OBJECT once and attributes resolve
 at request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
-import sys as _sys
 import json
 import os
 import shutil
@@ -18,7 +17,6 @@ from fastapi import APIRouter
 
 # bind the server module OBJECT once (see docstring); attributes
 # resolve per request so lifespan rebinds stay visible
-_srv = _sys.modules.get('server') or _sys.modules['__main__']
 
 router = APIRouter()
 

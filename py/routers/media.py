@@ -11,6 +11,8 @@ the big handlers instead of grandfathering forever).
 
 import logging
 import sys as _sys
+
+from py import app_state
 import asyncio
 import base64
 import json
@@ -34,6 +36,8 @@ from fastapi import APIRouter
 # server runs as __main__ when launched directly; bind the module OBJECT
 # once so attribute access always sees current process state
 _srv = _sys.modules.get('server') or _sys.modules['__main__']
+
+logger = logging.getLogger("app")
 
 router = APIRouter()
 
@@ -80,13 +84,13 @@ async def asr_transcription(
 
             # --- 核心改进：使用缓存的客户端 ---
             cache_key = (api_key, base_url)
-            if cache_key not in _srv.openai_asr_clients_cache:
+            if cache_key not in app_state.openai_asr_clients_cache:
                 logging.getLogger("app").info(f"Initializing new OpenAI ASR Client for: {base_url}")
-                _srv.openai_asr_clients_cache[cache_key] = AsyncOpenAI(
+                app_state.openai_asr_clients_cache[cache_key] = AsyncOpenAI(
                     api_key=api_key,
                     base_url=base_url
                 )
-            client = _srv.openai_asr_clients_cache[cache_key]
+            client = app_state.openai_asr_clients_cache[cache_key]
             # --------------------------------
 
             logging.getLogger("app").info(f"Using OpenAI ASR engine ({asr_settings.get('model', 'whisper-1')})")
@@ -283,7 +287,7 @@ async def text_to_speech(request: Request):
                 safe_url = sanitize_url(input_url=custom_tt_server, default_base=GSV_TTS_URL, endpoint="")
                 try:
                     # 使用全局客户端，无需 async with httpx.AsyncClient()
-                    async with _srv.global_http_client.stream("GET", safe_url, params=params) as response:
+                    async with app_state.global_http_client.stream("GET", safe_url, params=params) as response:
                         response.raise_for_status()
                         if custom_streaming:
                             async for chunk in response.aiter_bytes():
@@ -326,7 +330,7 @@ async def text_to_speech(request: Request):
             async def generate_audio():
                 safe_url = sanitize_url(input_url=gsvServer, default_base=GSV_TTS_URL, endpoint="/tts")
                 try:
-                    async with _srv.global_http_client.stream("POST", safe_url, json=gsv_params) as response:
+                    async with app_state.global_http_client.stream("POST", safe_url, json=gsv_params) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_bytes():
                             yield chunk
@@ -359,7 +363,7 @@ async def text_to_speech(request: Request):
 
             async def generate_audio():
                 try:
-                    async with _srv.global_http_client.stream("POST", url, headers=headers, json=payload) as response:
+                    async with app_state.global_http_client.stream("POST", url, headers=headers, json=payload) as response:
                         response.raise_for_status()
                         collected_audio = bytearray()
                         async for line in response.aiter_lines():
@@ -391,9 +395,9 @@ async def text_to_speech(request: Request):
             
             # 获取或创建缓存的客户端
             cache_key = (api_key, base_url)
-            if cache_key not in _srv.openai_tts_clients_cache:
-                _srv.openai_tts_clients_cache[cache_key] = AsyncOpenAI(api_key=api_key, base_url=base_url)
-            client = _srv.openai_tts_clients_cache[cache_key]
+            if cache_key not in app_state.openai_tts_clients_cache:
+                app_state.openai_tts_clients_cache[cache_key] = AsyncOpenAI(api_key=api_key, base_url=base_url)
+            client = app_state.openai_tts_clients_cache[cache_key]
 
             speed = float(tts_settings.get('openaiSpeed', 1.0))
             if mobile_optimized: speed = min(speed * 0.95, 1.2)
@@ -482,8 +486,8 @@ async def text_to_speech(request: Request):
             temp_filename = os.path.join(TOOL_TEMP_DIR, f"temp_tetos_{index}_{uuid.uuid4().hex[:8]}.mp3")
 
             def run_tetos_sync():
-                if cache_key in _srv.tetos_speakers_cache:
-                    speaker = _srv.tetos_speakers_cache[cache_key]
+                if cache_key in app_state.tetos_speakers_cache:
+                    speaker = app_state.tetos_speakers_cache[cache_key]
                 else:
                     if tts_engine == 'azure':
                         from tetos.azure import AzureSpeaker
@@ -508,7 +512,7 @@ async def text_to_speech(request: Request):
                             with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as tmp:
                                 tmp.write(sa_json); os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tmp.name
                         speaker = GoogleSpeaker(voice=selected_voice)
-                    _srv.tetos_speakers_cache[cache_key] = speaker
+                    app_state.tetos_speakers_cache[cache_key] = speaker
                 speaker.say(text, temp_filename)
 
             await asyncio.to_thread(run_tetos_sync)
@@ -1006,7 +1010,7 @@ async def upload_gsv_ref_audio(
         })
     
     except Exception as e:
-        _srv.logger.error(f"参考音频上传失败: {str(e)}")
+        logger.error(f"参考音频上传失败: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": f"文件保存失败: {str(e)}"}
@@ -1038,7 +1042,7 @@ async def delete_audio(filename: str):
             )
             
     except Exception as e:
-        _srv.logger.error(f"删除音频失败: {str(e)}")
+        logger.error(f"删除音频失败: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": f"删除失败: {str(e)}"}
