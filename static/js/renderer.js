@@ -2060,5 +2060,10 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
 
-// 挂载应用
-app.mount('#app');
+// 挂载应用（F3：外置页面模板注入完成后挂载；无模板装载器的页面直接挂载）
+const __mountApp = () => app.mount('#app');
+if (window.__templatesReady) {
+  window.__templatesReady.then(__mountApp);
+} else {
+  __mountApp();
+}

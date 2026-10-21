@@ -103,4 +103,24 @@ class TestTemplatesDirHygiene:
         if not tpl.exists():
             pytest.skip("F3 之前 templates/ 不存在")
         for f in tpl.iterdir():
+            if f.name == "MANIFEST.json":
+                continue
             assert f.name.startswith("page_") and f.suffix == ".html", f.name
+            body = f.read_text(encoding="utf-8")
+            assert "<script" not in body.lower(), f"{f.name} 含可执行脚本"
+
+    def test_manifest_pages_wired(self):
+        tpl = _STATIC / "templates"
+        mf = tpl / "MANIFEST.json"
+        if not mf.exists():
+            pytest.skip("尚无 MANIFEST")
+        pages = json.loads(mf.read_text(encoding="utf-8"))["pages"]
+        idx = (_STATIC / "index.html").read_text(encoding="utf-8")
+        for p in pages:
+            assert (tpl / f"{p}.html").exists(), f"缺模板文件 {p}.html"
+            assert f'data-tpl="{p}"' in idx, f"index.html 缺 {p} 锚点"
+            assert f'activeMenu' not in "".join(
+                l for l in idx.splitlines() if f'data-tpl="{p}"' in l)
+        assert '<script src="js/boot_templates.js"></script>' in idx
+        assert idx.index('<script src="js/boot_templates.js">') < \
+            idx.index('<script src="js/renderer.js">'), "loader 必须先于 renderer"
