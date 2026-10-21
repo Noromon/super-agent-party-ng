@@ -165,5 +165,173 @@ resetCycleTimers() {
       this.initCycleTimer(b, index);
     }
   });
-}
+},
+
+    // 打开编辑/新增对话框
+    openBehaviorDialog(index) {
+      this.currentBehaviorIndex = index;
+      if (index === -1) {
+        // 新增模式：创建默认模板的深拷贝
+        this.tempBehavior = this.createDefaultBehavior();
+      } else {
+        // 编辑模式：创建现有数据的深拷贝（切断引用）
+        // 假设您的数据在 behaviorSettings.behaviorList 中
+        this.tempBehavior = JSON.parse(JSON.stringify(this.behaviorSettings.behaviorList[index]));
+      }
+      
+      this.showBehaviorDialog = true;
+    },
+
+    // 创建默认行为模板
+    createDefaultBehavior() {
+      return {
+        enabled: true,
+        trigger: {
+          type: 'time',
+          time: { timeValue: '08:00:00', days: [1, 2, 3, 4, 5] },
+          noInput: { latency: 60 },
+          cycle: { cycleValue: '00:30:00', repeatNumber: 1, isInfiniteLoop: true }
+        },
+        action: {
+          type: 'prompt',
+          prompt: '',
+          random: { type: 'random', events: [''] }
+        },
+        platforms: ["chat"],  // 新增多选渠道字段（字符串数组）
+      };
+    },
+
+    // 关闭对话框后的清理
+    resetBehaviorDialogState() {
+      this.tempBehavior = null;
+      this.currentBehaviorIndex = -1;
+    },
+
+    // 保存行为设置（新增或更新）
+    saveBehavior() {
+      if (!this.tempBehavior) return;
+
+      // 1. 核心修复：确保 platforms 字段一定是数组且有值
+      if (!Array.isArray(this.tempBehavior.platforms)) {
+        // 如果没有数组，根据旧的单选字段转换，或者给默认值
+        let oldVal = this.tempBehavior.platform || 'chat';
+        this.tempBehavior.platforms = [oldVal];
+      }
+      
+      // 如果用户一个都没选（空数组），强制给个 'chat'
+      if (this.tempBehavior.platforms.length === 0) {
+        this.tempBehavior.platforms = ['chat'];
+      }
+
+      // 2. 同步旧字段 platform，取数组第一个元素
+      this.tempBehavior.platform = this.tempBehavior.platforms[0];
+
+      // 3. 保存逻辑
+      if (this.isEditingBehavior) {
+        // 查找并替换旧项
+        const idx = this.behaviorSettings.behaviorList.findIndex(b => b === this.editingItemOrigin);
+        if (idx !== -1) {
+          this.behaviorSettings.behaviorList[idx] = JSON.parse(JSON.stringify(this.tempBehavior));
+        }
+      } else {
+        // 新增项
+        this.behaviorSettings.behaviorList.push(JSON.parse(JSON.stringify(this.tempBehavior)));
+      }
+
+      this.showBehaviorDialog = false;
+      
+      // 4. 保存后刷新计时器
+      this.$nextTick(() => {
+        this.resetCycleTimers();
+      });
+    },
+
+    // 确认删除行为
+    confirmRemoveBehavior(index) {
+      this.$confirm(
+        this.t('confirmDeleteBehavior') || 'Are you sure you want to delete this behavior?',
+        this.t('warning') || 'Warning',
+        {
+          confirmButtonText: this.t('confirm'),
+          cancelButtonText: this.t('cancel'),
+          type: 'warning',
+        }
+      ).then(() => {
+        this.removeBehavior(index);
+      }).catch(() => {});
+    },
+
+    // 处理全局开关变化
+    handleGlobalSwitchChange() {
+      this.resetCycleTimers();
+      this.autoSaveSettings();
+    },
+
+    // 处理单个行为开关变化
+    handleBehaviorChange() {
+      this.resetCycleTimers();
+      this.autoSaveSettings();
+    },
+
+    // 根据触发类型返回图标类名
+    getTriggerIcon(type) {
+      const map = {
+        'time': 'fa-regular fa-clock',
+        'noInput': 'fa-solid fa-hourglass-half',
+        'cycle': 'fa-solid fa-arrows-spin'
+      };
+      return map[type] || 'fa-solid fa-bolt';
+    },
+
+    // 生成卡片上的摘要文本
+    getBehaviorSummary(b) {
+      if (!b || !b.trigger) return '';
+      
+      if (b.trigger.type === 'time') {
+        const time = b.trigger.time.timeValue;
+        const days = b.trigger.time.days.length;
+        const daysText = this.t('repeatDays') || 'Days'; // 简单处理，实际根据你的 t 函数逻辑
+        return `${time} (${daysText}: ${days})`;
+      } else if (b.trigger.type === 'noInput') {
+        return `${this.t('noInputLatency') || 'Latency'}: ${b.trigger.noInput.latency}s`;
+      } else if (b.trigger.type === 'cycle') {
+        const loopText = b.trigger.cycle.isInfiniteLoop ? '∞' : b.trigger.cycle.repeatNumber;
+        return `${this.t('cycleValue') || 'Cycle'}: ${b.trigger.cycle.cycleValue} (x${loopText})`;
+      }
+      return '';
+    },
+
+    // 辅助工具：生成数字范围数组
+    makeRange(start, end) {
+      const result = [];
+      for (let i = start; i <= end; i++) {
+        result.push(i);
+      }
+      return result;
+    },
+
+    // 禁用小时
+    disabledHours() {
+      // 只有在最小值的小时大于 0 时才需要禁用
+      // 如果最小是 00:00:01，则不禁用任何小时
+      return this.makeRange(0, 23).filter(h => h < this.minLimit.h);
+    },
+
+    // 禁用分钟 (selectedHour 是当前转盘选中的小时)
+    disabledMinutes(selectedHour) {
+      // 只有当选中的小时等于最小值的小时时，才限制分钟
+      if (selectedHour === this.minLimit.h) {
+        return this.makeRange(0, 59).filter(m => m < this.minLimit.m);
+      }
+      return [];
+    },
+
+    // 禁用秒钟 (selectedHour 和 selectedMinute 是当前选中的时和分)
+    disabledSeconds(selectedHour, selectedMinute) {
+      // 只有当时和分都处于最小值临界点时，才限制秒钟
+      if (selectedHour === this.minLimit.h && selectedMinute === this.minLimit.m) {
+        return this.makeRange(0, 59).filter(s => s < this.minLimit.s);
+      }
+      return [];
+    }
 });
