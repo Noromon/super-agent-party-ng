@@ -51,9 +51,6 @@ DISPATCH_HELPERS = [
     "_build_tool_hooks",
     "_plan_mode_block",
     "_sensitive_approval",
-    "_dispatch_external_tool",
-    "_dispatch_task_center_tool",
-    "_dispatch_unknown_tool",
 ]
 
 TCM_HELPERS = [
@@ -112,6 +109,19 @@ def test_dispatch_split_helpers_and_hooks_literal():
     # py/audit_tools.py parses this literal to audit hook-table consistency
     src = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
     assert "_TOOL_HOOKS = {" in src
+
+
+def test_tool_dispatch_module_helpers_present_and_small():
+    # 批 2h3：审批哨兵与 dispatch helpers 迁入 py/tool_dispatch.py
+    tree = ast.parse((_ROOT / "py" / "tool_dispatch.py").read_text(encoding="utf-8-sig"))
+    funcs = {n.name: n for n in tree.body
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    for h in ("_approval_payload", "_is_approval_result", "dispatch_external_tool",
+              "dispatch_task_center_tool", "dispatch_unknown_tool"):
+        assert h in funcs, "helper %s missing" % h
+        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+    src = (_ROOT / "py" / "tool_dispatch.py").read_text(encoding="utf-8-sig")
+    assert "_APPROVAL_PREFIX = " in src
 
 
 def test_complete_split_helpers_present_and_small():

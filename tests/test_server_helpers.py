@@ -162,7 +162,8 @@ class TestApprovalSentinel:
     @pytest.fixture
     def ns(self):
         import json as _json
-        ns = _extract(["_approval_payload", "_is_approval_result", "_APPROVAL_PREFIX"])
+        ns = _extract(["_approval_payload", "_is_approval_result", "_APPROVAL_PREFIX"],
+                      rel="py/tool_dispatch.py")
         ns.setdefault("json", _json)
         return ns
 

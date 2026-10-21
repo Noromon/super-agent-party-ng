@@ -150,5 +150,10 @@ class TestNonDefaultConfigDrift:
         # server keeps only the dispatch-side lookup over node_ext_mcp_tools
         # (execution layer), never a tool-announce loop for the LLM
         assert "来自扩展" not in SERVER_SRC
+        # 批 2h3：执行层的 node 注册表扫描已迁 py/tool_dispatch.py（注入
+        # 注册表活引用），server 内不再出现；唯一性转移到新模块断言
         assert SERVER_SRC.count(
-            "for ext_id, tools in node_ext_mcp_tools.items()") == 1
+            "for ext_id, tools in node_ext_mcp_tools.items()") == 0
+        _td = open(os.path.join(ROOT, "py", "tool_dispatch.py"),
+                   encoding="utf-8-sig").read()
+        assert _td.count("for ext_id, tools in ext_mcp_tools.items()") == 1
