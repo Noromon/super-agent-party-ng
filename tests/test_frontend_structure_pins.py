@@ -121,10 +121,10 @@ class TestTemplatesDirHygiene:
             assert (tpl / f"{p}.html").exists(), f"缺模板文件 {p}.html"
             host = chat if p.startswith("page_chat_") else idx
             assert f'data-tpl="{p}"' in host, f"{p} 锚点缺失"
-            assert f'activeMenu' not in "".join(
-                l for l in host.splitlines() if f'data-tpl="{p}"' in l)
-            assert f'activeMenu' not in "".join(
-                l for l in idx.splitlines() if f'data-tpl="{p}"' in l)
+            assert 'activeMenu' not in "".join(
+                ln for ln in host.splitlines() if f'data-tpl="{p}"' in ln)
+            assert 'activeMenu' not in "".join(
+                ln for ln in idx.splitlines() if f'data-tpl="{p}"' in ln)
         for pg, body in (("index.html", idx), ("chat.html", chat)):
             assert '<script src="js/boot_templates.js"></script>' in body, pg
             assert body.index('<script src="js/boot_templates.js">') < \
