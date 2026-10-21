@@ -978,5 +978,10 @@ async xmppCertDecision(key, decision) {
   } catch (e) {
     showNotification('网络错误：证书决策未送达', 'error');
   }
-}
+},
+
+    async changeQQAgent(agent) {
+      this.qqBotConfig.QQAgent = agent;
+      await this.autoSaveSettings();
+    }
 });

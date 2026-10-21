@@ -477,5 +477,21 @@ Object.assign(vue_methods, {
         }
         await this.autoSaveSettings();
       }
+    },
+
+    copyApiKey(apiKey){
+      navigator.clipboard.writeText(apiKey)
+        .then(() => {
+          showNotification(this.t('copy_success'))
+        })
+        .catch(() => {
+          showNotification(this.t('copy_failed'), 'error')
+        })
+    },
+
+    copyProvider(provider,index){
+      // 在this.modelProviders的index之后插入一个复制版本
+      this.modelProviders.splice(index + 1, 0, { ...provider, id: Date.now() });
+      this.autoSaveSettings();
     }
 });

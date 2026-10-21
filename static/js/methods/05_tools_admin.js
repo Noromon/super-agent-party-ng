@@ -167,5 +167,17 @@ Object.assign(vue_methods, {
     toolTypeLabel(type) {
       const found = this.llmInterfaceTypes.find(t => t.value === type)
       return found ? found.label : type
+    },
+
+    changeMainAgent(agent) {
+      this.mainAgent = agent;
+      if (agent === 'super-model') {
+        this.system_prompt = " "
+      }
+      else {
+        this.system_prompt = this.agents[agent].system_prompt;
+        console.log(this.system_prompt);
+      }
+      this.syncSystemPromptToMessages(this.system_prompt);
     }
 });

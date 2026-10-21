@@ -33,6 +33,7 @@
    "js/methods/12_context_todos.js",
    "js/methods/13_resume_stream.js",
    "js/methods/15_conversations.js",
+   "js/methods/14_ws_client.js",
    "js/methods/20_files_upload.js",
    "js/methods/22_providers.js",
    "js/methods/24_knowledge_base.js",
@@ -51,6 +52,8 @@
    "js/methods/60_system_settings.js",
    "js/methods/62_backup.js",
    "js/methods/64_conversation_groups.js",
+   "js/methods/66_render_preview.js",
+   "js/methods/68_scroll.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ],
@@ -87,6 +90,7 @@
    "js/methods/12_context_todos.js",
    "js/methods/13_resume_stream.js",
    "js/methods/15_conversations.js",
+   "js/methods/14_ws_client.js",
    "js/methods/20_files_upload.js",
    "js/methods/22_providers.js",
    "js/methods/24_knowledge_base.js",
@@ -105,6 +109,8 @@
    "js/methods/60_system_settings.js",
    "js/methods/62_backup.js",
    "js/methods/64_conversation_groups.js",
+   "js/methods/66_render_preview.js",
+   "js/methods/68_scroll.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ]
@@ -1548,8 +1554,10 @@
   "scanExtensions"
  ],
  "console_log_counts": {
+  "methods/05_tools_admin.js": 1,
   "methods/10_chat_stream.js": 1,
   "methods/13_resume_stream.js": 2,
+  "methods/14_ws_client.js": 9,
   "methods/20_files_upload.js": 1,
   "methods/22_providers.js": 6,
   "methods/24_knowledge_base.js": 2,
@@ -1562,11 +1570,12 @@
   "methods/50_bots_lifecycle.js": 4,
   "methods/58_shortcuts_input.js": 1,
   "methods/64_conversation_groups.js": 1,
+  "methods/66_render_preview.js": 7,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 96
+  "vue_methods.js": 79
  },
  "console_log_total": 200,
  "styles_css_lines": 12552
