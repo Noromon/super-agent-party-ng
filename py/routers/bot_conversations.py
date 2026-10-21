@@ -12,6 +12,7 @@ import logging
 import sys as _sys
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from py.bot_container import BotContainer, _bot_conv_meta
 from py.get_setting import load_covs, load_settings, save_covs
 from pydantic import BaseModel
 from typing import Union
@@ -25,6 +26,9 @@ class DeleteConversationRequest(BaseModel):
 # bind the server module OBJECT once (see docstring); attributes
 # resolve per request so lifespan rebinds stay visible
 _srv = _sys.modules.get('server') or _sys.modules['__main__']
+
+
+logger = logging.getLogger("app")
 
 router = APIRouter()
 
@@ -90,10 +94,10 @@ async def bot_conversations():
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
     live = set()
-    if _srv.BotContainer._xmpp is not None and getattr(_srv.BotContainer._xmpp, "bot_client", None):
-        live = {"bot:xmpp:%s" % k for k in (_srv.BotContainer._xmpp.bot_client.memoryList or {})}
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        live = {"bot:xmpp:%s" % k for k in (BotContainer._xmpp.bot_client.memoryList or {})}
     for it in items:
-        it.update(_srv._bot_conv_meta(it["conv_id"]))
+        it.update(_bot_conv_meta(it["conv_id"]))
         it["live"] = it["conv_id"] in live
     return {"success": True, "conversations": items}
 
@@ -106,7 +110,7 @@ async def bot_conversation(id: str):
     msgs = await load_bot_conv(id)
     if msgs is None:
         return JSONResponse(status_code=404, content={"success": False, "message": "会话不存在"})
-    return {"success": True, "conv_id": id, **_srv._bot_conv_meta(id),
+    return {"success": True, "conv_id": id, **_bot_conv_meta(id),
             "messages": redact_messages_for_view(msgs)}
 
 
@@ -126,10 +130,10 @@ async def clear_bot_conversation(data: dict):
     conv_id = str(data.get("id", ""))
     try:
         await save_bot_conv(conv_id, [])
-        if _srv.BotContainer._xmpp is not None and getattr(_srv.BotContainer._xmpp, "bot_client", None):
-            jid = _srv._bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
-            if jid and jid in _srv.BotContainer._xmpp.bot_client.memoryList:
-                _srv.BotContainer._xmpp.bot_client.memoryList[jid] = []
+        if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+            jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
+            if jid and jid in BotContainer._xmpp.bot_client.memoryList:
+                BotContainer._xmpp.bot_client.memoryList[jid] = []
         return {"success": True}
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
@@ -144,10 +148,10 @@ async def new_bot_conversation(data: dict):
         archive_id = await archive_bot_conv(conv_id)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    if _srv.BotContainer._xmpp is not None and getattr(_srv.BotContainer._xmpp, "bot_client", None):
-        jid = _srv._bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
-        if jid and jid in _srv.BotContainer._xmpp.bot_client.memoryList:
-            _srv.BotContainer._xmpp.bot_client.memoryList[jid] = []
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        jid = _bot_conv_meta(conv_id)["peer"] if conv_id.startswith("bot:xmpp:") else ""
+        if jid and jid in BotContainer._xmpp.bot_client.memoryList:
+            BotContainer._xmpp.bot_client.memoryList[jid] = []
     return {"success": True, "archive_id": archive_id}
 
 
@@ -161,9 +165,9 @@ async def activate_bot_conversation(data: dict):
         await swap_bot_conv(archive_id, active_id)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"success": False, "message": str(e)})
-    if _srv.BotContainer._xmpp is not None and getattr(_srv.BotContainer._xmpp, "bot_client", None):
-        jid = _srv._bot_conv_meta(active_id)["peer"] if active_id.startswith("bot:xmpp:") else ""
+    if BotContainer._xmpp is not None and getattr(BotContainer._xmpp, "bot_client", None):
+        jid = _bot_conv_meta(active_id)["peer"] if active_id.startswith("bot:xmpp:") else ""
         if jid:
-            _srv.BotContainer._xmpp.bot_client.memoryList[jid] = await load_bot_conv(active_id) or []
+            BotContainer._xmpp.bot_client.memoryList[jid] = await load_bot_conv(active_id) or []
     return {"success": True}
 

@@ -35,7 +35,7 @@ def _extract(names, rel="server.py"):
 class TestBotConvMeta:
     @pytest.fixture
     def meta(self):
-        return _extract(["_bot_conv_meta"])["_bot_conv_meta"]
+        return _extract(["_bot_conv_meta"], rel="py/bot_container.py")["_bot_conv_meta"]
 
     def test_active_row(self, meta):
         assert meta("bot:xmpp:alice@example") == {
@@ -49,7 +49,7 @@ class TestBotConvMeta:
 class TestAutostartPlan:
     @pytest.fixture
     def plan(self):
-        ns = _extract(["BOT_AUTOSTART_TABLE", "_bot_autostart_plan"])
+        ns = _extract(["BOT_AUTOSTART_TABLE", "_bot_autostart_plan"], rel="py/bot_container.py")
         return ns["_bot_autostart_plan"], ns["BOT_AUTOSTART_TABLE"]
 
     def test_filter_and_table_shape(self, plan):

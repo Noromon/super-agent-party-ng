@@ -16,8 +16,8 @@ ROUTERS = ROOT / "py" / "routers"
 # files/media/memories/system/workflows 余量→批 2。
 SRV_REF_CAPS = {
     "agents.py": 0,
-    "bot_conversations.py": 29,
-    "bots.py": 60,
+    "bot_conversations.py": 10,
+    "bots.py": 0,
     "files.py": 25,
     "media.py": 1,
     "memories.py": 25,
@@ -43,8 +43,8 @@ def test_srv_refs_within_caps():
 
 
 def test_tasks_and_status_fully_decoupled():
-    # 1a 已拔桩的模块禁止回潮
-    for name in ("tasks.py", "status.py", "agents.py"):
+    # 1a/1b/1d 已拔桩的模块禁止回潮
+    for name in ("tasks.py", "status.py", "agents.py", "bots.py", "workflows.py"):
         assert "_srv = " not in (ROUTERS / name).read_text(encoding="utf-8"), name
 
 
