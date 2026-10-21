@@ -59,6 +59,9 @@
    "js/methods/68_scroll.js",
    "js/methods/70_memory_io.js",
    "js/methods/72_live_danmu.js",
+   "js/methods/74_read_aloud.js",
+   "js/methods/76_profile_configs.js",
+   "js/methods/78_behavior.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ],
@@ -121,6 +124,9 @@
    "js/methods/68_scroll.js",
    "js/methods/70_memory_io.js",
    "js/methods/72_live_danmu.js",
+   "js/methods/74_read_aloud.js",
+   "js/methods/76_profile_configs.js",
+   "js/methods/78_behavior.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ]
@@ -1577,18 +1583,20 @@
   "methods/30_voice_asr.js": 14,
   "methods/32_persona_memory.js": 1,
   "methods/40_voice_tts.js": 12,
-  "methods/42_vrm_domain.js": 3,
+  "methods/42_vrm_domain.js": 5,
   "methods/50_bots_lifecycle.js": 4,
   "methods/58_shortcuts_input.js": 1,
   "methods/60_system_settings.js": 8,
   "methods/64_conversation_groups.js": 1,
   "methods/66_render_preview.js": 7,
   "methods/72_live_danmu.js": 11,
+  "methods/74_read_aloud.js": 5,
+  "methods/78_behavior.js": 2,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 56
+  "vue_methods.js": 47
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

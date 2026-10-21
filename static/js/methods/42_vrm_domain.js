@@ -458,5 +458,153 @@ Object.assign(vue_methods, {
       console.error('删除VRMA动作失败:', error);
       showNotification(error, 'error');
     }
+  },
+
+  // 获取当前选中的动作信息
+  getCurrentSelectedMotions() {
+    const selectedMotions = [];
+    
+    // 从默认动作中查找
+    this.VRMConfig.defaultMotions.forEach(motion => {
+      if (this.VRMConfig.selectedMotionIds.includes(motion.id)) {
+        selectedMotions.push(motion);
+      }
+    });
+    
+    // 从用户动作中查找
+    this.VRMConfig.userMotions.forEach(motion => {
+      if (this.VRMConfig.selectedMotionIds.includes(motion.id)) {
+        selectedMotions.push(motion);
+      }
+    });
+    
+    return selectedMotions;
+  },
+
+  // 获取所有可用的动作（默认 + 用户上传）
+  getAllAvailableMotions() {
+    return [...this.VRMConfig.defaultMotions, ...this.VRMConfig.userMotions];
+  },
+
+  // 根据ID获取动作信息
+  getMotionById(motionId) {
+    // 先在默认动作中查找
+    let motion = this.VRMConfig.defaultMotions.find(m => m.id === motionId);
+    
+    // 如果没找到，再在用户动作中查找
+    if (!motion) {
+      motion = this.VRMConfig.userMotions.find(m => m.id === motionId);
+    }
+    
+    return motion;
+  },
+
+async loadGaussScenes() {
+  const [def, user] = await Promise.all([
+    fetch('/get_default_gauss_scenes').then(r => r.json()),
+    fetch('/get_user_gauss_scenes').then(r => r.json())
+  ]);
+  this.VRMConfig.gaussDefaultScenes = def.scenes || [];
+  this.VRMConfig.gaussUserScenes   = user.scenes || [];
+  console.log("默认场景：",this.VRMConfig.gaussDefaultScenes);
+  if (!this.VRMConfig.selectedGaussSceneId) {
+    this.VRMConfig.selectedGaussSceneId = 'transparent';
   }
+  this.autoSaveSettings();
+},
+
+async handleGaussSceneChange(sceneId) {
+  // 与 VRM 模型切换类似：把场景 id 写进 VRMConfig
+  this.VRMConfig.selectedGaussSceneId = sceneId;
+
+  this.autoSaveSettings();
+},
+
+browseGaussSceneFile() {
+  const ipt = document.createElement('input');
+  ipt.type = 'file';
+  ipt.accept = '.ply,.spz,.splat,.ksplat,.sog';
+  ipt.onchange = e => {
+    const file = e.target.files[0];
+    if (file) {
+      this.newGaussScene.name = file.name;
+      this.newGaussScene.file = file;   // 保存原始 File 对象
+      this.newGaussScene.displayName = this.newGaussScene.displayName || this.newGaussScene.name;
+    }
+  };
+  ipt.click();
+},
+
+handleGaussSceneDrop(e) {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['ply','spz','splat','ksplat','sog'].includes(ext)) {
+    return showNotification('不支持的文件类型', 'error');
+  }
+  this.newGaussScene.name = file.name;
+  this.newGaussScene.file = file;
+  this.newGaussScene.displayName = this.newGaussScene.displayName || this.newGaussScene.name;
+},
+
+removeNewGaussScene() {
+  this.newGaussScene = { name: '', displayName: '' };
+},
+
+async uploadGaussScene() {
+  const fd = new FormData();
+  fd.append('file', this.newGaussScene.file);
+  fd.append('display_name', this.newGaussScene.displayName || this.newGaussScene.name);
+  console.log("上传场景：",fd);
+  const res = await fetch('/upload_gauss_scene', {
+    method: 'POST',
+    body: fd
+  }).then(r => r.json());
+
+  if (res.success) {
+    showNotification('场景上传成功');
+    this.showGaussSceneDialog = false;
+    // 添加新动作到用户动作列表
+    const newgaussScenes = {
+      id: res.file.unique_filename,
+      name: res.file.display_name,
+      path: res.file.path,
+      type: 'user' // 标记为用户上传的动作
+    };
+        
+    this.VRMConfig.gaussUserScenes.push(newgaussScenes);
+    // 自动选中新上传的场景
+    if (newgaussScenes) this.handleGaussSceneChange(newgaussScenes.id);
+  } else {
+    showNotification(res.message || '上传失败', 'error');
+  }
+},
+
+cancelGaussSceneUpload() {
+  this.showGaussSceneDialog = false;
+  this.removeNewGaussScene();
+},
+
+async deleteGaussSceneOption(sceneId) {
+  const scene = this.VRMConfig.gaussUserScenes.find(s => s.id === sceneId);
+  if (!scene) return;
+
+  // 提取 uuid 文件名
+  const filename = scene.path.split('/').pop();
+  const res = await fetch(`/delete_gauss_scene/${filename}`, {
+    method: 'DELETE'
+  }).then(r => r.json());
+
+  if (res.success) {
+    showNotification('场景已删除');
+    // 如果当前正在使用被删场景，切回第一个默认场景
+    if (this.VRMConfig.selectedGaussSceneId === sceneId) {
+      const firstDef = this.VRMConfig.gaussDefaultScenes[0];
+      if (firstDef) this.handleGaussSceneChange(firstDef.id);
+    }
+    await this.loadGaussScenes();
+  } else {
+    showNotification(res.message || '删除失败', 'error');
+  }
+}
 });

@@ -345,5 +345,16 @@ Object.assign(vue_methods, {
         btn.removeEventListener('click', this.handleCopy)
         btn.addEventListener('click', this.handleCopy)
       })
+    },
+
+    getRoleAvatar(name) {
+        // 尝试从记忆列表查找
+        const mem = this.memories.find(m => m.name === name);
+        if (mem && mem.avatar) return mem.avatar;
+        // 如果需要，也可以尝试从 agents 列表查找 (如果 agent 对象里存了 avatar)
+        // const agentKey = Object.keys(this.agents).find(key => this.agents[key].name === name);
+        // if (agentKey && this.agents[agentKey].avatar) return this.agents[agentKey].avatar;
+        
+        return 'source/Avatar.png';
     }
 });
