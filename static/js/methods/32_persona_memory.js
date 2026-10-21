@@ -254,5 +254,13 @@ Object.assign(vue_methods, {
         /* 新建：直接给空模板 */
         this.resetNewMemory();
       }
+    },
+
+  handleShowAddMemoryDialog() {
+    if (this.isGenerating){
+      showNotification(this.t('AIgening'))
+       return;
     }
+    this.showAddMemoryDialog = true
+  }
 });
