@@ -182,6 +182,17 @@ Object.assign(vue_methods, {
               // 调用前端的弹窗提醒
               showNotification(`${data.data.title}\n${this.t('intask')}`, 'success');
           }
+        // A5 日记：后端推送的日记条目（上游 vue_methods 同型分支）
+        else if (data.type === 'diary_entry') {
+          if (data.data && data.data.content) {
+            if (data.data.actionType === 'system_notify') {
+              const title = data.data.title || this.t('DiarySystem') || '日记系统';
+              showNotification(title + ': ' + data.data.content, 'warning');
+            } else {
+              this.pushDiaryToChat(data.data.content, data.data.actionType);
+            }
+          }
+        }
         else if (data.type === 'settings_saved') {
           if (!data.success) {
             showNotification(this.t('settings_save_failed'), 'error');

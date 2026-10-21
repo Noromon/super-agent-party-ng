@@ -199,5 +199,15 @@ def test_responses_adapter_smoke():
     asyncio.run(main())
 
 
+def test_validprovider_gates_openairesponses_url():
+    # 上游 b973b36c：OpenAIResponses 与 custom/customAnthropic 同组做 URL 校验（S65.1 补）
+    from pathlib import Path
+    r = Path(__file__).resolve().parents[1] / "static/js/renderer.js"
+    s = r.read_text(encoding="utf-8-sig")
+    i = s.index("validProvider()")
+    window = s[i:i + 400]
+    assert "OpenAIResponses" in window and "startsWith('http')" in window
+
+
 if __name__ == "__main__":
     asyncio.run(main())

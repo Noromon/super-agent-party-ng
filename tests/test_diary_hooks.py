@@ -127,3 +127,26 @@ def test_frontend_wiring():
         s = io.open(_ROOT / ("static/js/locales/%s.js" % loc), encoding="utf-8-sig").read()
         assert "'diarySaveSuccess'" in s or "DiarySystem" in s
         assert re.search(r"'DiarySystem'\s*:", s), loc
+
+
+def test_diary_block_nested_in_suite_content():
+    # S65.1 回归 pin：diary 子块必须在 .suite-content 内（尾插 EOF 曾致设置页空白）
+    role = io.open(_ROOT / "static/templates/page_role.html", encoding="utf-8-sig").read()
+    assert role.count("subMenu === 'diary'") == 1
+    i_content = role.index('class="suite-content"')
+    i_diary = role.index("subMenu === 'diary'")
+    assert i_content < i_diary
+    tail = [ln.strip() for ln in role.splitlines() if ln.strip()]
+    assert tail[-3:] == ["</div>", "</div>", "</div>"]
+    assert role.count("<div") == role.count("</div>")
+
+
+def test_ws_diary_entry_branch_and_mainjs_cdp_always_on():
+    # S65.1 缺口修补 pin：ws 分发器有 diary_entry 分支；main.js CDP 常开不再条件包裹
+    ws = io.open(_ROOT / "static/js/methods/14_ws_client.js", encoding="utf-8-sig").read()
+    assert "data.type === 'diary_entry'" in ws
+    assert "this.pushDiaryToChat(" in ws and "'system_notify'" in ws
+    mj = io.open(_ROOT / "main.js", encoding="utf-8-sig").read()
+    assert "app.commandLine.appendSwitch('remote-debugging-port', '0');" in mj
+    assert "chromeMCPSettings?.type === 'internal'" not in mj
+    assert "IS_INTERNAL_MODE_ACTIVE = true;" in mj
