@@ -42,6 +42,8 @@
    "js/methods/34_custom_tools.js",
    "js/methods/30_voice_asr.js",
    "js/methods/40_voice_tts.js",
+   "js/methods/50_bots_lifecycle.js",
+   "js/methods/51_bots_conversations.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ],
@@ -87,6 +89,8 @@
    "js/methods/34_custom_tools.js",
    "js/methods/30_voice_asr.js",
    "js/methods/40_voice_tts.js",
+   "js/methods/50_bots_lifecycle.js",
+   "js/methods/51_bots_conversations.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ]
@@ -1541,11 +1545,12 @@
   "methods/30_voice_asr.js": 14,
   "methods/32_persona_memory.js": 1,
   "methods/40_voice_tts.js": 12,
+  "methods/50_bots_lifecycle.js": 4,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 103
+  "vue_methods.js": 99
  },
  "console_log_total": 200,
  "styles_css_lines": 12552
