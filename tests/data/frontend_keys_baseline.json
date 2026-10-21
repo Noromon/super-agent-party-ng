@@ -27,6 +27,8 @@
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
+   "js/methods/30_voice_asr.js",
+   "js/methods/40_voice_tts.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ],
@@ -57,6 +59,8 @@
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
+   "js/methods/30_voice_asr.js",
+   "js/methods/40_voice_tts.js",
    "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ]
@@ -1492,7 +1496,6 @@
   "downloadAudio",
   "escapeHtml",
   "fetchTasks",
-  "handleFrameProcessed",
   "handleInputPaste",
   "removeBehavior",
   "removeLoveDimension",
@@ -1501,11 +1504,13 @@
   "scanExtensions"
  ],
  "console_log_counts": {
+  "methods/30_voice_asr.js": 14,
+  "methods/40_voice_tts.js": 12,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 150
+  "vue_methods.js": 124
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

@@ -18,14 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests" / "data" / "frontend_keys_baseline.json"
 
 
-def scan_top_level_keys(src: str, open_after: str):
-    """从 `open_after`（如 `const vue_methods = {`）之后按深度扫描，
-    收集对象字面量深度 1 的键名。跳过字符串/模板字面量/注释/正则字面量。"""
-    m = re.search(open_after, src)
-    if not m:
-        raise ValueError("anchor not found: %s" % open_after)
-    i = m.end()          # 位于 '{' 之后
-    depth = 1
+def _scan_object(src: str, i: int, depth: int):
+    """从对象字面量 '{' 之后按深度扫描，收集深度 1 的键名。
+    跳过字符串/模板字面量/注释/正则字面量。"""
     keys = []
     prev_sig = ""        # 上一个可见字符（正则字面量启发用）
     n = len(src)
@@ -134,91 +129,18 @@ def scan_top_level_keys(src: str, open_after: str):
     return keys
 
 
+def scan_top_level_keys(src: str, open_after: str):
+    m = re.search(open_after, src)
+    if not m:
+        raise ValueError("anchor not found: %s" % open_after)
+    return _scan_object(src, m.end(), 1)
+
+
 def scan_assign_keys(src: str):
     """收集 Object.assign(vue_methods, { ... }) 的顶层键（F2 分片文件）。"""
     keys = []
     for m in re.finditer(r"Object\.assign\(\s*vue_methods\s*,\s*\{", src):
-        # 复用深度扫描：从 '{' 之后开始
-        depth = 1
-        i = m.end()
-        n = len(src)
-        prev_sig = ""
-        while i < n and depth > 0:
-            c = src[i]
-            if c in "\"'":
-                q = c
-                i += 1
-                while i < n:
-                    if src[i] == "\\":
-                        i += 2
-                        continue
-                    if src[i] == q:
-                        break
-                    i += 1
-                prev_sig = q
-                i += 1
-                continue
-            if c == "`":
-                i += 1
-                while i < n:
-                    if src[i] == "\\":
-                        i += 2
-                        continue
-                    if src[i] == "`":
-                        break
-                    if src[i] == "$" and i + 1 < n and src[i + 1] == "{":
-                        d = 1
-                        i += 2
-                        while i < n and d:
-                            if src[i] == "{":
-                                d += 1
-                            elif src[i] == "}":
-                                d -= 1
-                            i += 1
-                        continue
-                    i += 1
-                prev_sig = "`"
-                i += 1
-                continue
-            if c == "/" and i + 1 < n and src[i + 1] == "/":
-                j = src.find("\n", i)
-                i = n if j < 0 else j
-                continue
-            if c == "/" and i + 1 < n and src[i + 1] == "*":
-                j = src.find("*/", i)
-                i = n if j < 0 else j + 2
-                continue
-            if c in "{[(":
-                depth += 1
-                prev_sig = c
-                i += 1
-                continue
-            if c in "}])":
-                depth -= 1
-                prev_sig = c
-                i += 1
-                continue
-            if depth == 1 and (c.isalpha() or c in "_$"):
-                j = i
-                while j < n and (src[j].isalnum() or src[j] in "_$"):
-                    j += 1
-                ident = src[i:j]
-                k = j
-                while k < n and src[k] in " \t\r\n":
-                    k += 1
-                if k < n and src[k] in "(:":
-                    keys.append(ident)
-                    prev_sig = src[k]
-                    i = k + 1
-                    if src[k] == "(":
-                        depth += 1
-                    continue
-                prev_sig = ident[-1]
-                i = j
-                continue
-            if not c.isspace():
-                prev_sig = c
-            i += 1
+        keys += _scan_object(src, m.end(), 1)
     return keys
 
 
