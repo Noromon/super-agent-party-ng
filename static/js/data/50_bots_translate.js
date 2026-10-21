@@ -339,7 +339,7 @@ Object.assign(vue_data, {
     ],
 
     vendorValues: [
-      'custom','customAnthropic', 'OpenAI','Anthropic', 'Gemini','Grok',
+      'custom','customAnthropic','OpenAIResponses', 'OpenAI','Anthropic', 'Gemini','Grok',
       'llama.cpp', 'Ollama','Vllm','LMstudio','SGLang','xinference','Dify','newapi',
       'LocalAI','ttswebui', 'Deepseek', 'Volcano','302.AI',
       'siliconflow', 'aliyun', 'ZhipuAI', 'moonshot', 'minimax', 

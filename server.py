@@ -449,6 +449,8 @@ import aiofiles
 import argparse
 from py.dify_openai import DifyOpenAIAsync
 from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
+from py.GeminiAsOpenAI import AsyncGeminiAsOpenAI
+from py.ResponsesAsOpenAI import AsyncResponsesAsOpenAI
 
 from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
@@ -711,6 +713,10 @@ def get_client_class(config, provider_id):
         return DifyOpenAIAsync 
     elif vendor == 'customAnthropic':
         return AsyncClaudeAsOpenAI
+    elif vendor == 'Gemini':
+        return AsyncGeminiAsOpenAI
+    elif vendor == 'OpenAIResponses':
+        return AsyncResponsesAsOpenAI
     else: 
         return AsyncOpenAI
 

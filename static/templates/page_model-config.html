@@ -241,7 +241,7 @@
 
                     <!-- 原有的自建 URL 和 提示信息保持不变 -->
                     <el-form-item
-                      v-if="newProviderTemp.vendor === 'custom' || newProviderTemp.vendor === 'customAnthropic'"
+                      v-if="newProviderTemp.vendor === 'custom' || newProviderTemp.vendor === 'customAnthropic' || newProviderTemp.vendor === 'OpenAIResponses'"
                       :label="t('customURL')"
                       required
                     >
@@ -251,7 +251,7 @@
                       />
                     </el-form-item>
 
-                    <div v-if="newProviderTemp.vendor && newProviderTemp.vendor !== 'custom' && newProviderTemp.vendor !== 'customAnthropic'">
+                    <div v-if="newProviderTemp.vendor && newProviderTemp.vendor !== 'custom' && newProviderTemp.vendor !== 'customAnthropic' && newProviderTemp.vendor !== 'OpenAIResponses'">
                       <el-alert
                         :title="t('defaultConfigInfo')"
                         type="info"

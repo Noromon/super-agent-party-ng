@@ -47,7 +47,8 @@ Object.assign(vue_methods, {
           },
           body: JSON.stringify({
             url: provider.url,
-            api_key: provider.apiKey
+            api_key: provider.apiKey,
+            vendor: provider.vendor
           })
         });
         if (!response.ok) {
@@ -165,7 +166,7 @@ Object.assign(vue_methods, {
         'tencent': 'https://api.lkeap.cloud.tencent.com/v1',
       }
       
-      if (value !== 'custom' && value !== 'customAnthropic' ) {
+      if (value !== 'custom' && value !== 'customAnthropic' && value !== 'OpenAIResponses') {
         this.newProviderTemp.url = defaultUrls[value] || ''
       }
       if (value === 'Ollama') {

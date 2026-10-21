@@ -15,11 +15,13 @@ from openai import AsyncOpenAI
 from py.acpx_tools import check_acpx_available
 from py.get_setting import USER_DATA_DIR, load_settings
 from pydantic import BaseModel
+from typing import Optional
 from fastapi import APIRouter
 
 class ProviderModelRequest(BaseModel):
     url: str
     api_key: str
+    vendor: Optional[str] = None
 
 
 # bind the server module OBJECT once (see docstring); attributes
@@ -93,8 +95,23 @@ async def get_models():
 @router.post("/v1/providers/models")
 async def fetch_provider_models(request: ProviderModelRequest):
     try:
-        # 使用传入的provider配置创建AsyncOpenAI客户端
-        client = AsyncOpenAI(api_key=request.api_key, base_url=request.url)
+        # 按 vendor 选择适配器（上游 407280d8/d11a2de7 拦截链，懒导入避免启动期依赖）
+        vendor = request.vendor or 'OpenAI'
+        kwargs = {"api_key": request.api_key, "base_url": request.url}
+        if vendor == 'customAnthropic':
+            from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
+            client = AsyncClaudeAsOpenAI(**kwargs)
+        elif vendor == 'Gemini':
+            from py.GeminiAsOpenAI import AsyncGeminiAsOpenAI
+            client = AsyncGeminiAsOpenAI(**kwargs)
+        elif vendor == 'OpenAIResponses':
+            from py.ResponsesAsOpenAI import AsyncResponsesAsOpenAI
+            client = AsyncResponsesAsOpenAI(**kwargs)
+        elif vendor == 'Dify':
+            from py.dify_openai import DifyOpenAIAsync
+            client = DifyOpenAIAsync(**kwargs)
+        else:
+            client = AsyncOpenAI(**kwargs)
         # 获取模型列表
         model_list = await client.models.list()
         # 提取模型ID并返回

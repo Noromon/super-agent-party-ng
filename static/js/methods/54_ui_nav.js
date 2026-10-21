@@ -81,7 +81,7 @@ Object.assign(vue_methods, {
             url = url.slice(0, -3);
           }
         }
-        else if (provider.vendor === 'customAnthropic'){
+        else if (provider.vendor === 'customAnthropic' || provider.vendor === 'OpenAIResponses'){
           url = provider.url;
         }
         else {
