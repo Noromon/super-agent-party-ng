@@ -424,5 +424,58 @@ Object.assign(vue_methods, {
       if (!visible && this.currentBrainSettings && this.currentBrainSettings.selectedProvider) {
         this.selectBrainProvider(this.currentBrainSettings.selectedProvider);
       }
+    },
+
+    async syncProviderConfig(targetConfig) {
+      if (targetConfig.selectedProvider) {
+        const provider = this.modelProviders.find(
+          p => p.id === targetConfig.selectedProvider && !p.disabled
+        );
+        if (provider) {
+          let targetUrl = provider.url;
+
+          // 判断当前同步的对象是否为 ccSettings (通过引用比较)
+          // 如果是 CC 配置，则应用特殊的 vendor_list 映射逻辑
+          if (targetConfig === this.ccSettings) {
+             const vendor_list = {
+              "Anthropic": "https://api.anthropic.com/",
+              "Deepseek": "https://api.deepseek.com/anthropic/",
+              "siliconflow": "https://api.siliconflow.cn/",
+              "ZhipuAI":"https://open.bigmodel.cn/api/anthropic/",
+              "moonshot":"https://api.moonshot.cn/anthropic/",
+              "aliyun": "https://dashscope.aliyuncs.com/apps/anthropic/",
+              "modelscope":"https://api-inference.modelscope.cn/",
+              "302.AI":"https://api.302.ai/cc/",
+              "MiMo":"https://api.xiaomimimo.com/anthropic/",
+              "longcat":"https://api.longcat.chat/anthropic/",
+              "newapi": provider.url.replace(/\/v1\/?$/, ''),
+              "Ollama":provider.url.replace(/\/v1\/?$/, '')
+            };
+            // 使用映射的 URL，如果没有匹配则回退到默认 url
+            targetUrl = vendor_list[provider.vendor] || provider.url;
+          }
+
+          // 同步核心配置 (注意：这里比较和赋值时使用 targetUrl)
+          const shouldUpdate = 
+            targetConfig.model !== provider.modelId ||
+            targetConfig.base_url !== targetUrl || // 比较 targetUrl
+            targetConfig.api_key !== provider.apiKey;
+            
+          if (shouldUpdate) {
+            targetConfig.model = provider.modelId || '';
+            targetConfig.base_url = targetUrl || ''; // 赋值 targetUrl
+            targetConfig.api_key = provider.apiKey || '';
+            console.log(`已同步 ${provider.vendor} 配置 (CC模式: ${targetConfig === this.ccSettings})`);
+          }
+        } else {
+          // ... (保持原本的清理逻辑不变)
+          console.warn('找不到匹配的供应商，已重置配置');
+          targetConfig.selectedProvider = null;
+          targetConfig.model = '';
+          targetConfig.base_url = '';
+          targetConfig.api_key = '';
+        }
+        await this.autoSaveSettings();
+      }
     }
 });

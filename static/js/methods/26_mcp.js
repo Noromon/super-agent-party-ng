@@ -358,5 +358,14 @@ Object.assign(vue_methods, {
         })
         this.showMCPConfirm = false
       }
+    },
+
+    updateMCPExample() {
+      this.currentMCPExample = this.mcpExamples[this.newMCPType];
+    },
+
+    toggleMCPServer(name, status) {
+      this.mcpServers[name].disabled = !status
+      this.autoSaveSettings()
     }
 });
