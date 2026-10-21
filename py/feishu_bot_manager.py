@@ -21,6 +21,7 @@ from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSet
 from py.random_topic import get_random_topics
 # 飞书机器人配置模型
 from py import llm_gate
+from py.base_bot import BaseBotManager
 
 class FeishuBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -38,197 +39,86 @@ class FeishuBotConfig(BaseModel):
     # 飞书特定的推送目标ID列表 (配置一次，永久有效)
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
-class FeishuBotManager:
+class FeishuBotManager(BaseBotManager):
+    """批 2 起为 BaseBotManager 的 Feishu adapter。
+
+    lark SDK 长连接编排（_connect/_ping_loop/自收消息循环）与行为引擎
+    stop+restart 编排保留在 run_client/_cleanup/stop_bot 覆写中。
+    """
+    PLATFORM_LABEL = "飞书"
+    THREAD_NAME = "FeishuBotThread"
+    SETTINGS_KEY = "feishuBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "feishu"
+    STOP_JOIN_TIMEOUT = 5
+    AUTO_START_ENGINE = False    # run_client 内 stop+restart 编排（原语义）
+
     def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
-        self.bot_client: Optional[FeishuClient] = None
-        self.is_running = False
-        self.config = None
-        self.loop = None
-        self._shutdown_event = threading.Event()
-        self._startup_complete = threading.Event()
-        self._ready_complete = threading.Event()
-        self._startup_error = None
+        super().__init__()
         self.ws = None  # 飞书长连接客户端
-        self._stop_requested = False  # 添加停止请求标志
-        
-    def start_bot(self, config):
-        """在新线程中启动飞书机器人"""
-        if self.is_running:
-            raise Exception("飞书机器人已在运行")
-            
-        self.config = config
-        self._shutdown_event.clear()
-        self._startup_complete.clear()
-        self._ready_complete.clear()
-        self._startup_error = None
-        self._stop_requested = False
-        
-        # 使用线程方式启动
-        self.bot_thread = threading.Thread(
-            target=self._run_bot_thread,
-            args=(config,),
-            daemon=True,
-            name="FeishuBotThread"
+
+    def build_client(self, config: FeishuBotConfig):
+        client = FeishuClient()
+        client.FeishuAgent = config.FeishuAgent
+        client.memoryLimit = config.memoryLimit
+        client.separators = config.separators if config.separators else ['。', '\n', '？', '！']
+        client.reasoningVisible = config.reasoningVisible
+        client.quickRestart = config.quickRestart
+        client.appid = config.appid
+        client.secret = config.secret
+        client.enableTTS = config.enableTTS
+        client.wakeWord = config.wakeWord
+
+        import lark_oapi as lark
+        client.lark_client = (lark.Client.builder()
+                              .app_id(config.appid)
+                              .app_secret(config.secret)
+                              .log_level(lark.LogLevel.INFO)
+                              .build())
+        event_dispatcher = (lark.EventDispatcherHandler.builder("", "")
+                            .register_p2_im_message_receive_v1(client.sync_handle_message)
+                            .build())
+        self.ws = lark.ws.Client(
+            config.appid,
+            config.secret,
+            event_handler=event_dispatcher,
+            log_level=lark.LogLevel.INFO,
+            auto_reconnect=False,
         )
-        self.bot_thread.start()
-        
-        # 等待启动确认
-        if not self._startup_complete.wait(timeout=30):
-            self.stop_bot()
-            raise Exception("飞书机器人连接超时")
-            
-        # 检查是否有启动错误
-        if self._startup_error:
-            self.stop_bot()
-            raise Exception(f"飞书机器人启动失败: {self._startup_error}")
-        
-        # 等待机器人就绪
-        if not self._ready_complete.wait(timeout=30):
-            self.stop_bot()
-            raise Exception("飞书机器人就绪超时，请检查网络连接和配置")
-            
-        if not self.is_running:
-            self.stop_bot()
-            raise Exception("飞书机器人未能正常运行")
-    
-    def _run_bot_thread(self, config):
-        """线程中运行飞书机器人"""
-        self.loop = None
-        
-        try:
-            # 创建新的事件循环
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            
-            # --- 1. 创建飞书客户端 ---
-            self.bot_client = FeishuClient()
-            self.bot_client.FeishuAgent = config.FeishuAgent
-            self.bot_client.memoryLimit = config.memoryLimit
-            self.bot_client.separators = config.separators if config.separators else ['。', '\n', '？', '！']
-            self.bot_client.reasoningVisible = config.reasoningVisible
-            self.bot_client.quickRestart = config.quickRestart
-            self.bot_client.appid = config.appid
-            self.bot_client.secret = config.secret
-            self.bot_client.enableTTS = config.enableTTS
-            self.bot_client.wakeWord = config.wakeWord
-            
-            # 设置弱引用和回调
-            self.bot_client._manager_ref = weakref.ref(self)
-            self.bot_client._ready_callback = self._on_bot_ready
+        return client
 
-            # --- 2. 关键修复：强制同步最新的行为配置 ---
-            # 即使传入的 config 不完整，这里也会重新加载全局设置来补全
-            try:
-                # 这是一个同步调用，在线程开始时运行是安全的
-                settings = asyncio.run(load_settings())
-                
-                # 获取行为设置
-                behavior_data = settings.get("behaviorSettings", {})
-                
-                # 获取飞书特定的目标列表 (可能在 config 里，也可能在 feishuBotConfig 里)
-                # 优先用 config 里的，如果没有则去 settings 找
-                target_ids = config.behaviorTargetChatIds
-                if not target_ids:
-                    feishu_conf = settings.get("feishuBotConfig", {})
-                    target_ids = feishu_conf.get("behaviorTargetChatIds", [])
-                
-                # 构造更新数据
-                if behavior_data:
-                    logging.info(f"飞书线程: 检测到行为配置，正在同步... 目标群组数: {len(target_ids)}")
-                    target_map = {"feishu": target_ids}
-                    # 更新全局引擎
-                    global_behavior_engine.update_config(behavior_data, target_map)
-                    # 更新本地 config 对象以保持一致
-                    config.behaviorSettings = behavior_data if isinstance(behavior_data, BehaviorSettings) else BehaviorSettings(**behavior_data)
-                    config.behaviorTargetChatIds = target_ids
-                else:
-                    logging.warning("飞书线程: 未找到行为配置 behaviorSettings")
-            except Exception as e:
-                logging.error(f"飞书线程同步行为配置失败: {e}")
-                import traceback
-                logging.getLogger("app").info(traceback.format_exc())
-            import lark_oapi as lark
-            # --- 3. 初始化飞书 SDK ---
-            lark_client = lark.Client.builder()\
-                .app_id(config.appid)\
-                .app_secret(config.secret)\
-                .log_level(lark.LogLevel.INFO)\
-                .build()
-                
-            self.bot_client.lark_client = lark_client
-            
-            # 创建事件处理程序
-            event_dispatcher = lark.EventDispatcherHandler.builder("", "")\
-                .register_p2_im_message_receive_v1(self.bot_client.sync_handle_message)\
-                .build()
-                
-            # 创建长连接
-            self.ws = lark.ws.Client(
-                config.appid, 
-                config.secret,
-                event_handler=event_dispatcher,
-                log_level=lark.LogLevel.INFO,
-                auto_reconnect=False
-            )
-            
-            # 在事件循环中运行WebSocket客户端
-            self.loop.run_until_complete(self._async_run_websocket())
-            
-        except Exception as e:
-            if not self._stop_requested:
-                logging.getLogger("app").info(f"飞书机器人线程异常: {e}")
-                if not self._startup_error:
-                    self._startup_error = str(e)
-            # 确保外部等待能解除
-            if not self._startup_complete.is_set():
-                self._startup_complete.set()
-            if not self._ready_complete.is_set():
-                self._ready_complete.set()
-        finally:
-            self._cleanup()  
+    def post_client_init(self, config):
+        self.bot_client._ready_callback = self._on_bot_ready
 
-    async def _async_run_websocket(self):
-        """异步运行WebSocket连接"""
+    async def run_client(self):
+        """建立长连接并编排 ping/收消息/行为引擎（原 _async_run_websocket）。"""
         try:
-            # 建立连接
             await self.ws._connect()
-            
-            # 设置启动完成标志
-            self._startup_complete.set()
+
             self._ready_complete.set()
             self.is_running = True
             logging.info("飞书机器人WebSocket连接已建立")
-            
-            # 启动ping循环
+
             ping_task = asyncio.create_task(self.ws._ping_loop())
-            
-            # 启动消息接收循环
             receive_task = asyncio.create_task(self._message_receive_loop())
-            
-            # --- 修复行为引擎启动逻辑 ---
-            # 1. 如果引擎声称在运行，但 loop 不一致，或者为了保险起见，先停止它
+
+            # 行为引擎适配当前事件循环：先停旧的再在线程 loop 内起（原语义）
             if global_behavior_engine.is_running:
                 logging.info("检测到行为引擎已在运行，正在重启以适配当前事件循环...")
                 global_behavior_engine.stop()
-                # 给一点时间让旧循环的 task 退出
                 await asyncio.sleep(0.5)
-
-            # 2. 在当前线程的 Loop 中启动引擎
             behavior_task = asyncio.create_task(global_behavior_engine.start())
             logging.info("行为引擎已在飞书线程启动")
-            
-            # 等待任务完成或停止信号
-            tasks = [ping_task, receive_task, behavior_task]
-                
+
             try:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(ping_task, receive_task, behavior_task,
+                                     return_exceptions=True)
             except asyncio.CancelledError:
                 logging.info("WebSocket任务被取消")
             except Exception as e:
                 if not self._stop_requested:
                     logging.getLogger("app").info(f"WebSocket任务异常: {e}")
-                    
+
         except Exception as e:
             if not self._stop_requested:
                 logging.getLogger("app").info(f"WebSocket连接失败: {e}")
@@ -241,39 +131,28 @@ class FeishuBotManager:
             while not self._stop_requested and not self._shutdown_event.is_set():
                 if self.ws._conn is None:
                     break
-                    
+
                 try:
-                    # 设置超时接收消息
                     msg = await asyncio.wait_for(self.ws._conn.recv(), timeout=1.0)
-                    # 处理消息
                     asyncio.create_task(self.ws._handle_message(msg))
                 except asyncio.TimeoutError:
-                    # 超时是正常的，继续循环
                     continue
                 except Exception as e:
                     if not self._stop_requested:
                         logging.getLogger("app").info(f"接收消息异常: {e}")
                     break
-                    
+
         except asyncio.CancelledError:
             logging.info("消息接收循环被取消")
         except Exception as e:
             if not self._stop_requested:
                 logging.getLogger("app").info(f"消息接收循环异常: {e}")
-    
-    def _on_bot_ready(self):
-        """机器人就绪回调"""
-        self.is_running = True
-        if not self._ready_complete.is_set():
-            self._ready_complete.set()
-        logging.info("飞书机器人已完全就绪")
 
     def _cleanup(self):
-        """清理资源"""
+        """清理：行为引擎 → 长连接 → 事件循环 drain（飞书精细版）。"""
         self.is_running = False
         logging.info("开始清理飞书机器人资源...")
-        
-        # 1. 停止行为引擎 (至关重要)
+
         try:
             if global_behavior_engine.is_running:
                 global_behavior_engine.stop()
@@ -281,7 +160,6 @@ class FeishuBotManager:
         except Exception as e:
             logging.warning(f"停止行为引擎失败: {e}")
 
-        # 2. 关闭长连接
         if self.ws and self.loop and not self.loop.is_closed():
             try:
                 if asyncio.iscoroutinefunction(self.ws._disconnect):
@@ -289,92 +167,76 @@ class FeishuBotManager:
                 logging.info("飞书长连接已关闭")
             except Exception as e:
                 logging.warning(f"关闭飞书长连接时出错: {e}")
-        
-        # 3. 清理事件循环
+
         if self.loop and not self.loop.is_closed():
             try:
                 pending = asyncio.all_tasks(self.loop)
                 for task in pending:
                     if not task.done():
                         task.cancel()
-                
                 if pending:
                     try:
                         self.loop.run_until_complete(
-                            asyncio.gather(*pending, return_exceptions=True)
-                        )
-                    except Exception as e:
+                            asyncio.gather(*pending, return_exceptions=True))
+                    except Exception:
                         pass
-                
                 self.loop.close()
                 logging.info("事件循环已关闭")
             except Exception as e:
                 logging.warning(f"关闭事件循环时出错: {e}")
-                
+
         self.bot_client = None
         self.loop = None
         self.ws = None
         self._shutdown_event.set()
-        logging.info("飞书机器人资源清理完成")    
+        logging.info("飞书机器人资源清理完成")
 
     def stop_bot(self):
-        """停止飞书机器人"""
         if not self.is_running and not self.bot_thread:
             logging.info("飞书机器人未在运行")
             return
-            
+
         logging.info("正在停止飞书机器人...")
-        
-        # 设置停止标志
         self._stop_requested = True
         self._shutdown_event.set()
         self.is_running = False
-        
-        # 如果有事件循环，尝试优雅停止
+
         if self.loop and not self.loop.is_closed():
             try:
-                # 获取所有任务并取消它们
                 try:
                     pending = asyncio.all_tasks(self.loop)
                     for task in pending:
                         if not task.done():
                             task.cancel()
                 except RuntimeError:
-                    pass  # 事件循环可能已经关闭
-                    
-                # 关闭WebSocket连接
+                    pass
+
                 if self.ws and hasattr(self.ws, '_disconnect'):
                     try:
                         future = asyncio.run_coroutine_threadsafe(
-                            self.ws._disconnect(), 
-                            self.loop
-                        )
+                            self.ws._disconnect(), self.loop)
                         future.result(timeout=2)
                         logging.info("WebSocket连接已关闭")
                     except Exception as e:
                         logging.warning(f"关闭WebSocket连接时出错: {e}")
-                        
             except Exception as e:
                 logging.warning(f"优雅停止过程中出错: {e}")
-        
-        # 等待线程结束
+
         if self.bot_thread and self.bot_thread.is_alive():
             try:
                 logging.info("等待飞书机器人线程结束...")
-                self.bot_thread.join(timeout=5)
+                self.bot_thread.join(timeout=self.STOP_JOIN_TIMEOUT)
                 if self.bot_thread.is_alive():
                     logging.warning("飞书机器人线程在5秒超时后仍在运行，但这是预期的清理行为")
                 else:
                     logging.info("飞书机器人线程已正常结束")
             except Exception as e:
                 logging.warning(f"等待线程结束时出错: {e}")
-        
-        # 重置停止标志
+
         self._stop_requested = False
         logging.info("飞书机器人停止操作完成")
 
     def get_status(self):
-        """获取机器人状态"""
         return {
             "is_running": self.is_running,
             "thread_alive": self.bot_thread.is_alive() if self.bot_thread else False,
@@ -384,41 +246,20 @@ class FeishuBotManager:
             "startup_error": self._startup_error,
             "connection_established": self._startup_complete.is_set(),
             "ready_completed": self._ready_complete.is_set(),
-            "stop_requested": self._stop_requested
+            "stop_requested": self._stop_requested,
         }
 
     def __del__(self):
-        """析构函数确保资源清理"""
         try:
             self.stop_bot()
-        except:
+        except Exception:
             pass
 
-    def update_behavior_config(self, config: FeishuBotConfig):
-        """
-        热更新行为配置，不重启机器人
-        """
-        # 更新 Manager 的本地记录
-        self.config = config
-        
-        # 1. 更新 Client 内部的实时参数
-        if self.bot_client:
-            self.bot_client.FeishuAgent = config.FeishuAgent 
-            self.bot_client.enableTTS = config.enableTTS
-            self.bot_client.wakeWord = config.wakeWord
-
-        # 2. 更新全局行为引擎
-        # 构造平台目标映射
-        target_map = {
-            "feishu": config.behaviorTargetChatIds
-        }
-        
-        # 调用引擎更新 (会自动重置计时器)
-        global_behavior_engine.update_config(
-            config.behaviorSettings,
-            target_map
-        )
-        logging.info("飞书机器人: 行为配置已热更新，计时器已重置")
+    def apply_live_fields(self, client, config: FeishuBotConfig):
+        client.FeishuAgent = config.FeishuAgent
+        client.enableTTS = config.enableTTS
+        client.wakeWord = config.wakeWord
+        client.config = config
 
 
 class FeishuClient:
@@ -507,7 +348,6 @@ class FeishuClient:
         logging.info(f"收到 {msg.chat_type} 消息，类型：{msg_type}")
         
         # 2. 初始化 API 客户端
-        from py.get_setting import load_settings
         settings = await load_settings()
         client = AsyncOpenAI(
             api_key="super-secret-key",
