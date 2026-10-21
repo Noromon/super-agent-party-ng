@@ -1,23 +1,27 @@
 # -*- coding: utf-8 -*-
 """Background task and stream control endpoints (task create/list/
 cancel/delete, stream cancel, chat resume) moved verbatim out of
-server.py in the R1 router migration (audit 09 item 6).  Process state defined by server is reached through
-the module object bound below (`_srv`); server runs as __main__ when
-launched directly, so we bind the OBJECT once and attributes resolve at
-request time (lifespan rebinds stay visible).  server imports this
-module, never the other way around.
+server.py in the R1 router migration (audit 09 item 6).
+批 1：断点续传活跃流状态迁至 py/stream_relay.py，本模块直接 import，
+不再经 server 模块对象反查（消除 `_srv` 暗桩）。
 """
-import sys as _sys
 import asyncio
+import logging
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pathlib import Path
 from py.get_setting import load_settings
 from py.sub_agent import run_subtask_in_background
 from py.task_center import get_task_center
+from py.stream_relay import (
+    _active_streams, _active_streams_lock, _cleanup_stream,
+    _release_consumer, _stream_consumer_generator,
+)
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
+
+logger = logging.getLogger("app")
 
 class StreamResumeRequest(BaseModel):
     stream_id: str
@@ -33,10 +37,6 @@ class TaskCreateRequest(BaseModel):
     trigger_config: Optional[Dict[str, Any]] = None
 
 
-# bind the server module OBJECT once (see docstring); attributes
-# resolve per request so lifespan rebinds stay visible
-_srv = _sys.modules.get('server') or _sys.modules['__main__']
-
 router = APIRouter()
 
 @router.post("/v1/streams/cancel/{stream_id}")
@@ -46,8 +46,8 @@ async def cancel_stream_endpoint(stream_id: str):
     围栏语义：取消后 stream_generator 在每次工具调度与后续 LLM 轮次前
     检查 cancelled 并立即终止，不再产生任何工具副作用。
     """
-    async with _srv._active_streams_lock:
-        entry = _srv._active_streams.get(stream_id)
+    async with _active_streams_lock:
+        entry = _active_streams.get(stream_id)
         if not entry:
             return JSONResponse(status_code=404, content={"cancelled": False, "stream_id": stream_id})
         entry["cancelled"] = True
@@ -56,8 +56,8 @@ async def cancel_stream_endpoint(stream_id: str):
     if task and not task.done():
         task.cancel()
     # T-4: cancel 后必须排程清理（count 门槛保护活跃消费者；未清者由 TTL sweeper 兜底）
-    asyncio.create_task(_srv._cleanup_stream(stream_id, delay=5.0))
-    _srv.logger.info(f"Stream {stream_id} cancelled by user")
+    asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
+    logger.info(f"Stream {stream_id} cancelled by user")
     return {"cancelled": True, "stream_id": stream_id}
 
 
@@ -70,7 +70,7 @@ async def resume_stream_endpoint(req: StreamResumeRequest):
     stream_id = req.stream_id
     from_index = req.from_index
 
-    entry = _srv._active_streams.get(stream_id)
+    entry = _active_streams.get(stream_id)
     if not entry:
         return JSONResponse(
             status_code=404,
@@ -87,11 +87,11 @@ async def resume_stream_endpoint(req: StreamResumeRequest):
 
     async def _resume_consumer():
         try:
-            async for chunk in _srv._stream_consumer_generator(stream_id, from_index):
+            async for chunk in _stream_consumer_generator(stream_id, from_index):
                 yield chunk
         finally:
             # T-4: 统一经 helper 释放（与消费者计数语义同源）
-            _srv._release_consumer(stream_id)
+            _release_consumer(stream_id)
 
     return StreamingResponse(
         _resume_consumer(),

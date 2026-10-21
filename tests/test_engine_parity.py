@@ -15,8 +15,10 @@ SRC = (ROOT / "server.py").read_text(encoding="utf-8")
 
 def _func_src(name):
     # R1 router migration: endpoint functions may live in py/routers/*.py
-    sources = [SRC] + [f.read_text(encoding="utf-8")
-                       for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
+    # 批 1: 断点续传中继函数已迁 py/stream_relay.py
+    sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8")] + \
+        [f.read_text(encoding="utf-8")
+         for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
     for src in sources:
         tree = ast.parse(src)
         for node in ast.walk(tree):

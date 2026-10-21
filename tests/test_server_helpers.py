@@ -9,14 +9,14 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _extract(names):
+def _extract(names, rel="server.py"):
     wanted_assigns, wanted_funcs = set(), set()
     for n in names:
         if n.isupper():
             wanted_assigns.add(n)
         else:
             wanted_funcs.add(n)
-    tree = ast.parse((ROOT / "server.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
     ns = {}
     picked = 0
     for node in tree.body:
@@ -111,7 +111,8 @@ class TestStreamTtlSweep:
     def ns(self):
         import logging
         import time as _time
-        ns = _extract(["_stream_ttl_sweep", "_STREAM_TTL_DONE", "_STREAM_TTL_HARD"])
+        ns = _extract(["_stream_ttl_sweep", "_STREAM_TTL_DONE", "_STREAM_TTL_HARD"],
+                      rel="py/stream_relay.py")
         ns["time"] = _time
         ns["logger"] = logging.getLogger("t")
         return ns
@@ -148,8 +149,10 @@ class TestStreamTtlSweep:
 
     def test_release_helper_defined_and_used(self):
         # R1 router migration: the resume call site moved to py/routers/tasks.py
+        # 批 1: 中继核心迁 py/stream_relay.py
         src = (ROOT / "server.py").read_text(encoding="utf-8")
         src += (ROOT / "py" / "routers" / "tasks.py").read_text(encoding="utf-8")
+        src += (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8")
         assert src.count("_release_consumer(stream_id)") >= 2
 
 
