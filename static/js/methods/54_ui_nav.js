@@ -223,5 +223,73 @@ openAiBrowser(){
   this.chromeMCPSettings.type = 'internal';
   this.chromeMCPSettings.enabled = true;
   this.changeChromeMCPEnabled();
-}
+},
+
+    async handleSelect(key) {
+      if (key === 'model-config') {
+        this.activeMenu = 'model-config';
+        this.subMenu = 'service'; // 默认显示第一个子菜单
+      }
+      else if (key === 'role') {
+        this.activeMenu = 'role';
+        this.subMenu = 'memory'; // 默认显示第一个子菜单
+      }
+      else if (key === 'toolkit') {
+        this.activeMenu = 'toolkit';
+        this.subMenu = 'tools'; // 默认显示第一个子菜单
+      }
+      else if (key === 'api-group') {
+        this.activeMenu = 'api-group';
+        this.subMenu = 'openai'; // 默认显示第一个子菜单
+      }
+      else if (key === 'storage') {
+        this.activeMenu = 'storage';
+        this.subMenu = 'text'; // 默认显示第一个子菜单
+        const response = await fetch(`/update_storage`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+        });
+        if (response.ok) {
+          console.log('Storage files updated successfully');
+          const data = await response.json();
+          this.textFiles = data.textFiles;
+          this.imageFiles = data.imageFiles;
+          this.videoFiles = data.videoFiles;
+          this.autoSaveSettings();
+        }
+        else {
+          console.error('Failed to update storage files');
+        }
+      }
+      else if (key === 'deploy-bot') {
+        this.activeMenu = 'deploy-bot';
+        this.subMenu = 'table_pet'; // 默认显示第一个子菜单
+      }
+      else {
+        this.activeMenu = key;
+      }
+      this.activeMenu = key;
+    },
+
+    toggleIcon() {
+      this.isExpanded = !this.isExpanded; // 点击时切换状态
+      this.maximizeWindow();
+    },
+
+    throttledUpdate(index, newContent) {
+      // 更新原始数据
+      this.messages[index].content = newContent;
+      
+      // 如果已经有定时器在跑，则跳过（防抖）
+      if (this.renderTimers[index]) return;
+
+      this.renderTimers[index] = setTimeout(() => {
+        // 执行真正的渲染
+        this.messages[index].renderedHtml = this.formatMessage(newContent, index);
+        // 清除定时器
+        this.renderTimers[index] = null;
+      }, 80); // 80ms 延迟，约等于 12fps，人眼感觉流畅且不卡顿
+    }
 });

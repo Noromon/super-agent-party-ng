@@ -530,5 +530,35 @@ Object.assign(vue_methods, {
         console.error('Failed to sync group memory:', error);
         showNotification(this.t('memorySyncFailed'), 'error');
       }
+    },
+
+    async deleteConversationGroup(groupId, options = {}) {
+      this.ensureConversationGroups();
+      if (!groupId || groupId === 'default') return;
+
+      const groupConversationIds = this.conversations
+        .filter(conv => (conv.groupId || 'default') === groupId)
+        .map(conv => conv.id);
+
+        for (const conversationId of groupConversationIds) {
+          await this.deleteConversationById(conversationId, {
+            deleteMemory: true,
+          });
+        }
+        await this.clearGroupMemoriesByGroupId(groupId);
+
+        this.conversationGroups = this.conversationGroups.filter(group => group.id !== groupId);
+
+      if (this.draftConversationGroupId === groupId) {
+        this.draftConversationGroupId = 'default';
+      }
+      if (this.activeConversationGroupId === groupId) {
+        this.activeConversationGroupId = 'default';
+      }
+
+      await this.saveConversations();
+      if (!options.silent) {
+        showNotification(this.t('groupDeleted'), 'success');
+      }
     }
 });

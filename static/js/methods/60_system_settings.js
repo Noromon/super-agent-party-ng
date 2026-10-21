@@ -823,5 +823,10 @@ openEnvPage(menu) {
         this.visionControlSettings.isFullScreen = true;
         this.autoSaveSettings();
       }
+    },
+
+    changeImgHost(val) {
+      this.BotConfig.img_host = val;
+      this.autoSaveSettings()
     }
 });
