@@ -20,7 +20,7 @@ SRV_REF_CAPS = {
     "bots.py": 0,
     "files.py": 0,
     "media.py": 0,
-    "memories.py": 25,
+    "memories.py": 15,
     "status.py": 0,
     "system.py": 0,
     "tasks.py": 0,

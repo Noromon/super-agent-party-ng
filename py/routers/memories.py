@@ -12,6 +12,8 @@ import logging
 import sys as _sys
 
 from py import app_state
+from py.memory_store import (load_index_and_meta, save_index_and_meta,
+                             flatten_records, dict_to_list, list_to_dict)
 import asyncio
 import json
 import os
@@ -206,8 +208,8 @@ async def get_kb_status(kb_id):
 
 @router.get("/memory/{memory_id}")
 async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
-    _, meta_dict = _srv.load_index_and_meta(memory_id)   # 拆包
-    return _srv.flatten_records(meta_dict)               # 传字典
+    _, meta_dict = load_index_and_meta(memory_id)   # 拆包
+    return flatten_records(meta_dict)               # 传字典
 
 
 @router.post("/memory/{memory_id}")
@@ -239,15 +241,15 @@ async def update_text(
     idx: int,
     body: TextUpdate = Body(...)
 ) -> dict:
-    index, meta_dict = _srv.load_index_and_meta(memory_id)
-    meta_list = _srv.dict_to_list(meta_dict)
+    index, meta_dict = load_index_and_meta(memory_id)
+    meta_list = dict_to_list(meta_dict)
     if not (0 <= idx < len(meta_list)):
         raise HTTPException(status_code=404, detail="index out of range")
     # 定位 → 改 data
     uuid, rec = next(iter(meta_list[idx].items()))
     rec["data"] = body.new_text
     # 写回
-    _srv.save_index_and_meta(memory_id, index, _srv.list_to_dict(meta_list))
+    save_index_and_meta(memory_id, index, list_to_dict(meta_list))
     return {"message": "updated", "idx": idx}
 
 
@@ -255,8 +257,8 @@ async def update_text(
 async def delete_text(memory_id: str, idx: int) -> dict:
     import faiss
     import numpy as np
-    index, meta_dict = _srv.load_index_and_meta(memory_id)
-    meta_list = _srv.dict_to_list(meta_dict)
+    index, meta_dict = load_index_and_meta(memory_id)
+    meta_list = dict_to_list(meta_dict)
     if not (0 <= idx < len(meta_list)):
         raise HTTPException(status_code=404, detail="index out of range")
 
@@ -277,6 +279,6 @@ async def delete_text(memory_id: str, idx: int) -> dict:
     del meta_list[idx]
 
     # 3. 落盘
-    _srv.save_index_and_meta(memory_id, new_index, _srv.list_to_dict(meta_list))
+    save_index_and_meta(memory_id, new_index, list_to_dict(meta_list))
     return {"message": "deleted", "idx": idx}
 
