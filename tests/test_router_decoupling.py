@@ -19,7 +19,7 @@ SRV_REF_CAPS = {
     "bot_conversations.py": 29,
     "bots.py": 60,
     "files.py": 25,
-    "media.py": 5,
+    "media.py": 1,
     "memories.py": 25,
     "status.py": 0,
     "system.py": 4,

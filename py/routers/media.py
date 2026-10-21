@@ -13,6 +13,7 @@ import logging
 import sys as _sys
 
 from py import app_state
+from py.voice import funasr_recognize_offline, tts_manager
 import asyncio
 import base64
 import json
@@ -112,7 +113,7 @@ async def asr_transcription(
         elif asr_engine == "funasr":
             logging.getLogger("app").info("Using FunASR engine (offline mode)")
             # 假设 funasr_recognize_offline 内部已处理好性能问题
-            result = await _srv.funasr_recognize_offline(audio_bytes, asr_settings)
+            result = await funasr_recognize_offline(audio_bytes, asr_settings)
             
         # ==========================================
         # ASR 引擎分支：Sherpa (本地)
@@ -162,10 +163,10 @@ async def asr_transcription(
 @router.get("/tts/status")
 async def get_tts_status():
     return {
-        "vrm_connections": len(_srv.tts_manager.vrm_connections),
+        "vrm_connections": len(tts_manager.vrm_connections),
         "vts_active": vts_instance.is_running, # 新增
-        "overlay_connections": len(_srv.tts_manager.overlay_connections),
-        "main_connections": len(_srv.tts_manager.main_connections)
+        "overlay_connections": len(tts_manager.overlay_connections),
+        "main_connections": len(tts_manager.main_connections)
     }
 
 

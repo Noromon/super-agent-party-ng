@@ -169,6 +169,7 @@ max-complexity = 60
 "py/twitch_service.py" = ["E722", "F401", "F541"]
 "py/utility_tools.py" = ["F401", "F541"]
 "py/vts_manager.py" = ["E701", "E722"]
+"py/voice.py" = ["E402", "E701", "E722", "F841"]
 "py/web_search.py" = ["E402", "E721", "F401", "F541", "F811"]
 "py/wechat_bot_manager.py" = ["E701", "E722", "F401", "F541"]
 "py/wecom_bot_manager.py" = ["E701", "E722", "F401"]

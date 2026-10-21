@@ -198,8 +198,12 @@ class TestGateBlindSpotClosure:
             funcs = [n for n in _ast.walk(tree)
                      if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))]
             for node in _ast.walk(tree):
+                # 注释对齐：闸针对 chat 系出口（chat.completions/embeddings/
+                # responses）；whisper 转写等非 chat API 不占 mem0 防撞闸
                 if (isinstance(node, _ast.Call) and isinstance(node.func, _ast.Attribute)
-                        and node.func.attr == "create"):
+                        and node.func.attr == "create"
+                        and isinstance(node.func.value, _ast.Attribute)
+                        and node.func.value.attr in ("completions", "embeddings", "responses")):
                     chain = [g for g in funcs if g.lineno <= node.lineno <= g.end_lineno]
                     if not chain:
                         bad.append((path.name, "<module>", node.lineno))
