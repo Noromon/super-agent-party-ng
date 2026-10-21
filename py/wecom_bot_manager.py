@@ -20,6 +20,7 @@ from aibot import WSClient, WSClientOptions, generate_req_id
 
 # 企业微信机器人配置模型
 from py import llm_gate
+from py.base_bot import BaseBotManager
 
 class WeComBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -34,94 +35,39 @@ class WeComBotConfig(BaseModel):
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
-class WeComBotManager:
-    def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
-        self.bot_client: Optional['WeComClient'] = None
-        self.is_running = False
-        self.config = None
-        self.loop = None
-        self._shutdown_event = threading.Event()
-        self._startup_complete = threading.Event()
-        self._ready_complete = threading.Event()
-        self._startup_error = None
-        self._stop_requested = False
-        
-    def start_bot(self, config: WeComBotConfig):
-        if self.is_running:
-            raise Exception("企业微信机器人已在运行")
-            
-        self.config = config
-        self._shutdown_event.clear()
-        self._startup_complete.clear()
-        self._ready_complete.clear()
-        self._startup_error = None
-        self._stop_requested = False
-        
-        self.bot_thread = threading.Thread(
-            target=self._run_bot_thread,
-            args=(config,),
-            daemon=True,
-            name="WeComBotThread"
-        )
-        self.bot_thread.start()
-        
-        if not self._startup_complete.wait(timeout=30):
-            self.stop_bot()
-            raise Exception("企业微信机器人连接超时")
-            
-        if self._startup_error:
-            self.stop_bot()
-            raise Exception(f"企业微信启动失败: {self._startup_error}")
-        
-    def _run_bot_thread(self, config):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        
-        try:
-            self.bot_client = WeComClient()
-            self.bot_client.WeComAgent = config.WeComAgent
-            self.bot_client.memoryLimit = config.memoryLimit
-            self.bot_client.reasoningVisible = config.reasoningVisible
-            self.bot_client.quickRestart = config.quickRestart
-            self.bot_client.wakeWord = config.wakeWord
-            self.bot_client._manager_ref = weakref.ref(self)
-            
-            # 初始加载时同步行为配置
-            try:
-                settings = self.loop.run_until_complete(load_settings())
-                behavior_data = settings.get("behaviorSettings", {})
-                target_ids = config.behaviorTargetChatIds or settings.get("weComBotConfig", {}).get("behaviorTargetChatIds", [])
-                
-                if behavior_data:
-                    global_behavior_engine.update_config(behavior_data, {"wecom": target_ids})
-                    logging.info(f"[WeComManager] 初始行为引擎配置已同步，目标数: {len(target_ids)}")
-            except Exception as e:
-                logging.error(f"企微初始同步行为配置失败: {e}")
+class WeComBotManager(BaseBotManager):
+    """批 2 起为 BaseBotManager 的 WeCom adapter；WS 长连接编排、消息与
+    行为回调为平台私产，保留在 WeComClient。"""
+    PLATFORM_LABEL = "企业微信"
+    THREAD_NAME = "WeComBotThread"
+    SETTINGS_KEY = "weComBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "wecom"
+    STOP_JOIN_TIMEOUT = 3
+    AUTO_START_ENGINE = False    # 原语义：run_client 内 stop+restart 编排
 
-            self.loop.run_until_complete(self._async_run_websocket())
-            
-        except Exception as e:
-            if not self._stop_requested:
-                logging.error(f"企业微信线程异常: {e}")
-                self._startup_error = str(e)
-            self._startup_complete.set()
-            self._ready_complete.set()
-        finally:
-            self._cleanup()
+    def build_client(self, config: WeComBotConfig):
+        client = WeComClient()
+        client.WeComAgent = config.WeComAgent
+        client.memoryLimit = config.memoryLimit
+        client.reasoningVisible = config.reasoningVisible
+        client.quickRestart = config.quickRestart
+        client.wakeWord = config.wakeWord
+        return client
 
-    async def _async_run_websocket(self):
+    async def run_client(self):
+        from py.behavior_engine import global_behavior_engine
         try:
             options = WSClientOptions(bot_id=self.config.bot_id, secret=self.config.secret)
             self.bot_client.ws_client = WSClient(options)
             self.bot_client.register_events()
-            
+
             if global_behavior_engine.is_running:
                 global_behavior_engine.stop()
                 await asyncio.sleep(0.5)
             asyncio.create_task(global_behavior_engine.start())
-            
-            # 标记状态
+
+            # 标记状态（企微原语义：建连前即乐观标记，startup 与 ready 同步置位）
             self.is_running = True
             self._startup_complete.set()
             self._ready_complete.set()
@@ -131,7 +77,7 @@ class WeComBotManager:
             await self.bot_client.ws_client.connect()
             while not self._stop_requested:
                 await asyncio.sleep(1.0)
-                
+
         except Exception as e:
             self.is_running = False
             if not self._stop_requested:
@@ -140,36 +86,25 @@ class WeComBotManager:
             raise
 
     def _cleanup(self):
-        self.is_running = False
         if self.bot_client and self.bot_client.ws_client:
-            try: self.bot_client.ws_client.disconnect()
-            except: pass
-        if self.loop and not self.loop.is_closed():
-            try: self.loop.close()
-            except: pass
-        self._shutdown_event.set()
-
-    def stop_bot(self):
-        self._stop_requested = True
-        self.is_running = False
-        if self.bot_thread and self.bot_thread.is_alive():
-            self.bot_thread.join(timeout=3)
+            try:
+                self.bot_client.ws_client.disconnect()
+            except Exception:
+                pass
+        super()._cleanup()
 
     def get_status(self):
         return {
             "is_running": self.is_running,
             "thread_alive": self.bot_thread.is_alive() if self.bot_thread else False,
             "config": self.config.model_dump() if self.config else None,
-            "startup_error": self._startup_error
+            "startup_error": self._startup_error,
         }
 
-    def update_behavior_config(self, config: WeComBotConfig):
-        self.config = config
-        if self.bot_client:
-            self.bot_client.WeComAgent = config.WeComAgent 
-            self.bot_client.wakeWord = config.wakeWord
-        global_behavior_engine.update_config(config.behaviorSettings, {"wecom": config.behaviorTargetChatIds})
-        logging.getLogger("app").info(f"[WeComManager] 行为配置已成功热更新，目标数: {len(config.behaviorTargetChatIds)}")
+    def apply_live_fields(self, client, config: WeComBotConfig):
+        client.WeComAgent = config.WeComAgent
+        client.wakeWord = config.wakeWord
+        client.config = config
 
 
 class WeComClient:

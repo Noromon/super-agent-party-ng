@@ -37,6 +37,7 @@ class BaseBotManager:
     STARTUP_TIMEOUT = 30
     READY_TIMEOUT = 30
     STOP_JOIN_TIMEOUT = 5
+    AUTO_START_ENGINE = True     # False=行为引擎生命周期由平台 run_client 自行编排
 
     def __init__(self):
         self.bot_thread = None
@@ -120,7 +121,7 @@ class BaseBotManager:
                 self.bot_client._manager_ref = weakref.ref(self)
                 self.post_client_init(config)
 
-                if not global_behavior_engine.is_running:
+                if self.AUTO_START_ENGINE and not global_behavior_engine.is_running:
                     asyncio.create_task(global_behavior_engine.start())
                     logging.info(f"行为引擎已在 {self.PLATFORM_LABEL} 线程启动")
 

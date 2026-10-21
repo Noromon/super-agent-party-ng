@@ -23,6 +23,7 @@ from py.random_topic import get_random_topics
 
 # 配置模型
 from py import llm_gate
+from py.base_bot import BaseBotManager
 
 class DingtalkBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -38,108 +39,76 @@ class DingtalkBotConfig(BaseModel):
     behaviorSettings: Optional[BehaviorSettings] = None
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
-class DingtalkBotManager:
+class DingtalkBotManager(BaseBotManager):
+    """批 2 起为 BaseBotManager 的 Dingtalk adapter。
+
+    D1（已批准）：start_bot 不再抢先置 is_running——client 长驻任务经
+    稳定窗口（START_SETTLE_SECONDS）未抛错才就绪；快速失败经
+    _startup_error 传播。行为引擎与长连接同生命周期（run_client 编排，
+    AUTO_START_ENGINE=False）。
+    """
+    PLATFORM_LABEL = "钉钉"
+    THREAD_NAME = "DingtalkBotThread"
+    SETTINGS_KEY = "dingtalkBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "dingtalk"
+    STOP_JOIN_TIMEOUT = 5
+    AUTO_START_ENGINE = False
+    START_SETTLE_SECONDS = 5
+
     def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
-        self.is_running = False
-        self.config = None
-        self._startup_error = None
+        super().__init__()
         self.client = None
-        
-    def start_bot(self, config: DingtalkBotConfig):
-        if self.is_running:
-            raise Exception("钉钉机器人已在运行")
-        self.config = config
-        self._startup_error = None
-        self.bot_thread = threading.Thread(target=self._run_bot_thread, args=(config,), daemon=True)
-        self.bot_thread.start()
-        self.is_running = True
+        self.bot_logic = None
 
-    def _run_bot_thread(self, config):
-        """线程中运行钉钉机器人：修复版"""
-        async def main_loop():
-            try:
-                # 1. 初始化逻辑类
-                self.bot_logic = DingtalkClientLogic(config)
-                
-                # 2. 强制同步最新的行为配置
-                from py.get_setting import load_settings
-                settings = await load_settings()
-                behavior_data = settings.get("behaviorSettings", {})
-                target_ids = config.behaviorTargetChatIds or []
-                
-                if behavior_data:
-                    logging.info(f"[Dingtalk] 同步行为配置中... 目标数: {len(target_ids)}")
-                    global_behavior_engine.update_config(behavior_data, {"dingtalk": target_ids})
+    def build_client(self, config: DingtalkBotConfig):
+        self.bot_logic = DingtalkClientLogic(config)
+        credential = dingtalk_stream.Credential(config.appKey, config.appSecret)
+        client = dingtalk_stream.DingTalkStreamClient(credential)
+        client.register_callback_handler(ChatbotMessage.TOPIC, DingtalkInternalHandler(self.bot_logic))
+        self.client = client  # run_client/stop 沿用平台原属性名
+        return client
 
-                # 3. 初始化钉钉官方 SDK (使用异步模式)
-                credential = dingtalk_stream.Credential(config.appKey, config.appSecret)
-                # 注意：这里我们手动管理 Loop
-                self.client = dingtalk_stream.DingTalkStreamClient(credential)
-                
-                handler = DingtalkInternalHandler(self.bot_logic)
-                self.client.register_callback_handler(ChatbotMessage.TOPIC, handler)
-                
-                logging.info("[Dingtalk] 正在并发启动：行为引擎 + 钉钉长连接...")
-
-                # 4. 【核心修复】用 gather 同时运行两个异步长任务
-                # client.start() 是异步的，不会阻塞 loop
-                await asyncio.gather(
-                    global_behavior_engine.start(),
-                    self.client.start()
-                )
-                
-            except Exception as e:
-                self._startup_error = str(e)
-                logging.error(f"[Dingtalk] 异步循环异常: {e}")
-            finally:
-                self.is_running = False
-                global_behavior_engine.stop()
-
-        # 在子线程中启动全新的 asyncio 事件循环
+    async def run_client(self):
+        from py.behavior_engine import global_behavior_engine
+        logging.info("[Dingtalk] 正在并发启动：行为引擎 + 钉钉长连接...")
+        eng_task = asyncio.create_task(global_behavior_engine.start())
+        cli_task = asyncio.create_task(self.client.start())
         try:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(main_loop())
-        except Exception as e:
-            logging.error(f"[Dingtalk] 线程退出: {e}")
+            done, _ = await asyncio.wait(
+                {cli_task}, timeout=self.START_SETTLE_SECONDS,
+                return_when=asyncio.FIRST_COMPLETED)
+            if cli_task in done and cli_task.exception():
+                raise cli_task.exception()
+            self.is_running = True
+            self._ready_complete.set()
+            logging.info("[Dingtalk] 机器人已完全就绪")
+            await asyncio.wait({cli_task, eng_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in (cli_task, eng_task):
+                if not t.done():
+                    t.cancel()
+            global_behavior_engine.stop()
 
-    def stop_bot(self):
+    def on_stop_requested(self):
         if self.client:
-            try: self.client.stop()
-            except: pass
-        self.is_running = False
+            try:
+                self.client.stop()
+            except Exception:
+                pass
 
     def get_status(self):
         return {
             "is_running": self.is_running,
             "has_error": self._startup_error is not None,
             "error_message": self._startup_error,
-            "config_loaded": self.config is not None
+            "config_loaded": self.config is not None,
         }
 
-    def update_behavior_config(self, config: DingtalkBotConfig):
-        """
-        热更新行为配置，不重启机器人
-        """
-        # 更新 Manager 的本地记录
-        self.config = config
-        
-        # 1. 更新 Logic 内部的实时参数
+    def apply_live_fields(self, client, config: DingtalkBotConfig):
         if self.bot_logic:
             self.bot_logic.config = config
 
-        # 2. 更新全局行为引擎
-        target_map = {
-            "dingtalk": config.behaviorTargetChatIds
-        }
-        
-        # 调用引擎更新 (会自动重置计时器)
-        global_behavior_engine.update_config(
-            config.behaviorSettings,
-            target_map
-        )
-        logging.getLogger("app").info("钉钉机器人: 行为配置已热更新，计时器已重置")
 
 class DingtalkInternalHandler(dingtalk_stream.ChatbotHandler):
     def __init__(self, bot_logic):

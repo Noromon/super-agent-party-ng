@@ -395,8 +395,6 @@ BOTS = [
                      appSecret="as", separators=["。"], reasoningVisible=False,
                      quickRestart=True, enableTTS=False, wakeWord=""),
         "patches": _dingtalk_patches,
-        "failure_drift": "dingtalk start_bot 立即置 is_running 不等待就绪，"
-                         "启动错误无法传播（R2-9 待拉平）",
         "client_settle": True,  # stop 前需等线程内 fake client 就位
     },
     {
