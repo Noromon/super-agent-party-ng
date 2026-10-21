@@ -1195,5 +1195,40 @@ Object.assign(vue_methods, {
             console.error('Error in playPCMChunk:', error);
             if (message) message.isPlaying = false;
         }
+    },
+
+  async fetchSystemVoices() {
+      this.isLoadingSystemVoices = true;
+      try {
+        // 使用 fetch API 调用后端接口
+        const response = await fetch('/system/voices'); // 请根据你的API前缀调整
+        
+        if (!response.ok) {
+            // 处理 HTTP 错误状态（如 404, 500）
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data && data.voices) {
+          this.systemVoices = data.voices;
+          
+          // 如果当前没有选中的音色，或者选中的音色不在列表里，默认选中第一个
+          const currentVoiceValid = this.systemVoices.some(v => v.id === this.ttsSettings.systemVoiceName);
+          if (!this.ttsSettings.systemVoiceName || !currentVoiceValid) {
+             if (this.systemVoices.length > 0) {
+               this.ttsSettings.systemVoiceName = this.systemVoices[0].id;
+               this.autoSaveSettings(); // 保存默认选择
+             }
+          }
+        }
+      } catch (error) {
+        console.error("获取系统音色失败:", error);
+        if (this.$message) {
+           this.$message.error(`获取系统音色列表失败: ${error.message}`);
+        }
+      } finally {
+        this.isLoadingSystemVoices = false;
+      }
     }
 });

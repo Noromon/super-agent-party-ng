@@ -68,6 +68,10 @@
    "js/methods/82_translate_panel.js",
    "js/methods/84_quickgen.js",
    "js/methods/86_segment_player.js",
+   "js/methods/88_extensions.js",
+   "js/methods/90_panel_resize.js",
+   "js/methods/92_model_downloads.js",
+   "js/methods/94_vector_logs.js",
    "js/renderer.js"
   ],
   "chat.html": [
@@ -138,6 +142,10 @@
    "js/methods/82_translate_panel.js",
    "js/methods/84_quickgen.js",
    "js/methods/86_segment_player.js",
+   "js/methods/88_extensions.js",
+   "js/methods/90_panel_resize.js",
+   "js/methods/92_model_downloads.js",
+   "js/methods/94_vector_logs.js",
    "js/renderer.js"
   ]
  },
@@ -1605,11 +1613,13 @@
   "methods/78_behavior.js": 2,
   "methods/84_quickgen.js": 3,
   "methods/86_segment_player.js": 1,
+  "methods/88_extensions.js": 9,
+  "methods/90_panel_resize.js": 1,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41,
   "vue_data.js": 1,
-  "vue_methods.js": 39
+  "vue_methods.js": 29
  },
  "console_log_total": 200,
  "styles_css_lines": 12552
