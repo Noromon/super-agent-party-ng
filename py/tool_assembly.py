@@ -26,11 +26,17 @@ async def build_llm_tools(request, settings, tk):
     tools = request.tools or []
     tool_names = set()
     if tk["mcp_client_list"]:
+        _live_status = tk.get("mcp_status", {})
         for server_name, mcp_client in tk["mcp_client_list"].items():
             if server_name in settings['mcpServers']:
                 if 'disabled' not in settings['mcpServers'][server_name]:
                     settings['mcpServers'][server_name]['disabled'] = False
-                if settings['mcpServers'][server_name]['disabled'] is False and settings['mcpServers'][server_name]['processingStatus'] == 'ready':
+                # 连接状态以内存实时值为准（process_mcp 单一写者，S62 裁决 C）；
+                # 内存没有该 server（启动 lifespan 路径）再回退磁盘 processingStatus
+                _status = _live_status.get(server_name)
+                if _status is None:
+                    _status = settings['mcpServers'][server_name].get('processingStatus')
+                if settings['mcpServers'][server_name]['disabled'] is False and _status == 'ready':
                     disable_tools = []
                     for tool in settings['mcpServers'][server_name].get("tools", []):
                         if tool.get("enabled", True) is False:

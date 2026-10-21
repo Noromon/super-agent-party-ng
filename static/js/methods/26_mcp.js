@@ -253,16 +253,19 @@ Object.assign(vue_methods, {
                   disabled: false,
                   tools: JSON.parse(tools)    
                 };
+                try { await this.autoSaveSettings(); } catch (e) { console.warn('MCP状态落盘失败:', e); }
                 showNotification(this.t('mcpAdded'), 'success');
                 resolve(true); // 成功
               } else if (status.startsWith('failed') || status === 'server_error') {
                 clearInterval(interval);
                 this.mcpServers[mcpId].processingStatus = 'server_error';
+                try { await this.autoSaveSettings(); } catch (e) { console.warn('MCP状态落盘失败:', e); }
                 showNotification(this.t('mcpCreationFailed'), 'error');
                 resolve(false); // 虽然失败，但也算结束了轮询
               } else if (checkCount >= maxChecks) {
                 clearInterval(interval);
                 this.mcpServers[mcpId].processingStatus = 'server_error';
+                try { await this.autoSaveSettings(); } catch (e) { console.warn('MCP状态落盘失败:', e); }
                 reject(new Error("Timeout waiting for MCP server"));
               }
             } catch(e) {

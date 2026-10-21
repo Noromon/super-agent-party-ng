@@ -38,6 +38,7 @@ def _assemble_toolkit():
     from py.acpx_tools import acp_agent_tool
     return {
         "mcp_client_list": app_state.mcp_client_list,
+        "mcp_status": app_state.mcp_status,
         "node_ext_mcp_tools": node_ext_mcp_tools,
         "HA_client": app_state.HA_client,
         "ChromeMCP_client": app_state.ChromeMCP_client,
@@ -7673,6 +7674,27 @@ async def extension_proxy(request: Request, url: str):
             return Response(content='{"error": "Internal Proxy Error"}', status_code=500, media_type="application/json")
 
         
+async def _persist_mcp_status(mcp_id: str, status: str):
+    """MCP 连接状态的单一写者（S62 裁决 C）：内存 mcp_status + 磁盘 processingStatus + WS 推送。
+
+    磁盘 processingStatus 此前只靠前端 pollMCPStatus 写回（且漏调 autoSaveSettings），
+    bot 会话（xmpp 等，settings 一律 load_settings 读盘）要等主界面下次落盘才看到新
+    工具；现由后端在状态迁移点直接落盘，前端退化为纯显示。
+    """
+    app_state.mcp_status[mcp_id] = status
+    disk_status = "ready" if status == "ready" else (
+        "initializing" if status == "initializing" else "server_error")
+    try:
+        cur = await load_settings()
+        cfg = cur.setdefault("mcpServers", {}).setdefault(mcp_id, {})
+        if cfg.get("processingStatus") != disk_status:
+            cfg["processingStatus"] = disk_status
+            await save_settings(cur)
+        await ws_manager.broadcast_settings_update(cur)
+    except Exception as e:
+        logging.getLogger("app").warning(f"MCP 状态落盘失败({mcp_id}/{status}): {e}")
+
+
 async def process_mcp(mcp_id: str):
     """
     初始化单个 MCP 服务器，带失败回调同步，无需 sleep。
@@ -7689,7 +7711,7 @@ async def process_mcp(mcp_id: str):
         if fail_reason is not None:
             return
         fail_reason = error_message
-        app_state.mcp_status[mcp_id] = f"failed: {error_message}"
+        await _persist_mcp_status(mcp_id, f"failed: {error_message}")
 
         # 容错：只有客户端已创建才标记 disabled
         if mcp_id in app_state.mcp_client_list:
@@ -7700,7 +7722,7 @@ async def process_mcp(mcp_id: str):
         init_done.set()          # 唤醒主协程
 
     # 2. 开始初始化
-    app_state.mcp_status[mcp_id] = "initializing"
+    await _persist_mcp_status(mcp_id, "initializing")
     try:
         cur_settings = await load_settings()
         server_config = cur_settings["mcpServers"][mcp_id]
@@ -7738,12 +7760,12 @@ async def process_mcp(mcp_id: str):
             finally:
                 retry += 1
                 await asyncio.sleep(0.5)
-        app_state.mcp_status[mcp_id] = "ready"
+        await _persist_mcp_status(mcp_id, "ready")
         app_state.mcp_client_list[mcp_id].disabled = False
 
     except Exception as e:
         # 任何异常（超时、崩溃）都走这里
-        app_state.mcp_status[mcp_id] = f"failed: {str(e)}"
+        await _persist_mcp_status(mcp_id, f"failed: {str(e)}")
         app_state.mcp_client_list[mcp_id].disabled = True
         await app_state.mcp_client_list[mcp_id].close()
 
