@@ -24,6 +24,13 @@
    "libs/element-plus.js",
    "libs/element-plus-icons.js",
    "js/vue_data.js",
+   "js/data/00_ui_core.js",
+   "js/data/20_brain_settings.js",
+   "js/data/30_tiles_vrm.js",
+   "js/data/40_tts_voice.js",
+   "js/data/50_bots_translate.js",
+   "js/data/60_cards_options.js",
+   "js/data/90_data_legacy.js",
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
@@ -106,6 +113,13 @@
    "libs/element-plus.js",
    "libs/element-plus-icons.js",
    "js/vue_data.js",
+   "js/data/00_ui_core.js",
+   "js/data/20_brain_settings.js",
+   "js/data/30_tiles_vrm.js",
+   "js/data/40_tts_voice.js",
+   "js/data/50_bots_translate.js",
+   "js/data/60_cards_options.js",
+   "js/data/90_data_legacy.js",
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
@@ -1604,6 +1618,7 @@
   "scanExtensions"
  ],
  "console_log_counts": {
+  "data/60_cards_options.js": 1,
   "methods/05_tools_admin.js": 1,
   "methods/08_message_render.js": 1,
   "methods/10_chat_stream.js": 1,
@@ -1640,8 +1655,7 @@
   "methods/99_skills.js": 3,
   "preload.js": 1,
   "renderer.js": 7,
-  "vrm.js": 41,
-  "vue_data.js": 1
+  "vrm.js": 41
  },
  "console_log_total": 200,
  "styles_css_lines": 12552

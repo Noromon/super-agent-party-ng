@@ -136,10 +136,11 @@ def scan_top_level_keys(src: str, open_after: str):
     return _scan_object(src, m.end(), 1)
 
 
-def scan_assign_keys(src: str):
-    """收集 Object.assign(vue_methods, { ... }) 的顶层键（F2 分片文件）。"""
+def scan_assign_keys(src: str, obj_name: str = "vue_methods"):
+    """收集 Object.assign(<obj>, { ... }) 的顶层键（F2 分片文件）。"""
     keys = []
-    for m in re.finditer(r"Object\.assign\(\s*vue_methods\s*,\s*\{", src):
+    pat = r"Object\.assign\(\s*" + obj_name + r"\s*,\s*\{"
+    for m in re.finditer(pat, src):
         keys += _scan_object(src, m.end(), 1)
     return keys
 
@@ -159,6 +160,10 @@ def collect():
     if methods_dir.exists():
         for f in sorted(methods_dir.glob("*.js")):
             methods += scan_assign_keys(f.read_text(encoding="utf-8-sig"))
+    data_dir = ROOT / "static" / "js" / "data"
+    if data_dir.exists():
+        for f in sorted(data_dir.glob("*.js")):
+            data += scan_assign_keys(f.read_text(encoding="utf-8-sig"), "vue_data")
 
     logs = {}
     total_logs = 0

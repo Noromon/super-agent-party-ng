@@ -68,6 +68,19 @@ class TestVueKeys:
             for j in range(i + 1, len(names)):
                 clash = set(groups[names[i]]) & set(groups[names[j]])
                 assert not clash, f"{names[i]} ∩ {names[j]} = {sorted(clash)}"
+        data_groups = {
+            "vue_data.js": scan_top_level_keys(
+                (js / "vue_data.js").read_text(encoding="utf-8-sig"),
+                r"(?:let|const|var)\s+vue_data\s*=\s*\{"),
+        }
+        for f in sorted((js / "data").glob("*.js")):
+            data_groups[f.name] = scan_assign_keys(
+                f.read_text(encoding="utf-8-sig"), "vue_data")
+        names = list(data_groups)
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                clash = set(data_groups[names[i]]) & set(data_groups[names[j]])
+                assert not clash, f"{names[i]} ∩ {names[j]} = {sorted(clash)}"
 
 
 class TestConsoleRatchet:

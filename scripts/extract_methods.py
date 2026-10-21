@@ -15,12 +15,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+OBJ = "vue_methods"  # --object vue_data 时覆盖
 SRC = ROOT / "static" / "js" / "vue_methods.js"
 
 
 def top_level_entries(src: str):
     """返回 [(key, start_line, end_line)]（1-based，含键所在行到块结束行）。"""
-    m = re.search(r"(?:let|const|var)\s+vue_methods\s*=\s*\{", src)
+    m = re.search(r"(?:let|const|var)\s+" + OBJ + r"\s*=\s*\{", src)
     if not m:
         raise ValueError("vue_methods anchor not found")
     i = m.end()
@@ -195,15 +196,22 @@ def move(dest_rel: str, keys):
         parts.append(seg)
     dest = ROOT / "static" / "js" / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
-    content = ("// 批 3 F2：自 vue_methods.js 搬移的 %s 域（Object.assign 装配，\n"
-               "// 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。\n"
-               "Object.assign(vue_methods, {\n" % dest_rel)
+    host = "vue_methods.js" if OBJ == "vue_methods" else "vue_data.js"
+    content = ("// 批 3 F2：自 %s 搬移的 %s 域（Object.assign 装配，\n"
+               "// 加载顺序在宿主之后、renderer 之前）。\n"
+               "Object.assign(%s, {\n" % (host, dest_rel, OBJ))
     content += ",\n\n".join(parts) + "\n});\n"
     dest.write_text(content, encoding="utf-8", newline="")
     print(f"moved {len(keys)} keys -> {dest} ({content.count(chr(10))} lines)")
 
 
 def main():
+    global OBJ, SRC
+    if "--object" in sys.argv:
+        i = sys.argv.index("--object")
+        OBJ = sys.argv[i + 1]
+        SRC = ROOT / "static" / "js" / ("vue_data.js" if OBJ == "vue_data" else "vue_methods.js")
+        sys.argv = sys.argv[:i] + sys.argv[i + 2:]
     src = SRC.read_text(encoding="utf-8")
     if "--move" in sys.argv:
         i = sys.argv.index("--move")
