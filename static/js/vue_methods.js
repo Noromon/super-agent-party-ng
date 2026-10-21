@@ -2887,9 +2887,6 @@ let vue_methods = {
                 throw new Error(errText);
             }
 
-            let reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
 
             // 初始化流式文本批量更新状态
             this._streamTargetMsg = currentMsg;
@@ -2905,114 +2902,97 @@ let vue_methods = {
                 }
             }
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-
-                buffer += decoder.decode(value, { stream: true });
-
-                while (buffer.includes('\n\n')) {
-                    const eventEndIndex = buffer.indexOf('\n\n');
-                    const eventData = buffer.slice(0, eventEndIndex);
-                    buffer = buffer.slice(eventEndIndex + 2);
-
-                    if (eventData.startsWith('data: ')) {
-                        const jsonStr = eventData.slice(6).trim();
-                        if (jsonStr === '[DONE]') break;
-                        const parsed = JSON.parse(jsonStr);
-                        // 上下文管理：服务端自动压缩事件 -> 前端替换历史落账
-                        if (parsed.type === 'context_compact') {
-                            this.applyContextCompact(parsed);
-                            continue;
-                        }
-                        if (parsed.type === 'context_usage') {
-                            this.updateContextStats(parsed);
-                            continue;
-                        }
-                        if (parsed.type === 'todo_stats') {
-                            this.updateTodoStats(parsed);
-                            continue;
-                        }
-                        const delta = parsed.choices?.[0]?.delta;
-                        if (!delta) continue;
-
-                        // 断点续传：捕获 stream_id（后端首帧携带）
-                        if (delta.stream_id && !_streamId) {
-                            _streamId = delta.stream_id;
-                            this._currentStreamId = _streamId;
-                            continue;
-                        }
-                        _chunkIndex++;
-
-                        if (currentMsg.content === '' && !isResume) {
-
-                            this.stopTimer();
-                            currentMsg.first_token_latency = this.elapsedTime;
-                        }
-
-                        // A. 处理思考 (Reasoning) —— 仅更新 displayBlocks，不拼 HTML
-                        if (delta.reasoning_content) {
-                            const block = getBlock('reasoning');
-                            block.content += delta.reasoning_content;
-                            // 不再操作 currentMsg.content
-                            this.requestScrollToBottom();
-                        }
-
-                        // B. 处理文本 (Content) —— 流式防抖更新
-                        if (delta.content) {
-                            // 缓冲文本，不再直接操作 DOM
-                            this._streamTextBuffer += delta.content;
-
-                            // 为 TTS 即时处理
-                            const parts = delta.content.split('```');
-                            for (let i = 0; i < parts.length; i++) {
-                                if (!isCodeBlock) { tts_buffer += parts[i]; }
-                                if (i < parts.length - 1) { isCodeBlock = !isCodeBlock; }
-                            }
-                            const { chunks, chunks_voice, remaining, remaining_voice } = this.splitTTSBuffer(tts_buffer);
-                            if (chunks.length > 0) {
-                                currentMsg.chunks_voice.push(...chunks_voice);
-                                currentMsg.ttsChunks.push(...chunks);
-                            }
-                            tts_buffer = remaining;
-                            this.cur_voice = remaining_voice;
-
-                            // 防抖合并到 displayBlocks
-                            if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
-                            this._streamUpdateTimer = setTimeout(() => {
-                                this.flushStreamTextBuffer();
-                            }, 80);
-                        }
-
-                        // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
-                        if (delta.tool_progress) {
-                            this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
-                            continue;
-                        }
-
-                        // D. 工具结果 / 错误 / 审批 —— 共用摄取器（与 resume 重放同一事实源）
-                        if (delta.tool_content) {
-                            this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
-                        }
-
-                        if (delta.audio?.data) {
-                            this.playPCMChunk(delta.audio.data, currentMsg.pure_content, currentMsg);
-                        }
-                        if (parsed.usage?.total_tokens) {
-                            currentMsg.total_tokens += parsed.usage.total_tokens;
-                        }
-                        if (delta.async_tool_id) {
-                            if (!this.asyncToolsID) this.asyncToolsID = [];
-                            if (!this.asyncToolsID.includes(delta.async_tool_id)) {
-                                this.asyncToolsID.push(delta.async_tool_id);
-                            }
-                        }
-
-                        this.sendMessagesToExtension();
+            await iterateSse(response, (parsed) => {
+                    // 上下文管理：服务端自动压缩事件 -> 前端替换历史落账
+                    if (parsed.type === 'context_compact') {
+                        this.applyContextCompact(parsed);
+                        return;
                     }
-                }
-            }
+                    if (parsed.type === 'context_usage') {
+                        this.updateContextStats(parsed);
+                        return;
+                    }
+                    if (parsed.type === 'todo_stats') {
+                        this.updateTodoStats(parsed);
+                        return;
+                    }
+                    const delta = parsed.choices?.[0]?.delta;
+                    if (!delta) return;
+
+                    // 断点续传：捕获 stream_id（后端首帧携带）
+                    if (delta.stream_id && !_streamId) {
+                        _streamId = delta.stream_id;
+                        this._currentStreamId = _streamId;
+                        return;
+                    }
+                    _chunkIndex++;
+
+                    if (currentMsg.content === '' && !isResume) {
+
+                        this.stopTimer();
+                        currentMsg.first_token_latency = this.elapsedTime;
+                    }
+
+                    // A. 处理思考 (Reasoning) —— 仅更新 displayBlocks，不拼 HTML
+                    if (delta.reasoning_content) {
+                        const block = getBlock('reasoning');
+                        block.content += delta.reasoning_content;
+                        // 不再操作 currentMsg.content
+                        this.requestScrollToBottom();
+                    }
+
+                    // B. 处理文本 (Content) —— 流式防抖更新
+                    if (delta.content) {
+                        // 缓冲文本，不再直接操作 DOM
+                        this._streamTextBuffer += delta.content;
+
+                        // 为 TTS 即时处理
+                        const parts = delta.content.split('```');
+                        for (let i = 0; i < parts.length; i++) {
+                            if (!isCodeBlock) { tts_buffer += parts[i]; }
+                            if (i < parts.length - 1) { isCodeBlock = !isCodeBlock; }
+                        }
+                        const { chunks, chunks_voice, remaining, remaining_voice } = this.splitTTSBuffer(tts_buffer);
+                        if (chunks.length > 0) {
+                            currentMsg.chunks_voice.push(...chunks_voice);
+                            currentMsg.ttsChunks.push(...chunks);
+                        }
+                        tts_buffer = remaining;
+                        this.cur_voice = remaining_voice;
+
+                        // 防抖合并到 displayBlocks
+                        if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                        this._streamUpdateTimer = setTimeout(() => {
+                            this.flushStreamTextBuffer();
+                        }, 80);
+                    }
+
+                    // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
+                    if (delta.tool_progress) {
+                        this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
+                        return;
+                    }
+
+                    // D. 工具结果 / 错误 / 审批 —— 共用摄取器（与 resume 重放同一事实源）
+                    if (delta.tool_content) {
+                        this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
+                    }
+
+                    if (delta.audio?.data) {
+                        this.playPCMChunk(delta.audio.data, currentMsg.pure_content, currentMsg);
+                    }
+                    if (parsed.usage?.total_tokens) {
+                        currentMsg.total_tokens += parsed.usage.total_tokens;
+                    }
+                    if (delta.async_tool_id) {
+                        if (!this.asyncToolsID) this.asyncToolsID = [];
+                        if (!this.asyncToolsID.includes(delta.async_tool_id)) {
+                            this.asyncToolsID.push(delta.async_tool_id);
+                        }
+                    }
+
+                    this.sendMessagesToExtension();
+            });
 
             // 循环结束后，强制刷新缓冲区中剩余的文字
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
@@ -3766,34 +3746,13 @@ let vue_methods = {
 
         if (!response.ok) throw new Error('Translation failed');
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';      // 残余半截行
-        let translated = '';  // 累积结果
-
-        // 4. 逐块读
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop(); // 最后一行可能不完整，留到下一轮
-
-          for (const line of lines) {
-            if (!line) continue;          // 空行跳过
-            try {
-              const chunk = JSON.parse(line);
-              const delta = chunk.choices?.[0]?.delta?.content ?? '';
-              if (delta) {
-                translated += delta;
-                this.messages[index].content = translated; // 实时渲染
-              }
-            } catch (e) {
-              // 忽略解析失败
-            }
+            await iterateNdjsonLines(response, (chunk) => {
+          const delta = chunk.choices?.[0]?.delta?.content ?? '';
+          if (delta) {
+            translated += delta;
+            this.messages[index].content = translated; // 实时渲染
           }
-        }
+            });
 
         // 5. 翻译完成
         this.messages[index].isTranslating = false;
@@ -3847,97 +3806,72 @@ let vue_methods = {
                     continue;
                 }
 
-                const resumeReader = resumeResponse.body.getReader();
-                const resumeDecoder = new TextDecoder();
-                let resumeBuffer = '';
                 let newStreamId = streamId;
-                let streamDone = false;
 
+                await iterateSse(resumeResponse, (parsed) => {
+                if (parsed.type === 'context_compact') {
+                    this.applyContextCompact(parsed);
+                    return;
+                }
+                if (parsed.type === 'context_usage') {
+                    this.updateContextStats(parsed);
+                    return;
+                }
+                if (parsed.type === 'todo_stats') {
+                    this.updateTodoStats(parsed);
+                    return;
+                }
+                const delta = parsed.choices?.[0]?.delta;
+                if (!delta) return;
 
-                while (!streamDone) {
-                    const { done, value } = await resumeReader.read();
-                    if (done) { streamDone = true; break; }
+                chunkIndex++;
 
-                    resumeBuffer += resumeDecoder.decode(value, { stream: true });
+                if (delta.reasoning_content) {
+                    const block = getBlock('reasoning');
+                    block.content += delta.reasoning_content;
+                    this.requestScrollToBottom();
+                }
 
-                    while (resumeBuffer.includes('\n\n')) {
-                        const eventEndIndex = resumeBuffer.indexOf('\n\n');
-                        const eventData = resumeBuffer.slice(0, eventEndIndex);
-                        resumeBuffer = resumeBuffer.slice(eventEndIndex + 2);
+                if (delta.content) {
+                    this._streamTargetMsg = currentMsg;
+                    this._streamTextBuffer = (this._streamTextBuffer || '') + delta.content;
 
-                        if (eventData.startsWith('data: ')) {
-                            const jsonStr = eventData.slice(6).trim();
-                            if (jsonStr === '[DONE]') { streamDone = true; break; }
-                            try {
-                                const parsed = JSON.parse(jsonStr);
-                                if (parsed.type === 'context_compact') {
-                                    this.applyContextCompact(parsed);
-                                    continue;
-                                }
-                                if (parsed.type === 'context_usage') {
-                                    this.updateContextStats(parsed);
-                                    continue;
-                                }
-                                if (parsed.type === 'todo_stats') {
-                                    this.updateTodoStats(parsed);
-                                    continue;
-                                }
-                                const delta = parsed.choices?.[0]?.delta;
-                                if (!delta) continue;
+                    const parts = delta.content.split('```');
+                    for (let i = 0; i < parts.length; i++) {
+                        if (!isCodeBlock) { tts_buffer += parts[i]; }
+                        if (i < parts.length - 1) { isCodeBlock = !isCodeBlock; }
+                    }
+                    const { chunks, chunks_voice, remaining, remaining_voice } = this.splitTTSBuffer(tts_buffer);
+                    if (chunks.length > 0) {
+                        currentMsg.chunks_voice.push(...chunks_voice);
+                        currentMsg.ttsChunks.push(...chunks);
+                    }
+                    tts_buffer = remaining;
 
-                                chunkIndex++;
+                    if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                    this._streamUpdateTimer = setTimeout(() => {
+                        this.flushStreamTextBuffer();
+                    }, 80);
+                }
 
-                                if (delta.reasoning_content) {
-                                    const block = getBlock('reasoning');
-                                    block.content += delta.reasoning_content;
-                                    this.requestScrollToBottom();
-                                }
+                if (delta.tool_progress) {
+                    this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
+                    return;
+                }
 
-                                if (delta.content) {
-                                    this._streamTargetMsg = currentMsg;
-                                    this._streamTextBuffer = (this._streamTextBuffer || '') + delta.content;
+                if (delta.tool_content) {
+                    this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
+                }
 
-                                    const parts = delta.content.split('```');
-                                    for (let i = 0; i < parts.length; i++) {
-                                        if (!isCodeBlock) { tts_buffer += parts[i]; }
-                                        if (i < parts.length - 1) { isCodeBlock = !isCodeBlock; }
-                                    }
-                                    const { chunks, chunks_voice, remaining, remaining_voice } = this.splitTTSBuffer(tts_buffer);
-                                    if (chunks.length > 0) {
-                                        currentMsg.chunks_voice.push(...chunks_voice);
-                                        currentMsg.ttsChunks.push(...chunks);
-                                    }
-                                    tts_buffer = remaining;
-
-                                    if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
-                                    this._streamUpdateTimer = setTimeout(() => {
-                                        this.flushStreamTextBuffer();
-                                    }, 80);
-                                }
-
-                                if (delta.tool_progress) {
-                                    this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
-                                    continue;
-                                }
-
-                                if (delta.tool_content) {
-                                    this._ingestToolFrame(delta.tool_content, delta, currentMsg, getBlock, toolCallStack);
-                                }
-
-                                if (delta.async_tool_id) {
-                                    if (!this.asyncToolsID) this.asyncToolsID = [];
-                                    if (!this.asyncToolsID.includes(delta.async_tool_id)) {
-                                        this.asyncToolsID.push(delta.async_tool_id);
-                                    }
-                                }
-
-                                this.sendMessagesToExtension();
-                            } catch (e) {
-                                // 忽略 JSON 解析错误
-                            }
-                        }
+                if (delta.async_tool_id) {
+                    if (!this.asyncToolsID) this.asyncToolsID = [];
+                    if (!this.asyncToolsID.includes(delta.async_tool_id)) {
+                        this.asyncToolsID.push(delta.async_tool_id);
                     }
                 }
+
+                this.sendMessagesToExtension();
+                });
 
                 // 恢复成功，flush 剩余文本
                 if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
@@ -13170,33 +13104,13 @@ isTargetPlatform(behavior, platformKey) {
 
       if (!res.ok) throw new Error('Network error');
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = ''; // 残余半截行
-      let result = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // 最后一行可能不完整，留到下一轮
-
-        for (const line of lines) {
-          if (!line) continue; // 跳过空行
-          try {
-            const chunk = JSON.parse(line);
-            const delta = chunk.choices?.[0]?.delta?.content ?? '';
-            if (delta) {
-              result += delta;
-              this.translatedText = result; // 实时渲染
-            }
-          } catch {
-            // 忽略解析失败
-          }
+            await iterateNdjsonLines(res, (chunk) => {
+        const delta = chunk.choices?.[0]?.delta?.content ?? '';
+        if (delta) {
+          result += delta;
+          this.translatedText = result; // 实时渲染
         }
-      }
+            });
     } catch (e) {
       if (e.name !== 'AbortError') {
         this.translatedText = `Translation error: ${e.message}`;
@@ -13281,34 +13195,13 @@ isTargetPlatform(behavior, platformKey) {
 
       if (!res.ok) throw new Error('Network error');
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';      // 残余半截行
-      let fullText = '';    // 累积完整回复
-
-      // 1. 实时读流
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // 最后一行可能不完整
-
-        for (const line of lines) {
-          if (!line) continue;
-          try {
-            const chunk = JSON.parse(line);
-            const delta = chunk.choices?.[0]?.delta?.content ?? '';
-            if (delta) {
-              fullText += delta;
-              this.quickCreatePrompt = fullText; // 实时显示
-            }
-          } catch {
-            // 忽略解析失败
-          }
+            await iterateNdjsonLines(res, (chunk) => {
+        const delta = chunk.choices?.[0]?.delta?.content ?? '';
+        if (delta) {
+          fullText += delta;
+          this.quickCreatePrompt = fullText; // 实时显示
         }
-      }
+            });
 
       // 2. 流结束，再走原来的解析逻辑
       let raw = fullText.trim();
@@ -13404,59 +13297,24 @@ isTargetPlatform(behavior, platformKey) {
 
       if (!res.ok) throw new Error('Network error');
       
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let result = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+            await iterateNdjsonLines(res, (data) => {
         
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
+        // 适配新的流式响应格式
+        if (data.choices && data.choices[0]) {
+          const choice = data.choices[0];
           
-          try {
-            const data = JSON.parse(line);
-            
-            // 适配新的流式响应格式
-            if (data.choices && data.choices[0]) {
-              const choice = data.choices[0];
-              
-              // 处理流式响应中的增量内容
-              if (choice.delta && choice.delta.content) {
-                result += choice.delta.content;
-                this.quickCreateSystemPrompt = result;
-              }
-              // 或者处理 finish_reason 为 stop 的最终响应
-              else if (choice.finish_reason === 'stop') {
-                // 最终完成，不需要额外处理
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to parse SSE line:', line, e);
-          }
-        }
-        
-        buffer = lines[lines.length - 1];
-      }
-      
-      // 处理可能剩余的缓冲数据
-      if (buffer.trim()) {
-        try {
-          const data = JSON.parse(buffer);
-          if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
-            result += data.choices[0].delta.content;
+          // 处理流式响应中的增量内容
+          if (choice.delta && choice.delta.content) {
+            result += choice.delta.content;
             this.quickCreateSystemPrompt = result;
           }
-        } catch (e) {
-          console.warn('Failed to parse remaining buffer:', buffer, e);
+          // 或者处理 finish_reason 为 stop 的最终响应
+          else if (choice.finish_reason === 'stop') {
+            // 最终完成，不需要额外处理
+          }
         }
-      }
+            });
+      
       
       // 保存生成的提示词
       this.promptForm.content = this.quickCreateSystemPrompt;
@@ -13521,61 +13379,25 @@ isTargetPlatform(behavior, platformKey) {
 
       if (!res.ok) throw new Error('Network error');
       
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let result = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+            await iterateNdjsonLines(res, (data) => {
         
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
+        // 适配新的流式响应格式
+        if (data.choices && data.choices[0]) {
+          const choice = data.choices[0];
           
-          try {
-            const data = JSON.parse(line);
-            
-            // 适配新的流式响应格式
-            if (data.choices && data.choices[0]) {
-              const choice = data.choices[0];
-              
-              // 处理流式响应中的增量内容
-              if (choice.delta && choice.delta.content) {
-                result += choice.delta.content;
-                this.messages[index].content = result;
-                this.requestScrollToBottom();
-              }
-              // 或者处理 finish_reason 为 stop 的最终响应
-              else if (choice.finish_reason === 'stop') {
-                // 最终完成，不需要额外处理
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to parse SSE line:', line, e);
-          }
-        }
-        
-        buffer = lines[lines.length - 1];
-      }
-      
-      // 处理可能剩余的缓冲数据
-      if (buffer.trim()) {
-        try {
-          const data = JSON.parse(buffer);
-          if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
-            result += data.choices[0].delta.content;
+          // 处理流式响应中的增量内容
+          if (choice.delta && choice.delta.content) {
+            result += choice.delta.content;
             this.messages[index].content = result;
             this.requestScrollToBottom();
           }
-        } catch (e) {
-          console.warn('Failed to parse remaining buffer:', buffer, e);
+          // 或者处理 finish_reason 为 stop 的最终响应
+          else if (choice.finish_reason === 'stop') {
+            // 最终完成，不需要额外处理
+          }
         }
-      }
+            });
+      
       
       showNotification(this.t('genSuccess'));
       
@@ -15944,44 +15766,14 @@ collapseSidePanel() {
 
             if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); 
-
-                for (const line of lines) {
-                    let trimmed = line.trim();
-                    if (!trimmed || trimmed === 'data: [DONE]') continue;
+            await iterateNdjsonLines(response, (data) => {
+                    const content = data.choices?.[0]?.delta?.content;
                     
-                    // --- 修改核心：兼容多种格式 ---
-                    
-                    // 1. 如果是以 data: 开头（SSE标准格式），去掉前缀
-                    if (trimmed.startsWith('data:')) {
-                        trimmed = trimmed.replace(/^data:\s?/, '');
+                    if (content) {
+                        // console.log('Chunk:', content); 
+                        webview.send('ai-stream-chunk', content);
                     }
-                    
-                    // 2. 尝试解析 JSON（现在无论是纯JSON还是去掉data后的JSON，都能解析）
-                    try {
-                        const data = JSON.parse(trimmed);
-                        const content = data.choices?.[0]?.delta?.content;
-                        
-                        if (content) {
-                            // console.log('Chunk:', content); 
-                            webview.send('ai-stream-chunk', content);
-                        }
-                    } catch (e) {
-                        // 忽略非 JSON 行（比如心跳包或注释）
-                        // console.log('Json parse failed for line:', trimmed);
-                    }
-                }
-            }
+            }, { stripDataPrefix: true });
             
             webview.send('ai-stream-end');
             console.log('流式传输结束');
@@ -18561,41 +18353,13 @@ async generateRandomTopic() {
 
     if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      // 解码并合并到缓冲区
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      // 留下最后一行可能不完整的在 buffer 中
-      buffer = lines.pop(); 
-
-      for (const line of lines) {
-        let trimmed = line.trim();
-        if (!trimmed || trimmed === 'data: [DONE]') continue;
-
-        // 兼容 SSE 格式 (去掉 data: 前缀)
-        if (trimmed.startsWith('data:')) {
-          trimmed = trimmed.replace(/^data:\s?/, '');
-        }
-
-        try {
-          const data = JSON.parse(trimmed);
+            await iterateNdjsonLines(res, (data) => {
           const content = data.choices?.[0]?.delta?.content;
           if (content) {
-            // 实时追加到 userInput，实现打字机效果
-            this.userInput += content;
+        // 实时追加到 userInput，实现打字机效果
+        this.userInput += content;
           }
-        } catch (e) {
-          // 忽略解析失败的行
-        }
-      }
-    }
+            }, { stripDataPrefix: true });
 
   } catch (e) {
     console.error("生成话题失败", e);

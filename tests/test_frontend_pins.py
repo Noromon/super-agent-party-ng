@@ -199,7 +199,7 @@ class TestStreamIdHeaderPin:
         assert "delta.stream_id && !_streamId" in SRC
         # captured id feeds both resume and cancel paths
         hdr = _slice("const _hdrStreamId = response.headers.get('X-Stream-Id');")
-        hdr = hdr[: hdr.index("while (true)")]
+        hdr = hdr[: hdr.index("iterateSse(")]
         assert "this._currentStreamId = _streamId" in hdr
 
 
