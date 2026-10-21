@@ -1,0 +1,97 @@
+      <div class="window-controls">
+        <el-button 
+          v-if="updateAvailable&&!isAssistantMode&&!isMobile"
+          @click="handleUpdateAction" 
+          class="top-bar-btn update-btn"
+          :class="{ 'installed': updateDownloaded }"
+          text>
+          <el-icon>
+            <i :class="updateIcon"></i>
+          </el-icon>
+          {{ updateButtonText }}
+          <span v-if="downloadProgress > 0 && !updateDownloaded" class="progress-text">
+            ({{ downloadProgress }}%)
+          </span>
+        </el-button>
+        <el-button  v-if="!isAssistantMode&&!isMobile" @click="restartDriverGuide" class="top-bar-btn" text id="driver-guide-btn" :title=" t('tutorial')">
+          <el-icon>
+            <i class="fa-solid fa-school"></i>
+          </el-icon>
+        </el-button>
+      <!-- 添加移动端菜单按钮 -->
+      <el-button 
+      class="top-bar-btn"
+       v-if="isMobile" 
+       @click="isCollapse = sidebarVisible;sidebarVisible = !sidebarVisible"
+       text
+       :title="isCollapse ? t('expandAside') : t('collapseAside')">
+          <el-icon>
+            <i :class="!sidebarVisible ? 'fa-solid fa-bars' : 'fa-solid fa-bars-staggered'"></i>
+          </el-icon>
+      </el-button>
+        <el-button 
+          v-if="!isAssistantMode&&!isMobile"
+          @click="openLogDialog"
+          class="top-bar-btn"
+          text
+          :title="t('serverLogs') || 'Server Logs'">
+          <el-icon>
+            <i class="fa-solid fa-terminal"></i>
+          </el-icon>
+        </el-button>
+        <!-- 新增展开/收起按钮 -->
+        <el-button 
+          v-if="!isAssistantMode&&!isMobile"
+          @click="isCollapse = !isCollapse"
+          class="top-bar-btn"
+          text
+          :title="isCollapse ? t('expandAside') : t('collapseAside')">
+          <el-icon>
+            <i :class="isCollapse ? 'fa-solid fa-bars' : 'fa-solid fa-bars-staggered'"></i>
+          </el-icon>
+        </el-button>
+        <el-button 
+          @click="fixedWindow"
+          v-if="isAssistantMode"
+          class="top-bar-btn"
+          text
+          :title="isFixedWindow ? t('unfixedWindow'):t('fixedWindow')">
+          <el-icon>
+            <i :class="isFixedWindow ? 'fa-solid fa-thumbtack-slash':'fa-solid fa-thumbtack'"></i>
+          </el-icon>
+        </el-button>
+        <el-button 
+          @click="toggleCapsuleMode"
+          v-if="!isCapsuleMode&&!isAssistantMode&&!isMobile"
+          class="top-bar-btn"
+          text
+          :title="t('CapsuleMode')">
+          <el-icon>
+            <i class="fa-solid fa-capsules"></i>
+          </el-icon>
+        </el-button>
+        <el-button 
+          @click="toggleAssistantMode"
+          class="top-bar-btn"
+          text
+          :title="isAssistantMode ?  t('maximize'):t('assistantMode')">
+          <el-icon>
+            <i :class="isAssistantMode ?  'fa-solid fa-expand' : 'fa-solid fa-mobile-screen'"></i>
+          </el-icon>
+        </el-button>
+        <el-button v-if="!isMac&&!isMobile" @click="minimizeWindow" class="top-bar-btn" text :title="t('minimize')">
+          <el-icon>
+            <i class="fa-solid fa-minus"></i>
+          </el-icon>
+        </el-button>
+        <el-button v-if="!isMac&&!isMobile" @click="toggleIcon" class="top-bar-btn" text :title="t('maximize')">
+          <el-icon>
+            <i :class="iconClass"></i>
+          </el-icon>
+        </el-button>
+        <el-button v-if="!isMac&&!isMobile" @click="closeWindow" class="top-bar-btn" text :title="t('close')">
+          <el-icon>
+            <i class="fa-solid fa-xmark"></i>
+          </el-icon>
+        </el-button>
+      </div>

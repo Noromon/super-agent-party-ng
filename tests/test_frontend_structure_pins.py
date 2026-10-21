@@ -116,11 +116,16 @@ class TestTemplatesDirHygiene:
             pytest.skip("尚无 MANIFEST")
         pages = json.loads(mf.read_text(encoding="utf-8"))["pages"]
         idx = (_STATIC / "index.html").read_text(encoding="utf-8")
+        chat = (_STATIC / "chat.html").read_text(encoding="utf-8")
         for p in pages:
             assert (tpl / f"{p}.html").exists(), f"缺模板文件 {p}.html"
-            assert f'data-tpl="{p}"' in idx, f"index.html 缺 {p} 锚点"
+            host = chat if p.startswith("page_chat_") else idx
+            assert f'data-tpl="{p}"' in host, f"{p} 锚点缺失"
+            assert f'activeMenu' not in "".join(
+                l for l in host.splitlines() if f'data-tpl="{p}"' in l)
             assert f'activeMenu' not in "".join(
                 l for l in idx.splitlines() if f'data-tpl="{p}"' in l)
-        assert '<script src="js/boot_templates.js"></script>' in idx
-        assert idx.index('<script src="js/boot_templates.js">') < \
-            idx.index('<script src="js/renderer.js">'), "loader 必须先于 renderer"
+        for pg, body in (("index.html", idx), ("chat.html", chat)):
+            assert '<script src="js/boot_templates.js"></script>' in body, pg
+            assert body.index('<script src="js/boot_templates.js">') < \
+                body.index('<script src="js/renderer.js">'), f"{pg}: loader 必须先于 renderer"

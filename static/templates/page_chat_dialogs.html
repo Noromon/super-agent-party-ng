@@ -1,0 +1,178 @@
+    <el-dialog append-to-body
+      v-model="showLogDialog"
+      :title="t('serverLogs') || 'Backend Logs'"
+      width="80%"
+      top="5vh"
+      class="log-dialog"
+    >
+      <div class="log-container" ref="logContainer">
+        <pre>{{ logContent }}</pre>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="fetchLogs">
+            <el-icon><i class="fa-solid fa-rotate-right"></i></el-icon> {{ t('refresh') || 'Refresh' }}
+          </el-button>
+          <el-button type="primary" @click="showLogDialog = false">{{ t('confirm') || 'OK' }}</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+      <el-dialog append-to-body
+        v-model="showModelDialog"
+        :title="t('mainModel')"
+        width="80%">
+        <div class="knowledge-dialog-content">
+          <!-- 服务器列表 -->
+          <div
+            v-for="provider in modelProviders"
+            :key="provider.id"
+            class="knowledge-item"
+            :class="{ active: settings.selectedProvider === provider.id }"
+            @click="
+              settings.selectedProvider = provider.id;
+              selectMainProvider(provider.id);
+              showModelDialog = false;
+            "
+          >
+            <img
+              :src="getVendorLogo(provider.vendor)"
+              class="mini-vendor-logo"
+            />
+            <span>{{ provider.modelId }}</span>
+          </div>
+          <div v-if="Object.keys(modelProviders).length === 0" class="empty-tip">
+              {{ t('firstTimeUse') }}
+              <el-link
+                type="primary"
+                :underline="false"
+                class="font-medium"
+                @click="switchToApiBox"
+              >
+                <el-icon class="mr-1">
+                  <i class="fa-solid fa-key"></i>
+                </el-icon>{{ t('keyBoxInterface') }}
+              </el-link>
+              {{ t('addProviderReturnSelect') }}
+              {{ t('mainmodelnotice') }}
+          </div>
+        </div>
+      </el-dialog>  
+      <!-- 扩展选择对话框 -->
+      <el-dialog append-to-body
+        :title="t('switchExtension')"
+        v-model="showExtensionsDialog"
+        width="80%"
+        >
+        <div class="extensions-list" :style="{ 'overflow-x': 'hidden'}">
+          <!-- 默认视图选项 -->
+          <el-card 
+            class="extension-card default-view-card"
+            :class="{ active: currentExtension === null }"
+            @click="resetToDefaultView()">
+            <div class="extension-info">
+              <h3>{{ t('defaultView') }}</h3>
+              <p>{{ t('defaultViewDescription') }}</p>
+            </div>
+          </el-card>
+          
+          <el-card 
+            class="extension-card task-center-card"
+            @click="openTaskCenter()">
+            <div class="extension-info">
+              <h3>{{ t('taskCenter') }}</h3>
+              <p>{{ t('taskCenterDescription') }}</p>
+            </div>
+          </el-card>
+
+          <el-card 
+            class="extension-card workspace-card"
+            @click="openWorkspace()"
+            v-show="isElectron">
+            <div class="extension-info">
+              <h3>{{ t('workspace') || '工作区文件' }}</h3>
+              <p>{{ t('workspaceDescription') || '管理与查看本地工作区文件树' }}</p>
+            </div>
+          </el-card>
+          
+          <!-- 分隔线 -->
+          <div class="extensions-divider" v-if="extensions.length > 0">
+            <span>
+              {{ t('availableExtensions') }}
+              <el-link
+                type="primary"
+                :underline="false"
+                href="#" 
+                @click.stop.prevent="switchToExtensionPage();showExtensionsDialog = false" 
+              >
+                <el-icon class="mr-1">
+                  <i class="fa-solid fa-puzzle-piece"></i>
+                </el-icon>{{ t('goToExtensionPage') }}
+              </el-link>
+            </span>
+          </div>
+          <!-- 扩展列表 -->
+          <el-empty v-if="extensions.length === 0" :description="t('noExtensionsFound')" ></el-empty>
+          <el-card
+              v-for="ext in extensions"
+              :key="ext.id"
+              class="extension-card"
+              :class="{ active: currentExtension && currentExtension.id === ext.id }"
+              @click="switchExtension(ext)">
+              
+              <!-- 右上角按钮组 (整合了收藏按钮) -->
+              <div class="btn-top-right">
+                
+                <!-- 1. 收藏按钮 -->
+                <el-tooltip :content="favoriteExtensionIds.includes(ext.id) ? t('unfavorite') : t('favorite')" placement="top">
+                  <el-button
+                    type="default"
+                    circle
+                    size="small"
+                    @click.stop.prevent="toggleFavoriteExtension(ext)">
+                    <i :class="favoriteExtensionIds.includes(ext.id) ? 'fa-solid fa-star star-active' : 'fa-regular fa-star'"></i>
+                  </el-button>
+                </el-tooltip>
+
+                <!-- 2. 浏览器打开按钮 -->
+                <el-tooltip :content="t('openExtensionInBrowser')" placement="top">
+                  <el-button
+                    type="default"
+                    circle
+                    size="small"
+                    @click.stop.prevent="openExtension(ext)"
+                    style="margin-left: 8px;">
+                    <i class="fa-solid fa-external-link"></i>
+                  </el-button>
+                </el-tooltip>
+
+                <!-- 3. 独立窗口打开按钮（仅在Electron环境下显示） -->
+                <el-tooltip :content="t('openExtensionInWindow')" placement="top">
+                  <el-button
+                    v-if="isElectron"
+                    type="primary"
+                    circle
+                    size="small"
+                    @click.stop.prevent="openExtensionInWindow(ext)"
+                    style="margin-left: 8px;">
+                    <i class="fa-solid fa-window-restore"></i>
+                  </el-button>
+                </el-tooltip>
+              </div>
+
+              <div class="extension-info">
+                <h3>{{ ext.name }}</h3>
+                <p>{{ ext.description }}</p>
+                <div class="extension-meta">
+                  <span>v{{ ext.version }}</span>
+                  <span>{{ ext.author }}</span>
+                </div>
+              </div>
+          </el-card>
+        </div>
+        <template #footer>
+          <div class="dialog-footer">
+            <el-button @click="showExtensionsDialog = false">{{ t('cancel') }}</el-button>
+          </div>
+        </template>
+      </el-dialog>
