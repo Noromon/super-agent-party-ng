@@ -1,0 +1,235 @@
+        <div v-show="activeMenu === 'system'" class="page tools-container">
+          <el-form :model="systemSettings" class="settings-form" label-position="top">
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-language"></i>
+                  </el-icon>
+                  {{ t('systemLanguage') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <el-select
+                    v-model="systemSettings.language"
+                    @change="handleSystemLanguageChange"
+                    class="full-width-input">
+                    <el-option
+                      v-for="option in systemlanguageOptions"
+                      :key="option.value"
+                      :label="t(option.label)"
+                      :value="option.value">
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-language"></i>
+                  </el-icon>
+                  {{ t('targetLang') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <el-select
+                    v-model="targetLangSelected"
+                    filterable
+                    allow-create
+                    default-first-option
+                    :placeholder="t('targetLangPlaceholder')"
+                    @change="changeLanguage"
+                  >
+                    <el-option :label="t('systemLanguage')" value="system"></el-option>
+                    <el-option label="简体中文" value="简体中文"></el-option>
+                    <el-option label="繁體中文" value="繁體中文"></el-option>
+                    <el-option label="English" value="English"></el-option>
+                    <el-option label="Français" value="Français"></el-option>
+                    <el-option label="Язык" value="Язык"></el-option>
+                    <el-option label="Deutsch" value="Deutsch"></el-option>
+                    <el-option label="Español" value="Español"></el-option>
+                    <el-option label="Portuguese" value="Portuguese"></el-option>
+                    <el-option label="日本語" value="日本語"></el-option>
+                    <el-option label="한국어" value="한국어"></el-option>
+                  </el-select>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-brush"></i>
+                  </el-icon>
+                  {{ t('themeSettings') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <el-select
+                    v-model="systemSettings.theme"
+                    @change="handleThemeChange"
+                    class="full-width-input">
+                    <el-option
+                      v-for="option in themeOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value">
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+              </div>
+            </div>
+            
+            <div class="tool-item" v-if="isElectron">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-network-wired"></i>
+                  </el-icon>
+                  {{ t('networkSettings') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <el-select
+                    v-model="systemSettings.network"
+                    @change="handleNetworkChange"
+                    class="full-width-input">
+                    <el-option
+                      v-for="option in networkOptions"
+                      :key="option.value"
+                      :label="t(option.label)"
+                      :value="option.value">
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-wifi"></i>
+                  </el-icon>
+                  {{ t('proxySettings') }}
+                </span>
+              </div>
+              <div class="tool-content">
+
+                <el-form-item :label="t('isChinaProxy')" class="form-item-align" label-position="left">
+                  <el-switch v-model="systemSettings.isChinaProxy"  @change="autoSaveSettings"></el-switch>
+                </el-form-item>
+
+                <el-form-item :label="t('proxyMode')" class="form-item-align">
+                  <el-select v-model="systemSettings.proxyMode" placeholder="Select method" @change="updateProxy">
+                    <el-option :label="t('systemProxy')" value="system"></el-option>
+                    <el-option :label="t('manualProxy')" value="manual"></el-option>
+                    <el-option :label="t('noneProxy')" value="none"></el-option>
+                  </el-select>
+                </el-form-item>
+                <el-form-item class="form-item-align">
+                  <el-input
+                    v-model="systemSettings.proxy"
+                    v-show="systemSettings.proxyMode === 'manual'"
+                    :placeholder="t('proxyPlaceholder')"
+                    class="full-width-input"
+                    @input="updateProxy"
+                  ></el-input>
+                </el-form-item>
+                
+              </div>
+              <el-alert
+                type="info"
+                :closable="false"
+                class="mb-2"
+              >
+                <template #default>
+                  <div class="alert-content">
+                    {{ t('proxyNotice') }}
+                  </div>
+                </template>
+              </el-alert>
+            </div>
+            <div class="tool-item" v-show="isElectron">
+              <div class="browser-mode-btn-container">
+                <el-button
+                  class="browser-mode-btn"
+                  type="primary"
+                  @click="openUserfile"
+                  round
+                  size="large">
+                  <span class="ml-2">
+                    {{ t('openUserfile') }}
+                  </span>
+                </el-button>
+              </div>
+              <el-alert
+                type="info"
+                :closable="false"
+                class="mb-2"
+              >
+                 <template #default>
+                   <div class="alert-content">
+                     {{ t('userfileNotice') }}
+                   </div>
+                 </template>
+               </el-alert>
+             </div>
+
+            <!-- 数据安全（M4-lite 快照备份） -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-database"></i>
+                  </el-icon>
+                  {{ t('dataGuardTitle') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <el-button type="primary" :loading="backupNowRunning" @click="backupNow">
+                      {{ t('dataGuardBackupNow') }}
+                    </el-button>
+                    <el-button @click="loadBackupList" :loading="backupListLoading">{{ t('dataGuardRefresh') }}</el-button>
+                    <span style="font-size:12px; opacity:.7;">{{ t('dataGuardAutoNote') }}</span>
+                  </div>
+                </el-form-item>
+                <el-form-item class="form-item-align">
+                  <el-switch v-model="systemSettings.backupIncludeUploads" @change="autoSaveSettings" />
+                  <span style="margin-left:8px; font-size:13px;">{{ t('dataGuardIncludeUploads') }}</span>
+                </el-form-item>
+                <el-table :data="backupSnapshots" stripe size="small" style="margin-top:8px;" max-height="260">
+                  <el-table-column prop="name" :label="t('dataGuardColSnap')" min-width="230"></el-table-column>
+                  <el-table-column :label="t('dataGuardColSize')" width="100">
+                    <template #default="scope">{{ formatBackupBytes(scope.row.bytes) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="files" :label="t('dataGuardColFiles')" width="80"></el-table-column>
+                  <el-table-column :label="t('dataGuardColState')" width="90">
+                    <template #default="scope">
+                      <span v-if="scope.row.partial" style="color:#e6a23c;">{{ t('dataGuardPartial') }}</span>
+                      <span v-else style="color:#67c23a;">{{ t('dataGuardComplete') }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('dataGuardColVerify')" width="90">
+                    <template #default="scope">
+                      <el-button size="small" :loading="verifyBackupName === scope.row.name" @click="verifyBackup(scope.row.name)">
+                        {{ t('dataGuardVerify') }}
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div style="font-size:12px; opacity:.65; margin-top:6px;">{{ t('dataGuardRestoreHint') }}</div>
+              </div>
+            </div>
+          </el-form>
+        </div>

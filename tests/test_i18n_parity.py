@@ -22,6 +22,8 @@ TEMPLATE_FILES = [
 ]
 # F2 分片：js/methods/*.js 属方法体的物理延续，同属 i18n 引用扫描范围
 TEMPLATE_FILES += sorted((REPO / "static" / "js" / "methods").glob("*.js"))
+# F3 外置页面模板同属引用面
+TEMPLATE_FILES += sorted((REPO / "static" / "templates").glob("*.html"))
 
 _KEY_RE = re.compile(r"""^\s*['"]([A-Za-z0-9_.]+)['"]\s*:""", re.M)
 _T_CALL_RE = re.compile(r"""(?:^|[^\w$.])(?:this\.)?t\(\s*['"]([A-Za-z0-9_.]+)['"]\s*[,)]""", re.M)

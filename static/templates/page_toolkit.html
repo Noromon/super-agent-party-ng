@@ -1,0 +1,3340 @@
+        <div v-show="activeMenu === 'toolkit'" class="page agent-suite-container">
+          <div class="suite-layout">
+            <!-- 左侧导航 -->
+            <div class="suite-sidebar">
+              <div class="tile-nav">
+                <div 
+                  v-for="tile in toolkitTiles" 
+                  :key="tile.id"
+                  class="nav-item"
+                  :class="{ active: subMenu === tile.id }"
+                  @click="subMenu = tile.id">
+                  <el-icon class="nav-icon"><i :class="tile.icon"></i></el-icon>
+                  <span class="nav-text">{{ t(tile.title) }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- 右侧内容 -->
+            <div class="suite-content">
+              <!-- 工具界面 -->
+              <div v-show="subMenu === 'tools'" class="page">
+                <div class="provider-grid">
+
+                  <!-- 当前时间工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.time.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('currentTime') }}</h3>
+                    </div>
+                    <el-form-item :label="t('triggerMode')">
+                      <el-select
+                        v-model="toolsSettings.time.triggerMode"
+                        @change="autoSaveSettings"
+                      >
+                          <el-option :label="t('beforeThinking')" value="beforeThinking" ></el-option>
+                          <el-option :label="t('afterThinking')" value="afterThinking" ></el-option>
+                      </el-select>
+                    </el-form-item>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('currentTimeNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 当前天气工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.weather.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">
+                        {{ t('openMeteoWeather') }}
+                      </h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('weatherNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+        
+                  <!-- 语言语调工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch
+                        v-model="toolsSettings.language.enabled"
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('languageTone') }}</h3>
+                    </div>
+                    <el-form-item :label="t('assistantLanguage')">
+                      <el-input
+                        v-model="toolsSettings.language.language"
+                        @change="autoSaveSettings"
+                        class="mini-input"
+                        :placeholder="t('languagePlaceholder')"
+                      ></el-input>
+                    </el-form-item>
+                    
+                    <el-form-item :label="t('assistantTone')">
+                      <el-input
+                        v-model="toolsSettings.language.tone"
+                        @change="autoSaveSettings"
+                        class="mini-input"
+                        :placeholder="t('tonePlaceholder')"
+                      ></el-input>
+                    </el-form-item>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('languageNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 维基百科工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.wikipedia.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">
+                        {{ t('wikipedia') }}
+                      </h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('wikipediaNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- arxiv工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.arxiv.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">
+                        {{ t('arxiv') }}
+                      </h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('arxivNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- LaTeX增强工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch
+                        v-model="toolsSettings.formula.enabled"
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div  class="tool-card-title">
+                      <h3 class="kb-title">{{ t('latexRenderingEnhancement') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('latexRenderingEnhancementNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 工具结果备忘录 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.hideToolResults.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">
+                        {{ t('hideToolResults') }}
+                      </h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('hideToolResultsNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 存储空间文件查询工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.getFile.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('fileGet') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('fileGetNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 深度研究工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch
+                        v-model="toolsSettings.deepsearch.enabled"
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('deepResearch') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('deepResearchNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+        
+                  <!-- 推理工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch
+                        v-model="toolsSettings.inference.enabled"
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('fakeInference') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('fakeInferenceNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 异步工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.asyncTools.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('asyncTools') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('asyncToolsNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- A2UI工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.a2ui.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('a2uiTools') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('a2uiToolsNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+                  <!-- 自主行为工具 -->
+                  <div class="provider-card tool-card">
+                    <div class="card-header">
+                      <el-switch 
+                        v-model="toolsSettings.autoBehavior.enabled" 
+                        @change="autoSaveSettings"
+                        class="tool-switch"
+                      ></el-switch>
+                    </div>
+                    <div class="tool-card-title">
+                      <h3 class="kb-title">{{ t('autoBehaviorTool') }}</h3>
+                    </div>
+                    <el-alert type="info" :closable="false" class="mb-2">
+                      <div class="alert-content">
+                        {{ t('autoBehaviorToolNotice') }}
+                      </div>
+                    </el-alert>
+                  </div>
+
+
+                </div>
+              </div>
+
+              <!-- HA界面 -->
+              <div v-show="subMenu === 'HA'" class="page">
+                <el-form :model="HASettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-house"></i>
+                          </el-icon>
+                          {{ t('homeAssistant') }}
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://www.home-assistant.io/" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                      <el-switch v-model="HASettings.enabled" @click.stop @change="changeHAEnabled"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('baseURL')" class="form-item-align">
+                        <el-input
+                          v-model="HASettings.url"
+                          :placeholder="t('urlPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="HASettings.api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-alert type="info" :closable="false" class="mb-2">
+                        <div class="alert-content">
+                          {{ t('HANotice1') }}<br>
+                          {{ t('HANotice2') }}<br>
+                          {{ t('HANotice3') }}<br>
+                          {{ t('HANotice4') }}
+                        </div>
+                      </el-alert>
+                    </div>
+                  </div>
+                </el-form> 
+              </div>
+
+              <!-- 浏览器控制界面 -->
+              <div v-show="subMenu === 'chromeMCP'" class="page">
+               <!-- 顶部说明条 -->
+                <div v-if="isElectron" class="toolbar">
+                    <el-alert
+                      :title="t('chromeMCPDescription')"
+                      type="info"
+                      :closable="false"
+                      class="mb-2"
+                    >
+                      1. {{ t('chromeMCPNotice') }}<br>
+                      2. {{ t('chromeMCPNotice2') }}<br>
+                      3. {{ t('chromeMCPNotice3') }}
+                    </el-alert>
+                </div>
+                <el-form v-if="isElectron" :model="chromeMCPSettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-compass"></i>
+                          </el-icon>
+                          {{ t('browserControl') }}
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://browsermcp.io/install" 
+                            target="_blank"
+                            v-if="chromeMCPSettings.type=='external' && chromeMCPSettings.mcpName=='browser-mcp'"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoBrowserExtension') }}
+                          </el-link>
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://nodejs.org/en/download" 
+                            target="_blank"
+                            v-if="chromeMCPSettings.type=='external'"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('downloadNodeJS') }}
+                          </el-link>
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://github.com/heshengtao/browser-for-sap/releases" 
+                            target="_blank"
+                            v-if="chromeMCPSettings.type=='external'"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoPartyExtension') }}
+                          </el-link>
+                        </span>
+                      </div>
+                      <el-switch v-model="chromeMCPSettings.enabled" @click.stop @change="changeChromeMCPEnabled"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('browserType')"  v-if="isElectron">
+                        <el-select
+                          v-model="chromeMCPSettings.type"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                          :disabled="chromeMCPSettings.enabled"
+                        >
+                          <el-option :label="t('internalBrowser')" value="internal" ></el-option>
+                          <el-option :label="t('externalBrowser')" value="external" ></el-option>
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item :label="t('mcpName')"  v-if="chromeMCPSettings.type=='external'">
+                        <el-select
+                          v-model="chromeMCPSettings.mcpName"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                          :disabled="chromeMCPSettings.enabled"
+                        >
+                          <el-option :label="t('browser-mcp')" value="browser-mcp" ></el-option>
+                          <el-option :label="t('playwright-mcp')" value="playwright-mcp" ></el-option>
+                        </el-select>
+                      </el-form-item>
+                      <el-alert type="info" :closable="false" class="mb-2" v-if="chromeMCPSettings.type=='external' && chromeMCPSettings.mcpName=='playwright-mcp'">
+                        <div class="alert-content">
+                          {{ t('browserNotice5') }}
+                        </div>
+                      </el-alert>
+                      <el-alert type="info" :closable="false" class="mb-2" v-if="chromeMCPSettings.type=='external' && chromeMCPSettings.mcpName=='browser-mcp'">
+                        <div class="alert-content">
+                          {{ t('browserNotice1') }}<br>
+                          {{ t('browserNotice2') }}<br>
+                          {{ t('browserNotice3') }}
+                        </div>
+                      </el-alert>
+                      <el-alert type="info" :closable="false" class="mb-2" v-if="chromeMCPSettings.type=='internal'">
+                        <div class="alert-content">
+                          {{ t('browserNotice4') }}
+                        </div>
+                      </el-alert>
+                      <el-alert type="info" :closable="false" class="mb-2" v-if="chromeMCPSettings.type=='external'">
+                        <div class="alert-content">
+                          {{ t('browserNotice6') }}
+                        </div>
+                      </el-alert>
+                    </div>
+                  </div>
+                  <!-- Node.js 卡片：已安装 & 未安装 双状态 -->
+                  <el-card shadow="hover" class="sherpa-card" v-if="chromeMCPSettings.type=='external'">
+                    <!-- 头部：标题 + 状态标签 -->
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span><strong>Node.js</strong></span>
+
+                      <div class="d-flex gap-2">
+                        <el-button
+                          v-if="!nodeInstalled"
+                          type="primary"
+                          :loading="nodeInstalling"
+                          @click="openRepository('https://nodejs.org/en/download')"
+                        >
+                          <i class="fa-solid fa-download"></i>
+                          {{ t('installNode') }}
+                        </el-button>
+                        <el-tag v-else type="success" effect="dark" size="large">  
+                          <i class="fa-solid fa-circle-check"></i>
+                          {{ t('installed') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                </el-form> 
+                <!-- Web端提示 -->
+                <div v-else >
+                  <el-empty :description="t('webNotSupported')" />
+                </div>
+              </div>
+              
+              <!-- SQL控制界面 -->
+              <div v-show="subMenu === 'sql'" class="page">
+                <el-form :model="sqlSettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-database"></i>
+                          </el-icon>
+                          {{ t('sqlControl') }}
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://docs.astral.sh/uv/getting-started/installation/" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('downloadUV') }}
+                          </el-link>
+                        </span>
+                      </div>
+                      <el-switch v-model="sqlSettings.enabled" @click.stop @change="changeSqlEnabled"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('sqlEngine')" class="form-item-align">
+                        <el-select
+                          v-model="sqlSettings.engine"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option label="SQLite" value="sqlite" ></el-option>
+                          <el-option label="PostgreSQL" value="postgres" ></el-option>
+                          <el-option label="MySQL/MariaDB" value="mysql" ></el-option>
+                          <el-option label="Microsoft SQL Server" value="mssql" ></el-option>
+                          <el-option label="Oracle" value="oracle" ></el-option>
+                        </el-select>
+                      </el-form-item> 
+                      <el-form-item v-if="sqlSettings.engine!='sqlite'" :label="t('user')" class="form-item-align">
+                        <el-input
+                          v-model="sqlSettings.user"
+                          @input="autoSaveSettings"
+                          placeholder="root"
+                        />
+                      </el-form-item>
+                      <el-form-item v-if="sqlSettings.engine!='sqlite'" :label="t('password')" class="form-item-align">
+                        <el-input
+                          v-model="sqlSettings.password"
+                          show-password
+                          placeholder="password"
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item v-if="sqlSettings.engine!='sqlite'" :label="t('host')" class="form-item-align" style="width: 100%">
+                        <div style="display: flex; gap: 10px; width: 100%;">
+                          <el-input
+                            v-model="sqlSettings.host"
+                            placeholder="localhost"
+                            @input="autoSaveSettings"
+                            style="flex: 1 1 0; min-width: 0;"
+                          ></el-input>
+                          <el-input-number
+                            v-model="sqlSettings.port"
+                            :step="1"
+                            :min="0"
+                            :max="65535"
+                            @input="autoSaveSettings"
+                            style="flex: 0 0 150px;"
+                          ></el-input-number>
+                        </div>
+                      </el-form-item>
+                      <el-form-item v-if="sqlSettings.engine!='sqlite'" :label="t('dbname')" class="form-item-align">
+                        <el-input
+                          v-model="sqlSettings.dbname"
+                          placeholder="dbname"
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item v-if="sqlSettings.engine =='sqlite'" :label="t('dbpath')" class="form-item-align">
+                        <el-input
+                          v-model="sqlSettings.dbpath"
+                          placeholder="/absolute/path/to/database.db"
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-alert type="info" :closable="false" class="mb-2">
+                        <div class="alert-content">
+                          {{ t('sqlNotice1') }}<br>
+                          {{ t('sqlNotice2') }}
+                        </div>
+                      </el-alert>
+                    </div>                   
+                  </div>
+                  <!-- uv 卡片：已安装 & 未安装 双状态 -->
+                  <el-card shadow="hover" class="sherpa-card">
+                    <!-- 头部：标题 + 状态标签 -->
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span><strong>UV</strong></span>
+
+                      <div class="d-flex gap-2">
+                        <el-button
+                          v-if="!uvInstalled"
+                          type="primary"
+                          :loading="uvInstalling"
+                          @click="openRepository('https://docs.astral.sh/uv/getting-started/installation/')"
+                        >
+                          <i class="fa-solid fa-download"></i>
+                          {{ t('installUv') }}
+                        </el-button>
+                        <el-tag v-else type="success" effect="dark" size="large">
+                          <i class="fa-solid fa-circle-check"></i>
+                          {{ t('installed') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                </el-form> 
+              </div>
+
+              <!-- 代码解释器界面 -->
+              <div v-show="subMenu === 'interpreter'" class="page">
+                <el-form :model="codeSettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-code"></i>
+                          </el-icon>
+                          {{ t('interpreter') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="codeSettings.enabled" @click.stop @change="handleInterpreterToggle"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('codeEngine')" class="form-item-align">
+                        <el-select
+                          v-model="codeSettings.engine"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option label="E2B" value="e2b" ></el-option>
+                          <el-option label="Sandbox Fusion" value="sandbox" ></el-option>
+                        </el-select>
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="codeSettings.engine === 'e2b'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-code"></i>
+                          </el-icon>
+                          E2B
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://e2b.dev/" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="codeSettings.e2b_api_key"
+                          :placeholder="t('e2bAPIKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="codeSettings.engine === 'sandbox'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-code"></i>
+                          </el-icon>
+                          Sandbox Fusion
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://github.com/bytedance/SandboxFusion" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoGithub') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('baseURL')" class="form-item-align">
+                        <el-input
+                          v-model="codeSettings.sandbox_url"
+                          :placeholder="t('sandboxURLPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                </el-form> 
+              </div>
+              <!-- 视觉控制界面 -->
+              <div v-show="subMenu === 'visionControl'" class="page">
+                <el-form v-if="isElectron" :model="visionControlSettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-arrow-pointer"></i>
+                          </el-icon>
+                          {{ t('visionControl') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="visionControlSettings.enabled" @click.stop @change="handleVisionControlEnableToggle(visionControlSettings.enabled)"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('mouseControl')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.mouse" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('keyboardControl')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.keyboard" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('realtimeDesktopVision')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('onlyNewScreen')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.onlyNewScreen" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('isEnableGrid')" class="form-item-align" label-position="left">
+                        <el-switch v-model="visionControlSettings.isEnableGrid" @click.stop @change="autoSaveSettings"/>
+                      </el-form-item>
+                      <el-form-item :label="t('isFullScreen')" class="form-item-align" label-position="left">
+                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                          <el-switch v-model="visionControlSettings.isFullScreen" @click.stop @change="handleFullScreenChange"></el-switch>
+                        </div>
+                      </el-form-item>
+                      <el-form-item>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                          <span v-if="!visionControlSettings.isFullScreen">
+                            {{t('currentFieldOfView')}} : [{{ visionControlSettings.ScreenSize.join(', ') }}]
+                          </span>
+                          <span v-else>
+                            {{t('currentFieldOfView')}} : {{ t('fullScreen') }}
+                          </span>
+                          <el-button 
+                            type="primary"
+                            @click="reselectRegion"
+                          >
+                            {{t('selectRegion')}}
+                          </el-button>
+                        </div>
+                      </el-form-item>
+                    </div>
+
+                  </div>
+                </el-form> 
+                <div v-else >
+                  <el-empty :description="t('webNotSupported')" />
+                </div>
+              </div>
+
+              <!-- 终端工具界面 -->
+              <div v-show="subMenu === 'CLI'" class="page">
+              <el-tabs v-model="activeCLITab">
+                <el-tab-pane :label="t('CLItoolSettings')" name="config">
+                  <el-form :model="CLISettings" class="settings-form"  label-position="top">
+                    <div class="tool-item">
+                      <div class="tool-header">
+                        <div class="header-left">
+                          <span>
+                            <el-icon>
+                              <i class="fa-solid fa-computer"></i>
+                            </el-icon>
+                            {{ t('CLItool') }}
+                          </span>
+                        </div>
+                        <el-switch v-model="CLISettings.enabled" @click.stop @change="handleEnableToggle"/>
+                      </div>
+                      <div class="tool-content">
+                        <el-form-item :label="t('CLIEngine')" class="form-item-align">
+                          <el-select
+                            v-model="CLISettings.engine"
+                            @change="autoSaveSettings"
+                            class="full-width-input"
+                          >
+                            <el-option :label="t('localEnvironment')" value="local" ></el-option>
+                            <el-option :label="t('dockerSandbox')" value="ds" ></el-option> 
+                            <el-option :label="t('ACPProtocol') || 'ACP Protocol'" value="acp" ></el-option>
+                          </el-select>
+                        </el-form-item>
+
+                        <!-- 工作空间选择 -->
+                        <el-form-item required :label="t('workspace')" class="form-item-align">
+                          <el-input v-model="CLISettings.cc_path" @input="autoSaveSettings" class="full-width-input">
+                            <template #append>
+                              <el-button @click="browseDirectory">
+                                <i class="fa-solid fa-folder"></i>
+                              </el-button>
+                            </template>
+                          </el-input>
+                        </el-form-item>
+
+                        <el-form-item :label="t('enabledModeChangeTool')" class="form-item-align" label-position="left">
+                          <el-switch
+                            v-model="CLISettings.mode_change"
+                            @change="autoSaveSettings"
+                            class="tool-switch"
+                          ></el-switch>
+                        </el-form-item>
+
+                        <el-form-item :label="t('enabledShortCut')" class="form-item-align" label-position="left">
+                          <el-switch
+                            v-model="CLISettings.shortcut"
+                            @change="autoSaveSettings"
+                            class="tool-switch"
+                          ></el-switch>
+                        </el-form-item>
+
+                      </div>
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('shortcutNotice1') }}
+                          </div>
+                        </template>
+                      </el-alert>
+                    </div>
+
+
+                    <!-- ★ 新增：ACP 协议配置（放在 Docker Sandbox 配置 div 后面） -->
+                    <div class="tool-item" v-show="CLISettings.engine === 'acp'">
+                      <div class="tool-header">
+                        <div class="header-left">
+                          <span>
+                            <el-icon><i class="fa-solid fa-plug"></i></el-icon>
+                            {{ t('ACPProtocol') || 'ACP Protocol' }}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="tool-content">
+
+                        <!-- ★ CLI 智能体选择 -->
+                        <el-form-item :label="t('CLIAgent') || 'CLI Agent'" class="form-item-align">
+                          <el-select 
+                            v-model="acpSettings.agent" 
+                            @change="autoSaveSettings" 
+                            class="full-width-input"
+                          >
+                            <el-option label="Claude Code" value="claude"></el-option>
+                            <el-option label="OpenClaw" value="openclaw"></el-option>
+                            <el-option label="Codex CLI" value="codex"></el-option>
+                            <el-option label="Gemini CLI" value="gemini"></el-option>
+                            <el-option label="OpenCode" value="opencode"></el-option>
+                            <el-option label="Qwen Code" value="qwen"></el-option>
+                            <el-option label="Cursor CLI" value="cursor"></el-option>
+                            <el-option label="GitHub Copilot" value="copilot"></el-option>
+                            <el-option label="Pi Agent" value="pi"></el-option>
+                            <el-option label="Factory Droid" value="droid"></el-option>
+                            <el-option label="iFlow CLI" value="iflow"></el-option>
+                            <el-option label="Kilocode" value="kilocode"></el-option>
+                            <el-option label="Kimi CLI" value="kimi"></el-option>
+                            <el-option label="Kiro CLI" value="kiro"></el-option>
+                            <el-option label="Qoder CLI" value="qoder"></el-option>
+                            <el-option label="Trae CLI" value="trae"></el-option>
+                            <el-option label="Goose CLI" value="goose"></el-option>
+                          </el-select>
+                        </el-form-item>
+
+                        <!-- ★ 权限模式选择 -->
+                        <el-form-item :label="t('permissionMode')" class="form-item-align">
+                          <el-select 
+                            v-model="acpSettings.permissionMode" 
+                            @change="autoSaveSettings" 
+                            class="full-width-input"
+                          >
+                            <el-option :label="t('planMode')" value="plan" ></el-option>
+                            <el-option :label="t('defaultPermissionMode')" value="default" ></el-option>
+                            <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
+                            <el-option :label="t('danger')+t('bypassPermissions')" value="yolo" ></el-option>
+                            <el-option :label="t('danger')+t('coworkPermissionMode')" value="cowork" ></el-option>
+                          </el-select>
+                        </el-form-item>
+
+                        <!-- ★ 模型配置（可选，用于覆盖默认模型） -->
+                        <el-form-item :label="t('modelOverride') || 'Model Override (Optional)'" class="form-item-align">
+                          <el-input 
+                            v-model="acpSettings.model" 
+                            placeholder="claude-sonnet-4-20250514 / gpt-5.1 / gemini-2.5-pro ..."
+                            @input="autoSaveSettings" 
+                            class="full-width-input"
+                          >
+                          </el-input>
+                        </el-form-item>
+
+                        <!-- ★ 额外环境变量配置 -->
+                        <el-form-item :label="t('extraEnvVars') || 'Extra Environment Variables'" class="form-item-align">
+                          <el-input 
+                            v-model="acpSettings.extraEnv" 
+                            type="textarea"
+                            :rows="3"
+                            placeholder="KEY1=value1&#10;KEY2=value2"
+                            @input="autoSaveSettings" 
+                            class="full-width-input"
+                          />
+                        </el-form-item>
+
+                        <!-- ★ ACPX 状态检查 -->
+                        <div class="acpx-status-bar">
+                          
+                          <el-button 
+                            @click="checkAcpxStatus" 
+                            :loading="checkingAcpx"
+                            type="primary" 
+                            class="add-server-btn">
+                            {{ t('checkAcpxStatus') || 'Check ACPX Status' }}
+                          </el-button>
+                        </div>
+
+                      </div>
+                      
+                      <!-- ★ ACP 协议说明 -->
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            1. {{ t('ACPProtocolNotice1') || 'ACP Protocol lets you use any CLI coding agent as a sub-agent via a unified interface.' }}<br>
+                            2. {{ t('ACPProtocolNotice2') || 'Make sure the target CLI tool is installed in your environment (e.g., Claude Code, Codex, Qwen Code).' }}<br>
+                            3. {{ t('ACPProtocolNotice3') || 'ACPM will automatically detect and use the installed acpx command.' }}
+                          </div>
+                        </template>
+                      </el-alert>
+                    </div>
+
+                    <!-- 本地环境配置 -->
+                    <div class="tool-item" v-show="CLISettings.engine === 'local'">
+                      <div class="tool-header">
+                        <div class="header-left">
+                          <span>
+                            <el-icon><i class="fa-solid fa-laptop"></i></el-icon>
+                            {{t('localEnvironment')}}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="tool-content">
+
+                        <!-- 权限模式选择 -->
+                        <el-form-item :label="t('permissionMode')" class="form-item-align">
+                          <el-select v-model="localEnvSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
+                            <el-option :label="t('planMode')" value="plan" ></el-option>
+                            <el-option :label="t('defaultPermissionMode')" value="default" ></el-option>
+                            <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
+                            <el-option :label="t('danger')+t('bypassPermissions')" value="yolo" ></el-option>
+                            <el-option :label="t('danger')+t('coworkPermissionMode')" value="cowork" ></el-option>
+                          </el-select>
+                        </el-form-item>
+
+                        <el-form-item :label="t('maxIterations')" class="form-item-align" v-if="localEnvSettings.permissionMode=='cowork'">
+                          <el-slider
+                            v-model="CLISettings.max_iterations"
+                            :min="10"
+                            :max="500"
+                            :step="1"
+                            show-input
+                            @input="autoSaveSettings"
+                          />
+                        </el-form-item>
+
+                        <el-form-item :label="t('subAgentPlanProvider')" class="form-item-align" v-if="localEnvSettings.permissionMode=='cowork'">
+                          <el-select
+                            v-model="fastSettings.selectedProvider"
+                            :placeholder="t('selectProvider')"
+                            filterable
+                            @change="selectFastProvider"
+                            @visible-change="handleFastProviderVisibleChange"
+                            class="full-width-input"
+                          >
+                            <el-option
+                              v-for="provider in modelProviders"
+                              :key="provider.id"
+                              :label="provider.vendor+' - '+provider.modelId"
+                              :value="provider.id"
+                            >
+                              <div class="provider-option">
+                                <img 
+                                  :src="getVendorLogo(provider.vendor)" 
+                                  class="mini-vendor-logo"
+                                />
+                                <span class="model-id">{{ provider.modelId }}</span>
+                              </div>
+                            </el-option>
+                          </el-select>
+                        </el-form-item>
+
+                      </div>
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('localEnvironmentNotice1') }}
+                          </div>
+                        </template>
+                      </el-alert>
+                    </div>
+
+                    <!-- Docker Sandbox 配置 -->
+                    <div class="tool-item" v-show="CLISettings.engine === 'ds'">
+                      <div class="tool-header">
+                        <div class="header-left">
+                          <span>
+                            <el-icon><i class="fa-brands fa-docker"></i></el-icon>
+                            {{t('dockerSandbox')}}
+                          </span>
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://www.docker.com/get-started" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-brands fa-docker"></i>
+                            </el-icon>{{ t('downloadDocker') }}
+                          </el-link>
+                        </div>
+                      </div>
+                      <div class="tool-content">
+
+                        <!-- 权限模式选择 -->
+                        <el-form-item :label="t('permissionMode')" class="form-item-align">
+                          <el-select v-model="dsSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
+                            <el-option :label="t('planMode')" value="plan" ></el-option>
+                            <el-option :label="t('defaultPermissionMode')" value="default" ></el-option>
+                            <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
+                            <el-option :label="t('bypassPermissions')" value="yolo" ></el-option>
+                            <el-option :label="t('coworkPermissionMode')" value="cowork" ></el-option>
+                          </el-select>
+                        </el-form-item>
+
+                        <el-form-item :label="t('maxIterations')" class="form-item-align" v-if="dsSettings.permissionMode=='cowork'">
+                          <el-slider
+                            v-model="CLISettings.max_iterations"
+                            :min="10"
+                            :max="500"
+                            :step="1"
+                            show-input
+                            @input="autoSaveSettings"
+                          />
+                        </el-form-item>
+
+                        <el-form-item :label="t('subAgentPlanProvider')" class="form-item-align" v-if="dsSettings.permissionMode=='cowork'">
+                          <el-select
+                            v-model="fastSettings.selectedProvider"
+                            :placeholder="t('selectProvider')"
+                            filterable
+                            @change="selectFastProvider"
+                            @visible-change="handleFastProviderVisibleChange"
+                            class="full-width-input"
+                          >
+                            <el-option
+                              v-for="provider in modelProviders"
+                              :key="provider.id"
+                              :label="provider.vendor+' - '+provider.modelId"
+                              :value="provider.id"
+                            >
+                              <div class="provider-option">
+                                <img 
+                                  :src="getVendorLogo(provider.vendor)" 
+                                  class="mini-vendor-logo"
+                                />
+                                <span class="model-id">{{ provider.modelId }}</span>
+                              </div>
+                            </el-option>
+                          </el-select>
+                        </el-form-item>
+
+                      </div>
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('DockerSandboxNotice1') }}
+                          </div>
+                        </template>
+                      </el-alert>
+                    </div>
+                    
+                    <!-- docker 卡片：已安装 & 未安装 双状态 -->
+                    <el-card shadow="hover" class="sherpa-card" v-show="CLISettings.engine === 'ds'">
+                      <!-- 头部：标题 + 状态标签 -->
+                      <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><strong>Docker</strong></span>
+
+                        <div class="d-flex gap-2">
+                          <el-button
+                            v-if="!dockerInstalled"
+                            type="primary"
+                            :loading="dockerInstalling"
+                            @click="openRepository('https://www.docker.com/get-started')"
+                          >
+                            <i class="fa-solid fa-download"></i>
+                            {{ t('installDocker') }}
+                          </el-button>
+                          <el-tag v-else type="success" effect="dark" size="large">  
+                            <i class="fa-solid fa-circle-check"></i>
+                            {{ t('installed') }}
+                          </el-tag>
+                        </div>
+                      </div>
+                    </el-card>
+                  </el-form> 
+                </el-tab-pane>
+                <el-tab-pane :label="t('agentSkills')" name="skills">
+                  <!-- 官网技能市场跳转横幅 (Skills Version) -->
+                  <div class="market-link-banner" @click="openRepository('https://www.agentparty.top/skills.html')">
+                    
+                    <div class="banner-main">
+                      <!-- 图标换成闪电 -->
+                      <div class="banner-icon-box">
+                        <i class="fa-solid fa-bolt-lightning"></i>
+                      </div>
+                      
+                      <div class="banner-text">
+                        <h3>{{ t('skillMarket') || 'Skills Market' }}</h3>
+                        <p>{{ t('exploreMoreSkills') || 'Unlock more capabilities: RAG, Web Search, Tools...' }}</p>
+                      </div>
+
+                      <div class="banner-action">
+                        <span>GO</span>
+                        <i class="fa-solid fa-arrow-right-long"></i>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="plugin-header">
+                    <h3>{{ t('agentSkills') }}</h3>
+                    <div class="plugin-button-group">
+                      <el-select
+                        style="width: 200px;"
+                        v-model="CLISettings.visibilityScope"
+                        @change="autoSaveSettings"
+                      >
+                        <el-option :label="t('globalSkill')" value="global" ></el-option>
+                        <el-option :label="t('workspaceSkill')" value="workspace" ></el-option>
+                        <el-option :label="t('noneSkill')" value="none" ></el-option>
+                      </el-select>
+                      <el-button 
+                        @click="showAddSkillDialog = true" 
+                        type="primary">
+                        {{ t('addSkill') }}
+                      </el-button>
+                      <el-button 
+                        @click="openSkillsFolder" 
+                        type="primary">
+                        {{ t('openSkillsFolder') }}
+                      </el-button>
+                      <el-button 
+                        @click="openRepository('https://github.com/super-agent-party/super-agent-party.github.io/blob/main/skills.json')" 
+                        type="primary">
+                        {{ t('addYourSkills') }}
+                      </el-button>
+                      <el-button 
+                        @click="handleRefreshSkills" 
+                        type="primary"
+                        :loading="skillsLoading">
+                        {{ t('refresh') }}
+                      </el-button>
+                    </div>
+                  </div>
+                  <div class="provider-grid">
+                    <!-- 技能卡片 -->
+                    <div class="provider-card knowledge-card skill-card" v-for="skill in computedSkillsList" :key="skill.id">
+                      
+                      <!-- 头部信息 -->
+                      <div class="card-header">
+                        <div class="kb-header">
+                          <h3 class="kb-title">{{ skill.name }}</h3>
+                          <el-tag type="info" size="small" effect="plain">v{{ skill.version }}</el-tag>
+                        </div>
+                        <div class="card-actions">
+                          <el-button @click="previewSkill(skill.id)" type="info" link size="small">
+                            <i class="fa-solid fa-eye"></i>
+                          </el-button>
+                        </div>
+                      </div>
+
+                      <!-- 技能内容 -->
+                      <div class="kb-content skill-content-wrapper">
+                        <p class="skill-desc">
+                          {{ skill.description && skill.description.length > 120 
+                            ? skill.description.slice(0, 120) + '...' 
+                            : skill.description }}
+                        </p>
+                      </div>
+
+                      <!-- 底部状态管理栏 (严格适配你的主题体系) -->
+                      <div class="skill-locations-bar">
+                        <!-- 🌍 全局状态 (Global) -->
+                        <div class="location-pane" :class="{ 'is-active': skill.isGlobal }">
+                          <div class="pane-title"><i class="fa-solid fa-globe"></i> {{ t('global') || 'Global' }}</div>
+                          <div class="pane-action">
+                            <template v-if="skill.isGlobal">
+                              <span class="status-indicator success"><i class="fa-solid fa-circle-check"></i> {{ t('installed') }}</span>
+                              <!-- 传 skill 对象，用于判断是否要弹窗 -->
+                              <el-button @click="removeGlobalSkill(skill)" type="danger" link class="action-icon-btn" :title="t('removeFromGlobal')">
+                                <i class="fa-solid fa-trash-can"></i>
+                              </el-button>
+                            </template>
+                            <template v-else>
+                              <span class="status-indicator pending">{{ t('notInstalled') }}</span>
+                              <!-- 如果全局没有，但项目里有，显示反向同步按钮 -->
+                              <el-button @click="syncToGlobal(skill.id)" type="default" link class="action-icon-btn" :title="t('syncToGlobal') || 'Sync to Global'">
+                                <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                              </el-button>
+                            </template>
+                          </div>
+                        </div>
+
+
+                        <!-- 分割线 -->
+                        <div class="pane-divider"></div>
+
+                        <!-- 📁 项目状态 (Workspace) -->
+                        <div class="location-pane" :class="{ 'is-active': skill.isProject, 'is-disabled': !CLISettings.cc_path }">
+                          <div class="pane-title">
+                            <i class="fa-solid fa-folder-tree"></i> {{ t('workspace') || 'Project' }}
+                          </div>
+                          <div class="pane-action">
+                            <template v-if="!CLISettings.cc_path">
+                              <span class="status-indicator disabled">{{ t('pleaseSelectWorkspaceFirst') }}</span>
+                            </template>
+                            <template v-else-if="skill.isProject">
+                              <span class="status-indicator success"><i class="fa-solid fa-link"></i> {{ t('synced') }}</span>
+                              <!-- 传 skill 对象，用于判断是否要弹窗 -->
+                              <el-button @click="removeProjectSkill(skill)" type="danger" link class="action-icon-btn" :title="t('removeFromProject')">
+                                <i class="fa-solid fa-unlink"></i>
+                              </el-button>
+                            </template>
+                            <template v-else>
+                              <span class="status-indicator pending">{{ t('notSynced') || 'Not Synced' }}</span>
+                              <el-button @click="syncToProject(skill.id)" type="default" link class="action-icon-btn" :disabled="!skill.isGlobal" :title="t('sync')">
+                                <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                              </el-button>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 添加新 Skill 卡片 -->
+                    <div class="provider-card add-tile" @click="showAddSkillDialog = true">
+                      <el-icon :size="40" color="var(--el-text-color-secondary)"><i class="fa-solid fa-plus"></i></el-icon>
+                      <div style="color: var(--el-text-color-regular); margin-top: 10px; font-weight: 500;">{{ t('addSkill') }}</div>
+                    </div>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
+                <!-- 技能预览对话框 -->
+                <el-dialog append-to-body 
+                  v-model="showSkillPreviewDialog" 
+                  :title="t('skillPreview')" 
+                  width="80%"
+                  top="5vh"
+                  custom-class="skill-preview-dialog"
+                >
+                  <div 
+                    v-loading="skillPreviewLoading" 
+                    class="markdown-body skill-preview-content"
+                    v-html="renderedSkillContent"
+                  ></div>
+                  <template #footer>
+                    <el-button @click="showSkillPreviewDialog = false">{{ t('close') }}</el-button>
+                  </template>
+                </el-dialog>
+                <!-- === 新增: 添加 Skill 对话框 === -->
+                <el-dialog append-to-body v-model="showAddSkillDialog" :title="t('addSkill')" width="80%">
+                  <el-tabs v-model="addSkillTab">
+                    
+                    <!-- GitHub 安装 -->
+                    <el-tab-pane label="GitHub" name="github">
+                      <el-alert type="info" :closable="false" class="mb-2">
+                        {{ t('skillGithubNote') }}
+                      </el-alert>
+                      <el-form label-position="top">
+                        <el-form-item :label="t('repoUrl')">
+                          <el-input v-model="newSkillUrl" placeholder="https://github.com/owner/repo"></el-input>
+                        </el-form-item>
+                        <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                          <el-button 
+                            type="primary" 
+                            @click="installSkillFromGithub" 
+                            :loading="isSkillInstalling" 
+                            :disabled="!newSkillUrl"
+                          >
+                            {{ t('downloadAndInstall') }}
+                          </el-button>
+                        </div>
+                      </el-form>
+                    </el-tab-pane>
+
+                    <el-tab-pane :label="t('localZip')" name="zip">
+                      <el-alert type="info" :closable="false" class="mb-2">
+                        {{ t('skillZipNote') }}
+                      </el-alert>
+                      
+                      <!-- 这是一个普通的 div 容器，加上 loading 遮罩 -->
+                      <div 
+                        class="upload-container"
+                        v-loading="isUploading"
+                        :element-loading-text="t('uploading')"
+                      >
+                        <!-- 
+                          1. @click: 点击触发 triggerSkillFileSelect
+                          2. @dragover.prevent: 允许拖拽（必须阻止默认行为）
+                          3. @drop.prevent: 获取拖拽的文件
+                        -->
+                        <div
+                          class="drop-zone"
+                          @dragover.prevent
+                          @drop.prevent="handleSkillDrop"
+                          @click="triggerSkillFileSelect"
+                          style="cursor: pointer;"
+                        >
+                          <!-- 这里你可以换成 fa-solid fa-cloud-arrow-up 或者保持 upload 组件 -->
+                          <el-icon :size="50"><i class="fa-solid fa-cloud-arrow-up"></i></el-icon>
+                          <p>{{ t('clickOrDrop') }}</p>
+                        </div>
+
+                        <!-- 
+                          隐藏的原生文件输入框 
+                          ref="skillFileInput": 用于 JS 找到它
+                          accept=".zip": 限制文件类型
+                          @change: 选中文件后触发
+                        -->
+                        <input 
+                          type="file" 
+                          ref="skillFileInput" 
+                          accept=".zip" 
+                          style="display: none" 
+                          @change="handleSkillFileChange"
+                        >
+                      </div>
+                    </el-tab-pane>
+                  </el-tabs>
+                </el-dialog>
+              </div>
+              <!-- 联网搜索界面 -->
+              <div v-show="subMenu === 'websearch'" class="page">
+                <el-form :model="webSearchSettings" class="settings-form"  label-position="top">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          {{ t('webSearch') }}
+                        </span>
+                      </div>
+                      <el-switch v-model="webSearchSettings.enabled" @click.stop @change="handleWebSearchToggle"/>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('searchEngine')" class="form-item-align">
+                        <el-select
+                          v-model="webSearchSettings.engine"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option label="DuckDuckGo" value="duckduckgo" ></el-option>
+                          <el-option label="SearXNG" value="searxng" ></el-option>
+                          <el-option label="Tavily" value="tavily" ></el-option>
+                          <el-option label="Bing" value="bing" ></el-option>
+                          <el-option label="Google" value="google" ></el-option>
+                          <el-option label="Brave" value="brave" ></el-option>
+                          <el-option label="Exa" value="exa" ></el-option>
+                          <el-option label="Serper" value="serper" ></el-option>
+                          <el-option label="Bochaai" value="bochaai" ></el-option>
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item :label="t('webCrawling')" class="form-item-align">
+                        <el-select
+                          v-model="webSearchSettings.crawler"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option :label="t('simpleRequest')" value="simpleRequest" ></el-option>
+                          <el-option label="markdown.new" value="mdnew" ></el-option>
+                          <el-option label="Jina" value="jina" ></el-option>
+                          <el-option label="Crawl4AI" value="crawl4ai" ></el-option>
+                          <el-option label="Firecrawl" value="firecrawl"></el-option>
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item :label="t('webSearchTiming')" class="form-item-align">
+                        <el-select
+                          v-model="webSearchSettings.when"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option :label="t('beforeThinking')" value="before_thinking" ></el-option>
+                          <el-option :label="t('afterThinking')" value="after_thinking" ></el-option>
+                          <el-option :label="t('both')" value="both" ></el-option>
+                        </el-select>
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'duckduckgo'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          DuckDuckGo{{t("noNet")}}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.duckduckgo_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'searxng'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          SearXNG
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://github.com/searxng/searxng" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoGithub') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.searxng_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('baseURL')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.searxng_url"
+                          :placeholder="t('searxngURLPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('searxngCustomEngine')" class="form-item-align" label-position="left">
+                        <el-switch
+                          v-model="webSearchSettings.searxng_is_select"
+                          @change="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item 
+                        v-show="webSearchSettings.searxng_is_select"
+                        :label="t('searxngEngines')" 
+                        class="form-item-align"
+                      >
+                        <el-input
+                          v-model="webSearchSettings.searxng_engines"
+                          :placeholder="t('searxngEnginesPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'tavily'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Tavily
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://app.tavily.com/home" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.tavily_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.tavily_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <!-- Bing 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'bing'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Bing
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/create-bing-search-service-resource"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.bing_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.bing_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('searchEndpoint')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.bing_search_url"
+                          placeholder="https://api.bing.microsoft.com/v7.0/search"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+
+                  <!-- Google 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'google'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Google
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://console.cloud.google.com/apis/credentials"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.google_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.google_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-form-item label="CSE ID" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.google_cse_id"
+                          :placeholder="t('googleCSEIdPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+
+                  <!-- Brave 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'brave'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Brave
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://brave.com/search/api/"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.brave_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.brave_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+
+                  <!-- Exa 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'exa'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Exa
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://docs.exa.ai/reference/welcome"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.exa_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.exa_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+
+                  <!-- Serper 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'serper'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Serper
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://serper.dev/dashboard"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.serper_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.serper_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <!-- Bochaai 配置块 -->
+                  <div class="tool-item" v-show="webSearchSettings.engine === 'bochaai'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Bochaai
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://open.bochaai.com/overview"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('resultCount')" class="form-item-align">
+                        <el-slider
+                          v-model="webSearchSettings.bochaai_max_results"
+                          :min="1"
+                          :max="20"
+                          :step="1"
+                          show-input
+                          @input="autoSaveSettings"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.bochaai_api_key"
+                          :placeholder="t('apiKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.crawler === 'jina'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          jina
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://jina.ai/api-dashboard" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoAPI') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.jina_api_key"
+                          :placeholder="t('jinaAPIKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.crawler === 'crawl4ai'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          Crawl4Ai
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://github.com/unclecode/crawl4ai" 
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-key"></i>
+                            </el-icon>{{ t('gotoGithub') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('baseURL')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.Crawl4Ai_url"
+                          :placeholder="t('crawl4AiURLPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.Crawl4Ai_api_key"
+                          :placeholder="t('crawl4AiAPIKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        />
+                      </el-form-item>
+                    </div>
+                  </div>
+
+                  <!-- Firecrawl 配置 -->
+                  <div class="tool-item" v-show="webSearchSettings.crawler === 'firecrawl'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-fire"></i>
+                          </el-icon>
+                          Firecrawl
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://www.firecrawl.dev/"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-globe"></i>
+                            </el-icon>{{ t('officialWebsite') }}
+                          </el-link>
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://docs.firecrawl.dev/api-reference/introduction"
+                            target="_blank"
+                            class="ml-2"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-book"></i>
+                            </el-icon>{{ t('docs') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <el-form-item :label="t('baseURL')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.firecrawl_url"
+                          :placeholder="t('firecrawlURLPlaceholder')"
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                        </el-input>
+                      </el-form-item>
+                      
+                      <el-form-item :label="t('apiKey')" class="form-item-align">
+                        <el-input
+                          v-model="webSearchSettings.firecrawl_api_key"
+                          :placeholder="t('firecrawlAPIKeyPlaceholder')"
+                          show-password
+                          @input="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                        </el-input>
+                        <div class="form-hint">{{ t('firecrawlKeyHint') }}</div>
+                      </el-form-item>
+                      
+                      <el-form-item :label="t('operationMode')" class="form-item-align">
+                        <el-select
+                          v-model="webSearchSettings.firecrawl_mode"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option label="scrape" value="scrape">
+                            <span style="display: flex; align-items: center; gap: 8px;">
+                              <el-icon><i class="fa-solid fa-file-lines"></i></el-icon>
+                              <span>{{ t('scrape') }}</span>
+                            </span>
+                          </el-option>
+                          <el-option label="crawl" value="crawl">
+                            <span style="display: flex; align-items: center; gap: 8px;">
+                              <el-icon><i class="fa-solid fa-sitemap"></i></el-icon>
+                              <span>{{ t('crawl') }}</span>
+                            </span>
+                          </el-option>
+                          <el-option label="search" value="search">
+                            <span style="display: flex; align-items: center; gap: 8px;">
+                              <el-icon><i class="fa-solid fa-magnifying-glass"></i></el-icon>
+                              <span>{{ t('search') }}</span>
+                            </span>
+                          </el-option>
+                          <el-option label="map" value="map">
+                            <span style="display: flex; align-items: center; gap: 8px;">
+                              <el-icon><i class="fa-solid fa-map"></i></el-icon>
+                              <span>{{ t('map') }}</span>
+                            </span>
+                          </el-option>
+                        </el-select>
+                        <div class="form-hint mode-hint">
+                          {{ t(webSearchSettings.firecrawl_mode + 'ModeHint') }}
+                        </div>
+                      </el-form-item>
+                    </div>
+                  </div>
+                  <div class="tool-item" v-show="webSearchSettings.crawler === 'simpleRequest'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          {{t('simpleRequest')}}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="tool-item" v-show="webSearchSettings.crawler === 'mdnew'">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon>
+                            <i class="fa-solid fa-globe"></i>
+                          </el-icon>
+                          markdown.new
+                          <el-link
+                            type="primary"
+                            :underline="false"
+                            href="https://markdown.new/"
+                            target="_blank"
+                          >
+                            <el-icon class="mr-1">
+                              <i class="fa-solid fa-globe"></i>
+                            </el-icon>{{ t('officialWebsite') }}
+                          </el-link>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                </el-form>
+              </div>
+              <!-- 知识库界面 -->
+              <div v-show="subMenu === 'document'" class="page">
+                <el-tabs v-model="activeKbTab">
+                  <el-tab-pane :label="t('kbSettings')" name="settings">
+                    <el-form :model="KBSettings" class="settings-form"  label-position="top">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon>
+                                <i class="fa-solid fa-book"></i>
+                              </el-icon>
+                              {{ t('knowledgeBase') }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <!-- 原有搜索时机设置 -->
+                          <el-form-item :label="t('KBSearchTiming')" class="form-item-align">
+                            <el-select
+                              v-model="KBSettings.when"
+                              @change="autoSaveSettings"
+                              class="full-width-input"
+                            >
+                              <el-option :label="t('beforeThinking')" value="before_thinking"></el-option>
+                              <el-option :label="t('afterThinking')" value="after_thinking"></el-option>
+                              <el-option :label="t('both')" value="both"></el-option>
+                            </el-select>
+                          </el-form-item>
+                          <el-form-item :label="t('returnChunks')" class="form-item-align">
+                            <el-slider
+                              v-model="KBSettings.top_n"
+                              :min="1"
+                              :max="20"
+                              :step="1"
+                              show-input
+                              @input="autoSaveSettings"
+                            />
+                          </el-form-item>
+                          <!-- 新增参数设置 -->
+                          <el-form-item :label="t('rerankEnable')" class="form-item-align" label-position="left">
+                            <el-switch
+                              v-model="KBSettings.is_rerank"
+                              @change="autoSaveSettings"
+                            ></el-switch>
+                          </el-form-item>
+                          <!-- 模型参数 -->
+                          <el-form-item :label="t('rerankProvider')" class="form-item-align" v-show="KBSettings.is_rerank">
+                            <el-select
+                              v-model="KBSettings.selectedProvider"
+                              :placeholder="t('selectProvider')"
+                              filterable
+                              @change="selectRankProvider"
+                              @visible-change="handleRankProviderVisibleChange"
+                              class="full-width-input"
+                            >
+                              <el-option
+                                v-for="provider in modelProviders"
+                                :key="provider.id"
+                                :label="provider.vendor+' - '+provider.modelId"
+                                :value="provider.id"
+                              >
+                                <div class="provider-option">
+                                  <img 
+                                    :src="getVendorLogo(provider.vendor)" 
+                                    class="mini-vendor-logo"
+                                  />
+                                  <span class="model-id">{{ provider.modelId }}</span>
+                                </div>
+                              </el-option>
+                            </el-select>
+                          </el-form-item>
+                          <el-alert
+                            type="info"
+                            :closable="false"
+                            class="mb-2"
+                          >
+                            <template #default>
+                              <div class="alert-content" v-show="KBSettings.is_rerank">
+                                {{ t('firstTimeUse') }}
+                                <el-link
+                                  type="primary"
+                                  :underline="false"
+                                  class="font-medium"
+                                  @click="switchToApiBox"
+                                >
+                                  <el-icon class="mr-1">
+                                    <i class="fa-solid fa-key"></i>
+                                  </el-icon>{{ t('keyBoxInterface') }}
+                                </el-link>
+                                {{ t('addProviderReturnSelect') }}
+                                {{ t('rerankmodelnotice') }}
+                              </div>
+                            </template>
+                          </el-alert>
+                        </div>
+                      </div>
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        <template #default>
+                          <div class="alert-content">
+                            {{ t('minilmNotice') }}
+                          </div>
+                        </template>
+                      </el-alert>
+                      <!-- Minilm ONNX 卡片 -->
+                      <el-card
+                        shadow="hover"
+                        class="sherpa-card"
+                      >
+                        <!-- 卡片头部：标题 + 安装状态 -->
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                          <!-- 左侧标题 -->
+                          <span><strong>Paraphrase Multilingual MiniLM L12 v2</strong></span>
+
+                          <!-- 右侧 tag 组 -->
+                          <div class="d-flex gap-2">
+                            <el-tag type="info" effect="dark">
+                              224MB
+                            </el-tag>
+
+                            <el-tag
+                              :type="minilmModelExists ? 'success' : 'info'"
+                              effect="dark"
+                            >
+                              {{ minilmModelExists ? t('installed') : t('notInstalled') }}
+                            </el-tag>
+                          </div>
+                        </div>
+
+
+                        <!-- 操作按钮区 -->
+                        <div class="card-actions">
+                          <!-- 左侧：两个下载按钮 -->
+                          <div class="left-actions">
+                            <el-button
+                              type="primary"
+                              :disabled="minilmModelExists || minilmDownloading"
+                              :loading="minilmDownloading && source==='modelscope'"
+                              @click="minilmDownload('modelscope')"
+                            >
+                              {{ t('downloadFromModelScope') }}
+                            </el-button>
+
+                            <el-button
+                              type="primary"
+                              :style="{ margin: '0' }"
+                              :disabled="minilmModelExists || minilmDownloading"
+                              :loading="minilmDownloading && source==='huggingface'"
+                              @click="minilmDownload('huggingface')"
+                            >
+                              {{ t('downloadFromHuggingFace') }}
+                            </el-button>
+                          </div>
+
+                          <!-- 右侧：删除按钮 -->
+                          <el-button
+                            v-if="minilmModelExists"
+                            type="danger"
+                            @click="minilmRemove"
+                          >
+                            {{ t('deleteModel') }}
+                          </el-button>
+                        </div>
+
+
+                        <!-- 进度条（固定在底部） -->
+                        <el-progress
+                          v-if="minilmDownloading"
+                          :percentage="minilmPercent"
+                          style="margin-top: 16px;"
+                          :stroke-width="10"
+                        ></el-progress>
+                      </el-card>
+                    </el-form>
+                  </el-tab-pane>
+                  <el-tab-pane :label="t('addKnowledgeBase')" name="add">
+                    <!-- 磁贴网格 -->
+                    <div class="provider-grid">
+                      <!-- 知识库磁贴 -->
+                      <div class="provider-card knowledge-card" v-for="kb in knowledgeBases" :key="kb.id">
+                        <div class="card-header">
+                          <!-- 加载状态指示 -->
+                          <el-switch 
+                            v-show="kb.processingStatus !== 'processing'" 
+                            v-model="kb.enabled" 
+                            @change="toggleKbEnabled(kb)">
+                          </el-switch>
+
+                          <div class="card-actions">
+                            <el-button  type="info" v-if="kb.processingStatus === 'processing'"  circle size="small">
+                              <i class="fa-solid fa-spinner"></i>
+                            </el-button>
+                            <el-button @click="removeKnowledgeBase(kb)" type="danger"  circle size="small">
+                              <i class="fa-solid fa-trash"></i>
+                            </el-button>
+                          </div>
+                        </div>
+
+                        <!-- 内容区域根据状态显示 -->
+                        <!-- 修改模板部分 -->
+                        <template v-if="kb.processingStatus !== 'processing'">
+                          <div class="kb-content">
+                            <div class="kb-header">
+                              <h3 class="kb-title">{{ kb.name }}</h3>
+                              <el-tag v-if="kb.files?.length" type="info" size="small">
+                                {{ kb.files.length }} {{ t('files') }}
+                              </el-tag>
+                            </div>
+                            <p class="kb-description">{{ kb.introduction || t('noDescription') }}</p>
+                            <div class="kb-meta">
+                              <div class="kb-meta-item">
+                                <el-icon class="kb-icon">
+                                  <i class="fa-solid fa-file"></i>
+                                </el-icon>
+                                <span>{{ t('model') }}: {{ kb.model || t('default') }}</span>
+                              </div>
+                              <div class="kb-meta-item">
+                                <el-icon class="kb-icon">
+                                  <i class="fa-solid fa-database"></i>
+                                </el-icon>
+                                <span>{{ t('segment') }}: {{ kb.chunk_size }} / {{ kb.chunk_overlap }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                        <div v-else class="processing-message">
+                          <p>{{ t('knowledgeBaseGenerating') }}</p>
+                        </div>
+                      </div>
+                      <!-- 添加新知识库磁贴 -->
+                      <div class="provider-card add-tile" @click="showAddKbDialog = true;currentUploadType = 'file'">
+                        <el-icon :size="40" color="#909399">
+                          <i class="fa-solid fa-plus"></i>
+                        </el-icon>
+                        <div style="color: #606266; margin-top: 10px;">{{ t('addNewKnowledgeBase') }}</div>
+                      </div>
+                    </div>
+
+                    <!-- 添加知识库对话框 -->
+                    <el-dialog append-to-body
+                      v-model="showAddKbDialog"
+                      :title="t('addNewKnowledgeBase')"
+                      width="80%"
+                      @closed="() => {
+                        newKb = {
+                          name: '',
+                          introduction: '',
+                          providerId: null,
+                          model: '',
+                          base_url: '',
+                          api_key: '',
+                          chunk_size: 1024,
+                          chunk_overlap: 256,
+                          weight: 0.5,
+                          chunk_k: 5
+                        }
+                      }"
+                    >
+                      <el-form label-position="top" label-width="120px">
+                        <el-form-item :label="t('knowledgeBaseName')" required>
+                          <el-input v-model="newKb.name" :placeholder="t('enterKnowledgeBaseName')" />
+                        </el-form-item>
+
+                        <el-form-item :label="t('knowledgeBaseIntro')">
+                          <el-input v-model="newKb.introduction" type="textarea" :placeholder="t('enterKnowledgeBaseIntro')" />
+                        </el-form-item>
+
+                        <el-form-item :label="t('embeddingProvider')" required>
+                          <el-select
+                            v-model="newKb.providerId"
+                            :placeholder="t('selectProvider')"
+                            filterable
+                            @change="selectKbProvider"
+                            class="full-width-input"
+                          >
+                            <el-option
+                              key='paraphrase-multilingual-MiniLM-L12-v2'
+                              :label="t('localVendor') + ' - ' + 'paraphrase-multilingual-MiniLM-L12-v2'"
+                              value='paraphrase-multilingual-MiniLM-L12-v2'
+                            >
+                              <div class="provider-option">
+                                <img 
+                                  :src="getVendorLogo('Local')" 
+                                  class="mini-vendor-logo"
+                                />
+                                <span class="model-id">paraphrase-multilingual-MiniLM-L12-v2</span>
+                              </div>
+                            </el-option>
+                            <el-option
+                              v-for="provider in modelProviders"
+                              :key="provider.id"
+                              :label="provider.vendor+' - '+provider.modelId"
+                              :value="provider.id"
+                            >
+                              <div class="provider-option">
+                                <img 
+                                  :src="getVendorLogo(provider.vendor)" 
+                                  class="mini-vendor-logo"
+                                />
+                                <span class="model-id">{{ provider.modelId }}</span>
+                              </div>
+                            </el-option>
+                          </el-select>
+                        </el-form-item>
+                        <el-alert type="info" :closable="false" class="mb-2">
+                          <template #default>
+                            <div class="alert-content">
+                              {{ t('minilmNotice2') }}
+                              <el-link
+                                type="primary"
+                                :underline="false"
+                                class="font-medium"
+                                @click="switchToKnowledgeConfig"
+                              >
+                                <el-icon class="mr-1">
+                                  <i class="fa-solid fa-key"></i>
+                                </el-icon>{{ t('goToKnowledgeBase') }}
+                              </el-link><br>
+                              {{ t('firstTimeUse') }}
+                              <el-link
+                                type="primary"
+                                :underline="false"
+                                class="font-medium"
+                                @click="switchToApiBox"
+                              >
+                                <el-icon class="mr-1">
+                                  <i class="fa-solid fa-key"></i>
+                                </el-icon>{{ t('keyBoxInterface') }}
+                              </el-link>
+                              {{ t('addProviderReturnSelect') }}
+                              {{ t('addemdNotice') }}
+                            </div>
+                          </template>
+                        </el-alert>
+                        <el-collapse v-model="activeCollapse" class="advanced-settings">
+                          <el-collapse-item name="advanced">
+                            <template #title>
+                              <div class="collapse-title">
+                                <span class="font-medium">{{ t('advancedSettingsClickExpand') }}</span>
+                              </div>
+                            </template>
+
+                            <el-form-item :label="t('segmentSize')">
+                              <el-slider
+                                v-model="newKb.chunk_size"
+                                :min="512"
+                                :max="4096"
+                                :step="512"
+                                show-input
+                                @input="autoSaveSettings"
+                              />
+                            </el-form-item>
+                            <el-form-item :label="t('overlapSize')">
+                              <el-slider
+                                v-model="newKb.chunk_overlap"
+                                :min="128"
+                                :max="1024"
+                                :step="128"
+                                show-input
+                                @input="autoSaveSettings"
+                              />
+                            </el-form-item>
+                            <el-form-item :label="t('returnParagraphs')">
+                              <el-slider
+                                v-model="newKb.chunk_k"
+                                :min="1"
+                                :max="50"
+                                :step="1"
+                                show-input
+                                @input="autoSaveSettings"
+                              />
+                            </el-form-item>
+                            <el-form-item :label="t('keywordSemanticWeight')">
+                              <span style="margin-right: 10px;">{{t('keyword')}}</span>
+                              <el-slider
+                                v-model="newKb.weight"
+                                :min="0"
+                                :max="1"
+                                :step="0.1"
+                                show-input
+                                @input="autoSaveSettings"
+                                style="flex: 1;"
+                              ></el-slider>
+                              <span style="margin-left: 10px;">{{t('semantic')}}</span>
+                            </el-form-item>
+                          </el-collapse-item>
+                        </el-collapse>
+                      </el-form>
+                      <!-- 文件上传区域 -->
+                      <el-form-item>
+                        <el-button 
+                          type="primary"
+                          @click="browseKbFiles"
+                          class="add-server-btn"
+                        >
+                          <i class="fa-solid fa-cloud-arrow-up"></i>
+                          {{t('uploadFile')}}
+                        </el-button>
+                        <!-- 紧凑型文件列表 -->
+                        <div class="compact-file-list" v-if="newKbFiles.length">
+                          <div
+                            v-for="(file, index) in newKbFiles"
+                            :key="index"
+                            class="compact-file-item"
+                          >
+                            <span class="file-name">@{{ file.name }}</span>
+                            <el-button
+                              @click.stop="removeKbFile(index)"
+                              class="delete-icon"
+                              circle
+                            >
+                            <i class="fa-solid fa-trash"></i>
+                            </el-button>
+                          </div>
+                        </div>
+                      </el-form-item>
+                      <template #footer>
+                        <el-button @click="showAddKbDialog = false">{{ t('cancel') }}</el-button>
+                        <el-button
+                          type="primary"
+                          @click="createKnowledgeBase"
+                          :disabled="!newKb.name || !newKb.providerId"
+                        >
+                          {{ t('createImmediately') }}
+                        </el-button>
+                      </template>
+                    </el-dialog>
+                  </el-tab-pane>
+                </el-tabs>
+              </div>
+
+            <!-- 新增表情包界面 -->
+              <div v-show="subMenu === 'sticker'" class="page">
+                <div class="provider-grid">
+                  <!-- 已有表情包库 -->
+                  <div 
+                    v-for="pack in stickerPacks" 
+                    :key="pack.id"
+                    class="provider-card knowledge-card">
+                    <div class="card-header">
+                      <el-switch v-model="pack.enabled"></el-switch>
+                      <div class="card-actions">
+                        <el-button @click="deleteStickerPack(pack)" type="danger" circle size="small">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                    <div class="kb-content">
+                      <div class="kb-header">
+                        <h3 class="kb-title">{{ pack.name }}</h3>
+                        <el-tag v-if="pack.stickers?.length" type="info" size="small" effect="dark">
+                          {{ pack.stickers.length }} {{ t('images') }}
+                        </el-tag>
+                      </div>
+                      <div class="kb-meta">
+                        <img :src="pack.cover" class="cover-image" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 添加新表情包库 -->
+                  <div class="provider-card add-tile" @click="showStickerDialog = true">
+                    <el-icon :size="40" color="#909399">
+                      <i class="fa-solid fa-plus"></i>
+                    </el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addStickerPack') }}</div>
+                  </div>
+                </div>
+
+                <!-- 表情包创建对话框 -->
+                <el-dialog append-to-body
+                  v-model="showStickerDialog"
+                  :title="t('createStickerPack')"
+                  width="80%">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('packName')" required>
+                      <el-input v-model="newStickerPack.name" />
+                    </el-form-item>
+
+                    <el-form-item :label="t('uploadStickers')" required>
+                      <div class="sticker-upload">
+                        <el-upload
+                          multiple
+                          list-type="picture-card"
+                          :file-list="uploadedStickers"
+                          :before-upload="handleBeforeUpload"
+                          :on-remove="handleStickerRemove"
+                          :on-preview="handlePictureCardPreview"
+                        >
+                          <el-icon><i class="fa-solid fa-plus"></i></el-icon>
+                        </el-upload>
+                      </div>
+                    </el-form-item>
+
+                    <!-- 预览弹窗 -->
+                    <el-dialog append-to-body v-model="dialogVisible" width="80%">
+                      <img :src="imageUrl" style="width: 100%" alt="Preview">
+                    </el-dialog>
+
+                    <el-form-item :label="t('imageDescription')" required>
+                      <div class="tag-editor">
+                        <div class="tag-item" 
+                            v-for="(sticker, index) in uploadedStickers" 
+                            :key="index">
+                          <img :src="sticker.url" class="sticker-thumb" />
+                          <el-input
+                            type="textarea"
+                            :rows="2"
+                            v-model="sticker.description"
+                            :placeholder="t('enterDescriptionPlaceholder')"
+                          />
+                        </div>
+                      </div>
+                    </el-form-item>
+                  </el-form>
+
+                  <template #footer>
+                    <el-button @click="cancelStickerUpload">{{ t('cancel') }}</el-button>
+                    <el-button 
+                      type="primary"
+                      @click="createStickerPack"
+                      :disabled="!newStickerPack.name || uploadedStickers.length === 0"
+                      >
+                      {{ t('createImmediately') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+
+              <!-- 在agent_group的内容区添加ComfyUI配置 -->
+              <div v-show="subMenu === 'comfyui'" class="page comfyui-container">
+                <el-tabs>
+                  <!-- 配置选项卡 -->
+                  <el-tab-pane :label="t('comfyuiConfig')">
+                    <el-form class="settings-form" label-position="top">
+                      <div class="tool-item">
+                        <div class="tool-header" style="display: flex; justify-content: space-between; align-items: center;">
+                          <span>
+                            <el-icon><i class="fa-solid fa-server"></i></el-icon>
+                            {{ t('comfyuiServers') }}
+                            <el-link
+                              type="primary"
+                              :underline="false"
+                              href="https://platform.comfy.org/profile/api-keys" 
+                              target="_blank"
+                            >
+                              <el-icon class="mr-1">
+                                <i class="fa-solid fa-key"></i>
+                              </el-icon>{{ t('gotoAPI') }}
+                            </el-link>
+                          </span>
+                        </div>
+                        <div class="tool-content">
+                          <div class="server-item">
+                            <el-input 
+                              v-model="comfyuiAPIkey" 
+                              :placeholder="t('comfyuiAPIKey')"
+                              class="full-width-input"
+                              show-password
+                              @change="autoSaveSettings"
+                            >
+                            </el-input>
+                          </div>
+                          <div v-for="(server, index) in comfyuiServers" 
+                              :key="index" 
+                              class="server-item">
+                            <el-input 
+                              v-model="comfyuiServers[index]" 
+                              placeholder="http://localhost:8188"
+                              class="full-width-input"
+                              @change="autoSaveSettings"
+                            >
+                            </el-input>
+                            <el-tooltip :content="t('connectComfyUIServer')" placement="top">
+                              <el-button 
+                                type="primary" 
+                                @click="connectComfyUI(index)" 
+                                :disabled="comfyuiServers.length === 0 || isConnecting"
+                                circle
+                              >
+                                <template v-if="isConnecting">
+                                  <i class="fa-solid fa-spinner fa-spin"></i>
+                                </template>
+                                <template v-else>
+                                  <i class="fa-solid fa-plug"></i>
+                                </template>
+                              </el-button>
+                            </el-tooltip>
+                            <el-tooltip :content="t('removeComfyUIServer')" placement="top">
+                              <el-button 
+                                v-if="index !== 0"
+                                @click="removeComfyUIServer(index)"
+                                type="danger" 
+                                circle>
+                                <i class="fa-solid fa-trash"></i>
+                              </el-button>
+                            </el-tooltip>
+                          </div>
+                          <el-button 
+                            @click="addComfyUIServer"
+                            type="primary" 
+                            class="add-server-btn">
+                            <i class="fa-solid fa-plus"></i> {{ t('addServer') }}
+                          </el-button>
+                        </div>
+                      </div>
+                      <el-alert
+                          :title="t('comfyuiConfigInfo')"
+                          type="info"
+                          :closable="false"
+                          class="mb-2"
+                        >
+                          1. {{ t('comfyuiConfigInfo1') }}<br>
+                          2. {{ t('comfyuiConfigInfo2') }}<br>
+                          3. {{ t('comfyuiConfigInfo3') }}<br>
+                          4. {{ t('comfyuiConfigInfo4') }}<br>
+                          5. {{ t('comfyuiConfigInfo5') }}<br>
+                      </el-alert>
+                    </el-form>
+                  </el-tab-pane>
+
+                  <!-- 展示选项卡 -->
+                  <el-tab-pane :label="t('comfyuiDisplay')">
+                    <div class="comfyui-iframe-container">
+                      <iframe 
+                        v-if="activeComfyUIUrl"
+                        :src="activeComfyUIUrl" 
+                        frameborder="0"
+                        class="comfyui-iframe"></iframe>
+                      <div v-else class="no-server-tip">
+                        <el-empty :description="t('noServerTip')" />
+                      </div>
+                    </div>
+                  </el-tab-pane>
+
+                      <!-- 新增 ComfyUI 工作流转工具选项卡 -->
+                  <el-tab-pane :label="t('comfyuiWorkflowTool')">
+                  <!-- 磁贴列表 -->
+                    <div class="provider-grid">
+                      <div v-for="file in workflows" :key="file.unique_filename" class="provider-card knowledge-card">
+                        <div class="card-header">
+                          <el-switch v-model="file.enabled" @change="autoSaveSettings"></el-switch>
+                          <div class="card-actions">
+                            <!-- 下载按钮 -->
+                            <a :href="`${partyURL}/uploaded_files/${file.unique_filename}`" download target="_blank">
+                              <el-button circle size="small" class="file-actions-btn">
+                                  <i class="fa-solid fa-download"></i>
+                              </el-button>
+                            </a>
+                            <!-- 删除按钮 -->
+                            <el-button
+                              type="danger"
+                              circle
+                              size="small"
+                              @click="deleteWorkflow(file.unique_filename)">
+                              <i class="fa-solid fa-trash"></i>
+                            </el-button>
+                          </div>
+                        </div>
+                        <h3>{{ file.original_filename }}</h3>
+                        <span>{{ (file.description?.substring(0, 50) + '...') || '' }}</span>
+                      </div>
+                      <!-- 添加上传按钮 -->
+                      <div class="provider-card add-tile" @click="showWorkflowUploadDialog = true">
+                        <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                        <div style="color: #606266; margin-top: 10px;">{{ t('uploadWorkflowJson') }}</div>
+                      </div>
+                    </div>
+                  </el-tab-pane>
+                </el-tabs>
+                <!-- 工作流上传对话框 -->
+                <el-dialog append-to-body
+                  v-model="showWorkflowUploadDialog"
+                  :title="t('uploadWorkflowJson')"
+                  width="80%"
+                >
+                  <div class="upload-container">
+                    <div
+                      class="drop-zone"
+                      @dragover.prevent
+                      @drop.prevent="handleWorkflowDrop"
+                      @click="browseWorkflowFile"
+                    >
+                      <el-icon :size="50"><i class="fa-solid fa-cloud-arrow-up"></i></el-icon>
+                      <p>{{ t('clickOrDrop') }}</p>
+                    </div>
+                    
+                    <!-- 文件列表 -->
+                    <div class="compact-file-list" v-if="workflowFile">
+                      <div class="compact-file-item">
+                        <span class="file-name">@{{ workflowFile.name }}</span>
+                        <el-button
+                          @click.stop="removeWorkflowFile"
+                          class="delete-icon"
+                          circle
+                        >
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+
+                    <div class="input-box" required>
+                      <el-input
+                        v-model="workflowDescription"
+                        type="textarea"
+                        :rows="3"
+                        :placeholder="t('descriptionPlaceholder')"
+                      />
+                    </div>
+
+                    <div class="input-box">
+                      <!-- 文字输入位置选择 -->
+                      <el-select v-model="selectedTextInput" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in textInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <div class="input-box">
+                      <!-- 文字输入位置选择 -->
+                      <el-select v-model="selectedTextInput2" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in textInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <div class="input-box">
+                      <!-- 图片输入位置选择 -->
+                      <el-select v-model="selectedImageInput" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in imageInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <div class="input-box">
+                      <!-- 图片输入位置选择 -->
+                      <el-select v-model="selectedImageInput2" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in imageInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <div class="input-box">
+                      <!-- 种子位置选择 -->
+                      <el-select v-model="selectedSeedInput" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in seedInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <div class="input-box">
+                      <!-- 种子位置选择 -->
+                      <el-select v-model="selectedSeedInput2" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
+                        <el-option
+                          v-for="(node, index) in seedInputOptions"
+                          :key="index"
+                          :label="node.label"
+                          :value="node.value"
+                        ></el-option>
+                      </el-select>
+                    </div>
+                    <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('comfyuiWorkflowInfo') }}
+                    </el-alert>
+                  </div>
+                  <template #footer>
+                    <el-button @click="cancelWorkflowUpload">{{ t('cancel') }}</el-button>
+                    <el-button type="primary" @click="uploadWorkflow" :disabled="!workflowFile">
+                      {{ t('createImmediately') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+              <!-- A2A页面 -->
+              <div v-show="subMenu === 'a2a'" class="page a2a-container">
+                <div class="provider-grid">
+                  <div class="provider-card a2a-card" v-for="(server, url) in a2aServers" :key="url">
+                    <div class="card-header">
+                      <el-switch v-show="server.status !== 'initializing'" v-model="server.enabled" @change="autoSaveSettings"></el-switch>
+                      <div class="card-actions">
+                        <el-button  type="info" v-if="server.status === 'initializing'"  circle size="small">
+                          <i class="fa-solid fa-spinner"></i>
+                        </el-button>
+                        <el-button @click="removeA2AServer(url)" type="danger" circle size="small">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                    <div class="a2a-content">
+                      <h3 class="a2a-name">{{ server.name }}</h3>
+                      <p class="a2a-description">{{ server.description }}</p>
+                      <div class="a2a-skills">
+                        <el-tag v-for="(skill, index) in server.skills" :key="index" type="info" size="small">
+                          {{ skill }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="provider-card add-tile" @click="showAddA2ADialog = true">
+                    <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addA2AServer') }}</div>
+                  </div>
+                </div>
+            
+                <!-- 添加A2A服务器对话框 -->
+                <el-dialog append-to-body v-model="showAddA2ADialog" :title="t('addA2AServer')" width="80%" label-position="top">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('A2AUrl')" required>
+                      <el-input v-model="newA2AUrl" placeholder="http://127.0.0.1:5000"></el-input>
+                    </el-form-item>
+                  </el-form>
+                  <template #footer>
+                    <el-button @click="showAddA2ADialog = false">{{ t('cancel') }}</el-button>
+                    <el-button 
+                      type="primary" 
+                      @click="addA2AServer"
+                      :disabled="!isValidUrl(newA2AUrl)">
+                      {{ t('confirmAdd') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+              <!-- MCP页面 -->
+              <div v-show="subMenu === 'mcp'" class="page mcp-container">
+                  <!-- 官网 MCP 市场跳转横幅 -->
+                  <div class="market-link-banner" @click="openRepository('https://www.agentparty.top/mcp.html')">
+                    <div class="banner-main">
+                      <div class="banner-icon-box">
+                        <i class="fa-solid fa-network-wired"></i>
+                      </div>
+                      <div class="banner-text">
+                        <h3>{{ t('mcpMarket') || 'MCP Market' }}</h3>
+                        <p>{{ t('exploreMoreMCP') || 'Connect to everything: GitHub, Databases, Local Files...' }}</p>
+                      </div>
+                      <div class="banner-action">
+                        <span>GO</span>
+                        <i class="fa-solid fa-arrow-right-long"></i>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="plugin-header">
+                    <h3>MCP</h3>
+                    <div class="plugin-button-group">
+                      <el-button 
+                        @click="showAddMCPDialo = true" 
+                        type="primary">
+                        {{ t('addNewMCP') }}
+                      </el-button>
+                      <el-button 
+                        @click="openRepository('https://github.com/super-agent-party/super-agent-party.github.io/blob/main/mcp.json')" 
+                        type="primary">
+                        {{ t('addYourMCP') }}
+                      </el-button>
+                    </div>
+                  </div>
+                  <!-- 磁贴网格 -->
+                  <div class="provider-grid">
+                    <div class="provider-card knowledge-card" v-for="(server, name) in mcpServers" :key="name">
+                      <div class="card-header">
+                        <el-switch
+                          v-show="server.processingStatus !== 'initializing'"
+                          :active-value="false"  
+                          :inactive-value="true" 
+                          v-model="server.disabled"
+                          @change="autoSaveSettings"
+                          class="kb-switch"
+                          :disabled="server.processingStatus === 'server_error'"
+                        ></el-switch>
+                        <div class="card-actions">
+                          <el-button
+                            @click="restartMCPServer(name)"
+                            type="info"
+                            circle
+                            size="small"
+                          >
+                            <i :class="server.processingStatus == 'initializing'?'fa-solid fa-spinner fa-spin':'fa-solid fa-rotate-right'"></i>
+                          </el-button>
+                          <!-- 编辑按钮现在是主要的查看工具入口 -->
+                          <el-button
+                            @click="editMCPServer(name)"
+                            type="primary"
+                            circle
+                            size="small"
+                          >
+                            <i class="fa-solid fa-pen-to-square"></i>
+                          </el-button>
+                          <el-button
+                            @click="removeMCPServer(name)"
+                            type="danger"
+                            circle
+                            size="small"
+                          >
+                            <i class="fa-solid fa-trash"></i>
+                          </el-button>
+                        </div>
+                      </div>
+                      <div class="kb-content">
+                        <div class="kb-header">
+                          <h3 class="kb-title">{{ name }}</h3>
+                          <!-- 状态标签 -->
+                          <el-tag v-if="server.processingStatus === 'initializing'" type="warning" size="small">{{ t('initializing') }}</el-tag>
+                          <el-tag v-else-if="server.processingStatus === 'server_error'" type="danger" size="small">{{ t('error') }}</el-tag>
+                          <el-tag v-else-if="server?.tools?.length" type="success" size="small">
+                            {{ server?.tools?.length }} {{ t('tools') }}
+                          </el-tag>
+                          <el-tag v-else type="info" size="small">0 {{ t('tools') }}</el-tag>
+                        </div>
+                        <div class="kb-meta">
+                          <div class="kb-meta-item">
+                            <!-- 仅保留提示信息，工具列表已移至弹窗 -->
+                            <span style="font-size: 12px; color: #909399;">
+                              {{ server.processingStatus === 'ready' ? t('clickEditToManageTools') : t('serverNotReady') }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 添加新磁贴 -->
+                    <div class="provider-card add-tile" @click="openAddDialog()">
+                      <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                      <div style="color: #606266; margin-top: 10px;">{{ t('addNewMCP') }}</div>
+                    </div>
+                  </div>
+
+                  <!-- 添加/编辑 MCP 对话框 -->
+                  <el-dialog append-to-body
+                    v-model="showAddMCPDialog"
+                    :title="isEditMode ? t('editMCP') : t('addNewMCP')"
+                    width="80%"
+                    
+                    :close-on-press-escape="false"
+                    class="mcp-dialog"
+                    @closed="resetDialogState">
+                    
+                    <!-- 加载遮罩 -->
+                    <div v-loading="isSubmitting" element-loading-text="Initializing MCP Server...">
+                      
+                      <!-- 使用 Tabs 分离配置和工具 -->
+                      <el-tabs v-model="activeDialogTab" class="mcp-dialog-tabs">
+                        
+                        <!-- Tab 1: 基础配置 -->
+                        <el-tab-pane :label="t('settings')" name="config">
+                          <el-form label-position="top" class="mt-2">
+                            <!-- 基础配置 (添加模式或编辑模式都显示) -->
+                            <div class="config-section">
+                                <el-form-item :label="t('serverType')">
+                                  <el-select 
+                                    v-model="newMCPType" 
+                                    @change="updateMCPExample"
+                                    class="full-width-input"
+                                    >
+                                    <el-option :label="t('stdioServer')" value="stdio"></el-option>
+                                    <el-option :label="t('sseServer')" value="sse"></el-option>
+                                    <el-option :label="t('wsServer')" value="ws"></el-option>
+                                    <el-option :label="t('streamableHttpServer')" value="streamablehttp"></el-option>
+                                  </el-select>
+                                </el-form-item>
+                            
+                                <el-form-item :label="t('inputMethod')">
+                                  <el-select 
+                                    v-model="mcpInputType" 
+                                    @change="handleInputMethodChange" 
+                                    class="full-width-input">
+                                    <el-option :label="t('formInput')" value="form"></el-option>
+                                    <el-option :label="t('jsonInput')" value="json"></el-option>
+                                  </el-select>
+                                </el-form-item>
+
+                                <!-- JSON 输入模式 -->
+                                <template v-if="mcpInputType === 'json'">
+                                  <el-alert v-if="!isEditMode" type="info" :closable="false" class="mb-2">
+                                      {{ t('mcpJsonFormat') }}
+                                      <pre class="json-example">{{ currentMCPExample }}</pre>
+                                    </el-alert>
+                                    <el-form-item :label="t('mcpJsonInput')">
+                                      <el-input v-model="newMCPJson" type="textarea" :rows="8" :placeholder="t('mcpJsonPlaceholder')"/>
+                                    </el-form-item>
+                                </template>
+
+                                <!-- 表单输入模式 -->
+                                <template v-if="mcpInputType === 'form'">
+                                  <el-form-item :label="t('mcpName')">
+                                    <el-input v-model="newMCPFormData.name" :disabled="isEditMode"/>
+                                  </el-form-item>
+                                  
+                                  <template v-if="newMCPType !== 'stdio'">
+                                    <el-form-item :label="t('mcpURL')">
+                                        <el-input :placeholder="mcpURLDict[newMCPType]" v-model="newMCPFormData.url"/>
+                                    </el-form-item>
+                                    <el-form-item :label="t('mcpApiKey')">
+                                        <el-input :placeholder="t('mcpApiKeyPlaceholder')" v-model="newMCPFormData.apiKey" show-password/>
+                                    </el-form-item>
+                                  </template>
+
+                                  <template v-if="newMCPType === 'stdio'">
+                                      <el-form-item :label="t('mcpCommand')">
+                                        <el-input :placeholder="t('mcpCommandPlaceholder')" v-model="newMCPFormData.command"/>
+                                      </el-form-item>
+                                      <el-form-item :label="t('mcpArgs')">
+                                        <el-input :placeholder="t('mcpArgsPlaceholder')" type="textarea" :rows="3" v-model="newMCPFormData.args"/>
+                                      </el-form-item>
+                                      <el-form-item :label="t('mcpEnv')">
+                                        <el-input :placeholder="t('mcpEnvPlaceholder')" type="textarea" :rows="3" v-model="newMCPFormData.env"/>
+                                      </el-form-item>
+                                  </template>
+                                </template>
+                            </div>
+                          </el-form>
+                        </el-tab-pane>
+
+                        <!-- Tab 2: 工具管理 (仅在编辑模式显示) -->
+                        <!-- 动态显示工具数量 -->
+                        <el-tab-pane 
+                          v-if="isEditMode" 
+                          :label="`${t('manageTools')} (${(mcpServers[currentEditingMCPId]?.tools?.length || 0)})`" 
+                          name="tools"
+                        >
+                          <!-- 错误提示 -->
+                          <el-alert v-if="mcpServers[currentEditingMCPId]?.processingStatus === 'server_error'" type="error" :closable="false" show-icon class="mb-2">
+                              {{ t('mcpConnectionFailed') }}
+                          </el-alert>
+
+                          <!-- 工具列表容器 -->
+                          <div v-if="mcpServers[currentEditingMCPId]?.tools && mcpServers[currentEditingMCPId].tools.length" class="tools-list-container">
+                              <div v-for="tool in mcpServers[currentEditingMCPId].tools" :key="tool.name" class="tool-item-card">
+                                  
+                                  <div class="tool-info-left">
+                                    <div class="tool-header-row">
+                                      <span class="tool-name">{{ tool.name }}</span>
+                                      <el-tooltip v-if="tool.description" :content="tool.description" placement="top" :show-after="500">
+                                        <el-icon class="tool-info-icon"><i class="fa-solid fa-circle-info"></i></el-icon>
+                                      </el-tooltip>
+                                    </div>
+                                    <div class="tool-desc">
+                                      {{ tool.description || t('noDescription') }}
+                                    </div>
+                                  </div>
+
+                                  <el-switch 
+                                    v-model="tool.enabled" 
+                                    @change="autoSaveSettings"
+                                    size="small"
+                                  />
+                              </div>
+                          </div>
+                          
+                          <!-- 空状态 -->
+                          <div v-else-if="mcpServers[currentEditingMCPId]?.processingStatus === 'ready'" class="tools-empty-state">
+                              {{ t('noToolsFound') }}
+                          </div>
+                          
+                          <!-- 初始化中状态 -->
+                          <div v-else-if="mcpServers[currentEditingMCPId]?.processingStatus === 'initializing'" class="tools-empty-state">
+                              <i class="fa-solid fa-spinner fa-spin"></i> {{ t('initializing') }}...
+                          </div>
+                        </el-tab-pane>
+
+                      </el-tabs>
+                    </div>
+
+                    <template #footer>
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span></span>
+
+                        <div>
+                          <el-button @click="showAddMCPDialog = false" :disabled="isSubmitting">
+                              {{ isEditMode ? t('close') : t('cancel') }}
+                          </el-button>
+                          
+                          <!-- 添加模式 -->
+                          <el-button 
+                            v-if="!isEditMode"
+                            type="primary" 
+                            @click="addMCPServer"
+                            :loading="isSubmitting"
+                            :disabled="(!newMCPJson && !newMCPFormData.name)">
+                            {{ t('confirmAdd') }}
+                          </el-button>
+                          
+                          <!-- 编辑模式 -->
+                          <el-button
+                            v-if="isEditMode"
+                            type="primary"
+                            @click="updateMCPServerConfig"
+                            :loading="isSubmitting">
+                            {{ t('confirmSave') }}
+                          </el-button>
+                        </div>
+                      </div>
+                    </template>
+                  </el-dialog>   
+                  <el-dialog append-to-body
+                    v-model="showMCPConfirm"
+                    :title="t('confirmDeleteTitle')"
+                    width="80%"
+                    @closed="deletingMCPName = null">
+                    <div class="confirm-content">
+                      <p>{{ t('confirmDeleteMCP', { name: deletingMCPName }) }}</p>
+                      <div class="confirm-buttons">
+                        <el-button @click="showMCPConfirm = false">{{ t('cancel') }}</el-button>
+                        <el-button type="danger" @click="confirmDeleteMCP">{{ t('confirm') }}</el-button>
+                      </div>
+                    </div>
+                  </el-dialog>
+              </div>
+              <!-- LLM工具页面 -->
+              <div v-show="subMenu === 'llmTool'" class="page llm-tool-container">
+                <!-- 磁贴网格 -->
+                <div class="provider-grid">
+                  <!-- 已有LLM工具配置 -->
+                  <div class="provider-card llm-card" v-for="(tool, id) in llmTools" :key="id">
+                    <div class="card-header">
+                      <el-switch v-model="tool.enabled" @change="autoSaveSettings"></el-switch>
+                      <div class="card-actions">
+                        <el-button @click="removeLLMTool(id)" type="danger" circle size="small">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                    <div class="llm-content">
+                      <h3 class="knowledge-info">{{ tool.name }}</h3>
+                      <el-tag type="info" size="small">{{ toolTypeLabel(tool.type) }}</el-tag>
+                      <p class="knowledge-desc">{{ tool.description || t('noDescription') }}</p>
+                    </div>
+                  </div>
+                  
+                  <!-- 添加新LLM工具 -->
+                  <div class="provider-card add-tile" @click="showLLMForm = true">
+                    <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addLLMTool') }}</div>
+                  </div>
+                </div>
+
+                <!-- 添加/编辑LLM工具对话框 -->
+                <el-dialog append-to-body v-model="showLLMForm" :title="editingLLM ? t('editLLMTool') : t('addLLMTool')" width="80%">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('toolName')" required>
+                      <el-input v-model="newLLMTool.name" :placeholder="t('toolNamePlaceholder')"/>
+                    </el-form-item>
+
+                    <el-form-item :label="t('interfaceType')" required>
+                      <el-select 
+                        v-model="newLLMTool.type" 
+                        @change="handleTypeChange"
+                        filterable
+                        allow-create
+                        :placeholder="t('selectInterfaceType')">
+                        <el-option
+                          v-for="type in llmInterfaceTypes"
+                          :key="type.value"
+                          :label="type.label"
+                          :value="type.value"
+                        />
+                      </el-select>
+                    </el-form-item>
+
+                    <el-form-item :label="t('description')" required>
+                      <el-input
+                        v-model="newLLMTool.description"
+                        type="textarea"
+                        :rows="3"
+                        :placeholder="t('descriptionPlaceholder')"
+                      />
+                    </el-form-item>
+
+                    <el-form-item :label="t('baseURL')" required>
+                      <el-input
+                        v-model="newLLMTool.base_url"
+                        :placeholder="defaultBaseURL"
+                      />
+                    </el-form-item>
+
+                    <el-form-item :label="t('apiKey')" required>
+                      <el-input
+                        v-model="newLLMTool.api_key"
+                        show-password
+                      />
+                    </el-form-item>
+
+                    <el-form-item :label="t('modelName')" required>
+                      <el-input
+                        v-model="newLLMTool.model"
+                      >
+                      </el-input>
+                    </el-form-item>
+                  </el-form>
+
+                  <template #footer>
+                    <el-button @click="cancelLLMTool">{{ t('cancel') }}</el-button>
+                    <el-button 
+                      type="primary" 
+                      @click="saveLLMTool"
+                      :disabled="!formValid">
+                      {{ editingLLM ? t('save') : t('createImmediately') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+              <!-- 自定义HTTP工具页面 -->
+              <div v-show="subMenu === 'customHttpTool'" class="page custom-http-tool-container">
+                <!-- 磁贴网格 -->
+                <div class="provider-grid">
+                  <div class="provider-card custom-http-tool-card" v-for="tool in customHttpTools" :key="tool.id">
+                    <div class="card-header">
+                      <el-switch v-model="tool.enabled" @change="autoSaveSettings"></el-switch>
+                      <div class="card-actions">
+                        <el-button @click="editCustomHttpTool(tool.id)" type="default" circle size="small">
+                          <i class="fa-solid fa-pen-to-square"></i>
+                        </el-button>
+                        <el-button @click="removeCustomHttpTool(tool.id)" type="danger" circle size="small">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                    <div class="custom-http-tool-content">
+                      <h3 class="custom-http-tool-name">{{ tool.name }}</h3>
+                      <p class="custom-http-tool-description">{{ tool.description }}</p>
+                    </div>
+                  </div>
+                  <!-- 添加新自定义HTTP工具 -->
+                  <div class="provider-card add-tile" @click="showCustomHttpToolForm = true">
+                    <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addCustomHttpTool') }}</div>
+                  </div>
+                </div>
+
+                <!-- 添加/编辑自定义HTTP工具对话框 -->
+                <el-dialog append-to-body v-model="showCustomHttpToolForm" :title="editingCustomHttpTool ? t('editCustomHttpTool') : t('addCustomHttpTool')" width="80%">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('toolName')" required>
+                      <el-input v-model="newCustomHttpTool.name" :placeholder="t('HTTPNamePlaceholder')"></el-input>
+                    </el-form-item>
+                    <el-form-item :label="t('description')" required>
+                      <el-input v-model="newCustomHttpTool.description" type="textarea" :rows="3" :placeholder="t('descriptionPlaceholder')"></el-input>
+                    </el-form-item>
+                    <el-form-item :label="t('URL')" required>
+                      <el-input v-model="newCustomHttpTool.url" :placeholder="t('urlPlaceholder')"></el-input>
+                    </el-form-item>
+                    <el-form-item :label="t('method')" required>
+                      <el-select v-model="newCustomHttpTool.method" placeholder="Select method">
+                        <el-option label="GET" value="GET"></el-option>
+                        <el-option label="POST" value="POST"></el-option>
+                        <el-option label="PUT" value="PUT"></el-option>
+                        <el-option label="DELETE" value="DELETE"></el-option>
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item :label="t('headers')">
+                      <el-input v-model="newCustomHttpTool.headers" type="textarea" :rows="4" :placeholder="t('headersPlaceholder')"></el-input>
+                    </el-form-item>
+                    <el-form-item :label="t('body')">
+                      <el-input v-model="newCustomHttpTool.body" type="textarea" :rows="20" :placeholder="t('bodyPlaceholder')"></el-input>
+                      <el-alert type="info" :closable="false">
+                        {{ t('bodyJsonSchemaFormat') }}
+                      </el-alert>
+                    </el-form-item>
+                  </el-form>
+                  <template #footer>
+                    <el-button @click="showCustomHttpToolForm = false">{{ t('cancel') }}</el-button>
+                    <el-button type="primary" @click="saveCustomHttpTool" :disabled="!newCustomHttpTool.name || !newCustomHttpTool.url">
+                      {{ editingCustomHttpTool ? t('save') : t('createImmediately') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+            </div>
+          </div>
+        </div>

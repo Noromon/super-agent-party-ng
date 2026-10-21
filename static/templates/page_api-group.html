@@ -1,0 +1,804 @@
+        <div v-show="activeMenu === 'api-group'" class="page agent-suite-container">
+          <div class="suite-layout">
+            <!-- 左侧导航 -->
+            <div class="suite-sidebar">
+              <div class="tile-nav">
+                <div 
+                  v-for="tile in apiTiles" 
+                  :key="tile.id"
+                  class="nav-item"
+                  :class="{ active: subMenu === tile.id }"
+                  @click="subMenu = tile.id">
+                  <el-icon class="nav-icon"><i :class="tile.icon"></i></el-icon>
+                  <span class="nav-text">{{ t(tile.title) }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- 右侧内容 -->
+            <div class="suite-content">
+              <!-- 开发工具页面 -->
+              <div v-show="subMenu === 'develop'" class="page agents-container">
+                <el-form  class="settings-form"> 
+                  <!-- Node.js 卡片：已安装 & 未安装 双状态 -->
+                  <el-card shadow="hover" class="sherpa-card">
+                    <!-- 头部：标题 + 状态标签 -->
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span><strong>Node.js</strong></span>
+
+                      <div class="d-flex gap-2">
+                        <el-button
+                          v-if="!nodeInstalled"
+                          type="primary"
+                          :loading="nodeInstalling"
+                          @click="openRepository('https://nodejs.org/en/download')"
+                        >
+                          <i class="fa-solid fa-download"></i>
+                          {{ t('installNode') }}
+                        </el-button>
+                        <el-tag v-else type="success" effect="dark" size="large">  
+                          <i class="fa-solid fa-circle-check"></i>
+                          {{ t('installed') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                  <!-- uv 卡片：已安装 & 未安装 双状态 -->
+                  <el-card shadow="hover" class="sherpa-card">
+                    <!-- 头部：标题 + 状态标签 -->
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span><strong>UV</strong></span>
+
+                      <div class="d-flex gap-2">
+                        <el-button
+                          v-if="!uvInstalled"
+                          type="primary"
+                          :loading="uvInstalling"
+                          @click="openRepository('https://docs.astral.sh/uv/getting-started/installation/')"
+                        >
+                          <i class="fa-solid fa-download"></i>
+                          {{ t('installUv') }}
+                        </el-button>
+                        <el-tag v-else type="success" effect="dark" size="large">
+                          <i class="fa-solid fa-circle-check"></i>
+                          {{ t('installed') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                  <!-- docker 卡片：已安装 & 未安装 双状态 -->
+                  <el-card shadow="hover" class="sherpa-card">
+                    <!-- 头部：标题 + 状态标签 -->
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                      <span><strong>Docker</strong></span>
+
+                      <div class="d-flex gap-2">
+                        <el-button
+                          v-if="!dockerInstalled"
+                          type="primary"
+                          :loading="dockerInstalling"
+                          @click="openRepository('https://www.docker.com/get-started')"
+                        >
+                          <i class="fa-solid fa-download"></i>
+                          {{ t('installDocker') }}
+                        </el-button>
+                        <el-tag v-else type="success" effect="dark" size="large">  
+                          <i class="fa-solid fa-circle-check"></i>
+                          {{ t('installed') }}
+                        </el-tag>
+                      </div>
+                    </div>
+                  </el-card>
+                </el-form> 
+              </div>
+              <!-- 智能体页面 -->
+              <div v-show="subMenu === 'agents'" class="page agents-container">
+                <el-tabs v-model="activeAgentTab">
+                  
+                  <!-- 第一个 Tab：智能体设置 (原弹窗内容) -->
+                  <el-tab-pane :label="t('agentSettings')" name="settings">
+                    <el-form class="settings-form" label-position="top">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <div class="header-left">
+                            <span>
+                              <el-icon>
+                                <i class="fa-solid fa-robot"></i>
+                              </el-icon>
+                              {{ t('agentSettings') }}
+                            </span>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          
+                          <!-- 主智能体选择 -->
+                          <div class="agent-section">
+                            <h5>{{ t('mainAgent') }}</h5>
+                            <el-select 
+                              v-model="mainAgent"
+                              @change="changeMainAgent">
+                              <el-option
+                                :label="t('defaultAgent')"
+                                value="super-model"
+                              >
+                              </el-option>
+                              <el-option
+                                v-for="(agent, id) in agents"
+                                :key="id"
+                                :label="agent.name"
+                                :value="id"
+                              >
+                              </el-option>
+                            </el-select>
+                          </div>
+                          <!-- 工具智能体选择 -->
+                          <div class="agent-section">
+                            <h5>{{ t('toolAgents') }}</h5>
+                            <div 
+                              v-for="(agent, id) in agents" 
+                              :key="id"
+                              class="knowledge-item">
+                              <el-switch 
+                                v-model="agent.enabled"
+                                @change="autoSaveSettings">
+                              </el-switch>
+                              <div class="knowledge-info">
+                                <div class="knowledge-name">{{ agent.name }}</div>
+                              </div>
+                            </div>
+                            <div v-if="Object.keys(agents).length === 0" class="empty-tip">
+                              {{ t('noagents') }}
+                              <a href="#" @click.stop.prevent="switchToagents">{{ t('goToagents') }}</a>
+                              {{ t('add') }}
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    </el-form>
+                  </el-tab-pane>
+
+                  <!-- 第二个 Tab：管理与添加智能体 (原磁贴网格) -->
+                  <el-tab-pane :label="t('manageAgents')" name="add">
+                    <!-- 磁贴网格 -->
+                    <div class="provider-grid">
+                      <!-- 已有智能体 -->
+                      <div class="provider-card agent-card" v-for="agent in agents" :key="agent.id">
+                        <div class="card-header">
+                          <span></span>
+                          <div class="card-actions">
+                            <!-- 删除按钮 -->
+                            <el-button @click="removeAgent(agent.id)" type="danger" circle size="small">
+                              <i class="fa-solid fa-trash"></i>
+                            </el-button>
+                          </div>
+                        </div>
+                        
+                        <div class="agent-content">
+                          <div class="agent-header">
+                            <span class="agent-name">{{ agent.name }}</span>
+                            <!-- 复制功能 -->
+                            <el-button
+                              size="small"
+                              type="info"
+                              @click="copyAgentName(agent.name)"
+                            >
+                              <i class="fa-regular fa-copy"></i>
+                            </el-button>
+                          </div>
+                          <!-- 带复制功能的ID展示 -->
+                          <el-tag 
+                            type="info" 
+                            size="small" 
+                            class="agent-id clickable"
+                            @click="copyAgentId(agent.id)"
+                          >
+                            {{ agent.id }}
+                            <i class="fa-regular fa-copy"></i>
+                          </el-tag>
+                          <p class="agent-prompt">{{ agent.system_prompt }}</p>
+                        </div>
+                      </div>
+                      
+                      <!-- 添加新智能体 -->
+                      <div class="provider-card add-tile" @click="showAgentForm = true; newAgent.system_prompt = this.system_prompt">
+                        <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                        <div style="color: #606266; margin-top: 10px;">{{ t('addNewAgent') }}</div>
+                      </div>
+                    </div>
+                  </el-tab-pane>
+
+                </el-tabs>
+
+                <!-- 智能体编辑对话框 (保持原样，放在 tabs 外面但在页面内) -->
+                <el-dialog append-to-body v-model="showAgentForm" :title="editingAgent ? t('editAgent') : t('addAgent')" width="80%">
+                  <el-form label-position="top">
+                    <el-form-item :label="t('agentName')" required>
+                      <el-input v-model="newAgent.name" :placeholder="t('agentNamePlaceholder')"/>
+                    </el-form-item>
+                    <el-form-item :label="t('systemPrompt')" required>
+                      <el-input 
+                        v-model="newAgent.system_prompt" 
+                        type="textarea" 
+                        :rows="6"
+                        :placeholder="t('systemPromptPlaceholder')"/>
+                    </el-form-item>
+                  </el-form>
+                  <el-alert
+                    type="info"
+                    :closable="false"
+                    class="mb-2"
+                  >
+                    <template #default>
+                      <div class="alert-content">
+                        {{ t('agentInfo') }}
+                      </div>
+                    </template>
+                  </el-alert>
+                  <template #footer>
+                    <el-button @click="showAgentForm = false">{{ t('cancel') }}</el-button>
+                    <el-button 
+                      type="primary" 
+                      @click="saveAgent"
+                      :disabled="!newAgent.name || !newAgent.system_prompt">
+                      {{ t('createAgent') }}
+                    </el-button>
+                  </template>
+                </el-dialog>
+              </div>
+              <!-- 扩展页面 -->
+              <div v-show="subMenu === 'extension'" class="page extension-container">
+                <!-- 官网插件市场跳转卡片 -->
+                <div class="market-link-banner" @click="openRepository('https://www.agentparty.top/plugins.html')">
+                  
+                  <div class="banner-main">
+                    <div class="banner-icon-box">
+                      <i class="fa-solid fa-store"></i>
+                    </div>
+                    
+                    <div class="banner-text">
+                      <h3>{{t('pluginMarket') || 'Extension Market'}}</h3>
+                      <p>{{t('exploreMorePlugins') || 'Discover and download more community extensions'}}</p>
+                    </div>
+
+                    <div class="banner-action">
+                      <span>GO</span>
+                      <i class="fa-solid fa-arrow-right-long"></i>
+                    </div>
+                  </div>
+                </div>
+                <span>
+                  <br>
+                </span>
+                <div class="plugin-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                  <!-- ✨ 左侧：标题 + 新增的短搜索框 ✨ -->
+                  <div style="display: flex; align-items: center; gap: 15px;">
+                    <h3 style="margin: 0; white-space: nowrap; flex-shrink: 0;">{{t('availableExtensions')}}</h3>
+                    <el-input 
+                      v-model="searchManageExtensionQuery" 
+                      :placeholder="t('search') || '搜索扩展...'" 
+                      clearable 
+                      style="width: 200px;"
+                    >
+                      <template #prefix><i class="fa-solid fa-magnifying-glass"></i></template>
+                    </el-input>
+                  </div>
+                  
+                  <!-- 右侧：按钮组保持不变 -->
+                  <div class="plugin-button-group">
+                    <el-button @click="openAddExtensionDialog" type="primary">{{t('addNewExtension')}}</el-button>
+                    <el-button @click="openExtfile" type="primary">{{t('openExtfile')}}</el-button>
+                    <el-button @click="openRepository('https://github.com/super-agent-party/super-agent-party.github.io')" type="primary">{{t('addYourExtensions')}}</el-button>
+                    <el-button @click="handleRefreshClick" type="primary" :loading="refreshing">{{refreshButtonText}}</el-button>
+                  </div>
+                </div>
+
+                <!-- 磁贴网格 -->
+                <div class="provider-grid">
+                  <div class="provider-card" v-for="extension in filteredManageExtensions" :key="extension.id">
+                    <div class="card-header">
+                      <el-tooltip :content="t('useExtension')" placement="top">
+                        <el-button type="primary" @click="switchExtension(extension);this.activeMenu = 'home';" circle>
+                          <i class="fa-solid fa-play"></i>
+                        </el-button>
+                      </el-tooltip>
+                      <div class="card-actions">
+                        <!-- 新增：如果有更新则显示更新小按钮 -->
+                        <el-tooltip v-if="extension.hasUpdate" :content="t('update')" placement="top">
+                          <el-button type="warning" circle size="small" @click.stop="updatePlugin(extension)"><i class="fa-solid fa-arrow-up"></i></el-button>
+                        </el-tooltip>
+                        
+                        <el-tooltip :content="t('openExtensionInBrowser')" placement="top">
+                          <el-button type="default" circle size="small" @click.stop="openExtension(extension)"><i class="fa-solid fa-external-link"></i></el-button>
+                        </el-tooltip>
+                        <el-tooltip :content="t('openExtensionInWindow')" placement="top">
+                          <el-button v-if="isElectron" type="primary" circle size="small" @click.stop="openExtensionInWindow(extension)" style="margin-left: 8px;"><i class="fa-solid fa-window-restore"></i></el-button>
+                        </el-tooltip>
+                        <el-tooltip :content="t('deleteExtension')" placement="top">
+                          <el-button @click="removeExtension(extension)" type="danger" circle size="small"><i class="fa-solid fa-trash"></i></el-button>
+                        </el-tooltip>
+                      </div>
+                    </div>
+                    <div class="kb-content">
+                      <div class="kb-header"> 
+                        <h3>{{ extension.name }}</h3>
+                        <!-- 这里的版本号区域 -->
+                        <el-tag type="info" size="small">v{{ extension.version }}</el-tag>   
+                        <!-- 新增：可更新标签 -->                   
+                        <el-tag v-if="extension.hasUpdate" type="warning" size="small" style="margin-left: 6px;">
+                          {{ t('updateAvailable') || '可更新' }}
+                        </el-tag>
+                      </div>
+                      <p class="kb-description">{{ extension.author }}</p>
+                      <div class="kb-meta"><p>{{ extension.description }}</p></div>
+                    </div>
+                  </div>
+                  <!-- 添加新扩展磁贴保持不变 -->
+                  <div class="provider-card add-tile" @click="openAddExtensionDialog">
+                    <el-icon :size="40" color="#909399"><i class="fa-solid fa-plus"></i></el-icon>
+                    <div style="color: #606266; margin-top: 10px;">{{ t('addNewExtension') }}</div>
+                  </div>
+                </div>
+                <!-- 添加扩展对话框 -->
+                <el-dialog append-to-body
+                  v-model="showExtensionForm"
+                  :title="t('addNewExtension')"
+                  width="80%"
+                >
+                  <!-- GitHub 地址输入 -->
+                  <div class="line-box">
+                    <el-input
+                      v-model="newExtensionUrl"
+                      placeholder="https://github.com/owner/repo"
+                      class="fill-input"
+                    ></el-input>
+                    <el-button
+                      type="primary"
+                      :loading="installLoading"
+                      :disabled="!newExtensionUrl.trim()"
+                      @click="addExtension"
+                    >
+                      {{ t('add') }}
+                    </el-button>
+                  </div>
+
+                  <!-- Electron 额外功能 -->
+                  <div v-if="isElectron" style="margin-top: 12px;">
+                    <el-divider>{{t('or')}}</el-divider>
+                    <el-button 
+                      @click="selectLocalZip" 
+                      :loading="installLoading"  
+                      type="primary" 
+                      class="add-server-btn">
+                      {{t('localZipInstallation')}}
+                    </el-button>
+                    <input
+                      ref="zipInput"
+                      type="file"
+                      accept=".zip"
+                      style="display: none"
+                      @change="onZipSelected"
+                    ></input>
+                  </div>
+                  <el-divider>{{t('or')}}</el-divider>
+                  
+                  <!-- 远程插件列表 - 卡片形式 -->
+                  <div class="plugin-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                    <!-- ✨ 左侧：标题 + 新增的短搜索框 ✨ -->
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                      <h3 style="margin: 0; white-space: nowrap; flex-shrink: 0;">{{t('availableExtensions')}}</h3>
+                      <el-input 
+                        v-model="searchRemotePluginQuery" 
+                        :placeholder="t('search') || '搜索插件...'" 
+                        clearable 
+                        style="width: 200px;"
+                      >
+                        <template #prefix><i class="fa-solid fa-magnifying-glass"></i></template>
+                      </el-input>
+                    </div>
+                    
+                    <div class="plugin-button-group">
+                      <el-button @click="openExtfile" type="primary">{{t('openExtfile')}}</el-button>
+                      <el-button @click="openRepository('https://github.com/super-agent-party/super-agent-party.github.io')" type="primary">{{t('addYourExtensions')}}</el-button>
+                      <el-button @click="handleRefreshClick" type="primary" :loading="refreshing">{{refreshButtonText}}</el-button>
+                    </div>
+                  </div>
+                  
+                  <div class="plugins-container">
+                    <div v-if="filteredRemotePlugins.length === 0" class="empty-plugins">
+                      <el-empty :description="t('noExtensionsFound')"></el-empty>
+                    </div>
+                    <div v-else class="plugins-grid">
+                      <div v-for="plugin in filteredRemotePlugins" :key="plugin.name" class="plugin-card">
+                        <div class="plugin-content">
+                          <h4 class="plugin-name">
+                            {{ plugin.name }}
+                            <!-- 新增：可更新标签 -->
+                            <el-tag v-if="plugin.hasUpdate" type="warning" size="small" style="margin-left: 8px;">
+                              {{ t('updateAvailable') || '可更新' }}
+                            </el-tag>
+                          </h4>
+                          <p class="plugin-description">{{ plugin.description }}</p>
+                        </div>
+                        <div class="plugin-action">
+                          <el-button v-if="plugin.repository" type="primary" @click="openRepository(plugin.repository)" class="repo-button">
+                            <i class="fa-brands fa-github"></i>{{ t('viewRepository') }}
+                          </el-button>
+                          
+                          <el-button v-if="plugin.installed" type="warning" :loading="plugin._updating" @click="updatePlugin(plugin)">
+                            {{ t('update') }}
+                          </el-button>
+                          
+                          <el-button :loading="installLoading && !plugin.installed" :type="plugin.installed ? 'danger' : 'primary'" @click="togglePlugin(plugin)">
+                            {{ plugin.installed ? t('uninstall'): t('install') }}
+                          </el-button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </el-dialog>
+              </div>
+              <!-- OpenAI风格API -->
+              <div v-show="subMenu === 'openai'" class="page">
+                <el-form class="settings-form">
+                  <div class="tool-item">
+                    <!-- 原有SuperAPI内容 -->
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class="fa-solid fa-link"></i></el-icon>
+                        {{ t('openaiStyleAPI') }}
+                      </span>
+                    </div>
+                    <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('superAPIInstructions') }}
+                      </el-alert>
+                      <!-- 模型名称 -->
+                      <el-form-item :label="t('modelName')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="'super-model'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyModel"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+
+                      <!-- API端点 -->
+                      <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="partyURL+'/v1'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+
+                      <!-- API key -->
+                      <div class="browser-mode-btn-container" v-if="isdocker">
+                        <el-button
+                          class="browser-mode-btn"
+                          type="primary"
+                          @click="launchAPIKeyManager"
+                          round
+                          size="large">
+                          <span class="ml-2">
+                            {{ t('APIKeyManager') }}
+                          </span>
+                        </el-button>
+                      </div>
+                      <el-form-item v-else :label="t('openaiStyleAPIKey')" class="form-item-align" label-position="top">
+                        <el-input
+                          value="super-secret-key"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                      <!-- 在index.html的API配置区块内添加 -->
+                      <el-form-item :label="t('exampleLanguage')" class="form-item-align" label-position="top">
+                        <el-select
+                          v-model="selectedCodeLang"
+                          @change="autoSaveSettings"
+                          class="full-width-input"
+                        >
+                          <el-option label="Python" value="python"></el-option>
+                          <el-option label="JavaScript" value="javascript"></el-option>
+                          <el-option label="cURL" value="curl"></el-option>
+                        </el-select>
+                      </el-form-item>
+
+                      <!-- 修改index.html中的代码块结构 -->
+                      <div class="code-block">
+                        <div class="code-header">
+                          <span class="code-lang">{{ selectedCodeLang }}</span>
+                          <button class="copy-button" @click.prevent="handleCopy"><i class="fa-solid fa-copy"></i></button>
+                        </div>
+                        <pre><code class="hljs" :class="'language-' + selectedCodeLang">{{ codeExamples[selectedCodeLang] }}</code></pre>
+                      </div>
+                    </div>
+                  </div>
+                </el-form>
+              </div>
+              <!-- FastAPI文档 -->
+              <div v-show="subMenu === 'fastapi'" class="page">
+                <iframe 
+                  :src="partyURL + '/docs'" 
+                  frameborder="0" 
+                  width="100%" 
+                  allow="fullscreen"
+                  class="fastapi-iframe"
+                ></iframe>
+              </div>
+              <!-- MCP风格API -->
+              <div v-show="subMenu === 'mcp'" class="page">
+                <el-form class="settings-form">
+                  <div class="tool-item">
+                    <!-- 原有SuperAPI内容 -->
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class='fa-solid fa-server'></i></el-icon>
+                        {{ t('MCPStyleAPI') }}
+                      </span>
+                    </div>
+                    <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('MCPAPIInstructions') }}
+                      </el-alert>
+                      <!-- API端点 -->
+                      <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="partyURL+'/mcp'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyMCPEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                    </div>
+                  </div>
+                </el-form>
+              </div>
+              <!-- VRM桌宠API -->
+              <div v-show="subMenu === 'vrm'" class="page">
+                <el-form class="settings-form">
+                  <div class="tool-item">
+                    <!-- 原有SuperAPI内容 -->
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class='fa-solid fa-server'></i></el-icon>
+                        {{ t('vrmAPI') }}
+                      </span>
+                    </div>
+                    <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('vrmAPIInstructions') }}
+                      </el-alert>
+                      <!-- API端点 -->
+                      <el-form-item :label="t('apiEndpoint')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="partyURL+'/vrm.html'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyVrmEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                      <!-- API端点 -->
+                      <el-form-item :label="t('360apiEndpoint')" class="form-item-align" label-position="top">
+                        <el-input
+                          :value="partyURL+'/vrm.html?mode=render'"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyVrmEndpoint"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                      <!-- API端点 -->
+                      <el-form-item :label="t('vmcpReceive')" class="form-item-align" label-position="top">
+                        <el-input
+                          value="http://127.0.0.1:39539"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyURL('http://127.0.0.1:39539')"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                      <el-form-item :label="t('vmcpSend')" class="form-item-align" label-position="top">
+                        <el-input
+                          value="http://127.0.0.1:39540"
+                          readonly
+                          class="full-width-input"
+                        >
+                          <template #append>
+                            <el-button
+                              @click="copyURL('http://127.0.0.1:39540')"
+                              class="copy-btn"
+                            >
+                            <i class="fa-solid fa-copy"></i>
+                            </el-button>
+                          </template>
+                        </el-input>
+                      </el-form-item>
+                        <el-alert
+                          type="info"
+                          :closable="false"
+                          class="mb-2"
+                        >
+                          {{ t('vmcpInstructions') }}
+                        </el-alert>
+                    </div>
+                  </div>
+                </el-form>
+              </div>
+              <!-- docker -->
+              <div v-show="subMenu === 'docker'" class="page">
+                <el-form class="settings-form">
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <span>
+                        <el-icon><i class='fa-brands fa-docker'></i></el-icon>
+                        {{ t('docker') }}
+                      </span>
+                    </div>
+                    <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('dockerInstructions') }}
+                      </el-alert>
+                      <!-- 修改index.html中的代码块结构 -->
+                      <div class="code-block">
+                        <div class="code-header">
+                          <span class="code-lang">shell</span>
+                          <button class="copy-button" @click.prevent="handleCopy"><i class="fa-solid fa-copy"></i></button>
+                        </div>
+                        <pre><code class="hljs language-shell">{{ dockerExamples }}</code></pre>
+                      </div>
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('dockerInstructions2') }}
+                      </el-alert>                      <!-- 修改index.html中的代码块结构 -->
+                      <div class="code-block">
+                        <div class="code-header">
+                          <span class="code-lang">shell</span>
+                          <button class="copy-button" @click.prevent="handleCopy"><i class="fa-solid fa-copy"></i></button>
+                        </div>
+                        <pre><code class="hljs language-shell">{{ dockerExamples2 }}</code></pre>
+                      </div>
+                    </div>
+                  </div>
+                </el-form>
+              </div>
+              <!-- 浏览器模式 -->
+              <div v-show="subMenu === 'browser'" class="page">
+                <el-form class="settings-form">
+                  <div class="tool-item">
+                    <span>
+                      <el-icon>
+                        <i class="fa-solid fa-globe"></i>
+                      </el-icon>
+                      {{ t('useWebmode') }}
+                    </span>
+                    <div class="browser-mode-btn-container">
+                      <el-button
+                        class="browser-mode-btn"
+                        type="primary"
+                        @click="launchBrowserMode"
+                        round
+                        size="large">
+                        <i class="fa-solid fa-globe" v-if="!isBrowserOpening"></i>
+                        <transition name="bounce">
+                          <span v-if="isBrowserOpening" class="ml-2">
+                            <el-icon class="is-loading"><loading /></el-icon>
+                            {{ t('launching') }}
+                          </span>
+                          <span v-else class="ml-2">
+                            {{ t('launchBrowserMode') }}
+                          </span>
+                        </transition>
+                      </el-button>
+                    </div>
+                    <canvas id="qrcode" style="display: block; margin: 20px auto;"></canvas>
+                    <el-alert
+                      type="info"
+                      :closable="false"
+                      class="mb-2"
+                    >
+                      <template #default>
+                        <div class="alert-content">
+                          {{ t('clickToUse') }}<br>
+                          {{ t('scanToUse') }}
+                        </div>
+                      </template>
+                    </el-alert>
+                    <div class="tool-content">
+                      <el-alert
+                        type="info"
+                        :closable="false"
+                        class="mb-2"
+                      >
+                        {{ t('browserEmbedCodeInstructions') }}
+                      </el-alert>
+                      <!-- 修改index.html中的代码块结构 -->
+                      <div class="code-block">
+                        <div class="code-header">
+                          <span class="code-lang">html</span>
+                          <button class="copy-button" @click.prevent="handleCopy"><i class="fa-solid fa-copy"></i></button>
+                        </div>
+                        <pre><code class="hljs language-html">{{ browserEmbedCodeExamples }}</code></pre>
+                      </div>
+                    </div>
+                  </div>
+                </el-form>
+              </div>
+            </div>
+          </div>
+        </div>

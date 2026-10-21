@@ -1,0 +1,213 @@
+        <div v-show="activeMenu === 'storage'" class="page storage-container">
+          <div class="suite-layout">
+            <!-- 左侧二级导航 -->
+            <div class="suite-sidebar">
+              <div class="tile-nav">
+                <div 
+                  v-for="tile in storageTiles" 
+                  :key="tile.id"
+                  class="nav-item"
+                  :class="{ active: subMenu === tile.id }"
+                  @click="subMenu = tile.id">
+                  <el-icon class="nav-icon"><i :class="tile.icon"></i></el-icon>
+                  <span class="nav-text">{{ t(tile.title) }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 右侧内容区 -->
+            <div class="suite-content">
+              <!-- 文本存储 -->
+              <div v-show="subMenu === 'text'" class="page text-container">
+                <!-- 顶部工具条 -->
+                <div class="toolbar">
+                  <el-checkbox
+                    v-model="allChecked"
+                    :indeterminate="indeterminate"
+                    @change="toggleAll">
+                    {{ t('selectAll') }}
+                  </el-checkbox>
+                  <el-button
+                    type="danger"
+                    :disabled="selectedFiles.length === 0"
+                    @click="batchDeleteFiles">
+                    <i class="fa-solid fa-trash"></i>
+                    {{ t('batchDelete') }}
+                  </el-button>
+                </div>
+                <div class="text-list">
+                  <!-- 文件列表 -->
+                  <div class="file-item" v-for="(file, index) in textFiles" :key="index">
+                    <!-- 复选框 -->
+                    <el-checkbox
+                      v-model="selectedFiles"
+                      :label="file.unique_filename"
+                      style="margin-right: 10px;"
+                      class="checkbox-no-label">  
+                    </el-checkbox>
+                    <div class="file-info">
+                      <span class="file-name">{{ file.original_filename }}</span>
+                    </div>
+                    <div class="file-actions">
+                      <!-- 复制链接按钮 -->
+                      <el-button circle size="small" class="file-actions-btn" @click="copyLink(file.unique_filename)">
+                        <i class="fa-solid fa-link"></i>
+                      </el-button>
+                      <!-- 下载按钮 -->
+                      <el-button 
+                        circle 
+                        size="small" 
+                        class="file-actions-btn"
+                        @click="handleDownload(file)">
+                        <i class="fa-solid fa-download"></i>
+                      </el-button>
+                      <!-- 删除按钮 -->
+                      <el-button type="danger" circle size="small" class="file-actions-btn" @click="deleteFile(file)">
+                        <i class="fa-solid fa-trash"></i>
+                      </el-button>
+                    </div>
+                  </div>
+                </div>
+                <!-- 如果文件列表长度为0 -->
+                <div v-if="textFiles.length === 0" class="no-files">
+                  <el-empty :description="t('noFiles')" />
+                </div>
+              </div>
+              <!-- 图片存储 -->
+              <div v-show="subMenu === 'image'" class="page image-container">
+                <!-- 新增顶部工具栏 -->
+                <div class="toolbar">
+                  <el-checkbox
+                    v-model="allImagesChecked"
+                    :indeterminate="indeterminateImages"
+                    @change="toggleAllImages">
+                    {{ t('selectAll') }}
+                  </el-checkbox>
+                  <el-button
+                    type="danger"
+                    :disabled="selectedImages.length === 0"
+                    @click="batchDeleteImages">
+                    <i class="fa-solid fa-trash"></i>
+                    {{ t('batchDelete') }}
+                  </el-button>
+                </div>
+                <div class="image-grid">
+                  <div class="image-item" v-for="(img, index) in imageFiles" :key="index">
+                    <img :src="`${partyURL}/uploaded_files/${img.unique_filename}`" @click="previewImage(img)" class="thumbnail"/>
+                    <div class="image-overlay">
+                      <!-- 复选框 -->
+                      <el-checkbox
+                        v-model="selectedImages"
+                        :label="img.unique_filename"
+                        class="checkbox-no-label">
+                      </el-checkbox>
+                      <div class="image-actions">
+                        <!-- 复制链接按钮 -->
+                        <el-button circle size="small" class="image-actions-btn" @click="copyLink(img.unique_filename)">
+                          <i class="fa-solid fa-link"></i>
+                        </el-button>
+                        
+                        <!-- 下载按钮 -->
+                      <el-button 
+                        circle 
+                        size="small" 
+                        class="image-actions-btn"
+                        @click="handleDownload(img)">
+                        <i class="fa-solid fa-download"></i>
+                      </el-button>
+                        
+                        <el-button type="danger" class="image-actions-btn" circle size="small" @click="deleteImage(img)">
+                          <i class="fa-solid fa-trash"></i>
+                        </el-button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="imageFiles.length === 0" class="no-Images">
+                  <el-empty :description="t('noImages')" />
+                </div>
+                <el-dialog append-to-body
+                  v-model="previewVisible"
+                  :title="t('preview')"
+                  class="image-preview-dialog"
+                  width="80%">
+                  <div class="preview-container">
+                    <img 
+                      :src="previewImageUrl" 
+                      class="preview-image"
+                      alt="Preview"
+                    />
+                  </div>
+                </el-dialog>
+              </div>
+              <!-- 视频存储 -->
+              <div v-show="subMenu === 'video'" class="page video-container">
+                <!-- 顶部工具条 -->
+                <div class="toolbar">
+                  <el-checkbox
+                    v-model="allVideosChecked"
+                    :indeterminate="indeterminateVideos"
+                    @change="toggleAllVideos">
+                    {{ t('selectAll') }}
+                  </el-checkbox>
+                  <el-button
+                    type="danger"
+                    :disabled="selectedVideos.length === 0"
+                    @click="batchDeleteVideos">
+                    <i class="fa-solid fa-trash"></i>
+                    {{ t('batchDelete') }}
+                  </el-button>
+                </div>
+
+                <!-- 视频列表 -->
+                <div class="video-grid" v-if="videoFiles.length > 0">
+                  <div class="video-item" v-for="(video, index) in videoFiles" :key="index">
+                    <div class="video-wrapper">
+                      <!-- 原生视频控件 -->
+                      <video 
+                        controls 
+                        preload="metadata"
+                        class="video-player">
+                        <source :src="`${partyURL}/uploaded_files/${video.unique_filename}`" type="video/mp4">
+                      </video>
+                      
+                      <!-- 顶部操作层 (不遮挡底部的进度条) -->
+                      <div class="video-top-overlay">
+                        <el-checkbox
+                          v-model="selectedVideos"
+                          :label="video.unique_filename"
+                          class="checkbox-no-label">
+                        </el-checkbox>
+                        
+                        <div class="video-quick-actions">
+                          <!-- 复制链接 -->
+                          <el-button circle size="small" class="video-mini-btn" @click="copyLink(video.unique_filename)">
+                            <i class="fa-solid fa-link"></i>
+                          </el-button>
+                          <!-- 下载 -->
+                          <el-button circle size="small" class="video-mini-btn" @click="handleDownload(video)">
+                            <i class="fa-solid fa-download"></i>
+                          </el-button>
+                          <!-- 删除 -->
+                          <el-button type="danger" circle size="small" class="video-mini-btn" @click="deleteVideo(video)">
+                            <i class="fa-solid fa-trash"></i>
+                          </el-button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <!-- 文件名展示区 -->
+                    <div class="video-info-footer" :title="video.original_filename">
+                      {{ video.original_filename }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 空状态 -->
+                <div v-if="videoFiles.length === 0" class="no-files">
+                  <el-empty :description="t('noVideos') || '暂无视频'" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>

@@ -115,7 +115,10 @@ class TestDeadLinkCleanupPins:
 class TestBackupUiPins:
     """M4-lite Data Guard UI: endpoints wired, loading guards, i18n both langs."""
 
-    HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    # F3 外置页面模板同属 HTML 引用面（按钮/文案键在模板文件中）
+    HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8") + "\n".join(
+        f.read_text(encoding="utf-8")
+        for f in sorted((ROOT / "static" / "templates").glob("*.html")))
     ZH = (ROOT / "static" / "js" / "locales" / "zh-CN.js").read_text(encoding="utf-8")
     EN = (ROOT / "static" / "js" / "locales" / "en-US.js").read_text(encoding="utf-8")
 
