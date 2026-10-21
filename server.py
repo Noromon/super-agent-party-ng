@@ -451,6 +451,11 @@ from py.ClaudeAsOpenAI import AsyncClaudeAsOpenAI
 
 from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
+from py.file_utils import (ALLOWED_EXTENSIONS, ALLOWED_IMAGE_EXTENSIONS,
+                           ALLOWED_VIDEO_EXTENSIONS, ALLOWED_AUDIO_EXTENSIONS,
+                           ALLOWED_VRM_EXTENSIONS, ALLOWED_VRMA_EXTENSIONS,
+                           ALLOWED_GAUSS, animation_dir, GAUSS_DIR,
+                           make_file_url, scan_motion_files, get_internal_ip)
 
 logger = None      
 os.environ["no_proxy"] = "localhost,127.0.0.1"
@@ -465,24 +470,6 @@ locales = {}
 sleep_guard = None
 scheduler_task = None
 _TOOL_HOOKS = {}
-ALLOWED_EXTENSIONS = [
-  # 办公文档
-    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'pdf', 'pages', 
-    'numbers', 'key', 'rtf', 'odt', 'epub',
-  
-  # 编程开发
-  'js', 'ts', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rs',
-  'swift', 'kt', 'dart', 'rb', 'php', 'html', 'css', 'scss', 'less',
-  'vue', 'svelte', 'jsx', 'tsx', 'json', 'xml', 'yml', 'yaml', 
-  'sql', 'sh',
-  
-  # 数据配置
-  'csv', 'tsv', 'txt', 'md', 'log', 'conf', 'ini', 'env', 'toml'
-]
-ALLOWED_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']
-
-ALLOWED_VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg', 'mov', 'avi']
-
 # 1. 先清空系统可能给错的条目
 for ext in ("js", "mjs", "css", "html", "htm", "json", "xml", "map", "svg"):
     mimetypes.add_type("", f".{ext}")          # 先删掉
@@ -7969,72 +7956,13 @@ async def health_check():
 
 
 
-ALLOWED_AUDIO_EXTENSIONS = ['wav', 'mp3', 'ogg', 'flac', 'aac']
 
 
 
-# 允许的VRM文件扩展名
-ALLOWED_VRM_EXTENSIONS = {'vrm'}
 
 
 
 # 修改删除VRM模型的接口，添加安全检查
-
-ALLOWED_VRMA_EXTENSIONS = {"vrma"}
-
-animation_dir = os.path.join(DEFAULT_VRM_DIR, "animations")
-
-def make_file_url(request: Request, file_path: str) -> str:
-    """将本地文件路径转成对外可访问的 URL"""
-    return str(request.base_url) + file_path.lstrip("/")
-
-
-def scan_motion_files(directory: str, allowed_ext: set) -> List[dict]:
-    """
-    扫描指定目录下所有符合扩展名的文件，返回列表：
-    [
-      {
-        "id": "文件名(不含扩展名)",
-        "name": "文件名(不含扩展名)",
-        "path": "对外可访问的完整 URL",
-        "type": "default" | "user"
-      }
-    ]
-    """
-    files = []
-    if not os.path.exists(directory):
-        return files
-
-    for f in os.listdir(directory):
-        if f.lower().endswith(tuple(allowed_ext)):
-            file_id = Path(f).stem
-            file_path = os.path.join(directory, f)
-            # 注意：这里统一返回相对路径，后面再组装成 URL
-            files.append({
-                "id": file_id,
-                "name": file_id,
-                "path": file_path,
-                "type": "default" if directory == animation_dir else "user"
-            })
-    # 按文件名排序
-    files.sort(key=lambda x: x["name"])
-    return files
-
-
-
-
-
-
-
-
-# -------------- GAUSS 场景相关 --------------
-GAUSS_DIR     = os.path.join(DEFAULT_VRM_DIR, "scene")       # 默认场景目录
-ALLOWED_GAUSS = {"ply", "spz", "splat", "ksplat", "sog"}     # spark 支持的扩展名
-
-
-
-
-
 
 
 
@@ -8161,20 +8089,6 @@ def list_to_dict(meta_list: List[Dict[str, Any]]) -> Dict[str, Any]:
 # ---------- 3. 删除（按行号） ----------
 
 
-
-
-def get_internal_ip():
-    """获取本机内网 IP 地址"""
-    try:
-        # 创建一个 socket 连接，目标可以是任何公网地址（不真连接），只是用来获取出口 IP
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0)
-        s.connect(("8.8.8.8", 80))  # 使用 Google DNS，不实际发送数据
-        internal_ip = s.getsockname()[0]
-        s.close()
-        return internal_ip
-    except Exception:
-        return "127.0.0.1"
 
 
 

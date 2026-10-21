@@ -12,6 +12,8 @@ import logging
 import sys as _sys
 
 from py import app_state
+from py.file_utils import (ALLOWED_EXTENSIONS, ALLOWED_IMAGE_EXTENSIONS,
+                           ALLOWED_VIDEO_EXTENSIONS, get_internal_ip)
 import asyncio
 import os
 import shutil
@@ -320,13 +322,13 @@ async def update_storage_endpoint(request: Request):
         file_path = os.path.join(UPLOAD_FILES_DIR, file)
         if os.path.isfile(file_path):
             file_extension = os.path.splitext(file)[1][1:]
-            if file_extension in _srv.ALLOWED_EXTENSIONS:
+            if file_extension in ALLOWED_EXTENSIONS:
                 if file not in [item["unique_filename"] for item in textFiles]:
                     textFiles.append({"unique_filename": file, "original_filename": file})
-            elif file_extension in _srv.ALLOWED_IMAGE_EXTENSIONS:
+            elif file_extension in ALLOWED_IMAGE_EXTENSIONS:
                 if file not in [item["unique_filename"] for item in imageFiles]:
                     imageFiles.append({"unique_filename": file, "original_filename": file})
-            elif file_extension in _srv.ALLOWED_VIDEO_EXTENSIONS:
+            elif file_extension in ALLOWED_VIDEO_EXTENSIONS:
                 if file not in [item["unique_filename"] for item in videoFiles]:
                     videoFiles.append({"unique_filename": file, "original_filename": file})
 
@@ -405,7 +407,7 @@ async def update_proxy():
 
 @router.get("/api/ip")
 def get_ip():
-    ip = _srv.get_internal_ip()
+    ip = get_internal_ip()
     return {"ip": ip}
 
 

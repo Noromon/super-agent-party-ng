@@ -7,6 +7,7 @@ launched directly, so we bind the OBJECT once and attributes resolve at
 request time (lifespan rebinds stay visible).  server imports this
 module, never the other way around.
 """
+import logging
 import sys as _sys
 import glob
 import os
@@ -15,6 +16,10 @@ import uuid
 from fastapi import File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pathlib import Path
+from py.file_utils import (ALLOWED_EXTENSIONS, ALLOWED_IMAGE_EXTENSIONS,
+                           ALLOWED_VIDEO_EXTENSIONS, ALLOWED_VRM_EXTENSIONS,
+                           ALLOWED_VRMA_EXTENSIONS, ALLOWED_GAUSS, GAUSS_DIR,
+                           animation_dir, make_file_url, scan_motion_files)
 from py import auth as sap_auth
 from py.get_setting import DEFAULT_VRM_DIR, EXT_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR, USER_DATA_DIR, load_settings
 from py.load_files import get_file_content
@@ -30,6 +35,9 @@ class FileNames(BaseModel):
 # resolve per request so lifespan rebinds stay visible
 _srv = _sys.modules.get('server') or _sys.modules['__main__']
 
+
+logger = logging.getLogger("app")
+
 router = APIRouter()
 
 @router.post("/load_file")
@@ -43,9 +51,9 @@ async def load_file_endpoint(request: Request, files: List[UploadFile] = File(No
     # 辅助函数：根据后缀名判断类型
     def get_file_type(ext):
         ext = ext.lower().lstrip('.')
-        if ext in _srv.ALLOWED_IMAGE_EXTENSIONS:
+        if ext in ALLOWED_IMAGE_EXTENSIONS:
             return 'image'
-        if ext in _srv.ALLOWED_VIDEO_EXTENSIONS:
+        if ext in ALLOWED_VIDEO_EXTENSIONS:
             return 'video'
         return 'file'
 
@@ -74,11 +82,11 @@ async def load_file_endpoint(request: Request, files: List[UploadFile] = File(No
                 # 兼容原有的分类列表
                 file_meta = {"unique_filename": unique_filename, "original_filename": file.filename}
                 ext_clean = file_extension[1:].lower()
-                if ext_clean in _srv.ALLOWED_EXTENSIONS:
+                if ext_clean in ALLOWED_EXTENSIONS:
                     textFiles.append(file_meta)
-                elif ext_clean in _srv.ALLOWED_IMAGE_EXTENSIONS:
+                elif ext_clean in ALLOWED_IMAGE_EXTENSIONS:
                     imageFiles.append(file_meta)
-                elif ext_clean in _srv.ALLOWED_VIDEO_EXTENSIONS:
+                elif ext_clean in ALLOWED_VIDEO_EXTENSIONS:
                     vedioFiles.append(file_meta)
 
         elif 'application/json' in content_type:
@@ -113,17 +121,17 @@ async def load_file_endpoint(request: Request, files: List[UploadFile] = File(No
                 
                 file_meta = {"unique_filename": unique_filename, "original_filename": file_name}
                 ext_clean = file_extension[1:].lower()
-                if ext_clean in _srv.ALLOWED_EXTENSIONS:
+                if ext_clean in ALLOWED_EXTENSIONS:
                     textFiles.append(file_meta)
-                elif ext_clean in _srv.ALLOWED_IMAGE_EXTENSIONS:
+                elif ext_clean in ALLOWED_IMAGE_EXTENSIONS:
                     imageFiles.append(file_meta)
-                elif ext_clean in _srv.ALLOWED_VIDEO_EXTENSIONS:
+                elif ext_clean in ALLOWED_VIDEO_EXTENSIONS:
                     vedioFiles.append(file_meta)
 
         return JSONResponse(content={"success": True, "fileLinks": file_links, "textFiles": textFiles, "imageFiles": imageFiles, "vedioFiles": vedioFiles})
     
     except Exception as e:
-        _srv.logger.error(f"Error processing request: {str(e)}")
+        logger.error(f"Error processing request: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -179,7 +187,7 @@ async def upload_vrm_model(
     
     # 检查文件扩展名
     file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in _srv.ALLOWED_VRM_EXTENSIONS:
+    if file_extension not in ALLOWED_VRM_EXTENSIONS:
         return JSONResponse(
             status_code=400,
             content={"success": False, "message": f"不支持的文件类型: {file_extension}，只支持.vrm文件"}
@@ -210,7 +218,7 @@ async def upload_vrm_model(
         })
     
     except Exception as e:
-        _srv.logger.error(f"VRM模型上传失败: {str(e)}")
+        logger.error(f"VRM模型上传失败: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": f"文件保存失败: {str(e)}"}
@@ -257,7 +265,7 @@ async def get_default_vrm_models(request: Request):
         })
         
     except Exception as e:
-        _srv.logger.error(f"获取默认VRM模型失败: {str(e)}")
+        logger.error(f"获取默认VRM模型失败: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": f"获取默认模型失败: {str(e)}"}
@@ -297,7 +305,7 @@ async def delete_vrm_model(filename: str):
             )
             
     except Exception as e:
-        _srv.logger.error(f"删除VRM模型失败: {str(e)}")
+        logger.error(f"删除VRM模型失败: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "message": f"删除失败: {str(e)}"}
@@ -307,7 +315,7 @@ async def delete_vrm_model(filename: str):
 @router.get("/get_default_vrma_motions")
 async def get_default_vrma_motions(request: Request):
     try:
-        motions = _srv.scan_motion_files(_srv.animation_dir, _srv.ALLOWED_VRMA_EXTENSIONS)
+        motions = scan_motion_files(animation_dir, ALLOWED_VRMA_EXTENSIONS)
 
         # 把磁盘路径转成 URL
         for m in motions:
@@ -329,7 +337,7 @@ async def get_user_vrma_motions(request: Request):
         # C-fix: scan_motion_files needs the extension set (the default-library
         # sibling passes it; this call site had been crashing with 500 since
         # the signature gained allowed_ext)
-        motions = _srv.scan_motion_files(UPLOAD_FILES_DIR, _srv.ALLOWED_VRMA_EXTENSIONS)
+        motions = scan_motion_files(UPLOAD_FILES_DIR, ALLOWED_VRMA_EXTENSIONS)
 
         # 把磁盘路径转成 URL
         for m in motions:
@@ -353,7 +361,7 @@ async def upload_vrma_motion(
 ):
     # 检查扩展名
     file_extension = Path(file.filename).suffix.lower().lstrip(".")
-    if file_extension not in _srv.ALLOWED_VRMA_EXTENSIONS:
+    if file_extension not in ALLOWED_VRMA_EXTENSIONS:
         return JSONResponse(
             status_code=400,
             content={"success": False, "message": f"不支持的文件类型: {file_extension}"}
@@ -371,7 +379,7 @@ async def upload_vrma_motion(
             buffer.write(content)
 
         # 构建返回数据
-        file_url = _srv.make_file_url(request, f"uploaded_files/{unique_filename}")
+        file_url = make_file_url(request, f"uploaded_files/{unique_filename}")
 
         return JSONResponse(content={
             "success": True,
@@ -433,7 +441,7 @@ async def upload_gauss_scene(
     display_name: str = Form(...)
 ):
     ext = Path(file.filename).suffix.lower().lstrip(".")
-    if ext not in _srv.ALLOWED_GAUSS:
+    if ext not in ALLOWED_GAUSS:
         return JSONResponse(status_code=400, content={
             "success": False,
             "message": f"不支持的文件类型: {ext}"
@@ -460,11 +468,11 @@ async def upload_gauss_scene(
 @router.get("/get_default_gauss_scenes")
 async def get_default_gauss_scenes(request: Request):
     try:
-        os.makedirs(_srv.GAUSS_DIR, exist_ok=True)
+        os.makedirs(GAUSS_DIR, exist_ok=True)
         scenes = []
-        for f in os.listdir(_srv.GAUSS_DIR):
+        for f in os.listdir(GAUSS_DIR):
             ext = Path(f).suffix.lower().lstrip(".")
-            if ext in _srv.ALLOWED_GAUSS:
+            if ext in ALLOWED_GAUSS:
                 scenes.append({
                     "id":   Path(f).stem,
                     "name": Path(f).stem,
@@ -483,7 +491,7 @@ async def get_user_gauss_scenes(request: Request):
         scenes = []
         for f in os.listdir(UPLOAD_FILES_DIR):
             ext = Path(f).suffix.lower().lstrip(".")
-            if ext in _srv.ALLOWED_GAUSS:
+            if ext in ALLOWED_GAUSS:
                 scenes.append({
                     "id":   Path(f).stem,
                     "name": Path(f).stem,

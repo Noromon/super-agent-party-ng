@@ -14,6 +14,7 @@ import sys as _sys
 
 from py import app_state
 from py.voice import funasr_recognize_offline, tts_manager
+from py.file_utils import ALLOWED_AUDIO_EXTENSIONS
 import asyncio
 import base64
 import json
@@ -981,7 +982,7 @@ async def upload_gsv_ref_audio(
     
     # 检查文件扩展名
     file_extension = file.filename.split('.')[-1].lower()
-    if file_extension not in _srv.ALLOWED_AUDIO_EXTENSIONS:
+    if file_extension not in ALLOWED_AUDIO_EXTENSIONS:
         return JSONResponse(
             status_code=400,
             content={"success": False, "message": f"不支持的文件类型: {file_extension}"}
