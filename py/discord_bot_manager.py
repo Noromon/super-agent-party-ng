@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+"""Discord bot manager。批 2 起为 BaseBotManager 的 Discord adapter：
+生命周期模板在 py/base_bot.py，本文件保留 DiscordClient 与消息/行为逻辑。"""
 import asyncio
 import base64
 import io
@@ -6,7 +9,7 @@ import logging
 import random
 import re
 import threading
-import weakref
+import time
 from typing import Dict, List, Optional, Any
 
 import aiohttp
@@ -15,11 +18,13 @@ from discord.ext import commands, tasks
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from py.behavior_engine import BehaviorItem, BehaviorSettings,global_behavior_engine
+from py.base_bot import BaseBotManager
+from py.behavior_engine import BehaviorItem, BehaviorSettings, global_behavior_engine
 from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 # ------------------ 配置模型 ------------------
 from py import llm_gate
+
 
 class DiscordBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -36,93 +41,21 @@ class DiscordBotConfig(BaseModel):
     # Discord 特定的推送目标 ID 列表 (Channel IDs)
     behaviorTargetChatIds: List[str] = Field(default_factory=list)
 
+
 # ------------------ 管理器 ------------------
-class DiscordBotManager:
-    def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
-        self.bot_client: Optional["DiscordClient"] = None
-        self.is_running = False
-        self.config: Optional[DiscordBotConfig] = None
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._shutdown_event = threading.Event()
-        self._ready_complete = threading.Event()
-        self._startup_error: Optional[str] = None
-        self._stop_requested = False
+class DiscordBotManager(BaseBotManager):
+    PLATFORM_LABEL = "Discord"
+    THREAD_NAME = "DiscordBotThread"
+    SETTINGS_KEY = "discordBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "discord"
+    STOP_JOIN_TIMEOUT = 5
 
-    # ---------- 生命周期 ----------
-    def start_bot(self, config: DiscordBotConfig):
-        if self.is_running:
-            raise RuntimeError("Discord 机器人已在运行")
-        self.config = config
-        self._shutdown_event.clear()
-        self._ready_complete.clear()
-        self._startup_error = None
-        self._stop_requested = False
+    def build_client(self, config: DiscordBotConfig):
+        return DiscordClient(config, manager=self)
 
-        self.bot_thread = threading.Thread(
-            target=self._run_bot_thread, args=(config,), daemon=True, name="DiscordBotThread"
-        )
-        self.bot_thread.start()
-
-        if not self._ready_complete.wait(timeout=30):
-            self.stop_bot()
-            raise RuntimeError("Discord 机器人就绪超时")
-
-        if self._startup_error:
-            self.stop_bot()
-            raise RuntimeError(f"Discord 机器人启动失败: {self._startup_error}")
-
-    def _run_bot_thread(self, config: DiscordBotConfig):
-        """线程中运行 Discord 机器人"""
-        try:
-            # 1. 创建并设置循环
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-
-            # 2. 定义一个统一的异步启动函数
-            async def main_startup():
-                try:
-                    # 在异步环境下加载设置，避免 asyncio.run 冲突
-                    settings = await load_settings()
-                    behavior_data = settings.get("behaviorSettings", {})
-                    
-                    target_ids = config.behaviorTargetChatIds
-                    if not target_ids:
-                        discord_conf = settings.get("discordBotConfig", {})
-                        target_ids = discord_conf.get("behaviorTargetChatIds", [])
-                    
-                    if behavior_data:
-                        logging.info(f"Discord 线程: 同步行为配置... 目标频道数: {len(target_ids)}")
-                        target_map = {"discord": target_ids}
-                        global_behavior_engine.update_config(behavior_data, target_map)
-                        
-                        # 更新本地配置对象
-                        config.behaviorSettings = behavior_data if isinstance(behavior_data, BehaviorSettings) else BehaviorSettings(**behavior_data)
-                        config.behaviorTargetChatIds = target_ids
-
-                    # 3. 实例化 Client
-                    self.bot_client = DiscordClient(config, manager=self)
-
-                    # 4. 启动行为引擎 (此时在运行的 loop 中，可以使用 create_task)
-                    if not global_behavior_engine.is_running:
-                        asyncio.create_task(global_behavior_engine.start())
-                        logging.info("行为引擎已在 Discord 线程启动")
-
-                    # 5. 启动 Discord Bot (这会阻塞直到 Bot 关闭)
-                    await self.bot_client.start(config.token)
-                except Exception as e:
-                    self._startup_error = str(e)
-                    logging.exception("Discord 机器人启动过程中出错")
-
-            # 运行异步主任务
-            self.loop.run_until_complete(main_startup())
-
-        except Exception as e:
-            if not self._stop_requested:
-                self._startup_error = str(e)
-                logging.exception("Discord 机器人线程异常")
-        finally:
-            self._cleanup()
+    async def run_client(self):
+        await self.bot_client.start(self.config.token)
 
     def stop_bot(self):
         if not self.is_running and not self.bot_thread:
@@ -130,13 +63,17 @@ class DiscordBotManager:
         self._stop_requested = True
         self._shutdown_event.set()
         self.is_running = False
-        if self.bot_client:
-            asyncio.run_coroutine_threadsafe(self.bot_client.close(), self.loop)
+        if self.bot_client and self.loop and not self.loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(self.bot_client.close(), self.loop)
+            except RuntimeError:
+                pass
         if self.bot_thread and self.bot_thread.is_alive():
-            self.bot_thread.join(timeout=5)
+            self.bot_thread.join(timeout=self.STOP_JOIN_TIMEOUT)
         self._cleanup()
 
     def _cleanup(self):
+        # discord 特有：等 pending 网络任务 drain 后再关 loop
         self.is_running = False
         if self.loop and not self.loop.is_closed():
             try:
@@ -158,29 +95,12 @@ class DiscordBotManager:
             "config": self.config.model_dump() if self.config else None,
         }
 
-    def update_behavior_config(self, config: DiscordBotConfig):
-        """
-        热更新行为配置，不重启机器人
-        """
-        # 更新 Manager 的本地记录
-        self.config = config
-        
-        # 1. 更新 Client 内部的实时参数
-        if self.bot_client:
-            self.bot_client.config.llm_model = config.llm_model 
-            self.bot_client.config.enable_tts = config.enable_tts
-            self.bot_client.config.wakeWord = config.wakeWord
+    def apply_live_fields(self, client, config: DiscordBotConfig):
+        # discord 原语义：原位改 client.config 字段（不整体换 config 对象）
+        client.config.llm_model = config.llm_model
+        client.config.enable_tts = config.enable_tts
+        client.config.wakeWord = config.wakeWord
 
-        # 2. 更新全局行为引擎
-        target_map = {
-            "discord": config.behaviorTargetChatIds
-        }
-        
-        global_behavior_engine.update_config(
-            config.behaviorSettings,
-            target_map
-        )
-        logging.info("Discord 机器人: 行为配置已热更新，计时器已重置")
 
 # ------------------ Discord Client ------------------
 class DiscordClient(discord.Client):

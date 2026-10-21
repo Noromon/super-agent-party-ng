@@ -22,6 +22,7 @@ STOP_JOIN_TIMEOUT。
 （批 2 裁决清单 B 区）。
 """
 import asyncio
+import inspect
 import logging
 import threading
 import weakref
@@ -93,6 +94,8 @@ class BaseBotManager:
 
                 settings = await load_settings()
 
+                await self.pre_client_setup()
+
                 # 行为配置同步（各平台原逐份复制的同一段逻辑，字段名参数化）
                 behavior_data = settings.get("behaviorSettings", {})
                 target_ids = getattr(config, self.TARGET_FIELD, None) if self.TARGET_FIELD else None
@@ -108,8 +111,11 @@ class BaseBotManager:
                     if self.TARGET_FIELD:
                         setattr(config, self.TARGET_FIELD, target_ids)
 
-                # client 构建（平台钩子）+ 公共接线
-                self.bot_client = self.build_client(config)
+                # client 构建（平台钩子，可 async：如需网络握手）+ 公共接线
+                client = self.build_client(config)
+                if inspect.isawaitable(client):
+                    client = await client
+                self.bot_client = client
                 self.bot_client.config = config
                 self.bot_client._manager_ref = weakref.ref(self)
                 self.post_client_init(config)
@@ -119,7 +125,7 @@ class BaseBotManager:
                     logging.info(f"行为引擎已在 {self.PLATFORM_LABEL} 线程启动")
 
                 self._startup_complete.set()
-                await self.bot_client.run()
+                await self.run_client()
             except Exception as e:
                 if not self._stop_requested:
                     logging.error(f"{self.PLATFORM_LABEL} 机器人启动/运行异常: {e}")
@@ -134,6 +140,8 @@ class BaseBotManager:
             self.loop.run_until_complete(main_startup())
         except Exception as e:
             if not self._stop_requested:
+                if not self._startup_error:
+                    self._startup_error = str(e)
                 logging.error(f"{self.PLATFORM_LABEL} 线程 Loop 异常: {e}")
         finally:
             self._cleanup()
@@ -198,6 +206,13 @@ class BaseBotManager:
 
     def build_client(self, config):
         raise NotImplementedError
+
+    async def pre_client_setup(self):
+        """client 构建前的异步准备（如行为引擎 handler 注册），默认 no-op。"""
+
+    async def run_client(self):
+        """启动 client 主循环，默认 client.run()；平台可覆写（discord.start 等）。"""
+        await self.bot_client.run()
 
     def post_client_init(self, config):
         """默认无附加接线；client 支持 _ready_callback 的平台自行覆写接线。"""

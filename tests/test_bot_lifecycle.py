@@ -387,7 +387,6 @@ BOTS = [
         "mgr": "SlackBotManager", "cfg": "SlackBotConfig",
         "data": dict(bot_token="xoxb-t", app_token="xapp-t"),
         "patches": _slack_patches,
-        "failure_drift": "slack 启动异常被吞，start_bot 不抛错（R2-9 待拉平）",
     },
     {
         "id": "dingtalk", "mod": "py.dingtalk_bot_manager",

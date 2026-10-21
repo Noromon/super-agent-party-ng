@@ -19,6 +19,7 @@ from py.get_setting import get_port, load_settings
 
 # ------------------ 配置模型 (严格对齐) ------------------
 from py import llm_gate
+from py.base_bot import BaseBotManager
 
 class SlackBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -37,113 +38,41 @@ class SlackBotConfig(BaseModel):
     behaviorTargetChatIds: List[str] = []
 
 # ------------------ Slack 机器人管理器 ------------------
-class SlackBotManager:
+class SlackBotManager(BaseBotManager):
+    """批 2 起为 BaseBotManager 的 Slack adapter。
+
+    D2（已批准）：启动异常不再被吞——记入 _startup_error 由 start_bot
+    传播；stop_bot 获得统一 join/清理语义。SocketMode 事件驱动、消息处理
+    与行为回调为平台私产，保留在本类。
+    """
+    PLATFORM_LABEL = "Slack"
+    THREAD_NAME = "SlackBotThread"
+    SETTINGS_KEY = "slackBotConfig"
+    TARGET_FIELD = "behaviorTargetChatIds"
+    ENGINE_TARGET_KEY = "slack"
+    STOP_JOIN_TIMEOUT = 5
+
     def __init__(self):
-        self.bot_thread: Optional[threading.Thread] = None
+        super().__init__()
         self.socket_client: Optional[SocketModeClient] = None
-        self.is_running = False
-        self.config: Optional[SlackBotConfig] = None
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self._ready_complete = threading.Event()
-        
         self.bot_user_id: Optional[str] = None
-        
         # --- 状态存储 ---
-        self.memory: Dict[str, List[dict]] = {}      
-        self.async_tools: Dict[str, List[str]] = {}  
-        self.file_links: Dict[str, List[str]] = {}   
+        self.memory: Dict[str, List[dict]] = {}
+        self.async_tools: Dict[str, List[str]] = {}
+        self.file_links: Dict[str, List[str]] = {}
 
-    def start_bot(self, config: SlackBotConfig):
-        if self.is_running:
-            raise RuntimeError("Slack 机器人已在运行")
-        self.config = config
-        self._ready_complete.clear()
+    async def pre_client_setup(self):
+        from py.behavior_engine import global_behavior_engine
+        global_behavior_engine.register_handler("slack", self.execute_behavior_event)
 
-        self.bot_thread = threading.Thread(
-            target=self._run_bot_thread, args=(config,), daemon=True, name="SlackBotThread"
-        )
-        self.bot_thread.start()
-
-        if not self._ready_complete.wait(timeout=30):
-            self.stop_bot()
-            raise RuntimeError("Slack 机器人启动超时")
-
-    def _run_bot_thread(self, config: SlackBotConfig):
-        """线程中运行 Slack 机器人"""
-        # 1. 创建并设置循环
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-
-        # 2. 定义统一的异步启动入口
-        async def main_startup():
-            try:
-                # --- 步骤 A: 异步加载设置 (替代 asyncio.run) ---
-                from py.get_setting import load_settings
-                from py.behavior_engine import global_behavior_engine, BehaviorSettings
-                
-                global_behavior_engine.register_handler("slack", self.execute_behavior_event)
-
-                settings = await load_settings()
-                behavior_data = settings.get("behaviorSettings", {})
-                
-                # 获取目标频道列表
-                target_ids = config.behaviorTargetChatIds
-                if not target_ids:
-                    slack_conf = settings.get("slackBotConfig", {})
-                    target_ids = slack_conf.get("behaviorTargetChatIds", [])
-                
-                # --- 步骤 B: 同步行为配置 ---
-                if behavior_data:
-                    logging.info(f"Slack 线程: 检测到行为配置，正在同步... 目标频道数: {len(target_ids)}")
-                    target_map = {"slack": target_ids}
-                    
-                    # 更新全局引擎
-                    global_behavior_engine.update_config(behavior_data, target_map)
-                    
-                    # 更新本地配置对象
-                    if isinstance(behavior_data, dict):
-                        config.behaviorSettings = BehaviorSettings(**behavior_data)
-                    else:
-                        config.behaviorSettings = behavior_data
-                    config.behaviorTargetChatIds = target_ids
-
-                # --- 步骤 C: 启动行为引擎 (此时 Loop 已在运行，可以 create_task) ---
-                if not global_behavior_engine.is_running:
-                    asyncio.create_task(global_behavior_engine.start())
-                    logging.info("行为引擎已在 Slack 线程启动")
-
-                # --- 步骤 D: 启动 Slack Bot 主程序 (阻塞直到断开) ---
-                await self._async_start(config)
-
-            except Exception as e:
-                logging.exception(f"Slack 启动过程异常: {e}")
-                # 如果启动失败，确保状态复位
-                self.is_running = False 
-                self._ready_complete.set() # 防止主线程死锁
-
-        # 3. 开始运行 Loop
-        try:
-            self.loop.run_until_complete(main_startup())
-        except Exception as e:
-            logging.error(f"Slack 线程 Loop 异常: {e}")
-        finally:
-            self.is_running = False
-            if not self._ready_complete.is_set():
-                self._ready_complete.set()
-            # 清理 Loop
-            try:
-                self.loop.close()
-            except:
-                pass
-
-    async def _async_start(self, config: SlackBotConfig):
+    async def build_client(self, config: SlackBotConfig):
         web_client = AsyncWebClient(token=config.bot_token)
-        
+
         # 获取机器人 ID 用于防递归
         auth = await web_client.auth_test()
         self.bot_user_id = auth["user_id"]
 
-        self.socket_client = SocketModeClient(app_token=config.app_token, web_client=web_client)
+        socket_client = SocketModeClient(app_token=config.app_token, web_client=web_client)
 
         async def process_listener(client, req: SocketModeRequest):
             if req.type == "events_api":
@@ -155,19 +84,23 @@ class SlackBotManager:
                 if event.get("type") in ["message", "app_mention"]:
                     asyncio.ensure_future(self._handle_message(event, web_client))
 
-        self.socket_client.socket_mode_request_listeners.append(process_listener)
+        socket_client.socket_mode_request_listeners.append(process_listener)
+        self.socket_client = socket_client
+        return socket_client
+
+    async def run_client(self):
         await self.socket_client.connect()
         self.is_running = True
         self._ready_complete.set()
-        while self.is_running: await asyncio.sleep(1)
+        while self.is_running:
+            await asyncio.sleep(1)
 
-    def stop_bot(self):
-        self.is_running = False
-        if self.socket_client:
-            asyncio.run_coroutine_threadsafe(self.socket_client.close(), self.loop)
-        if self.loop:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-        self.is_running = False
+    def on_stop_requested(self):
+        if self.socket_client and self.loop and not self.loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(self.socket_client.close(), self.loop)
+            except RuntimeError:
+                pass
 
     def get_status(self):
         return {"is_running": self.is_running}
