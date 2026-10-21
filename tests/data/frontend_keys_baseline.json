@@ -27,6 +27,7 @@
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
+   "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ],
   "chat.html": [
@@ -56,6 +57,7 @@
    "js/settings_schema.js",
    "js/stream_client.js",
    "js/vue_methods.js",
+   "js/methods/80_webview_agent.js",
    "js/renderer.js"
   ]
  },

@@ -134,6 +134,94 @@ def scan_top_level_keys(src: str, open_after: str):
     return keys
 
 
+def scan_assign_keys(src: str):
+    """收集 Object.assign(vue_methods, { ... }) 的顶层键（F2 分片文件）。"""
+    keys = []
+    for m in re.finditer(r"Object\.assign\(\s*vue_methods\s*,\s*\{", src):
+        # 复用深度扫描：从 '{' 之后开始
+        depth = 1
+        i = m.end()
+        n = len(src)
+        prev_sig = ""
+        while i < n and depth > 0:
+            c = src[i]
+            if c in "\"'":
+                q = c
+                i += 1
+                while i < n:
+                    if src[i] == "\\":
+                        i += 2
+                        continue
+                    if src[i] == q:
+                        break
+                    i += 1
+                prev_sig = q
+                i += 1
+                continue
+            if c == "`":
+                i += 1
+                while i < n:
+                    if src[i] == "\\":
+                        i += 2
+                        continue
+                    if src[i] == "`":
+                        break
+                    if src[i] == "$" and i + 1 < n and src[i + 1] == "{":
+                        d = 1
+                        i += 2
+                        while i < n and d:
+                            if src[i] == "{":
+                                d += 1
+                            elif src[i] == "}":
+                                d -= 1
+                            i += 1
+                        continue
+                    i += 1
+                prev_sig = "`"
+                i += 1
+                continue
+            if c == "/" and i + 1 < n and src[i + 1] == "/":
+                j = src.find("\n", i)
+                i = n if j < 0 else j
+                continue
+            if c == "/" and i + 1 < n and src[i + 1] == "*":
+                j = src.find("*/", i)
+                i = n if j < 0 else j + 2
+                continue
+            if c in "{[(":
+                depth += 1
+                prev_sig = c
+                i += 1
+                continue
+            if c in "}])":
+                depth -= 1
+                prev_sig = c
+                i += 1
+                continue
+            if depth == 1 and (c.isalpha() or c in "_$"):
+                j = i
+                while j < n and (src[j].isalnum() or src[j] in "_$"):
+                    j += 1
+                ident = src[i:j]
+                k = j
+                while k < n and src[k] in " \t\r\n":
+                    k += 1
+                if k < n and src[k] in "(:":
+                    keys.append(ident)
+                    prev_sig = src[k]
+                    i = k + 1
+                    if src[k] == "(":
+                        depth += 1
+                    continue
+                prev_sig = ident[-1]
+                i = j
+                continue
+            if not c.isspace():
+                prev_sig = c
+            i += 1
+    return keys
+
+
 def collect():
     idx = (ROOT / "static" / "index.html").read_text(encoding="utf-8-sig")
     chat = (ROOT / "static" / "chat.html").read_text(encoding="utf-8-sig")
@@ -144,6 +232,11 @@ def collect():
 
     methods = scan_top_level_keys(vm, r"(?:let|const|var)\s+vue_methods\s*=\s*\{")
     data = scan_top_level_keys(vd, r"(?:let|const|var)\s+vue_data\s*=\s*\{")
+    # F2 分片：js/methods/*.js 按文件名序装配进同一键集合
+    methods_dir = ROOT / "static" / "js" / "methods"
+    if methods_dir.exists():
+        for f in sorted(methods_dir.glob("*.js")):
+            methods += scan_assign_keys(f.read_text(encoding="utf-8-sig"))
 
     logs = {}
     total_logs = 0

@@ -51,6 +51,24 @@ class TestVueKeys:
         assert dups <= set(DATA["_dup_methods"]), (
             f"新增重复键: {sorted(dups - set(DATA['_dup_methods']))}")
 
+    def test_no_cross_file_key_overlap(self):
+        # F2 分片：宿主与分片、分片与分片之间键名不得相交
+        # （跨文件重复会让 winner 随加载顺序漂移，41 个存量 dup 仅允许存在于宿主内部）
+        from gen_frontend_baseline import scan_assign_keys, scan_top_level_keys
+        js = _ROOT / "static" / "js"
+        groups = {
+            "vue_methods.js": scan_top_level_keys(
+                (js / "vue_methods.js").read_text(encoding="utf-8-sig"),
+                r"(?:let|const|var)\s+vue_methods\s*=\s*\{"),
+        }
+        for f in sorted((js / "methods").glob("*.js")):
+            groups[f.name] = scan_assign_keys(f.read_text(encoding="utf-8-sig"))
+        names = list(groups)
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                clash = set(groups[names[i]]) & set(groups[names[j]])
+                assert not clash, f"{names[i]} ∩ {names[j]} = {sorted(clash)}"
+
 
 class TestConsoleRatchet:
     def test_total_do_not_grow(self):
