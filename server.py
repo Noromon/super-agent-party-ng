@@ -1432,6 +1432,7 @@ def _build_tool_hooks():
         Exa_search,
         Serper_search,
         bochaai_search,
+        youcom_search,
         jina_crawler,
         Crawl4Ai_search, 
         firecrawl_search,
@@ -1569,6 +1570,7 @@ def _build_tool_hooks():
         "Exa_search": Exa_search,
         "Serper_search": Serper_search,
         "bochaai_search": bochaai_search,
+        "youcom_search": youcom_search,
         "comfyui_tool_call": comfyui_tool_call,
         "time": time,
         "get_weather": get_weather,
@@ -4029,9 +4031,9 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
     """Web search before-thinking injection + after-thinking announcements."""
     from py.web_search import (
         DDGsearch, searxng, Tavily_search, Bing_search, Google_search,
-        Brave_search, Exa_search, Serper_search, bochaai_search,
+        Brave_search, Exa_search, Serper_search, bochaai_search, youcom_search,
         duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
-        brave_tool, exa_tool, serper_tool, bochaai_tool, jina_crawler_tool,
+        brave_tool, exa_tool, serper_tool, bochaai_tool, youcom_tool, jina_crawler_tool,
         simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
     )
     if settings['webSearch']['enabled'] or enable_web_search:
@@ -4069,6 +4071,8 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
                 results = await Serper_search(user_prompt)
             elif settings['webSearch']['engine'] == 'bochaai':
                 results = await bochaai_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'youcom':
+                results = await youcom_search(user_prompt)
             if results:
                 content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}\n\n请根据联网搜索结果组织你的回答，并确保你的回答是准确的。")
                 tool_chunk = {
@@ -4098,6 +4102,8 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
                 tools.append(serper_tool)
             elif settings['webSearch']['crawler'] == 'bochaai':
                 tools.append(bochaai_tool)
+            elif settings['webSearch']['crawler'] == 'youcom':
+                tools.append(youcom_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
                 tools.append(jina_crawler_tool)
@@ -5866,6 +5872,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             Exa_search,
             Serper_search,
             bochaai_search,
+            youcom_search,
             duckduckgo_tool, 
             searxng_tool, 
             tavily_tool, 
@@ -5875,6 +5882,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             exa_tool,
             serper_tool,
             bochaai_tool,
+            youcom_tool,
             jina_crawler_tool, 
             simple_fetch_tool,
             Crawl4Ai_tool,
@@ -6230,9 +6238,9 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
     """before_thinking search execution + after_thinking tool announcements."""
     from py.web_search import (
         DDGsearch, searxng, Tavily_search, Bing_search, Google_search,
-        Brave_search, Exa_search, Serper_search, bochaai_search,
+        Brave_search, Exa_search, Serper_search, bochaai_search, youcom_search,
         duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
-        brave_tool, exa_tool, serper_tool, bochaai_tool, jina_crawler_tool,
+        brave_tool, exa_tool, serper_tool, bochaai_tool, youcom_tool, jina_crawler_tool,
         simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
     )
     if settings['webSearch']['enabled'] or enable_web_search:
@@ -6255,6 +6263,8 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
                 results = await Serper_search(user_prompt)
             elif settings['webSearch']['engine'] == 'bochaai':
                 results = await bochaai_search(user_prompt)
+            elif settings['webSearch']['engine'] == 'youcom':
+                results = await youcom_search(user_prompt)
             if results:
                 content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}")
         if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
@@ -6276,6 +6286,8 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
                 tools.append(serper_tool)
             elif settings['webSearch']['crawler'] == 'bochaai':
                 tools.append(bochaai_tool)
+            elif settings['webSearch']['crawler'] == 'youcom':
+                tools.append(youcom_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
                 tools.append(jina_crawler_tool)
@@ -6672,6 +6684,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         Exa_search,
         Serper_search,
         bochaai_search,
+        youcom_search,
         duckduckgo_tool, 
         searxng_tool, 
         tavily_tool, 
@@ -6681,6 +6694,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         exa_tool,
         serper_tool,
         bochaai_tool,
+        youcom_tool,
         jina_crawler_tool, 
         simple_fetch_tool,
         Crawl4Ai_tool,
@@ -6961,6 +6975,7 @@ async def execute_tool_manually(request: Request):
         Exa_search,
         Serper_search,
         bochaai_search,
+        youcom_search,
         jina_crawler,
         Crawl4Ai_search, 
         firecrawl_search,
@@ -7098,6 +7113,7 @@ async def execute_tool_manually(request: Request):
         "Exa_search": Exa_search,
         "Serper_search": Serper_search,
         "bochaai_search": bochaai_search,
+        "youcom_search": youcom_search,
         "comfyui_tool_call": comfyui_tool_call,
         "time": time,
         "get_weather": get_weather,
