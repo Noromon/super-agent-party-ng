@@ -116,6 +116,11 @@ Object.assign(vue_methods, {
           }
 
           const { dims } = await resp.json();
+          // S77(d8814a90)：编辑时维度变化警告——已有记忆与 faiss 维度可能不匹配
+          if (this.newMemory.id && oldMemory && oldMemory.embedding_dims
+              && dims !== oldMemory.embedding_dims) {
+            showNotification(`${this.t('embeddingDimsChanged')}: ${oldMemory.embedding_dims} → ${dims}. ${this.t('existingMemoriesPreserved')}`, 'warning');
+          }
           memory.embedding_dims = dims;
           await this.autoSaveSettings();          // 真正落盘
         } catch (e) {

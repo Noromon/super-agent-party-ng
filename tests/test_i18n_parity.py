@@ -33,7 +33,7 @@ _T_CALL_RE = re.compile(r"""(?:^|[^\w$.])(?:this\.)?t\(\s*['"]([A-Za-z0-9_.]+)['
 KNOWN_MISSING_KEYS = {
     "ComfyUI", "URL", "Voice", "audioConversionFailed", "audioProcessingStarted",
     "backToDefaultView", "cancelSuccess", "copySuccess", "copy_failed", "denying",
-    "editLLMTool", "editText", "executing", "failed_to_reload_live_config",
+    "editLLMTool", "executing", "failed_to_reload_live_config",
     "failed_to_start_live", "failed_to_stop_live", "fillAllFields", "fillRequired",
     "installDocker", "intask", "invalidConfig",
     "live_config_reloaded_successfully", "live_started_successfully",

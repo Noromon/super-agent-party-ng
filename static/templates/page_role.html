@@ -229,6 +229,19 @@
                       width="80%"
                     >
                       <div v-loading="vectorLoading">
+                        <!-- S77: 新增记忆条目输入区（上游 91c038eb 终态） -->
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                          <el-input
+                            v-model="newVectorText"
+                            type="textarea"
+                            :rows="2"
+                            :placeholder="t('addMemoryEntry')"
+                            style="flex:1"
+                          ></el-input>
+                          <el-button type="primary" :disabled="!(newVectorText || '').trim()" @click="addVectorRow">
+                            <i class="fa-solid fa-plus"></i> {{ t('add') }}
+                          </el-button>
+                        </div>
                         <el-table :data="vectorTable" stripe height="400">
                           <el-table-column prop="idx" label="#" width="60" ></el-table-column>
                           <el-table-column prop="text" :label="t('memoryText')"></el-table-column>
@@ -239,7 +252,7 @@
                               <el-button circle @click="startEditRow($index)">
                                 <i class="fa-solid fa-pen"></i>
                               </el-button>
-                              <el-button circle type="danger" @click="deleteVectorRow(vectorTable[$index].idx)">
+                              <el-button circle type="danger" @click="deleteVectorRow($index)">
                                 <i class="fa-solid fa-trash"></i>
                               </el-button>
                             </template>

@@ -1,6 +1,17 @@
 // 批 3 F2：自 vue_methods.js 搬移的 methods/70_memory_io.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
+    // S77(1c33bc74)：移除破坏 JSON/API 传输的控制字符（保留换行、回车、制表符）
+    _sanitizeCardText(raw, maxLen = 100 * 1024) {
+      if (typeof raw !== 'string') return raw || '';
+      let cleaned = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      if (cleaned.length > maxLen) {
+        console.warn(`[_sanitizeCardText] 字段过长 ${cleaned.length} > ${maxLen}，已截断`);
+        cleaned = cleaned.substring(0, maxLen);
+      }
+      return cleaned;
+    },
+
     downloadMemory(memory) {
       // 仅导出酒馆 V3 所需字段，敏感信息全部剔除
       const card = {
@@ -227,15 +238,16 @@ Object.assign(vue_methods, {
       // 兼容 V2/V3：统一抽出 data
       const data = jsonData.data || jsonData;
 
+      const s = this._sanitizeCardText.bind(this);   // S77: 导入清洗
       this.newMemory = {
         ...this.newMemory,                      // 保持 providerId 等旧字段
-        name: data.name || '',
-        description: data.description || '',
+        name: s(data.name).substring(0, 512),   // 名称限制 512 字符
+        description: s(data.description),
         avatar: data.avatar || '',
-        personality: data.personality || '',
-        mesExample: data.mes_example || '',
-        systemPrompt: data.system_prompt || '',
-        firstMes: data.first_mes || '',
+        personality: s(data.personality),
+        mesExample: s(data.mes_example),
+        systemPrompt: s(data.system_prompt),
+        firstMes: s(data.first_mes),
         alternateGreetings: Array.isArray(data.alternate_greetings)
           ? data.alternate_greetings
           : [''],

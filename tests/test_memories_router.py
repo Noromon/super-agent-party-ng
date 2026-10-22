@@ -22,7 +22,11 @@ class TestMemoriesRouterContract:
         # MemoryAddBody / TextUpdate models to resolve in the new module
         r = requests.post(f"{sap}/memory/m-test", json={}, timeout=10,
                           headers=_h(sap))
-        assert r.status_code == 422
+        # S77: POST 体改 new_text 主+content 别名（双可选），空文本=端点自校验 400
+        assert r.status_code == 400
+        r = requests.post(f"{sap}/memory/m-test", json={"new_text": "x"},
+                          timeout=10, headers=_h(sap))
+        assert r.status_code == 404  # 配置不存在（证模型+路由已解析）
         r = requests.put(f"{sap}/memory/m-test/0", json={}, timeout=10,
                          headers=_h(sap))
         assert r.status_code == 422

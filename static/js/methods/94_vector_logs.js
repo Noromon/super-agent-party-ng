@@ -26,15 +26,15 @@ Object.assign(vue_methods, {
       }
     },
 
-    // 新增记忆（C-5：此前为空 fetch 残壳=按钮静默必败，后端已补 POST /memory/{id}）
+    // 新增记忆（S77：上游终态 new_text 主字段；trim 防御=b6a0cd30）
     async addVectorRow() {
-      if (!this.newVectorText.trim()) return
+      if (!(this.newVectorText || '').trim()) return
       try {
         const mid = this.vectorDialogMemoryId
         const res = await fetch(`/memory/${mid}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: this.newVectorText.trim() })
+          body: JSON.stringify({ new_text: this.newVectorText.trim() })
         })
         if (!res.ok) throw new Error(await res.text())
         this.newVectorText = ''
@@ -48,7 +48,7 @@ Object.assign(vue_methods, {
 
   startEditRow(tableIndex) {
     const row = this.vectorTable[tableIndex]
-    this.editRowIdx = row.idx
+    this.editRowUuid = row.uuid
     this.editRowText = row.text
     this.editRowVisible = true
   },
@@ -57,7 +57,7 @@ Object.assign(vue_methods, {
     if (!this.editRowText.trim()) return
     try {
       const mid = this.vectorDialogMemoryId
-      const res = await fetch(`/memory/${mid}/${this.editRowIdx}`, {
+      const res = await fetch(`/memory/${mid}/${this.editRowUuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_text: this.editRowText.trim() })
@@ -70,10 +70,11 @@ Object.assign(vue_methods, {
     }
   },
 
-  async deleteVectorRow(idx) {
+  async deleteVectorRow(tableIndex) {
     try {
       const mid = this.vectorDialogMemoryId
-      const res = await fetch(`/memory/${mid}/${idx}`, { method: 'DELETE' })
+      const row = this.vectorTable[tableIndex]
+      const res = await fetch(`/memory/${mid}/${row.uuid}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await res.text())
       await this.loadVectorTable(mid)
     } catch (e) {

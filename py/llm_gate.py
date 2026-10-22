@@ -28,6 +28,122 @@ DEFAULT_DEBOUNCE_SECONDS = 20.0
 
 _m0_lock = threading.Lock()
 _m0_cache = {}
+_m0_dims_cache = {}
+
+_bad_ctrl_re = None
+
+
+def sanitize_card_strings(memory):
+    """S77(1c33bc74): 清理角色卡文本字段中的控制字符（保留 \\n \\r \\t），
+    防止破坏 API 请求。原地修改，非 dict 容忍直接返回。"""
+    global _bad_ctrl_re
+    import re
+    if not isinstance(memory, dict):
+        return
+    if _bad_ctrl_re is None:
+        _bad_ctrl_re = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]')
+    text_keys = ('description', 'personality', 'mesExample', 'systemPrompt',
+                 'firstMes', 'name', 'characterBook')
+    for key in text_keys:
+        val = memory.get(key)
+        if isinstance(val, str):
+            memory[key] = _bad_ctrl_re.sub('', val)
+    alt_gs = memory.get('alternateGreetings')
+    if isinstance(alt_gs, list):
+        for i in range(len(alt_gs)):
+            if isinstance(alt_gs[i], str):
+                alt_gs[i] = _bad_ctrl_re.sub('', alt_gs[i])
+
+
+def effective_dims(memory_id, stored_dims):
+    """S77(d8814a90): 以已有 faiss 索引实际维度为准，防止更换 provider/model
+    后维度不匹配导致 mem0 静默重建索引、旧数据全部丢失。
+    (path, mtime_ns) 缓存，避免每请求全量读大索引。"""
+    try:
+        import os
+        from py.get_setting import MEMORY_CACHE_DIR
+        path = os.path.join(MEMORY_CACHE_DIR, memory_id, "agent-party.faiss")
+        if not os.path.exists(path):
+            return stored_dims
+        ck = (path, os.stat(path).st_mtime_ns)
+        cached = _m0_dims_cache.get(memory_id)
+        if cached and cached[0] == ck:
+            return cached[1]
+        import faiss
+        d = faiss.read_index(path).d
+        _m0_dims_cache[memory_id] = (ck, d)
+        if d != stored_dims:
+            logging.getLogger("app").warning(
+                "[LlmGate] stored dims(%s) != faiss actual dims(%s)，以实际维度为准",
+                stored_dims, d)
+        return d
+    except Exception as e:
+        logging.getLogger("app").warning("[LlmGate] 无法读取已有 faiss 索引维度: %s", e)
+        return stored_dims
+
+
+def ensure_pkl_compatible(memory_id):
+    """S77(75b7a78a): from_config 前把旧 pickle 自动迁移/修复为 mem0 兼容的
+    (docstore, idx2id) 元组格式（缺 user_id 一并补齐），否则 mem0 _load 按
+    元组解包把 docstore 变成 str，get_all/update/delete 全崩。"""
+    import hashlib
+    import os
+    import pickle
+    from py.get_setting import MEMORY_CACHE_DIR
+    ppath = os.path.join(MEMORY_CACHE_DIR, memory_id, "agent-party.pkl")
+    fpath = os.path.join(MEMORY_CACHE_DIR, memory_id, "agent-party.faiss")
+    if not os.path.exists(ppath):
+        return
+    try:
+        with open(ppath, "rb") as f:
+            raw = pickle.load(f)
+        needs_migration = not (isinstance(raw, tuple) and len(raw) == 2
+                               and isinstance(raw[0], dict))
+        needs_repair = False
+        if not needs_migration and raw[0]:
+            first = next(iter(raw[0].values()), {})
+            if isinstance(first, dict) and "user_id" not in first:
+                needs_repair = True
+        if not (needs_migration or needs_repair):
+            return
+        import faiss
+        faiss.read_index(fpath)  # 索引可读性前置校验（上游同法）
+        if needs_migration:
+            if isinstance(raw, dict):
+                meta = raw
+            elif isinstance(raw, tuple) and isinstance(raw[0], dict):
+                meta = raw[0]
+            else:
+                meta = {}
+        else:
+            idx2id_old = raw[1]
+            meta = {}
+            for _idx in sorted(idx2id_old.keys()):
+                vid = idx2id_old[_idx]
+                payload = raw[0].get(vid, {})
+                meta[vid] = {"data": payload.get("data", ""),
+                             "created_at": payload.get("created_at", ""),
+                             "timetamp": payload.get("updated_at",
+                                                     payload.get("created_at", ""))}
+        docstore, idx2id = {}, {}
+        for i, (vid, rec) in enumerate(meta.items()):
+            data_t = rec.get("data", "") if isinstance(rec, dict) else ""
+            docstore[vid] = {
+                "data": data_t,
+                "hash": hashlib.md5(data_t.encode()).hexdigest(),
+                "created_at": rec.get("created_at", "") if isinstance(rec, dict) else "",
+                "updated_at": rec.get("timetamp", rec.get("created_at", ""))
+                if isinstance(rec, dict) else "",
+                "user_id": memory_id,
+            }
+            idx2id[i] = vid
+        with open(ppath, "wb") as f:
+            pickle.dump((docstore, idx2id), f)
+        logging.getLogger("app").info("[LlmGate] pickle %s: %s",
+                                      "已迁移为 mem0 兼容格式" if needs_migration
+                                      else "已修复(补充 user_id)", ppath)
+    except Exception as e:
+        logging.getLogger("app").warning("[LlmGate] pickle 处理失败: %s", e)
 
 
 def enter():
@@ -143,15 +259,20 @@ def get_mem0_instance(memory_id, cur_memory, settings):
 
     Rebuilding Memory.from_config on every request re-loads the FAISS index
     from disk each turn; reuse instead unless any relevant config changed.
+
+    S77 单点：角色卡清洗 + dims 实际值护栏 + pkl 兼容迁移在每次真实构建前
+    执行（聊天两路与 CRUD 端点全走此处，优于上游三份拷贝）。
     """
     from mem0 import Memory
 
+    sanitize_card_strings(cur_memory)
+    eff_dims = effective_dims(memory_id, cur_memory.get("embedding_dims", 1024))
     key = (
         memory_id,
         cur_memory.get("model"),
         cur_memory.get("base_url"),
         cur_memory.get("api_key"),
-        cur_memory.get("embedding_dims", 1024),
+        eff_dims,
         settings.get("model"),
         settings.get("base_url"),
         settings.get("api_key"),
@@ -171,7 +292,7 @@ def get_mem0_instance(memory_id, cur_memory, settings):
                 "model": cur_memory["model"],
                 "api_key": cur_memory["api_key"],
                 "openai_base_url": cur_memory["base_url"],
-                "embedding_dims": cur_memory.get("embedding_dims", 1024),
+                "embedding_dims": eff_dims,
             },
         },
         "llm": {
@@ -188,10 +309,11 @@ def get_mem0_instance(memory_id, cur_memory, settings):
                 "collection_name": "agent-party",
                 "path": os.path.join(MEMORY_CACHE_DIR, memory_id),
                 "distance_strategy": "euclidean",
-                "embedding_model_dims": cur_memory.get("embedding_dims", 1024),
+                "embedding_model_dims": eff_dims,
             },
         },
     }
+    ensure_pkl_compatible(memory_id)
     m0 = Memory.from_config(config)
     with _m0_lock:
         _m0_cache[memory_id] = (key, m0)

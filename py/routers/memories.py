@@ -10,15 +10,14 @@ module, never the other way around.
 
 import logging
 import sys as _sys
+import threading
 
 from py import app_state
-from py.memory_store import (load_index_and_meta, save_index_and_meta,
-                             flatten_records, dict_to_list, list_to_dict)
+from py.memory_store import fmt_iso8605_to_local
 import asyncio
 import json
 import os
 import shutil
-from datetime import datetime
 from fastapi import BackgroundTasks, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 from py import llm_gate
@@ -41,7 +40,8 @@ class GroupMemoryExtractRequest(BaseModel):
 
 
 class MemoryAddBody(BaseModel):
-    content: str
+    new_text: str = ""    # S77: 上游终态主字段
+    content: str = ""     # fork C-5 旧前端别名，兼容一版
 
 
 class TextUpdate(BaseModel):
@@ -206,79 +206,109 @@ async def get_kb_status(kb_id):
     return {"kb_id": kb_id, "status": status}
 
 
+# ---------- S77: 记忆 CRUD（上游 91c038eb 终态：全走 mem0 API + uuid 定位） ----------
+# 锁语义=同进程 CRUD 串行（1c33bc74），锁在 worker 线程内持有，不阻塞事件循环。
+_m0_crud_lock = threading.Lock()
+
+
+async def _memory_cfg_or_404(memory_id: str):
+    cur_settings = await load_settings()
+    cur_memory = next((m for m in (cur_settings.get("memories") or [])
+                       if isinstance(m, dict) and m.get("id") == memory_id), None)
+    if cur_memory is None:
+        raise HTTPException(status_code=404, detail="memory config not found")
+    if not cur_memory.get("providerId"):
+        raise HTTPException(status_code=400,
+                            detail="memory has no embedding provider configured")
+    return cur_memory, cur_settings
+
+
+def _m0_session(memory_id, cur_memory, cur_settings):
+    # dims 护栏 + pkl 迁移都在 llm_gate.get_mem0_instance 单点内完成
+    return llm_gate.get_mem0_instance(memory_id, cur_memory, cur_settings)
+
+
 @router.get("/memory/{memory_id}")
 async def read_memory(memory_id: str) -> List[Dict[str, Any]]:
-    _, meta_dict = load_index_and_meta(memory_id)   # 拆包
-    return flatten_records(meta_dict)               # 传字典
+    cur_memory, cur_settings = await _memory_cfg_or_404(memory_id)
+    try:
+        def _op():
+            with _m0_crud_lock:
+                m0 = _m0_session(memory_id, cur_memory, cur_settings)
+                return m0.get_all(user_id=memory_id, limit=10000)
+        results = await asyncio.to_thread(_op)
+        # mem0 v1.1+ 返回 {"results": [...]}，旧版直接返回 list
+        items = results.get("results", []) if isinstance(results, dict) else (results or [])
+        flat = []
+        for item in items:
+            flat.append({
+                "idx": len(flat),
+                "uuid": item.get("id", ""),
+                "text": item.get("memory", ""),
+                "created_at": fmt_iso8605_to_local(item.get("created_at", "")),
+                "timetamp": fmt_iso8605_to_local(item.get("updated_at")
+                                                 or item.get("created_at", "")),
+            })
+        return flat
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[memory] GET /memory/{memory_id} 失败")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/memory/{memory_id}")
 async def add_memory_text(memory_id: str, body: MemoryAddBody = Body(...)) -> dict:
-    content = (body.content or "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="content required")
-    cur_settings = await load_settings()
-    cur_memory = next((m for m in cur_settings.get("memories", [])
-                       if isinstance(m, dict) and m.get("id") == memory_id), None)
-    if cur_memory is None:
-        raise HTTPException(status_code=404, detail="memory not found")
+    text = (body.new_text or body.content or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="new_text required")
+    cur_memory, cur_settings = await _memory_cfg_or_404(memory_id)
     try:
-        # 与 GET/PUT/DELETE 操作同一 faiss+meta 存储；infer=False=原文入库不走 LLM 抽取
-        m0 = llm_gate.get_mem0_instance(memory_id, cur_memory, cur_settings)
-        await asyncio.to_thread(
-            m0.add, content, user_id=memory_id,
-            metadata={"timetamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
-            infer=False)
+        def _op():
+            with _m0_crud_lock:
+                m0 = _m0_session(memory_id, cur_memory, cur_settings)
+                # infer=False=原文入库不走 LLM 抽取
+                return m0.add(text, user_id=memory_id, infer=False)
+        await asyncio.to_thread(_op)
         return {"message": "added"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[memory] POST /memory/{memory_id} 失败: {e}")
         raise HTTPException(status_code=500, detail=f"add failed: {e}")
 
 
-@router.put("/memory/{memory_id}/{idx}")
-async def update_text(
-    memory_id: str,
-    idx: int,
-    body: TextUpdate = Body(...)
-) -> dict:
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
-    # 定位 → 改 data
-    uuid, rec = next(iter(meta_list[idx].items()))
-    rec["data"] = body.new_text
-    # 写回
-    save_index_and_meta(memory_id, index, list_to_dict(meta_list))
-    return {"message": "updated", "idx": idx}
+@router.put("/memory/{memory_id}/{uuid}")
+async def update_text(memory_id: str, uuid: str,
+                      body: TextUpdate = Body(...)) -> dict:
+    cur_memory, cur_settings = await _memory_cfg_or_404(memory_id)
+    try:
+        def _op():
+            with _m0_crud_lock:
+                m0 = _m0_session(memory_id, cur_memory, cur_settings)
+                return m0.update(memory_id=uuid, data=body.new_text)
+        await asyncio.to_thread(_op)
+        return {"message": "updated", "uuid": uuid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[memory] PUT /memory/{memory_id}/{uuid} 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"update failed: {e}")
 
 
-@router.delete("/memory/{memory_id}/{idx}")
-async def delete_text(memory_id: str, idx: int) -> dict:
-    import faiss
-    import numpy as np
-    index, meta_dict = load_index_and_meta(memory_id)
-    meta_list = dict_to_list(meta_dict)
-    if not (0 <= idx < len(meta_list)):
-        raise HTTPException(status_code=404, detail="index out of range")
-
-    ntotal = index.ntotal
-    print("index.ntotal",index.ntotal)
-    print("len(meta_list)",len(meta_list))
-    if ntotal != len(meta_list):
-        raise RuntimeError("index 与 meta 长度不一致")
-
-    # 1. 重建 Faiss 索引（去掉 idx）
-    ids_to_keep = np.array([i for i in range(ntotal) if i != idx], dtype=np.int64)
-    vecs = np.vstack([index.reconstruct(i) for i in range(ntotal)])
-    new_index = faiss.IndexFlatL2(index.d)   # 跟你建索引时保持一致
-    if vecs.shape[0] - 1 > 0:
-        new_index.add(vecs[ids_to_keep].astype("float32"))
-
-    # 2. 删除列表元素
-    del meta_list[idx]
-
-    # 3. 落盘
-    save_index_and_meta(memory_id, new_index, list_to_dict(meta_list))
-    return {"message": "deleted", "idx": idx}
+@router.delete("/memory/{memory_id}/{uuid}")
+async def delete_text(memory_id: str, uuid: str) -> dict:
+    cur_memory, cur_settings = await _memory_cfg_or_404(memory_id)
+    try:
+        def _op():
+            with _m0_crud_lock:
+                m0 = _m0_session(memory_id, cur_memory, cur_settings)
+                return m0.delete(memory_id=uuid)
+        await asyncio.to_thread(_op)
+        return {"message": "deleted", "uuid": uuid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[memory] DELETE /memory/{memory_id}/{uuid} 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"delete failed: {e}")
 

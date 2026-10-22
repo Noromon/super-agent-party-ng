@@ -171,7 +171,9 @@ main();`,
 
     vectorTable: [],       // { idx, uuid, text, created_at, timetamp },
 
-    editRowIdx: null,      // 当前编辑的行号（=后端 idx）,
+    newVectorText: '',     // S77: 新增记忆条目输入（此前未声明=Vue3 非响应隐患）,
+
+    editRowUuid: '',       // 当前编辑行的 mem0 uuid（S77，原 editRowIdx）,
 
     editRowText: "",     // 当前编辑的文本,
 

@@ -100,7 +100,7 @@ class TestDeadLinkCleanupPins:
         body = _slice("async addVectorRow()")
         body = body[: body.index("startEditRow")]
         assert "method: 'POST'" in body
-        assert "content: this.newVectorText.trim()" in body
+        assert "new_text: this.newVectorText.trim()" in body  # S77: 上游终态字段
         assert "await this.loadVectorTable(mid)" in body
 
     def test_dead_branches_removed(self):
