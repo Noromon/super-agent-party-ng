@@ -129,3 +129,17 @@ class TestTemplatesDirHygiene:
             assert '<script src="js/boot_templates.js"></script>' in body, pg
             assert body.index('<script src="js/boot_templates.js">') < \
                 body.index('<script src="js/renderer.js">'), f"{pg}: loader 必须先于 renderer"
+
+    def test_f1_stream_accumulators_declared(self):
+        # RA-01 回归 pin（S66）：F1 回调化曾误删 5 处累加器声明 → ReferenceError
+        m = _STATIC / "js/methods"
+        t1 = (m / "10_chat_stream.js").read_text(encoding="utf-8")
+        assert "let translated = '';" in t1
+        t2 = (m / "82_translate_panel.js").read_text(encoding="utf-8")
+        assert "let result = '';" in t2
+        t3 = (m / "84_quickgen.js").read_text(encoding="utf-8")
+        assert t3.count("let result = '';") == 2
+        assert "let fullText = '';" in t3
+        cfg = (Path(__file__).resolve().parents[1] / "eslint.config.js").read_text(encoding="utf-8")
+        for sym in ("iterateNdjsonLines", "iterateSse", "MIME_WHITELIST"):
+            assert sym in cfg, sym

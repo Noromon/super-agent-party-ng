@@ -43,6 +43,7 @@ Object.assign(vue_methods, {
 
       if (!res.ok) throw new Error('Network error');
 
+      let result = '';
             await iterateNdjsonLines(res, (chunk) => {
         const delta = chunk.choices?.[0]?.delta?.content ?? '';
         if (delta) {

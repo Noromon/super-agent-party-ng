@@ -43,6 +43,15 @@ const appGlobals = {
     md: "readonly",                 // vue_methods.js 顶层 const（markdown-it 实例）
     MAX_RENDERED_BLOCKS: "readonly",// renderer.js 顶层 const
     MAX_DISPLAY_LENGTH: "readonly", // renderer.js 顶层 const
+    // S66（外审 BL-01）：批 F1/F2 分片化后新增的跨文件顶层符号（script 加载顺序保证可见）：
+    iterateNdjsonLines: "readonly", // stream_client.js 顶层函数
+    iterateSse: "readonly",         // stream_client.js 顶层函数
+    ALLOWED_EXTENSIONS: "readonly",         // vue_methods.js 顶层 const
+    ALL_ALLOWED_EXTENSIONS: "readonly",     // vue_methods.js 顶层 const
+    ALLOWED_IMAGE_EXTENSIONS: "readonly",   // vue_methods.js 顶层 const
+    ALLOWED_VIDEO_EXTENSIONS: "readonly",   // vue_methods.js 顶层 const
+    IMAGE_MIME_WHITELIST: "readonly",       // vue_methods.js 顶层 const
+    MIME_WHITELIST: "readonly",             // vue_methods.js 顶层 const
     uuid: "readonly",               // libs/uuid.min.js
     hljs: "readonly",               // libs/highlight.min.js
     mermaid: "readonly",            // libs/mermaid.min.js

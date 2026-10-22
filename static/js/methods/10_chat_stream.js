@@ -976,6 +976,7 @@ Object.assign(vue_methods, {
 
         if (!response.ok) throw new Error('Translation failed');
 
+        let translated = '';  // 累积结果
             await iterateNdjsonLines(response, (chunk) => {
           const delta = chunk.choices?.[0]?.delta?.content ?? '';
           if (delta) {

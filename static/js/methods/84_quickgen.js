@@ -50,6 +50,7 @@ Object.assign(vue_methods, {
 
       if (!res.ok) throw new Error('Network error');
 
+      let fullText = '';    // 累积完整回复
             await iterateNdjsonLines(res, (chunk) => {
         const delta = chunk.choices?.[0]?.delta?.content ?? '';
         if (delta) {
@@ -154,6 +155,7 @@ Object.assign(vue_methods, {
 
       if (!res.ok) throw new Error('Network error');
       
+      let result = '';
             await iterateNdjsonLines(res, (data) => {
         
         // 适配新的流式响应格式
@@ -238,6 +240,7 @@ Object.assign(vue_methods, {
 
       if (!res.ok) throw new Error('Network error');
       
+      let result = '';
             await iterateNdjsonLines(res, (data) => {
         
         // 适配新的流式响应格式
