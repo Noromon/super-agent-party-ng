@@ -9,7 +9,7 @@
     "dev": "node start.js",
     "lint": "npm run lint:js && npm run lint:py",
     "lint:js": "eslint static/js main.js start.js",
-    "lint:py": "uv run ruff check server.py py tests",
+    "lint:py": "uv run --no-sync ruff check .",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "electron-builder -mwl",
     "build:win": "electron-builder -w",

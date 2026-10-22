@@ -90,7 +90,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.3",
-    "ruff>=0.8",
+    # RA-38（S66）：钉 0.17 系——lint 归零判定版本敏感（全局旧版对上游 behavior_engine 报 F811）
+    "ruff==0.17.*",
 ]
 
 [tool.pytest.ini_options]
@@ -151,9 +152,11 @@ max-complexity = 60
 "py/overlay_router.py" = ["F401"]
 "py/qq_bot_manager.py" = ["E722", "F401", "F841"]
 "py/recover_from_log.py" = ["E741"]
-# media router: legacy carried verbatim from server.py (R1 migration);
-# retire these exemptions while splitting the handlers (M-3)
+# media router: legacy carried verbatim from server.py (R1 migration).
+# RA-27/BL-09（S66）：原「M-3 拆分时退役」承诺未兑现且不在 M-3 验收面——
+# 改记「退役另立 R3 尾项」跟踪（见 docs/AUDIT/09 backlog）；豁免现压制 ~31 错。
 "py/routers/media.py" = ["C901", "E701", "E702", "E722"]
+# RA-27：system.py F541 豁免现压制 ~4 错，同列 R3 尾项
 "py/routers/system.py" = ["F541"]
 "py/scheduler.py" = ["E722"]
 "py/sherpa_asr.py" = ["F401"]
