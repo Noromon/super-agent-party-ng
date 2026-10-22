@@ -575,52 +575,28 @@ class FeishuClient:
                 state["text_buffer"] += content
                 state["image_buffer"] += content
                 
-                # 实时发送文本
+                # 分段发送（S79/B11 结构感知：不切断代码块/表格）
                 if state["text_buffer"]:
-                    force_split = len(state["text_buffer"]) > 4000
+                    buffer = state["text_buffer"]
                     while True:
-                        buffer = state["text_buffer"]
-                        split_pos = -1
-                        in_code_block = False
-                        if force_split:
-                            min_idx = len(buffer) + 1
-                            found_sep_len = 0
-                            for sep in self.separators:
-                                idx = buffer.find(sep)
-                                if idx != -1 and idx < min_idx:
-                                    min_idx = idx
-                                    found_sep_len = len(sep)
-                            if min_idx <= len(buffer): split_pos = min_idx + found_sep_len
-                        else:
-                            i = 0
-                            while i < len(buffer):
-                                if buffer[i:].startswith("```"):
-                                    in_code_block = not in_code_block
-                                    i += 3
-                                    continue
-                                if not in_code_block:
-                                    found_sep = False
-                                    for sep in self.separators:
-                                        if buffer[i:].startswith(sep):
-                                            split_pos = i + len(sep)
-                                            found_sep = True
-                                            break
-                                    if found_sep: break
-                                i += 1
-                        if split_pos == -1: break
-                        
-                        current_chunk = buffer[:split_pos]
-                        state["text_buffer"] = buffer[split_pos:]
-                        
-                        clean_text = self._clean_text(current_chunk)
-                        if clean_text: await self._send_text(msg, clean_text)
-                        if force_split: break
+                        chunk, buffer = self._take_sendable_unit(buffer)
+                        if chunk is None:
+                            break
+                        clean = self._clean_text(chunk)
+                        if clean:
+                            await self._send_text(msg, clean)
+                    state["text_buffer"] = buffer
             
             # 处理剩余内容
             self._extract_images(state)
             if state["text_buffer"]:
-                clean_text = self._clean_text(state["text_buffer"])
-                if clean_text: await self._send_text(msg, clean_text)
+                leftover = state["text_buffer"]
+                # S79(B11)：收尾时若存在未闭合的代码块围栏，补上闭合围栏以保证卡片正确渲染
+                if leftover.count("```") % 2 == 1:
+                    leftover = leftover.rstrip() + "\n```"
+                clean_text = self._clean_text(leftover)
+                if clean_text:
+                    await self._send_text(msg, clean_text)
             for img_url in state["image_cache"]:
                 await self._send_image(img_url)
             
@@ -1070,42 +1046,92 @@ class FeishuClient:
         for match in matches:
             state["image_cache"].append(match.group(1))
     
+    def _is_table_line(self, line: str) -> bool:
+        s = line.strip()
+        return s.startswith("|") and s.count("|") >= 2
+
+    def _take_sendable_unit(self, buffer: str):
+        """S79(B11/78afa240)：从缓冲区头部取出一个"完整且可安全发送"的单元。
+        永远不会切断围栏代码块或 Markdown 表格。
+        返回 (chunk, remaining)；若暂时没有完整单元可发送，返回 (None, buffer) 等待更多内容。"""
+        if not buffer:
+            return None, buffer
+
+        nl = buffer.find("\n")
+        first_line = buffer if nl == -1 else buffer[:nl]
+
+        # 1) 代码块：缓冲区开头是围栏，必须等到闭合围栏后整体发送
+        if first_line.lstrip().startswith("```"):
+            open_end = (nl + 1) if nl != -1 else len(buffer)
+            close = buffer.find("```", open_end)
+            if close == -1:
+                return None, buffer
+            close_nl = buffer.find("\n", close)
+            if close_nl == -1:
+                return None, buffer
+            return buffer[:close_nl + 1], buffer[close_nl + 1:]
+
+        # 2) 表格：累积连续的表格行，等出现"完整的"非表格行确认表格结束后整体发送
+        if self._is_table_line(first_line):
+            ends_nl = buffer.endswith("\n")
+            lines = buffer.split("\n")
+            # buffer 末尾若没有换行符，最后一个分片是尚未接收完整的行，不能用于判断
+            last_complete = len(lines) if ends_nl else len(lines) - 1
+            i = 0
+            while i < len(lines) and self._is_table_line(lines[i]):
+                i += 1
+            # 终止行必须是一个"完整且非空"的非表格行，否则可能是流式分片边界，需继续等待
+            if i >= last_complete:
+                return None, buffer
+            if lines[i] == "" and i == len(lines) - 1:
+                return None, buffer
+            chunk = "\n".join(lines[:i]) + "\n"
+            remaining = "\n".join(lines[i:])
+            return chunk, remaining
+
+        # 3) 普通文本：按配置的分隔符在最早位置切分，但不得越过后续代码块的起始
+        split_pos = -1
+        for sep in self.separators:
+            pos = buffer.find(sep)
+            if pos != -1:
+                end = pos + len(sep)
+                if split_pos == -1 or end < split_pos:
+                    split_pos = end
+        fence = buffer.find("```")
+        if fence > 0 and (split_pos == -1 or fence < split_pos):
+            return buffer[:fence], buffer[fence:]
+        if split_pos == -1:
+            return None, buffer
+        return buffer[:split_pos], buffer[split_pos:]
+
     def _clean_text(self, text: str) -> str:
-        # 1. 移除 Markdown 图片 ![alt](url) -> 空
-        text = re.sub(r"!\[.*?\]\(.*?\)", "", text)
-        # 移除html标签
-        text = re.sub(r'<.*?>', '', text)
-        return text.strip()
-    
+        # S79(B11)：按代码块分段，代码块内部原样保留（避免误删 <T> 等内容），
+        # 仅清理代码块之外的图片/HTML 标签与独立分割线（--- 不再发空消息）
+        parts = re.split(r'(```[\s\S]*?```)', text)
+        out = []
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                out.append(part)
+            else:
+                part = re.sub(r"!\[.*?\]\(.*?\)", "", part)
+                part = re.sub(r'<[^>]+>', '', part)
+                part = re.sub(r'(?m)^[ \t]*([-*_])\1{2,}[ \t]*$', '', part)
+                out.append(part)
+        return "".join(out).strip()
+
     @llm_gate.gated
     async def _send_text(self, original_msg, text):
-        """发送文本消息（使用富文本 Post 格式以支持 Markdown）"""
-        print("发送文本消息", text)
+        """S79(B11)：交互卡片(card 2.0) markdown 组件发送——支持代码块/表格/
+        分割线等完整 Markdown，避免 post 富文本把代码块渲染成 [代码块]。"""
         try:
             if not text:
                 return
-            
-            # 构建富文本结构
-            # 飞书 Post 结构: {"zh_cn": {"title": "可选标题", "content": [[Nodes]]}}
-            # 我们使用 md 标签，它独占一个段落
-            content_dict = {
-                "zh_cn": {
-                    "content": [
-                        [
-                            {
-                                "tag": "md",
-                                "text": text
-                            }
-                        ]
-                    ]
-                }
-            }
-            
-            # 序列化为 JSON 字符串
-            content_str = json.dumps(content_dict)
-            
+
+            card = {"schema": "2.0", "body": {"elements": [{"tag": "markdown", "content": text}]}}
+            content_str = json.dumps(card)
+
             chat_type = original_msg.chat_type
-            msg_type = "post"  # 关键：改为 post 类型
+            msg_type = "interactive"  # 关键：card 2.0 交互卡片
             from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, ReplyMessageRequest, ReplyMessageRequestBody
             if chat_type == "p2p":  # 私聊
                 req = CreateMessageRequest.builder()\
@@ -1117,9 +1143,9 @@ class FeishuClient:
                         .content(content_str)
                         .build()
                     ).build()
-                
+
                 resp = self.lark_client.im.v1.message.create(req)
-                
+
             else:  # 群聊
                 req = ReplyMessageRequest.builder()\
                     .message_id(original_msg.message_id)\
@@ -1129,15 +1155,12 @@ class FeishuClient:
                         .content(content_str)
                         .build()
                     ).build()
-                
+
                 resp = self.lark_client.im.v1.message.reply(req)
-            
+
             if not resp.success():
-                logging.getLogger("app").info(f"发送 Markdown 文本失败: {resp.code} {resp.msg}")
-                # 如果发送失败（可能是 md 语法太复杂或有非法字符），可以考虑回退到纯文本
-                # logging.info("尝试回退到纯文本发送...")
-                # ... (可选的回退逻辑)
-                
+                logging.getLogger("app").info(f"发送 Markdown 卡片失败: {resp.code} {resp.msg}")
+
         except Exception as e:
             logging.getLogger("app").info(f"发送文本异常: {e}")
             import traceback
