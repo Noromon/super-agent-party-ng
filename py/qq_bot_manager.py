@@ -22,6 +22,7 @@ from py.get_setting import get_port,load_settings
 
 # 定义请求体
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 
 from py.base_bot import BaseBotManager
 
@@ -391,14 +392,18 @@ class MyClient(botpy.Client):
             )
             
             full_response = []
+            reasoning_chars = 0
+            finish_reason = ""
             async for chunk in stream:
                 reasoning_content = ""
                 tool_content = ""
                 if chunk.choices:
+                    finish_reason = chunk.choices[0].finish_reason or finish_reason
                     chunk_dict = chunk.model_dump()
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta:
                         reasoning_content = delta.get("reasoning_content", "") 
+                        reasoning_chars += len(reasoning_content)
                         tool_content = delta.get("tool_content", "")
                         async_tool_id = delta.get("async_tool_id", "")
                         tool_link = delta.get("tool_link", "")
@@ -464,6 +469,11 @@ class MyClient(botpy.Client):
 
             # 记忆管理
             full_content = "".join(full_response)
+            if not full_content.strip():
+                log_empty_reply("qq", c_id, reasoning_chars, finish_reason)
+                if not state.get("image_cache"):
+                    await self._send_text_message(message, EMPTY_REPLY_MSG)
+                return
             self.memoryList[c_id].append({"role": "assistant", "content": full_content})
             if self.memoryLimit > 0:
                 while len(self.memoryList[c_id]) > self.memoryLimit:
@@ -674,14 +684,18 @@ class MyClient(botpy.Client):
             )
             
             full_response = []
+            reasoning_chars = 0
+            finish_reason = ""
             async for chunk in stream:
                 reasoning_content = ""
                 tool_content = ""
                 if chunk.choices:
+                    finish_reason = chunk.choices[0].finish_reason or finish_reason
                     chunk_dict = chunk.model_dump()
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta:
                         reasoning_content = delta.get("reasoning_content", "")
+                        reasoning_chars += len(reasoning_content)
                         tool_content = delta.get("tool_content", "")
                         async_tool_id = delta.get("async_tool_id", "")
                         tool_link = delta.get("tool_link", "")
@@ -744,6 +758,11 @@ class MyClient(botpy.Client):
 
             # 记忆管理
             full_content = "".join(full_response)
+            if not full_content.strip():
+                log_empty_reply("qq-group", g_id, reasoning_chars, finish_reason)
+                if not self.group_states.get(g_id, {}).get("image_cache"):
+                    await self._send_group_text(message, EMPTY_REPLY_MSG, state)
+                return
             self.memoryList[g_id].append({"role": "assistant", "content": full_content})
             if self.memoryLimit > 0:
                 while len(self.memoryList[g_id]) > self.memoryLimit:

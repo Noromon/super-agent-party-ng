@@ -185,6 +185,7 @@ max-complexity = 60
 "tests/test_covs_rescue.py" = ["F401"]
 "tests/test_data_backup.py" = ["E402"]
 "tests/test_engine_parity.py" = ["F841"]
+"tests/test_im_empty_reply.py" = ["E402"]
 "tests/test_process_tree.py" = ["E402"]
 "tests/test_secret_box.py" = ["F401"]
 "tests/test_task_center.py" = ["E402"]

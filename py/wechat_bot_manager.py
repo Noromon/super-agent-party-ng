@@ -28,6 +28,7 @@ except ImportError:
 
 # 拦截控制台输出的终极杀器
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
 
 class StreamInterceptor:
@@ -359,14 +360,18 @@ class WeChatClient:
             )
             
             full_response = []
+            reasoning_chars = 0
+            finish_reason = ""
             async for chunk in stream:
                 if not chunk.choices: continue
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
                 content = chunk.choices[0].delta.content or ""
                 
                 # 处理推理内容
                 reasoning = ""
                 if hasattr(chunk.choices[0].delta, "reasoning_content"):
-                    reasoning = chunk.choices[0].delta.reasoning_content
+                    reasoning = chunk.choices[0].delta.reasoning_content or ""
+                reasoning_chars += len(reasoning)
                 if reasoning and self.reasoningVisible:
                     content = reasoning
                 
@@ -409,6 +414,10 @@ class WeChatClient:
 
             # 更新记忆
             full_content = "".join(full_response)
+            if not full_content.strip():
+                log_empty_reply("wechat", chat_id, reasoning_chars, finish_reason)
+                await self._send_text(msg, EMPTY_REPLY_MSG)
+                return
             self.memoryList[chat_id].append({"role": "assistant", "content": full_content})
             
             if self.enableTTS:

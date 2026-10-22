@@ -21,6 +21,7 @@ from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSet
 from py.random_topic import get_random_topics
 # 飞书机器人配置模型
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
 
 class FeishuBotConfig(BaseModel):
@@ -536,11 +537,14 @@ class FeishuClient:
             )
             
             full_response = []
+            reasoning_chars = 0
+            finish_reason = ""
             async for chunk in stream:
                 reasoning_content = ""
                 
                 if chunk.choices:
                     delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason or finish_reason
                     
                     # [捕获音频]
                     if hasattr(delta, "audio") and delta.audio:
@@ -549,6 +553,7 @@ class FeishuClient:
 
                     if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                          reasoning_content = delta.reasoning_content
+                         reasoning_chars += len(reasoning_content)
                          
                     # 处理 async_tool_id 和 tool_link
                     if hasattr(delta, "async_tool_id") and delta.async_tool_id:
@@ -638,6 +643,12 @@ class FeishuClient:
 
             # 更新记忆
             full_content = "".join(full_response)
+            if not full_content.strip():
+                log_empty_reply("feishu", chat_id, reasoning_chars, finish_reason,
+                                audio=has_omni_audio)
+                if not has_omni_audio:
+                    await self._send_text(msg, EMPTY_REPLY_MSG)
+                return
             
             # 如果没生成 Omni 音频，且开启了旧 TTS，才用旧 TTS
             if self.enableTTS and not has_omni_audio:

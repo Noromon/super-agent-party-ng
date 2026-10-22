@@ -24,6 +24,7 @@ from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 # ------------------ 配置模型 ------------------
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 
 
 class DiscordBotConfig(BaseModel):
@@ -275,14 +276,18 @@ class DiscordClient(discord.Client):
             "audio_buffer": [] 
         }
         full_response = []
+        reasoning_chars = 0
+        finish_reason = ""
 
         async for chunk in stream:
             if not chunk.choices: continue
             delta_raw = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason or finish_reason
             if hasattr(delta_raw, "audio") and delta_raw.audio:
                 if "data" in delta_raw.audio:
                     state["audio_buffer"].append(delta_raw.audio["data"])
             reasoning_content = getattr(delta_raw, "reasoning_content", None) or ""
+            reasoning_chars += len(reasoning_content)
             async_tool_id = getattr(delta_raw, "async_tool_id", None) or ""
             tool_link = getattr(delta_raw, "tool_link", None) or ""
             if tool_link and settings.get("tools", {}).get("toolMemorandum", {}).get("enabled"):
@@ -341,6 +346,11 @@ class DiscordClient(discord.Client):
                 has_omni_audio = True
             except Exception as e: logging.error(f"Omni 音频处理失败: {e}")
         full_content = "".join(full_response)
+        if not full_content.strip():
+            log_empty_reply("discord", cid, reasoning_chars, finish_reason, audio=has_omni_audio)
+            if not has_omni_audio:
+                await self._send_segment(msg, EMPTY_REPLY_MSG)
+            return
         if self.config.enable_tts and not has_omni_audio: await self._send_voice(msg, full_content)
         self.memory[cid].append({"role": "assistant", "content": full_content})
         if self.config.memory_limit > 0:

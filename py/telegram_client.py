@@ -5,6 +5,7 @@ from py.behavior_engine import BehaviorItem
 from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 
 class TelegramClient:
     def __init__(self):
@@ -231,6 +232,8 @@ class TelegramClient:
             "audio_buffer": [] # <--- 新增
         }
         full_response = []
+        reasoning_chars = 0
+        finish_reason = ""
 
         try:
             stream = await client.chat.completions.create(
@@ -250,8 +253,10 @@ class TelegramClient:
                 if not chunk.choices: continue
                 
                 delta = chunk.choices[0].delta
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
                 content = getattr(delta, 'content', '') or ""
                 reasoning = getattr(delta, 'reasoning_content', '') or ""
+                reasoning_chars += len(reasoning)
                 tool_link = getattr(delta, 'tool_link', '') or ""
                 async_tool_id = getattr(delta, 'async_tool_id', '') or ""
 
@@ -353,7 +358,14 @@ class TelegramClient:
 
             # 记忆
             assistant_text = "".join(full_response)
-            self.memoryList[chat_id].append({"role": "assistant", "content": assistant_text})
+            if not assistant_text.strip():
+                log_empty_reply("telegram", chat_id, reasoning_chars, finish_reason,
+                                audio=has_omni_audio)
+                if not has_omni_audio:
+                    await self._send_text(chat_id, EMPTY_REPLY_MSG)
+                    return
+            else:
+                self.memoryList[chat_id].append({"role": "assistant", "content": assistant_text})
 
             # 记忆限制
             if self.memoryLimit > 0:

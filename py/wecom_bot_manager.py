@@ -20,6 +20,7 @@ from aibot import WSClient, WSClientOptions, generate_req_id
 
 # 企业微信机器人配置模型
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
 
 class WeComBotConfig(BaseModel):
@@ -219,6 +220,8 @@ class WeComClient:
         # 3. LLM 响应与流式回传
         stream_id = generate_req_id('stream')
         full_response_text = ""
+        reasoning_chars = 0
+        finish_reason = ""
         try:
             stream = await client.chat.completions.create(
                 model=self.WeComAgent,
@@ -231,8 +234,10 @@ class WeComClient:
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
                 content = delta.content or ""
                 reasoning = getattr(delta, "reasoning_content", "") or ""
+                reasoning_chars += len(reasoning)
                 full_response_text += (reasoning if self.reasoningVisible and reasoning else content)
                 
                 if content:
@@ -240,6 +245,11 @@ class WeComClient:
                     await self.ws_client.reply_stream(frame, stream_id, full_response_text, False)
             
             await self.ws_client.reply_stream(frame, stream_id, full_response_text, True)
+            if not full_response_text.strip():
+                log_empty_reply("wecom", chat_id, reasoning_chars, finish_reason)
+                await self.ws_client.reply_stream(frame, generate_req_id('stream'),
+                                                  EMPTY_REPLY_MSG, True)
+                return
             self.memoryList[chat_id].append({"role": "assistant", "content": full_response_text})
             
             # # 4. 如果开启了 TTS，异步发送语音气泡

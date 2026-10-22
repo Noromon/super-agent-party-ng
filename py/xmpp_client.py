@@ -36,6 +36,8 @@ IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 
 
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
+
 
 class XmppClient:
     PLUGINS = ("xep_0030", "xep_0066", "xep_0199")
@@ -576,6 +578,8 @@ class XmppClient:
                              base_url=f"http://127.0.0.1:{get_port()}/v1")
         out_buffer = ""
         full_text = []
+        reasoning_chars = 0
+        finish_reason = ""
         try:
             stream = await client.chat.completions.create(
                 model=self.XmppAgent,
@@ -592,9 +596,11 @@ class XmppClient:
             async for chunk in stream:
                 if not chunk.choices:
                     continue
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
                 delta = chunk.choices[0].delta
                 content = getattr(delta, "content", "") or ""
                 reasoning = getattr(delta, "reasoning_content", "") or ""
+                reasoning_chars += len(reasoning)
                 tool_link = getattr(delta, "tool_link", "") or ""
                 async_tool_id = getattr(delta, "async_tool_id", "") or ""
                 if tool_link and settings["tools"]["toolMemorandum"]["enabled"]:
@@ -618,6 +624,10 @@ class XmppClient:
             return
 
         assistant_text = "".join(full_text)
+        if not assistant_text.strip():
+            log_empty_reply("xmpp", chat_jid, reasoning_chars, finish_reason)
+            await self._send_text(chat_jid, EMPTY_REPLY_MSG)
+            return
         self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
         if self.memoryLimit > 0:
             while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:

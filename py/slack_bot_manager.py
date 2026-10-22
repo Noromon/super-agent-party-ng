@@ -19,6 +19,7 @@ from py.get_setting import get_port, load_settings
 
 # ------------------ 配置模型 (严格对齐) ------------------
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
 
 class SlackBotConfig(BaseModel):
@@ -196,10 +197,13 @@ class SlackBotManager(BaseBotManager):
 
             full_response = []
             last_update_time = time.time()
+            reasoning_chars = 0
+            finish_reason = ""
 
             async for chunk in stream:
                 if not chunk.choices: continue
                 delta_raw = chunk.choices[0].delta
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
 
                 tool_link = getattr(delta_raw, "tool_link", None)
                 if tool_link and settings.get("tools", {}).get("toolMemorandum", {}).get("enabled"):
@@ -212,6 +216,7 @@ class SlackBotManager(BaseBotManager):
 
                 content = delta_raw.content or ""
                 reasoning = getattr(delta_raw, "reasoning_content", None) or ""
+                reasoning_chars += len(reasoning)
                 if reasoning and self.config.reasoning_visible:
                     content = reasoning
 
@@ -234,6 +239,11 @@ class SlackBotManager(BaseBotManager):
             for img_url in state["image_cache"]:
                 await self._send_image(cid, img_url, web_client)
 
+            if not full_content.strip():
+                log_empty_reply("slack", cid, reasoning_chars, finish_reason)
+                if not state["image_cache"]:
+                    await web_client.chat_update(channel=cid, ts=reply_ts, text=EMPTY_REPLY_MSG)
+                return
             if self.config.enable_tts:
                 await self._send_voice(cid, full_content, web_client)
 

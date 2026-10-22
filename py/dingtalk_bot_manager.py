@@ -23,6 +23,7 @@ from py.random_topic import get_random_topics
 
 # 配置模型
 from py import llm_gate
+from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
 
 class DingtalkBotConfig(BaseModel):
@@ -327,6 +328,8 @@ class DingtalkClientLogic:
         # --- D. AI 调用与流式输出 ---
         ai_client = AsyncOpenAI(api_key="none", base_url=f"http://127.0.0.1:{self.port}/v1")
         state = {"text_buffer": "", "full_response": ""}
+        reasoning_chars = 0
+        finish_reason = ""
 
         try:
             stream = await ai_client.chat.completions.create(
@@ -342,10 +345,12 @@ class DingtalkClientLogic:
             async for chunk in stream:
                 if not chunk.choices: continue
                 delta = chunk.choices[0].delta
-                
+                finish_reason = chunk.choices[0].finish_reason or finish_reason
+
                 # 处理推理内容 (如 DeepSeek R1)
                 reasoning = ""
                 if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning_chars += len(delta.reasoning_content)
                     if self.config.reasoningVisible:
                         reasoning = delta.reasoning_content
                 
@@ -369,6 +374,10 @@ class DingtalkClientLogic:
                 handler.reply_markdown("AI 助手", state["text_buffer"], incoming_message)
 
             # --- E. 记忆持久化与裁剪 ---
+            if not state["full_response"].strip():
+                log_empty_reply("dingtalk", cid, reasoning_chars, finish_reason)
+                handler.reply_text(EMPTY_REPLY_MSG, incoming_message)
+                return
             self.memoryList[cid].append({"role": "assistant", "content": state["full_response"]})
             if self.config.memoryLimit > 0:
                 # 保持 memoryLimit 组对话 (1 user + 1 assistant = 2条)
