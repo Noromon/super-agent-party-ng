@@ -117,6 +117,8 @@ def test_frontend_wiring():
     assert html.index('44_diary.js') < html.index('<script src="js/renderer.js">')
     role = io.open(_ROOT / "static/templates/page_role.html", encoding="utf-8-sig").read()
     assert "subMenu === 'diary'" in role
+    # S67：主动发消息渠道须含 XMPP（引擎 _push_to_im 走 behavior handler 通用路径，xmpp 已注册）
+    assert 'label="XMPP" value="xmpp"' in role
     data = io.open(_ROOT / "static/js/data/60_cards_options.js", encoding="utf-8-sig").read()
     assert "diarySettings:" in data and "diaryActionMeta:" in data
     tiles = io.open(_ROOT / "static/js/data/40_tts_voice.js", encoding="utf-8-sig").read()
