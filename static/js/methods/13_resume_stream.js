@@ -40,6 +40,7 @@ Object.assign(vue_methods, {
                 let newStreamId = streamId;
 
                 await iterateSse(resumeResponse, (parsed) => {
+                try { // RA-08：毒帧吞错继续（旧 catch 罩全帧处理），避免中止整轮进重试环重放半帧副作用
                 if (parsed.type === 'context_compact') {
                     this.applyContextCompact(parsed);
                     return;
@@ -102,6 +103,9 @@ Object.assign(vue_methods, {
                 }
 
                 this.sendMessagesToExtension();
+                } catch (frameErr) {
+                    console.warn('[StreamResume] 帧处理异常，已跳过该帧:', frameErr.message);
+                }
                 });
 
                 // 恢复成功，flush 剩余文本

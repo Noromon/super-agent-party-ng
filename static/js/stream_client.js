@@ -79,10 +79,10 @@ async function iterateNdjsonLines(response, onFrame, opts = {}) {
   let buffer = "";
 
   const handleLine = async (rawLine) => {
-    let line = rawLine;
+    // RA-09：无条件 trim（原 quick-gen 两路逐行 trim，兼容 CRLF/代理后端容差）
+    let line = rawLine.trim();
+    if (!line) return;
     if (opts.stripDataPrefix) {
-      line = line.trim();
-      if (!line) return;
       if (line === "data: [DONE]" || line === "[DONE]") return;
       if (line.startsWith("data:")) line = line.slice(5).trim();
     }
@@ -91,6 +91,7 @@ async function iterateNdjsonLines(response, onFrame, opts = {}) {
     try {
       parsed = JSON.parse(line);
     } catch (e) {
+      console.warn("[stream] JSON 解析失败，跳过该行:", line.slice(0, 120));
       return; // 吞错继续（拉平语义）
     }
     await onFrame(parsed);
