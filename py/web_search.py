@@ -5,21 +5,29 @@ import json
 import os
 import time
 from bs4 import BeautifulSoup
-from langchain_community.tools import DuckDuckGoSearchResults
 import requests
 from tavily import TavilyClient
+from ddgs import DDGS
 from py.get_setting import load_settings
 from py.load_files import check_robots_txt, is_private_ip
 from urllib.parse import urlparse
 
 async def DDGsearch(query):
     settings = await load_settings()
+    proxy_url = settings.get('systemSettings', {}).get('proxy', '') or None
     def sync_search():
         max_results = settings['webSearch']['duckduckgo_max_results'] or 10
         try:
-            dds = DuckDuckGoSearchResults(num_results=max_results,output_format="json")
-            results = dds.invoke(query)
-            return results
+            # S69：钉死 backend="duckduckgo"。此前经 langchain 包装的默认 backend="auto"
+            # 会让 ddgs 库遍历 wikipedia/google/yahoo/bing 等全部引擎兜底，违背用户指定 DDG 的语义。
+            with DDGS(proxy=proxy_url, timeout=30) as ddgs:
+                raw = ddgs.text(query, max_results=max_results, backend="duckduckgo")
+            results = [{
+                'title': item.get('title', ''),
+                'link': item.get('href', ''),
+                'snippet': item.get('body', ''),
+            } for item in raw]
+            return json.dumps(results, indent=2, ensure_ascii=False)
         except Exception as e:
             logging.getLogger("app").info(f"An error occurred: {e}")
             return "[Error] This search/fetch attempt failed (details in the server log). It did NOT run successfully - retry with a shorter keyword query, or try another search/fetch tool. An empty response here is NOT evidence that no information exists."
