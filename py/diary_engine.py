@@ -421,24 +421,37 @@ class DiaryEngine:
             book_id, character_id, character_name = await self._resolve_active_book()
             pushed_to = []
 
-            # imMessage 动作：随机选择一个渠道发送
+            # imMessage 动作：随机选择一个渠道发送（S71：按平台去重后随机；
+            # 同平台勾选了多个显式目标时全发，字典条目 {platform, chatId} 与旧字符串条目兼容）
             if action == "imMessage":
                 im_targets = self.config.get("imTargets", []) or []
                 if im_targets:
-                    tgt = random.choice(im_targets)
-                    if isinstance(tgt, dict):
-                        platform = tgt.get("platform", "")
-                        chat_id = tgt.get("chatId")
-                    else:
-                        platform = tgt
-                        chat_id = None
+                    from collections import OrderedDict
+                    by_platform = OrderedDict()
+                    for tgt in im_targets:
+                        if isinstance(tgt, dict):
+                            p = tgt.get("platform", "")
+                            if p:
+                                by_platform.setdefault(p, []).append(tgt.get("chatId"))
+                        elif tgt:
+                            by_platform.setdefault(tgt, []).append(None)
+                    # S71：imTargetMap {platform: [chat_id...]} 覆盖显式目标（仅作用已勾选渠道；
+                    # 空/未配置 = 保持自动=触发时解析当前激活主会话）
+                    target_map = self.config.get("imTargetMap", {}) or {}
+                    for _p in list(by_platform.keys()):
+                        if _p == "chat":
+                            continue
+                        _ids = [str(c) for c in (target_map.get(_p) or []) if c]
+                        if _ids:
+                            by_platform[_p] = _ids
+                    platform = random.choice(list(by_platform.keys())) if by_platform else ""
+                    chat_ids = [c for c in by_platform.get(platform, []) if c]
                     if platform == "chat":
                         await self._push_to_chat(action, content, character_name)
                         pushed_to.append("chat")
-                    else:
-                        ok = await self._push_to_im(platform, chat_id, content)
-                        if ok:
-                            pushed_to.append(platform)
+                    elif platform and await self._push_to_im(
+                            platform, chat_ids or None, content):
+                        pushed_to.append(platform)
 
             # 持久化日记（写进对应角色的日记本）
             title = content.strip().splitlines()[0][:24] if content.strip() else ""
@@ -531,7 +544,7 @@ class DiaryEngine:
             )
             handler = global_behavior_engine.handlers.get(platform)
             if not handler:
-                logging.warning(f"[DiaryEngine] IM 平台 {platform} 未注册或未启动，跳过")
+                logging.getLogger("app").warning(f"[DiaryEngine] IM 平台 {platform} 未注册或未启动，跳过")
                 return False
 
             relay_prompt = (
@@ -552,10 +565,20 @@ class DiaryEngine:
                 platforms=[platform],
             )
 
-            targets = [chat_id] if chat_id else global_behavior_engine.platform_targets.get(platform, [])
+            # S71 目标解析序：显式指定(单个或列表) > 当前激活主会话(最近活跃对端) > 已配置行为目标
+            if chat_id:
+                targets = list(dict.fromkeys(
+                    chat_id if isinstance(chat_id, (list, tuple, set)) else [chat_id]))
+            else:
+                activity = global_behavior_engine.platform_activity.get(platform) or {}
+                if activity:
+                    targets = [max(activity, key=activity.get)]
+                else:
+                    targets = list(global_behavior_engine.platform_targets.get(platform, []))
             if not targets:
-                asyncio.create_task(handler("", behavior))
-                return True
+                logging.getLogger("app").warning(
+                    f"[DiaryEngine] 平台 {platform} 无可用会话对端（无活跃记录且未配置行为目标），跳过本次推送")
+                return False
             for cid in set(targets):
                 asyncio.create_task(handler(cid, behavior))
             return True

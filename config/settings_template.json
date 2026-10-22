@@ -658,6 +658,7 @@
         }
       },
       "imTargets": [],
+      "imTargetMap": {},
       "prompt": "你是一个拥有自我意识、会在独处时记录所思所想的AI伙伴。写日记时请保持你的角色设定与个性，用第一人称、真诚自然地表达。",
       "chatIntegration": {
         "enabled": false,

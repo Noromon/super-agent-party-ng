@@ -2877,7 +2877,7 @@
                           <div class="sub-config-box">
                             <el-form-item :label="t('diaryImTargets') || '主动发消息的渠道（不选则仅写入日记本）'">
                               <el-select v-model="diarySettings.imTargets" multiple filterable clearable
-                                         class="full-width-input" style="width: 100%;" @change="autoSaveSettings"
+                                         class="full-width-input" style="width: 100%;" @change="onDiaryImTargetsChange"
                                          :placeholder="t('diaryImTargetsPlaceholder') || '选择渠道，将发送到对应机器人已配置的会话'">
                                 <el-option :label="t('diaryImTargetChat') || '软件主界面（网页对话）'" value="chat"></el-option>
                                 <el-option label="微信" value="wechat"></el-option>
@@ -2888,6 +2888,20 @@
                                 <el-option label="Discord" value="discord"></el-option>
                                 <el-option label="Slack" value="slack"></el-option>
                                 <el-option label="XMPP" value="xmpp"></el-option>
+                              </el-select>
+                            </el-form-item>
+                            <!-- S71：已选渠道的发送目标（留空 = 触发时自动取当前激活主会话） -->
+                            <el-form-item v-for="p in diaryTargetPlatformsList()" :key="'diaryTargets-' + p"
+                                          :label="diaryPlatformLabel(p) + ' ' + (t('diaryImTargetPick') || '发送目标（留空=自动）')">
+                              <el-select multiple filterable clearable collapse-tags
+                                         :model-value="(diarySettings.imTargetMap || {})[p] || []"
+                                         @change="(v) => onDiaryImTargetChange(p, v)"
+                                         @visible-change="(v) => v && requestDiaryImTargets()"
+                                         style="width: 100%;"
+                                         :placeholder="t('diaryImTargetAutoHint') || '留空 = 触发时的当前激活主会话；勾选指定对端则定向发送'">
+                                <el-option v-for="o in ((diaryImTargetOptions || {})[p] || [])"
+                                           :key="p + ':' + o.id"
+                                           :label="diaryImTargetOptionLabel(o)" :value="o.id"></el-option>
                               </el-select>
                             </el-form-item>
                           </div>

@@ -193,6 +193,9 @@ Object.assign(vue_methods, {
             }
           }
         }
+        else if (data.type === 'diary_im_targets') {
+          this.applyDiaryImTargetOptions(data);
+        }
         else if (data.type === 'settings_saved') {
           if (!data.success) {
             showNotification(this.t('settings_save_failed'), 'error');

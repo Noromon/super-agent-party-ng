@@ -213,5 +213,66 @@ Object.assign(vue_methods, {
       this.$nextTick(() => { if (typeof this.scrollToBottom === 'function') this.scrollToBottom(); });
     },
 
+    // ---- S71：日记主动推送目标（imTargetMap {platform:[ids]}；空/缺省 = 自动取触发时主会话）----
+    diaryTargetPlatformsList() {
+      const list = this.diarySettings && this.diarySettings.imTargets;
+      if (!Array.isArray(list)) return [];
+      const seen = new Set();
+      const out = [];
+      for (const tgt of list) {
+        const p = typeof tgt === 'string' ? tgt : (tgt && tgt.platform);
+        if (p && p !== 'chat' && !seen.has(p)) { seen.add(p); out.push(p); }
+      }
+      return out;
+    },
+
+    diaryPlatformLabel(p) {
+      const map = {
+        wechat: '微信', feishu: '飞书', dingtalk: '钉钉', wecom: '企业微信',
+        telegram: 'Telegram', discord: 'Discord', slack: 'Slack', xmpp: 'XMPP',
+      };
+      return map[p] || p;
+    },
+
+    diaryImTargetOptionLabel(o) {
+      if (!o || !o.id) return '';
+      let label = o.id;
+      if (o.is_main) {
+        label += this.t('diaryImTargetMainSuffix') || '（当前激活主会话）';
+      } else if (o.last_active) {
+        const d = new Date(o.last_active * 1000);
+        label += ' · ' + String(d.getHours()).padStart(2, '0') + ':'
+          + String(d.getMinutes()).padStart(2, '0');
+      }
+      return label;
+    },
+
+    async onDiaryImTargetsChange() {
+      // 移除未再勾选渠道的目标残留，避免无效配置常驻 settings
+      const keep = new Set(this.diaryTargetPlatformsList());
+      const map = this.diarySettings.imTargetMap || (this.diarySettings.imTargetMap = {});
+      for (const p of Object.keys(map)) {
+        if (!keep.has(p)) delete map[p];
+      }
+      if (keep.size) this.requestDiaryImTargets();
+      await this.autoSaveSettings();
+    },
+
+    onDiaryImTargetChange(platform, ids) {
+      if (!this.diarySettings.imTargetMap) this.diarySettings.imTargetMap = {};
+      this.diarySettings.imTargetMap[platform] = Array.isArray(ids) ? ids : [];
+      this.autoSaveSettings();
+    },
+
+    requestDiaryImTargets() {
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({ type: 'get_diary_im_targets' }));
+      }
+    },
+
+    applyDiaryImTargetOptions(payload) {
+      this.diaryImTargetOptions = (payload && payload.targets) || {};
+    },
+
     // 处理单击文件自动添加 @ 快捷方式
 });

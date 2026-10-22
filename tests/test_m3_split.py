@@ -17,7 +17,8 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 GIANT_WHITELIST = {
     # S65-P3（A5 日记）：lifespan +19 行（引擎启动/停止钩子）、ws +5 行（save_settings 热更）越过 300 线，冻结现值，后续拆分时下调
     "lifespan": 307,
-    "websocket_endpoint": 302,
+    # S71：ws +4 行（get_diary_im_targets 两行分支，重活已抽 _ws_diary_im_targets 模块级 helper），重冻结 302->306
+    "websocket_endpoint": 306,
 }
 
 STREAM_HELPERS = [

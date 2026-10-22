@@ -7966,6 +7966,61 @@ app.include_router(overlay_router)
 
 settings_lock = asyncio.Lock()
 
+
+async def _ws_diary_im_targets(websocket: WebSocket):
+    """S71：日记主动推送目标候选 = 运行时活跃 ∪ 各平台已配置行为目标 ∪ 落盘 bot 会话。"""
+    try:
+        from py.behavior_engine import global_behavior_engine
+        from py.get_setting import load_settings
+        cfg_src = {
+            "wechat": ("wechatBotConfig", "behaviorTargetChatIds"),
+            "feishu": ("feishuBotConfig", "behaviorTargetChatIds"),
+            "dingtalk": ("dingtalkBotConfig", "behaviorTargetChatIds"),
+            "wecom": ("weComBotConfig", "behaviorTargetChatIds"),
+            "telegram": ("telegramBotConfig", "behaviorTargetChatIds"),
+            "discord": ("discordBotConfig", "behaviorTargetChatIds"),
+            "slack": ("slackBotConfig", "behaviorTargetChatIds"),
+            "xmpp": ("xmppBotConfig", "behaviorTargetJids"),
+        }
+        settings_now = await load_settings()
+        entries_by_p = {p: {} for p in cfg_src}
+        for p, act in (global_behavior_engine.platform_activity or {}).items():
+            if p in entries_by_p:
+                for cid, ts in (act or {}).items():
+                    entries_by_p[p][str(cid)] = {
+                        "id": str(cid), "last_active": ts, "source": "activity"}
+        for p, (sk, tf) in cfg_src.items():
+            for cid in ((settings_now.get(sk) or {}).get(tf) or []):
+                entries_by_p[p].setdefault(str(cid), {
+                    "id": str(cid), "last_active": None, "source": "config"})
+        try:
+            from py.get_setting import list_bot_convs
+            for row in await list_bot_convs():
+                parts = str(row.get("conv_id", "")).split(":", 2)
+                if len(parts) == 3 and parts[0] == "bot" and parts[1] in entries_by_p:
+                    entries_by_p[parts[1]].setdefault(parts[2], {
+                        "id": parts[2], "last_active": row.get("updated_at"),
+                        "source": "conv"})
+        except Exception as _ce:
+            logger.info(f"[WS] diary_im_targets 会话表读取跳过: {_ce}")
+        out = {}
+        for p, ent in entries_by_p.items():
+            lst = list(ent.values())
+            main = max((e for e in lst if e.get("last_active")),
+                       key=lambda e: e["last_active"], default=None)
+            for e in lst:
+                e["is_main"] = (main is not None and e["id"] == main["id"])
+            out[p] = lst
+        await ws_manager.send_json({"type": "diary_im_targets", "targets": out}, websocket)
+    except Exception as _te:
+        logger.error(f"[WS] get_diary_im_targets 失败: {_te}")
+        try:
+            await ws_manager.send_json(
+                {"type": "diary_im_targets", "targets": {}, "error": str(_te)}, websocket)
+        except Exception:
+            pass
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     if not sap_auth.ws_auth_ok(websocket):
@@ -8035,6 +8090,10 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if msg_type == "ping":
                 await ws_manager.send_json({"type": "pong"}, websocket)
+
+            elif msg_type == "get_diary_im_targets":
+                # S71：日记主动推送目标候选（重活在 _ws_diary_im_targets，保 ws 循环壳尺寸）
+                await _ws_diary_im_targets(websocket)
 
             elif msg_type == "save_settings":
                 settings_dict = data.get("data", {})
