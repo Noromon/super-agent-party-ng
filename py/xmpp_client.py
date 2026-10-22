@@ -67,6 +67,7 @@ class XmppClient:
         self.config = None
         self._is_ready = False
         self._manager_ref = None
+        self.behaviorTargetJids: List[str] = []
         self._ready_callback = None
         self._shutdown_requested = False
         self.xmpp: Optional[slixmpp.Client] = None
@@ -670,7 +671,7 @@ class XmppClient:
         try:
             self.xmpp.send_message(mto=chat_jid, mbody=text.strip(), mtype="chat")
         except Exception as e:
-            logging.error(f"XMPP 发送失败: {e}")
+            logging.getLogger("app").error(f"XMPP 发送失败: {e}")
 
     def _fence_ok(self, path: str, extra_roots=()) -> bool:
         roots = [UPLOAD_FILES_DIR, TOOL_TEMP_DIR, KB_DIR] + [r for r in extra_roots if r]
@@ -789,8 +790,37 @@ class XmppClient:
         msg.send()
 
     # -------------------- 行为引擎（主动事件） --------------------
-    @llm_gate.gated
     async def execute_behavior_event(self, chat_jid: str, behavior_item: BehaviorItem):
+        # S71：空 chat_jid（diary/behavior 引擎空目标语义）-> 展开已配置目标；仍空则告警跳过。
+        if not chat_jid:
+            targets = [t for t in (self.behaviorTargetJids or []) if t]
+            if not targets:
+                logging.getLogger("app").warning(
+                    "[XMPP] 行为事件无目标 JID（未配置行为目标），跳过本次事件")
+                return
+            for t in dict.fromkeys(targets):
+                await self.execute_behavior_event(t, behavior_item)
+            return
+        # S71：slixmpp 流绑定 bot 线程 loop，而行为/日记派发在 server 主 loop ->
+        # 整个事件协程桥接回 bot loop 执行（run_coroutine_threadsafe，对齐 feishu 先例）。
+        bot_loop = None
+        ref = self._manager_ref() if self._manager_ref else None
+        if ref is not None:
+            bot_loop = getattr(ref, "loop", None)
+        if bot_loop is not None and not bot_loop.is_closed():
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is not bot_loop:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._execute_behavior_event(chat_jid, behavior_item), bot_loop)
+                await asyncio.wrap_future(fut)
+                return
+        await self._execute_behavior_event(chat_jid, behavior_item)
+
+    @llm_gate.gated
+    async def _execute_behavior_event(self, chat_jid: str, behavior_item: BehaviorItem):
         prompt_content = await self._resolve_behavior_prompt(behavior_item)
         if not prompt_content:
             return
@@ -807,13 +837,15 @@ class XmppClient:
                 extra_body={"is_app_bot": True, "platform": "xmpp",
                             **self._tools_override()})
             reply = (resp.choices[0].message.content or "").strip()
-            if reply:
-                self.memoryList[chat_jid].append({"role": "assistant", "content": reply})
-                await self._send_text(chat_jid, reply)
-                await self._send_local_images(chat_jid, reply)
-                await self._persist_conv(chat_jid)
+            if not reply:
+                log_empty_reply("xmpp-behavior", chat_jid)
+                return
+            self.memoryList[chat_jid].append({"role": "assistant", "content": reply})
+            await self._send_text(chat_jid, reply)
+            await self._send_local_images(chat_jid, reply)
+            await self._persist_conv(chat_jid)
         except Exception as e:
-            logging.error(f"XMPP 行为事件失败: {e}")
+            logging.getLogger("app").error(f"XMPP 行为事件失败: {e}")
 
     async def _resolve_behavior_prompt(self, behavior_item: BehaviorItem) -> Optional[str]:
         try:

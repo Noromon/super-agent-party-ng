@@ -68,6 +68,7 @@ class XmppBotManager(BaseBotManager):
                                         if config.image_oversize_action in ("off", "reject", "shrink")
                                         else "reject")
         client.image_max_mb = max(1, min(1024, int(config.image_max_mb or 20)))
+        client.behaviorTargetJids = list(config.behaviorTargetJids or [])
         return client
 
     def on_stop_requested(self):
