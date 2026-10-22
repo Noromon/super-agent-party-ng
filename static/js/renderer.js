@@ -1969,12 +1969,10 @@ directives: {
            // 2. 更新真实 DOM
            morphdom(el, wrapper, { 
                childrenOnly: true,
-               onBeforeElUpdated: (fromEl, toEl) => {
-                   const tag = fromEl.tagName || '';
-                   if (tag.startsWith('MJX-') || fromEl.classList.contains('MathJax')) return false;
-                   if (fromEl.tagName === 'PRE' && fromEl.isEqualNode(toEl)) return false;
-                   return true;
-               }
+                onBeforeElUpdated: (fromEl, toEl) => {
+                    if (fromEl.tagName === 'PRE' && fromEl.isEqualNode(toEl)) return false;
+                    return true;
+                }
            });
            
             // 🌟 【核心修复点】直接调用，不加 requestAnimationFrame，让 scrollToBottom 自带的 setTimeout 去处理时序

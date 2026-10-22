@@ -121,9 +121,19 @@ if (window.markdownitContainer) {
 }
 
 
-// 添加更复杂的临时占位符
-const LATEX_PLACEHOLDER_PREFIX = 'LATEX_PLACEHOLDER_';
-let latexPlaceholderCounter = 0;
+// S81(A8)：KaTeX 引擎 + markdown-it-texmath（上游终态：md 渲染期同步排版，替代 MathJax 异步 typeset）
+if (window.texmath) {
+    md.use(window.texmath, {
+        engine: window.katex, // 指定渲染引擎为 katex
+        delims: 'dollars',    // 指定使用 $...$ 和 $$...$$ 语法
+        katexOptions: {
+            throwOnError: false,
+            output: 'html'    // 强制输出 HTML，对流式渲染最友好
+        }
+    });
+} else {
+    console.warn('KaTeX/texmath 未加载，$ 公式将按普通文本渲染。');
+}
 
 const ALLOWED_EXTENSIONS =[
   // 办公文档

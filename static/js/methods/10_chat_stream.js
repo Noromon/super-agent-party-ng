@@ -554,14 +554,7 @@ Object.assign(vue_methods, {
 
             currentMsg.generationFinished = true;
 
-            this.$nextTick(() => {
-                setTimeout(() => {
-                    if (window.MathJax) {
-                        const els = document.querySelectorAll('.stream-content');
-                        window.MathJax.typesetPromise([...els]).catch(() => { });
-                    }
-                }, 100);
-            });
+            // S81(A8)：流式收尾不再手动 MathJax typeset——KaTeX/texmath 已在渲染管线内排版
 
             if (this.ttsSettings.enabled) {
                 if (this.audioStartTime > this.audioCtx.currentTime) {

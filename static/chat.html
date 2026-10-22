@@ -99,11 +99,7 @@ function updateElement(el, rawMarkdown, formatFn) {
     
     // 性能优化：跳过不需要更新的节点
     onBeforeElUpdated: (fromEl, toEl) => {
-      // 1. 保护 MathJax 公式不被重绘 (防止公式闪烁)
-      if (fromEl.classList.contains('MathJax') || fromEl.tagName === 'MJX-CONTAINER') {
-        return false; 
-      }
-      // 2. 保护代码块，如果内容没变就不动 (防止高亮丢失)
+      // 保护代码块，如果内容没变就不动 (防止高亮丢失)
       if (fromEl.tagName === 'PRE' && fromEl.isEqualNode(toEl)) {
         return false;
       }
@@ -112,22 +108,22 @@ function updateElement(el, rawMarkdown, formatFn) {
     
     // 节点添加后的回调
     onNodeAdded: (node) => {
-      // 可以在这里触发 highlight.js 或 mathjax 对新节点的渲染
+      // 可以在这里触发 highlight.js 对新节点的渲染
       if (node.tagName === 'PRE' && window.hljs) {
          // hljs.highlightElement(node); // 如果 formatMessage 里没做，可以在这做
       }
     }
   });
-
-  // E. 触发 MathJax 渲染（仅含公式时 + per-element 防抖，避免流式期间高频排版）
-  if (window.MathJax && /\$[^$\n]+\$|\\\[[\s\S]*?\\\]/.test(el.textContent || '')) {
-    if (el._mjTimer) clearTimeout(el._mjTimer);
-    el._mjTimer = setTimeout(() => { window.MathJax.typesetPromise([el]).catch(()=>{}); }, 300);
-  }
 }
   </script>
   <!-- Include markdown-it and highlight.js scripts -->
   <script src="libs/markdown-it.min.js"></script>
+  <!-- S81(A8)：1. KaTeX 样式 -->
+  <link rel="stylesheet" href="libs/katex.min.css">
+  <!-- 2. KaTeX 核心脚本 -->
+  <script src="libs/katex.min.js"></script>
+  <!-- 3. markdown-it-texmath 插件（这个在浏览器环境非常稳） -->
+  <script src="libs/texmath.min.js"></script>
   <script src="libs/markdown-it-task-lists.min.js"></script>
   <script src="libs/markdown-it-footnote.min.js"></script>
   <script src="libs/markdown-it-container.min.js"></script>
@@ -145,32 +141,6 @@ function updateElement(el, rawMarkdown, formatFn) {
       theme: 'default',
     });
   </script>
-  <!--  MathJax 配置  -->
-  <script>
-    window.MathJax = {
-      options: {
-        ignoreHtmlClass: 'user-message-content'  // 匹配用户消息容器类名
-      },
-      tex: {
-        inlineMath: [
-          ['$', '$']       // 常见的行内公式定界符
-        ],
-        displayMath: [
-          ['$$', '$$']     // 常见的行间公式定界符
-        ],
-      },
-      svg: {
-        fontCache: 'global' // 使用全局字体缓存
-      },
-      startup: {
-        pageReady: () => {
-          // 可选：页面加载完成后执行一些操作
-          console.log("MathJax is ready!");
-        }
-      }
-    };
-  </script>
-  <script id="MathJax-script" async src="libs/tex-svg.js"></script>
 </head>
 <body>
   <div id="app">

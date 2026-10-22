@@ -219,9 +219,7 @@ main();`,
 
     renderTimers: {}, // 用于存储每个消息的防抖定时器,
 
-    mathJaxQueue: Promise.resolve(), // MathJax 串行队列，防止冲突,
-
-    isMathJaxRunning: false,
+    // S81(A8)：MathJax 串行队列/运行标记两字段已退役（KaTeX/texmath 渲染期同步排版）
 
     // --- AI 浏览器数据 ---
     browserTabs: [

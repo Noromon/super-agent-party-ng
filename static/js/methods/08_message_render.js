@@ -102,8 +102,6 @@ Object.assign(vue_methods, {
 
       // --- 预处理阶段 ---
       const parts = this.splitCodeAndText(content);
-      let latexPlaceholderCounter = 0;
-      const latexPlaceholders = [];
       let inUnclosedCodeBlock = false;
 
       let processedContent = parts.map(part => {
@@ -160,22 +158,12 @@ Object.assign(vue_methods, {
               match.replace('<think>', '<div class="highlight-block-reasoning">')
             );
 
-          // [原有逻辑] 处理 LaTeX 公式
-          const latexRegex = /(\$(?:\\.|[^\$\\])*\$)|(\\\[(?:\\.|[^\\])*\\\])/g;
-          return formatted.replace(latexRegex, (match) => {
-            const placeholder = `LATEX_PLACEHOLDER_${latexPlaceholderCounter++}`;
-            latexPlaceholders.push({ placeholder, latex: match });
-            return placeholder;
-          });
+          // S81(A8)：LaTeX 不再做占位保护——md.use(texmath)+KaTeX 在渲染期同步排版
+          return formatted;
         }
       }).join('');
 
       let rendered = md.render(processedContent);
-      // --- 恢复阶段 ---
-      // 恢复 LaTeX
-      latexPlaceholders.forEach(({ placeholder, latex }) => {
-        rendered = rendered.replace(placeholder, latex);
-      });
 
       // 处理未闭合代码块的转义 (如果有)
       rendered = rendered.replace(/\\\`/g, '`').replace(/\\\$/g, '$');
@@ -189,10 +177,8 @@ Object.assign(vue_methods, {
         rendered = `<div class="thinking-header"><i class="fa-solid fa-lightbulb"></i> ${this.t('thinking')}</div>` + rendered;
       }
 
-      // --- 后处理 (MathJax & Mermaid) ---
-      // 我们不再在 formatMessage 内部直接调用 MathJax，而是将其推入队列
+      // --- 后处理 (S81/A8：公式已由 KaTeX/texmath 在 md 管线内同步排版，无需异步队列) ---
       this.$nextTick(() => {
-        this.queueMathJax(index, content);
         this.initCopyButtons();
         this.initPreviewButtons();
         // Mermaid 也可以在这里懒加载
@@ -211,22 +197,6 @@ Object.assign(vue_methods, {
 
       return rendered;
     },
-
-  // 3. MathJax 队列处理 (解决流式输出时的公式闪烁/报错)
-  queueMathJax(index, content) {
-    // 仅当内容确实包含公式时才处理，避免流式期间每次更新都入队
-    const text = (typeof content === 'string' ? content : '') || '';
-    if (!/\$[^$\n]+\$|\\\[[\s\S]*?\\\]/.test(text)) return;
-    if (!window.MathJax) return;
-    if (!this.mathJaxTimers) this.mathJaxTimers = {};
-    // 每消息防抖：取消上一次待执行的 typeset，静默 300ms 后只执行一次（替代无限 Promise 链）
-    clearTimeout(this.mathJaxTimers[index]);
-    this.mathJaxTimers[index] = setTimeout(() => {
-      const element = document.getElementById(`message-content-${index}`);
-      if (!element) return;
-      window.MathJax.typesetPromise([element]).catch(err => { console.debug('MathJax rendering skipped:', err.message); });
-    }, 300);
-  },
 
     formatMessageWrapper(content) {
         // 调用您现有的 formatMessage，这里传 index = -1 避免产生副作用（如 thinking 图标）
