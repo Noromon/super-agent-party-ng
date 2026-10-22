@@ -660,11 +660,9 @@ Object.assign(vue_methods, {
                     }
                 });
             }
-            if (currentMsg && Array.isArray(currentMsg.backend_content)) {
-                currentMsg.backend_content.forEach(item => {
-                    if (!Object.isFrozen(item)) Object.freeze(item);
-                });
-            }
+            // S82(B10/399b66ea)：backend_content 不再浅冻结——条目后续仍会被
+            // 截断/同步/追加改写，冻结对象在 strict 下改写抛错=渲染卡死元凶
+            // （displayBlocks 的冻结保留：纯展示+getBlock 有 isFrozen 复用判定）
 
             this.markConvDirty(this.conversationId);
             this.flushDirtyConversations();
