@@ -33,6 +33,9 @@ from py.get_setting import (KB_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR,
 
 UPLOAD_NS = "urn:xmpp:http:upload:0"
 SIMS_NS = "urn:xmpp:sims:1"
+REF_NS = "urn:xmpp:reference:0"
+FT_NS = "urn:xmpp:jingle:apps:file-transfer:5"
+OOB_NS = "jabber:x:oob"
 DISCO_ITEMS_NS = "http://jabber.org/protocol/disco#items"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 # 表示“该候选 JID 上没有 363 服务”的 stanza 错误条件：换下一个候选；全中才判服务器缺失
@@ -61,6 +64,26 @@ def build_slot_request(name, size):
     sz = ET.SubElement(req, "size", {"size": str(size)})
     sz.text = str(size)
     return req
+
+
+def build_file_share(url, name, size, mime):
+    """S76: 与桥接 ext/xmpp-bridge 同构的附件结构（reference/media-sharing
+    + 顶层 jabber:x:oob）——Monocles 等客户端按此检测附件；XEP 样例的
+    <share><preview> 写法客户端不认（20:01 实测只收到 body 文字）。
+    子元素显式标同父命名空间 = 桥接原始串里默认命名空间继承的等价形式。"""
+    ref = ET.Element("{%s}reference" % REF_NS, {"type": "data"})
+    media = ET.SubElement(ref, "{%s}media-sharing" % SIMS_NS)
+    file_el = ET.SubElement(media, "{%s}file" % FT_NS)
+    ET.SubElement(file_el, "{%s}name" % FT_NS).text = name
+    ET.SubElement(file_el, "{%s}media-type" % FT_NS).text = mime
+    ET.SubElement(file_el, "{%s}size" % FT_NS).text = str(size)
+    sources = ET.SubElement(media, "{%s}sources" % SIMS_NS)
+    ET.SubElement(sources, "{%s}reference" % REF_NS, {"uri": url, "type": "data"})
+    oob = ET.Element("{%s}x" % OOB_NS)
+    ET.SubElement(oob, "{%s}url" % OOB_NS).text = url
+    ET.SubElement(oob, "{%s}size" % OOB_NS).text = str(size)
+    ET.SubElement(oob, "{%s}name" % OOB_NS).text = name
+    return [ref, oob]
 
 
 def slot_error_kind(xml) -> str:
@@ -812,6 +835,7 @@ class XmppClient:
                     await self._send_text(chat_jid, f"（图片上传失败：存储服务器返回 HTTP {resp.status}）")
                     return None
             self._upload_service_jid = service
+            app.info("[XMPP] 图片已上传: %s (%s)", get_url, name)
             self._send_sims(chat_jid, get_url, name, size, mime)
             return get_url
         if reasons and all(r.endswith(":noservice") for r in reasons):
@@ -859,19 +883,16 @@ class XmppClient:
     def _send_sims(self, chat_jid: str, url: str, name: str, size: int, mime: str):
         # S75: slixmpp 1.17 StanzaBase 无 m*/b* kwargs 魔法（bto= 直接 TypeError，
         # 潜伏自 M5，S72 打通上传后首次暴露）——改显式属性赋值。
+        # S76: 附件三件套与桥接同构（客户端只认 reference/media-sharing+oob），
+        # body 置于附件元素之后（桥接实证的对现代客户端顺序模式）。
         msg = self.xmpp.Message()
         msg["to"] = chat_jid
         msg["type"] = "chat"
-        msg["body"] = f"📎 {name}"
-        sims = ET.Element("{%s}share" % SIMS_NS)
-        preview = ET.SubElement(sims, "preview")
-        ref = ET.SubElement(preview, "{urn:xmpp:reference:0}reference",
-                            {"type": "content", "uri": url})
-        ref.text = name
-        media = ET.SubElement(preview, "{urn:xmpp:oob:1}oob")
-        ET.SubElement(media, "url").text = url
-        msg.xml.append(sims)
+        for el in build_file_share(url, name, size, mime):
+            msg.xml.append(el)
+        msg["body"] = f"📎 {name}\n{url}"
         msg.send()
+        logging.getLogger("app").info("[XMPP] 附件消息已发: %s → %s (%s)", name, chat_jid, url)
 
     # -------------------- 行为引擎（主动事件） --------------------
     async def execute_behavior_event(self, chat_jid: str, behavior_item: BehaviorItem):

@@ -839,8 +839,30 @@ class TestS75Sims:
         m = x.msgs[0]
         assert m.attrs.get("to") == "u@d" and m.attrs.get("type") == "chat"
         assert "f.png" in m.attrs.get("body", "")
+        assert "https://h/f.png" in m.attrs.get("body", "")
         assert m.sent is True
-        assert any("share" in str(el.tag) for el in list(m.xml))
+        tags = [str(el.tag) for el in list(m.xml)]
+        assert "{urn:xmpp:reference:0}reference" in tags
+        assert "{jabber:x:oob}x" in tags
+        assert tags.index("{urn:xmpp:reference:0}reference") < tags.index("{jabber:x:oob}x")
+
+    def test_build_file_share_structure(self):
+        parts = xc.build_file_share("https://h/f.png", "f.png", 4242, "image/png")
+        assert len(parts) == 2
+        ref, oob = parts
+        assert ref.tag == "{urn:xmpp:reference:0}reference" and ref.get("type") == "data"
+        media = ref.find("{urn:xmpp:sims:1}media-sharing")
+        assert media is not None
+        f = media.find("{urn:xmpp:jingle:apps:file-transfer:5}file")
+        assert f is not None
+        assert f.find("{urn:xmpp:jingle:apps:file-transfer:5}name").text == "f.png"
+        assert f.find("{urn:xmpp:jingle:apps:file-transfer:5}media-type").text == "image/png"
+        assert f.find("{urn:xmpp:jingle:apps:file-transfer:5}size").text == "4242"
+        src = media.find("{urn:xmpp:sims:1}sources")
+        assert src.find("{urn:xmpp:reference:0}reference").get("uri") == "https://h/f.png"
+        assert oob.tag == "{jabber:x:oob}x"
+        assert oob.find("{jabber:x:oob}url").text == "https://h/f.png"
+        assert oob.find("{jabber:x:oob}name").text == "f.png"
 
     def test_slixmpp_stanza_kwargs_magic_absent(self):
         # 钉死事实：此版本 StanzaBase 无 m*/b* kwargs，未来勿再走 kwargs 构造
@@ -855,3 +877,5 @@ class TestS75Sims:
         src = inspect.getsource(xc.XmppClient._send_sims)
         assert "Message(bto" not in src and "Message(mto" not in src
         assert 'msg["to"]' in src and 'msg["type"]' in src
+        assert "附件消息已发" in src and "build_file_share" in src
+        assert "preview" not in src  # S76: 旧 XEP 样例 share/preview 结构已废弃
