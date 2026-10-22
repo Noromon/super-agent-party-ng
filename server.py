@@ -5837,8 +5837,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                 }
                 yield f"data: {json.dumps(final_chunk)}\n\n"
                 full_content += final_chunk["choices"][0]["delta"].get("content", "")
-            if not tool_calls:
-                # 将响应添加到消息列表
+            if not tool_calls and full_content:
+                # 将响应添加到消息列表（S68：空生成不写历史，防 assistant 空串污染上下文）
                 content_append(request.messages, 'assistant', full_content)
             # 工具和深度搜索
             if tool_calls:
