@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """M-3 structural ratchet (audit 09 item 7): giant functions may only shrink.
 
-WHITELIST = module-level functions still >=300 lines. Each M-3 batch must
-REMOVE an entry (never add). tools_change_messages split (2026-10-20) moved
-768 -> 205 lines into 11 module-level helpers, all verified here.
+WHITELIST = module-level functions still >=300 lines. Entries may only be
+REMOVED, never added; re-freezing an already-listed entry upward needs an
+explicit S-number note (RA-25 errata, S66: the old "never add" wording went
+stale when S65-P3 legitimately re-froze two entries on 2026-10-21).
+tools_change_messages split (2026-10-20) moved 768 -> 205 lines into 11
+module-level helpers, all verified here.
 """
 import ast
 import pathlib

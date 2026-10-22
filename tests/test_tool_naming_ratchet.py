@@ -3,7 +3,8 @@
 
 *_tool vs *_tool_local 双工具族 + 近邻语义名（edit_file_patch_tool vs
 edit_file_tool 等）是 LLM 幻觉工具名（C-19）的温床。difflib 近似名
-冲突对 = 162（2026-10-21 实测基线）。整族改名按审计原文排在 E-1 工具
+冲突对基线现值见 _CONFLICT_CAP 行注（162=2026-10-21 实测，165=S65-A10 youcom_search
+移植入 *_search 家族契约名 +3 对；RA-36/RA G9-10 勘误：原 docstring 滞留 162）。整族改名按审计原文排在 E-1 工具
 registry 落地之后（改名=LLM 可见契约+审批 UI/auto-approve/.party 白名单
 连锁）；在此之前本棘轮保证冲突对**只降不升**——新增工具引入新近似名
 冲突即转红。
