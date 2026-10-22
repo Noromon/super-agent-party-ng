@@ -8,6 +8,7 @@ console.log 计数与 styles.css 行数——F2 域切/F3 页面分片过程中
 （确有方法/数据键增删时评审后重跑并在提交信息中说明）。
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -121,10 +122,17 @@ class TestTemplatesDirHygiene:
             assert (tpl / f"{p}.html").exists(), f"缺模板文件 {p}.html"
             host = chat if p.startswith("page_chat_") else idx
             assert f'data-tpl="{p}"' in host, f"{p} 锚点缺失"
-            assert 'activeMenu' not in "".join(
-                ln for ln in host.splitlines() if f'data-tpl="{p}"' in ln)
-            assert 'activeMenu' not in "".join(
-                ln for ln in idx.splitlines() if f'data-tpl="{p}"' in ln)
+            # RA-18（S66）：原两条 join-anchor-line 断言恒真（锚点行必然干净）→
+            # 改为有语义的近邻检查：锚点行不得被重新挂上条件指令（内联时代回归形态）
+            for ln in (l2 for l2 in host.splitlines() if f'data-tpl="{p}"' in l2):
+                assert 'v-if' not in ln and 'v-show' not in ln, f"{p}: 锚点行被挂条件指令"
+        # RA-17（S66）：MANIFEST 反向钉——孤儿模板与未列名手写锚点都会静默改变装载面
+        listed = set(pages)
+        on_disk = {f.stem for f in tpl.glob("page_*.html")}
+        assert on_disk - listed == set(), f"MANIFEST 未列名的孤儿模板: {sorted(on_disk - listed)}"
+        anchors = set(re.findall(r'data-tpl="([^"]+)"', idx))
+        anchors |= set(re.findall(r'data-tpl="([^"]+)"', chat))
+        assert anchors - listed == set(), f"MANIFEST 未登记的锚点: {sorted(anchors - listed)}"
         for pg, body in (("index.html", idx), ("chat.html", chat)):
             assert '<script src="js/boot_templates.js"></script>' in body, pg
             assert body.index('<script src="js/boot_templates.js">') < \

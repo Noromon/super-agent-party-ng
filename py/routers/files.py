@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 """File management and visual-asset endpoints (file read/delete/load,
 VRM model / VRMA motion / Gauss scene libraries) moved verbatim
-out of server.py in the R1 router migration (audit 09 item 6).  Process state defined by server is reached through
-the module object bound below (`_srv`); server runs as __main__ when
-launched directly, so we bind the OBJECT once and attributes resolve at
-request time (lifespan rebinds stay visible).  server imports this
-module, never the other way around.
+out of server.py in the R1 router migration (audit 09 item 6).  S66/RA-14: the
+original `_srv` server-module binding was dead here (no handler reads it) and
+was removed;  server imports this module, never the other way around.
 """
 import logging
-import sys as _sys
 import glob
 import os
 import re
@@ -31,9 +28,6 @@ class FileNames(BaseModel):
     fileNames: List[str]
 
 
-# bind the server module OBJECT once (see docstring); attributes
-# resolve per request so lifespan rebinds stay visible
-_srv = _sys.modules.get('server') or _sys.modules['__main__']
 
 
 logger = logging.getLogger("app")

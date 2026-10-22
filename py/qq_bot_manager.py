@@ -66,14 +66,8 @@ class QQBotManager(BaseBotManager):
         logging.info("开始连接QQ机器人...")
         await self.bot_client.start(appid=self.config.appid, secret=self.config.secret)
 
-    def on_stop_requested(self):
-        if self.loop and not self.loop.is_closed():
-            try:
-                self.loop.call_soon_threadsafe(self.loop.stop)
-            except RuntimeError as e:
-                logging.debug(f"事件循环已停止: {e}")
-            except Exception as e:
-                logging.warning(f"停止事件循环时出错: {e}")
+    # RA-16（S66）：原 on_stop_requested 覆写为死钩子——本类 stop_bot 全覆写且不调 super，
+    # 基类永不回调该钩子；其循环停止逻辑与 stop_bot 内联重复，已删。
 
     def update_behavior_config(self, config):
         """QQ 平台无行为引擎接入：契约要求的显式 no-op（仅记录配置）。"""
@@ -173,10 +167,10 @@ class QQBotManager(BaseBotManager):
             except Exception as e:
                 logging.warning(f"停止事件循环时出错: {e}")
         
-        # 等待线程结束
+        # 等待线程结束（RA-16：单源用类属性 STOP_JOIN_TIMEOUT，不再硬编码 10）
         if self.bot_thread and self.bot_thread.is_alive():
             try:
-                self.bot_thread.join(timeout=10)
+                self.bot_thread.join(timeout=self.STOP_JOIN_TIMEOUT)
                 if self.bot_thread.is_alive():
                     logging.warning("机器人线程在超时后仍在运行")
             except Exception as e:

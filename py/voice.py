@@ -664,20 +664,8 @@ class TTSConnectionManager:
 
 tts_manager = TTSConnectionManager()
 
-async def broadcast_to_vrm(self, message: Union[str, bytes]):
-    if not self.vrm_connections:
-        return
-    disconnected = []
-    for connection in self.vrm_connections:
-        try:
-            if isinstance(message, bytes):
-                await connection.send_bytes(message)
-            else:
-                await connection.send_text(message)
-        except:
-            disconnected.append(connection)
-    for conn in disconnected:
-        self.disconnect_vrm(conn)
+# 批 1c 迁出遗留的模块级 broadcast_to_vrm 死定义（RA-12/29，S66 删除）：
+# 全部调用点均走 tts_manager.broadcast_to_vrm 方法，本孤儿函数从未被引用。
 
 from py.vts_manager import vts_instance
 

@@ -3,7 +3,6 @@
 # 第一步：在加载任何沉重库之前，先搞定端口
 # ==========================================
 import signal
-import struct
 import sys
 import os
 import argparse
@@ -12,7 +11,7 @@ import errno
 from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
-from py.defaults import DEFAULT_SERVER_PORT, FUNASR_WS_URL, GSV_TTS_URL
+from py.defaults import DEFAULT_SERVER_PORT, GSV_TTS_URL
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 
 from py.tool_assembly import build_llm_tools
@@ -285,7 +284,6 @@ sys.stdout.reconfigure(encoding='utf-8')
 import base64
 from datetime import datetime
 import glob
-from io import BytesIO
 import io
 import os
 from pathlib import Path
@@ -297,7 +295,6 @@ import httpx
 import ipaddress
 from urllib.parse import urlparse, urlunparse, urljoin
 from urllib.robotparser import RobotFileParser
-import websockets
 from py.load_files import check_robots_txt, get_file_content, is_private_ip, sanitize_url
 
 # 修复 sherpa-onnx 在 macOS arm64 上的 onnxruntime dylib 路径问题
@@ -1078,7 +1075,7 @@ from py.bot_container import (BOT_AUTOSTART_TABLE, BotContainer,
                                   _bot_autostart_plan, sync_all_bots_behavior)
 from py.stream_relay import (
     _active_streams, _active_streams_lock, _current_stream_entry, _stream_cancelled,
-    _stream_producer_wrapper, _stream_consumer_generator, _release_consumer,
+    _stream_producer_wrapper, _stream_consumer_generator,
     _stream_ttl_loop, _cleanup_stream,
 )
 from py.routers import (media, bots, memories, system, files,
@@ -4704,7 +4701,6 @@ def _stream_round_compress(request, settings, _st):
     """L1 context compression after a tool round (W1 copy). (M-3 split)"""
     max_rounds = 0 if _cm_context_enabled(settings) else settings.get("max_rounds", 0)
     chat_messages = request.messages # 这里的 chat_messages 包含 system
-    usage_info = None
     _st.setdefault("_ctx_peak", 0)
     if max_rounds > 0:
                             
@@ -5780,6 +5776,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             if tool_calls:
                 async for _c in _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
                     yield _c
+                # RA-11：旧内联压缩段首「逐轮擦除 usage_info」随 helper 化失活，回植旧位（tool round 内顺序执行处）
+                usage_info = None
                 if _st.pop("w1_cancel", False):
                     return
                 if _st.pop("w1_abort", False):

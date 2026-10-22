@@ -64,3 +64,18 @@ def test_app_state_keys_not_redefined_in_server():
     for k in keys:
         assert not re.search(r"^" + k + r"\s*=", srv, re.M), \
             f"{k} 在 server.py 重复定义（会遮蔽 app_state 造成双事实源）"
+
+
+def test_s66_hygiene_pins():
+    # S66/C1（外审 RA-11/12/14/15）：死件清理后不得回填
+    v = (ROOT / "py" / "voice.py").read_text(encoding="utf-8")
+    assert not re.search(r"^async def broadcast_to_vrm", v, re.M), "RA-12 模块级孤儿回填"
+    assert v.count("async def broadcast_to_vrm") == 1
+    for f in ("files.py", "media.py", "system.py"):
+        s = (ROUTERS / f).read_text(encoding="utf-8")
+        assert "_srv = _sys.modules" not in s, f"RA-14 {f} 死绑定回填"
+    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    for dead in ("import struct", "FUNASR_WS_URL", "from io import BytesIO",
+                 "import websockets", "_release_consumer"):
+        assert dead not in srv, f"RA-15 死 import 回填: {dead}"
+    assert "RA-11" in srv, "RA-11 逐轮擦除 usage_info 注释标记缺失（回植被删？）"

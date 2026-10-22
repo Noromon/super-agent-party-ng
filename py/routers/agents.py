@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """Agent-party and A2A endpoints (agent list/remove, a2a init) moved
 verbatim out of server.py in the R1 router migration (audit 09
-item 6).  Process state defined by server is reached through
-the module object bound below (`_srv`); server runs as __main__ when
-launched directly, so we bind the OBJECT once and attributes resolve
-at request time (lifespan rebinds stay visible).  server imports this
+item 6).  S66/RA-14: this module needs no server state; the stale `_srv` prose
+documented a binding that no handler here uses.  server imports this
 module, never the other way around.
 """
 import json
