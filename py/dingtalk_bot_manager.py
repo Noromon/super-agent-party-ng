@@ -84,6 +84,10 @@ class DingtalkBotManager(BaseBotManager):
             self._ready_complete.set()
             logging.info("[Dingtalk] 机器人已完全就绪")
             await asyncio.wait({cli_task, eng_task}, return_when=asyncio.FIRST_COMPLETED)
+            # RA-05：settle 窗后 cli_task 异常死亡须继续上抛（旧 gather 必记语义），
+            # 交由基类 except 填 _startup_error，避免静默死亡+泛化报错
+            if cli_task.done() and cli_task.exception():
+                raise cli_task.exception()
         finally:
             for t in (cli_task, eng_task):
                 if not t.done():

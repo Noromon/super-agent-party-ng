@@ -43,6 +43,7 @@ class WeComBotManager(BaseBotManager):
     SETTINGS_KEY = "weComBotConfig"
     TARGET_FIELD = "behaviorTargetChatIds"
     ENGINE_TARGET_KEY = "wecom"
+    SYNC_CONFIG_WRITEBACK = False  # RA-07：旧 wecom 行为同步仅 update_config，不回写 config
     STOP_JOIN_TIMEOUT = 3
     AUTO_START_ENGINE = False    # 原语义：run_client 内 stop+restart 编排
 

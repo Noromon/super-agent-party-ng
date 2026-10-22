@@ -103,14 +103,17 @@ class WeChatBotManager(BaseBotManager):
         self.qr_base64 = None
         self.is_logged_in = False
 
+    def pre_start_reset(self):
+        # RA-06：复位须晚于基类「已在运行/清理中」守卫，避免运行中误触重复 start 污染登录态
+        self.qr_url = None
+        self.qr_base64 = None
+        self.is_logged_in = False
+
     def start_bot(self, config):
         logging.info("========================================")
         logging.info("正在初始化微信机器人...")
         if WeChatBot is None:
             raise Exception("尚未安装 wechatbot-sdk")
-        self.qr_url = None
-        self.qr_base64 = None
-        self.is_logged_in = False
         super().start_bot(config)
 
     def build_client(self, config: WeChatBotConfig):

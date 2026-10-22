@@ -38,7 +38,11 @@ class BaseBotManager:
     READY_TIMEOUT = 30
     STOP_JOIN_TIMEOUT = 5
     AUTO_START_ENGINE = True     # False=行为引擎生命周期由平台 run_client 自行编排
-    SYNC_BEHAVIOR_ON_START = True  # False=启动时不做全局行为配置同步（qq 无行为接入）
+    SYNC_BEHAVIOR_ON_START = True  # False=启动时不做全局行为同步（qq 无行为接入）
+    SYNC_CONFIG_WRITEBACK = True   # False=行为同步不回写 config（RA-07：wecom 旧语义）
+
+    def pre_start_reset(self):
+        """守卫通过、启动开始前的平台侧状态复位钩子（RA-06：须晚于「已在运行」守卫）。"""
 
     def __init__(self):
         self.bot_thread = None
@@ -60,6 +64,7 @@ class BaseBotManager:
         if self.is_running:
             raise Exception(f"{self.PLATFORM_LABEL} 机器人已在运行")
 
+        self.pre_start_reset()
         self.config = config
         self._shutdown_event.clear()
         self._startup_complete.clear()
@@ -74,16 +79,22 @@ class BaseBotManager:
 
         if not self._startup_complete.wait(timeout=self.STARTUP_TIMEOUT):
             self.stop_bot()
-            raise Exception(f"{self.PLATFORM_LABEL} 机器人连接超时")
+            err = self._startup_error
+            raise Exception(f"{self.PLATFORM_LABEL} 机器人连接超时" + (f": {err}" if err else ""))
         if self._startup_error:
             self.stop_bot()
             raise Exception(f"{self.PLATFORM_LABEL} 机器人启动失败: {self._startup_error}")
         if not self._ready_complete.wait(timeout=self.READY_TIMEOUT):
             self.stop_bot()
-            raise Exception(f"{self.PLATFORM_LABEL} 机器人就绪超时")
+            err = self._startup_error
+            raise Exception(f"{self.PLATFORM_LABEL} 机器人就绪超时" + (f": {err}" if err else ""))
         if not self.is_running:
+            # RA-04/RA-03：就绪阶段异常在 _startup_error 迟写入（先写后 set 事件，无竞态窗口），
+            # 此处二次读取并拼入消息，避免真实异常被泛化文案吞没
             self.stop_bot()
-            raise Exception(f"{self.PLATFORM_LABEL} 机器人未能正常运行")
+            err = self._startup_error
+            raise Exception(
+                f"{self.PLATFORM_LABEL} 机器人未能正常运行" + (f": {err}" if err else ""))
 
     def _run_bot_thread(self, config):
         self.loop = asyncio.new_event_loop()
@@ -94,24 +105,37 @@ class BaseBotManager:
                 from py.get_setting import load_settings
                 from py.behavior_engine import global_behavior_engine, BehaviorSettings
 
-                settings = await load_settings()
+                # RA-02：读设置+行为同步=旧 per-platform 语义「失败吞错继续启动」；
+                # 且仅接入行为的平台才读设置（qq 等 SYNC_BEHAVIOR_ON_START=False 不再无谓读盘）
+                settings = {}
+                if self.SYNC_BEHAVIOR_ON_START:
+                    try:
+                        settings = await load_settings()
+                    except Exception as e:
+                        logging.warning(f"{self.PLATFORM_LABEL} 启动读取设置失败（跳过行为同步继续启动）: {e}")
 
                 await self.pre_client_setup()
 
                 # 行为配置同步（各平台原逐份复制的同一段逻辑，字段名参数化）
-                behavior_data = settings.get("behaviorSettings", {}) if self.SYNC_BEHAVIOR_ON_START else {}
-                target_ids = getattr(config, self.TARGET_FIELD, None) if self.TARGET_FIELD else None
-                if not target_ids and self.SETTINGS_KEY:
-                    target_ids = (settings.get(self.SETTINGS_KEY, {}) or {}).get(self.TARGET_FIELD, [])
-                if behavior_data:
-                    global_behavior_engine.update_config(
-                        behavior_data, {self.ENGINE_TARGET_KEY: target_ids})
-                    if isinstance(behavior_data, dict):
-                        config.behaviorSettings = BehaviorSettings(**behavior_data)
-                    else:
-                        config.behaviorSettings = behavior_data
-                    if self.TARGET_FIELD:
-                        setattr(config, self.TARGET_FIELD, target_ids)
+                if self.SYNC_BEHAVIOR_ON_START:
+                    try:
+                        behavior_data = settings.get("behaviorSettings", {})
+                        target_ids = getattr(config, self.TARGET_FIELD, None) if self.TARGET_FIELD else None
+                        if not target_ids and self.SETTINGS_KEY:
+                            target_ids = (settings.get(self.SETTINGS_KEY, {}) or {}).get(self.TARGET_FIELD, [])
+                        if behavior_data:
+                            global_behavior_engine.update_config(
+                                behavior_data, {self.ENGINE_TARGET_KEY: target_ids})
+                            # RA-07：config 回写受开关门控（wecom 旧语义=不回写）
+                            if self.SYNC_CONFIG_WRITEBACK:
+                                if isinstance(behavior_data, dict):
+                                    config.behaviorSettings = BehaviorSettings(**behavior_data)
+                                else:
+                                    config.behaviorSettings = behavior_data
+                                if self.TARGET_FIELD:
+                                    setattr(config, self.TARGET_FIELD, target_ids)
+                    except Exception as e:
+                        logging.warning(f"{self.PLATFORM_LABEL} 启动行为配置同步失败（继续启动）: {e}")
 
                 # client 构建（平台钩子，可 async：如需网络握手）+ 公共接线
                 client = self.build_client(config)
