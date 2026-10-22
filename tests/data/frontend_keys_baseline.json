@@ -660,6 +660,8 @@
   "navigateTo",
   "newBotConversation",
   "onDiaryActionToggle",
+  "onDiaryActionToolsList",
+  "onDiaryActionToolsMode",
   "onDiaryImTargetChange",
   "onDiaryImTargetsChange",
   "onDidStartLoading",

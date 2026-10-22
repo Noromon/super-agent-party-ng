@@ -478,7 +478,20 @@ class DiaryEngine:
         ]
 
     async def _get_enable_tools_for_action(self, action: str):
-        """根据动作类型动态构建工具白名单"""
+        """S74：每动作工具策略（diarySettings.actions.<key>.tools_mode）。
+
+        lowpriv（默认=现状）= 只读低权限白名单；none = 0 工具；
+        inherit = 继承角色全部工具（返回 None，不发名单）；
+        custom = 用户自填 tools_list。
+        """
+        cfg = ((self.config.get("actions", {}) or {}).get(action) or {})
+        mode = str(cfg.get("tools_mode") or "lowpriv").lower()
+        if mode == "none":
+            return []
+        if mode == "inherit":
+            return None
+        if mode == "custom":
+            return [t for t in (cfg.get("tools_list") or []) if t]
         tools = list(DIARY_ALLOWED_TOOLS)
         if action == "smartHome":
             try:
@@ -493,7 +506,7 @@ class DiaryEngine:
         return tools
 
     async def _invoke_agent(self, action: str) -> str:
-        """调用本地主智能体生成日记内容（限制为低权限工具）"""
+        """调用本地主智能体生成日记内容（按 S74 每动作工具策略限制）"""
         port = get_port()
         url = f"http://127.0.0.1:{port}/v1/chat/completions"
         enable_tools = await self._get_enable_tools_for_action(action)
@@ -503,9 +516,11 @@ class DiaryEngine:
             "stream": False,
             "is_app_bot": True,
             "platform": "diary",
-            "enable_tools": enable_tools,
             "enable_web_search": action == "webSearch",
         }
+        if enable_tools is not None:
+            # None 必须整个省略（server 模型 List[str]=None 不接受显式 null）
+            payload["enable_tools"] = enable_tools
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
                 resp = await client.post(url, json=payload)

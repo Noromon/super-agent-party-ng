@@ -213,6 +213,20 @@ Object.assign(vue_methods, {
       this.$nextTick(() => { if (typeof this.scrollToBottom === 'function') this.scrollToBottom(); });
     },
 
+    // ---- S74：每动作工具策略（lowpriv 默认/none/inherit/custom）----
+    onDiaryActionToolsMode(key, mode) {
+      const a = this.diarySettings.actions[key] || (this.diarySettings.actions[key] = {});
+      a.tools_mode = mode;
+      if (mode !== 'custom') a.tools_list = [];
+      this.autoSaveSettings();
+    },
+
+    onDiaryActionToolsList(key, list) {
+      const a = this.diarySettings.actions[key] || (this.diarySettings.actions[key] = {});
+      a.tools_list = Array.isArray(list) ? list : [];
+      this.autoSaveSettings();
+    },
+
     // ---- S71：日记主动推送目标（imTargetMap {platform:[ids]}；空/缺省 = 自动取触发时主会话）----
     diaryTargetPlatformsList() {
       const list = this.diarySettings && this.diarySettings.imTargets;

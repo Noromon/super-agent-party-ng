@@ -136,3 +136,49 @@ def test_ui_and_i18n_wired():
                     "behaviorToolsWhitelist", "behaviorToolsBlacklist",
                     "behaviorToolsList", "behaviorToolsListHint"):
             assert key in s, (loc, key)
+
+
+# ---------------------------------------------------------------- S74 每动作工具策略
+
+def test_diary_action_policy_modes(monkeypatch):
+    from py.diary_engine import DIARY_ALLOWED_TOOLS, global_diary_engine as de
+    monkeypatch.setattr(de, "config", {
+        "actions": {
+            "think": {},
+            "webSearch": {"tools_mode": "none"},
+            "knowledge": {"tools_mode": "inherit"},
+            "imMessage": {"tools_mode": "custom", "tools_list": ["simple_fetch", ""]},
+        }
+    })
+    import asyncio as _aio
+    assert _aio.run(de._get_enable_tools_for_action("think")) == list(DIARY_ALLOWED_TOOLS)
+    assert _aio.run(de._get_enable_tools_for_action("webSearch")) == []
+    assert _aio.run(de._get_enable_tools_for_action("knowledge")) is None
+    assert _aio.run(de._get_enable_tools_for_action("imMessage")) == ["simple_fetch"]
+    assert "shell_tool_local" not in list(DIARY_ALLOWED_TOOLS)
+
+
+def test_diary_lowpriv_action_unknown_key_defaults():
+    from py.diary_engine import DIARY_ALLOWED_TOOLS, global_diary_engine as de
+    import asyncio as _aio
+    _ = de  # config 无 actions -> lowpriv 现状
+    got = _aio.run(de._get_enable_tools_for_action("brandNewAction"))
+    assert got == list(DIARY_ALLOWED_TOOLS)
+
+
+def test_diary_payload_omits_none_tools():
+    src = _read("py/diary_engine.py")
+    assert "if enable_tools is not None:" in src
+    assert '"enable_tools": enable_tools,' not in src
+
+
+def test_s74_ui_and_i18n():
+    role = _read("static/templates/page_role.html")
+    assert "onDiaryActionToolsMode" in role and "diaryToolsPolicy" in role
+    js = _read("static/js/methods/44_diary.js")
+    assert "onDiaryActionToolsMode" in js and "onDiaryActionToolsList" in js
+    for loc in ("static/js/locales/zh-CN.js", "static/js/locales/en-US.js"):
+        s = _read(loc)
+        for key in ("diaryToolsPolicy", "diaryToolsLowpriv", "diaryToolsNone",
+                    "diaryToolsInherit", "diaryToolsCustom", "diaryToolsCustomHint"):
+            assert key in s, (loc, key)

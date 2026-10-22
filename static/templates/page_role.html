@@ -2874,6 +2874,23 @@
                                            :disabled="!diarySettings.actions[key].enabled"
                                            show-input style="flex: 1;" @change="autoSaveSettings"></el-slider>
                               </span>
+                              <!-- S74：每动作工具策略（默认 lowpriv=只读低权限白名单） -->
+                              <el-select :model-value="diarySettings.actions[key].tools_mode || 'lowpriv'"
+                                         @change="(v) => onDiaryActionToolsMode(key, v)"
+                                         size="small" style="width: 150px; flex-shrink: 0;"
+                                         :disabled="!diarySettings.actions[key].enabled"
+                                         :title="t('diaryToolsPolicy') || '该动作可用工具'">
+                                <el-option :label="t('diaryToolsLowpriv') || '低权限白名单'" value="lowpriv"></el-option>
+                                <el-option :label="t('diaryToolsNone') || '无工具'" value="none"></el-option>
+                                <el-option :label="t('diaryToolsInherit') || '继承全部工具'" value="inherit"></el-option>
+                                <el-option :label="t('diaryToolsCustom') || '自定义名单'" value="custom"></el-option>
+                              </el-select>
+                              <el-select v-if="(diarySettings.actions[key].tools_mode || 'lowpriv') === 'custom'"
+                                         :model-value="diarySettings.actions[key].tools_list || []"
+                                         @change="(v) => onDiaryActionToolsList(key, v)"
+                                         multiple filterable allow-create default-first-option
+                                         size="small" style="flex: 1; min-width: 160px;"
+                                         :placeholder="t('diaryToolsCustomHint') || '输入工具名回车添加'"></el-select>
                             </div>
                           </div>
                         </div>
