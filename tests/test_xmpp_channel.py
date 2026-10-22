@@ -460,6 +460,14 @@ class TestBodyUrlExtraction:
 
 
 class TestTlsGate:
+    @pytest.fixture(autouse=True)
+    def _isolated_store(self, tmp_path, monkeypatch):
+        # S72: 全局 STORE 一律换 tmp（防 env 泄漏写进生产 xmpp_trust.json），
+        # 并禁用系统信任链真实联网。
+        from py import xmpp_trust as xt
+        monkeypatch.setattr(xt, "STORE", xt.TrustStore(tmp_path / "x.json"))
+        monkeypatch.setattr(xc, "system_tls_ok", lambda h, p: False)
+
     def _fake_conn(self, monkeypatch, der=b"FAKE-DER", fail=False):
         import hashlib
 
@@ -517,6 +525,24 @@ class TestTlsGate:
         fp = self._fake_conn(monkeypatch)
         xt.get_store().trust("known2.local:7443", fp)
         assert asyncio.run(c._gate_https("https://known2.local:7443/a.jpg")) is True
+
+    def test_system_trusted_cert_passes(self, monkeypatch):
+        # S72: CA 证书系统链可验 → 直放，不探测不排队
+        c = make_client()
+        monkeypatch.setattr(xc, "system_tls_ok", lambda h, p: True)
+
+        async def boom(*a, **kw):
+            raise AssertionError("must not probe")
+        monkeypatch.setattr(xc.asyncio, "open_connection", boom)
+        assert asyncio.run(c._gate_https("https://ca.good/a.jpg")) is True
+
+    def test_same_cert_other_host_passes(self, monkeypatch):
+        # S72: 已审阅证书的同指纹主机（Openfire slot 回机器名:7443）免复审
+        from py import xmpp_trust as xt
+        c = make_client()
+        fp = self._fake_conn(monkeypatch)
+        xt.get_store().trust("localhost:5222", fp)
+        assert asyncio.run(c._gate_https("https://DESKTOP-XYZ:7443/a.jpg")) is True
 
 
 class TestRedactMediaForStore:
@@ -641,3 +667,139 @@ class TestRunConstruction:
         with pytest.raises(RuntimeError, match="5222"):
             asyncio.run(c.run())
         assert built == []  # rejected before touching slixmpp at all
+
+
+class TestS72UploadFlow:
+    """_upload_and_share 候选顺序重试 + 纯 helper 行为测（探针实测语义回归）。"""
+
+    def _tmp_png(self):
+        import os as _os
+        fd, path = tempfile.mkstemp(suffix=".png")
+        _os.write(fd, b"x" * 64)
+        _os.close(fd)
+        self._path = path
+        return path
+
+    def _client(self):
+        c = make_client()
+        c._upload_service_jid = None
+        c._xep0363_supported = True
+        c.sent = []
+
+        async def fake_send(chat_jid, text):
+            c.sent.append(text)
+        c._send_text = fake_send
+        c.sims = []
+        c._send_sims = lambda jid, url, name, size, mime: c.sims.append((url, name))
+        return c
+
+    def test_pick_upload_services_order(self):
+        got = xc.pick_upload_services(
+            [("proxy.a", "File Proxy"), ("fileupload.localhost", "HTTP File Upload")],
+            "localhost")
+        assert got == ["fileupload.localhost",
+                       "httpfileupload.localhost", "upload.localhost"]
+
+    def test_slot_request_size_dual_form(self):
+        # Openfire 读 <size> 文本；XEP 严格实现读 size 属性。缺任一都是回归。
+        # （<request> 子元素按惯例不带命名空间，序列化时由父级继承）
+        req = xc.build_slot_request("a.png", 1234)
+        sz = req.find("size")
+        assert sz is not None and sz.get("size") == "1234" and sz.text == "1234"
+        fn = req.find("filename")
+        assert fn is not None and fn.get("name") == "a.png" and fn.text == "a.png"
+
+    def test_slot_error_kind(self):
+        from slixmpp.xmlstream import ET as XET
+        nosrv = XET.fromstring(
+            "<iq type='error'><error type='cancel'>"
+            "<remote-server-not-found xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>"
+            "</error></iq>")
+        bad = XET.fromstring(
+            "<iq type='error'><error type='modify'>"
+            "<bad-request xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/>"
+            "</error></iq>")
+        assert xc.slot_error_kind(nosrv) == "noservice"
+        assert xc.slot_error_kind(bad) == "error"
+
+    def test_all_noservice_disables_and_informs(self, monkeypatch):
+        c = self._client()
+        path = self._tmp_png()
+
+        async def services():
+            return ["a.localhost", "b.localhost"]
+
+        async def slot(service, name, size):
+            return None, None, "noservice"
+        monkeypatch.setattr(c, "_discover_upload_services", services)
+        monkeypatch.setattr(c, "_request_slot", slot)
+        out = asyncio.run(c._upload_and_share("j@x", path))
+        os.unlink(path)
+        assert out is None
+        assert c._xep0363_supported is False
+        assert any("XEP-0363" in s for s in c.sent)
+
+    def test_partial_failure_keeps_capability(self, monkeypatch):
+        c = self._client()
+        path = self._tmp_png()
+
+        async def services():
+            return ["a.localhost", "b.localhost"]
+
+        seq = iter([("noservice"), ("error")])
+
+        async def slot(service, name, size):
+            return None, None, next(seq)
+        monkeypatch.setattr(c, "_discover_upload_services", services)
+        monkeypatch.setattr(c, "_request_slot", slot)
+        out = asyncio.run(c._upload_and_share("j@x", path))
+        os.unlink(path)
+        assert out is None
+        assert c._xep0363_supported is True
+        assert any("暂不可用" in s for s in c.sent)
+
+    def test_first_dead_second_success(self, monkeypatch):
+        c = self._client()
+        path = self._tmp_png()
+
+        async def services():
+            return ["dead.localhost", "good.localhost"]
+
+        async def slot(service, name, size):
+            if service.startswith("dead"):
+                return None, None, "noservice"
+            return "https://good.local/p/a.png", "https://good.local/get/a.png", None
+
+        async def gate(url):
+            return True
+
+        class _Resp:
+            status = 201
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        class _Sess:
+            def put(self, url, **kw):
+                return _Resp()
+        c.session = _Sess()
+        c._aio_ssl = lambda url: False
+        monkeypatch.setattr(c, "_discover_upload_services", services)
+        monkeypatch.setattr(c, "_request_slot", slot)
+        monkeypatch.setattr(c, "_gate_https", gate)
+        out = asyncio.run(c._upload_and_share("j@x", path))
+        os.unlink(path)
+        assert out == "https://good.local/get/a.png"
+        assert c._upload_service_jid == "good.localhost"
+        assert c.sims and c._xep0363_supported is True
+
+    def test_discover_prefers_sticky_cache(self, monkeypatch):
+        c = make_client()
+        c._upload_service_jid = "sticky.local"
+
+        async def services():
+            return [c._upload_service_jid]
+        assert asyncio.run(c._discover_upload_services()) == ["sticky.local"]

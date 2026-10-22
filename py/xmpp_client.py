@@ -6,7 +6,8 @@
 XMPP 侧：slixmpp（TCP 5222 / TLS 5223；wss 传输不支持并给出明确报错）、
 XEP-0066 OOB 与内联 base64 收图、XEP-0363 HTTP Upload + SIMS 发图。
 安全：外发本地图片仅限 UPLOAD_FILES_DIR / TOOL_TEMP_DIR / KB_DIR 围栏内；
-扩展的 local-image?path= 任意文件读 fallback 已废除（上传失败只发文字）。
+扩展的 local-image?path= 任意文件读 fallback 已废除（上传失败只发文字，
+S72 起附具体原因；363 服务多候选重试、CA 证书直放、同指纹证书免复审）。
 """
 import asyncio
 import base64
@@ -32,7 +33,62 @@ from py.get_setting import (KB_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR,
 
 UPLOAD_NS = "urn:xmpp:http:upload:0"
 SIMS_NS = "urn:xmpp:sims:1"
+DISCO_ITEMS_NS = "http://jabber.org/protocol/disco#items"
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+# 表示“该候选 JID 上没有 363 服务”的 stanza 错误条件：换下一个候选；全中才判服务器缺失
+NO_SERVICE = frozenset(("service-unavailable", "remote-server-not-found",
+                        "item-not-found", "feature-not-implemented"))
+
+
+def pick_upload_services(items, domain):
+    """S72: ordered XEP-0363 service candidates. items = [(jid, name), ...]
+    disco hits first (in disco order), then the three conventional names."""
+    hit = [jid for jid, nm in items
+           if jid and ("upload" in jid.lower() or "upload" in (nm or "").lower())]
+    out = list(dict.fromkeys(hit))
+    for c in (f"httpfileupload.{domain}", f"fileupload.{domain}", f"upload.{domain}"):
+        if c not in out:
+            out.append(c)
+    return out
+
+
+def build_slot_request(name, size):
+    """<size> dual form: XEP-strict servers read the attribute, Openfire
+    reads the text (probe-proven); attribute-only gets a 400 there."""
+    req = ET.Element("{%s}request" % UPLOAD_NS)
+    fn = ET.SubElement(req, "filename", {"name": name})
+    fn.text = name
+    sz = ET.SubElement(req, "size", {"size": str(size)})
+    sz.text = str(size)
+    return req
+
+
+def slot_error_kind(xml) -> str:
+    """'noservice' -> try next candidate; 'error' -> one-shot failure."""
+    try:
+        err = xml.find("{*}error")
+    except Exception:
+        return "error"
+    if err is None:
+        return "error"
+    for child in err:
+        if (child.tag.rsplit("}", 1)[-1] or "").lower() in NO_SERVICE:
+            return "noservice"
+    return "error"
+
+
+def system_tls_ok(host, port) -> bool:
+    """Endpoint validates against the OS trust store (CA-issued cert) ->
+    pass the HTTPS gate without TOFU review."""
+    import socket
+    import ssl
+    try:
+        with socket.create_connection((host, port), 8) as s:
+            with ssl.create_default_context().wrap_socket(s, server_hostname=host):
+                return True
+    except Exception:
+        return False
+
 
 
 from py import llm_gate
@@ -204,6 +260,9 @@ class XmppClient:
         # (Typical: prosody 5222 + http-upload 7443 share one self-signed cert)
         if xmpp_trust.get_store().knows_host(host):
             return True
+        # S72: CA 证书（系统信任链可验）直接放行，无需 TOFU 审阅
+        if await asyncio.to_thread(system_tls_ok, host, port):
+            return True
         try:
             _r, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port,
@@ -217,8 +276,19 @@ class XmppClient:
                 writer.close()
             fp = xmpp_trust.fingerprint_pem(pem)
         except Exception as e:
-            logging.warning("XMPP TLS 探测失败 %s: %s", key, e)
+            logging.getLogger("app").warning("XMPP TLS 探测失败 %s: %r", key, e)
             return False
+        if (xmpp_trust.get_store().check(key, fp) == "match"
+                or xmpp_trust.ONCE.is_granted(key)):
+            return True
+        # S72: 同一张已审阅过的证书（同指纹）出现在其它 host:port（Openfire
+        # slot 回机器名:7443 而非连接用的 localhost:5222）——视为已信任
+        if any((v.get("fingerprint") or "") == fp
+               for v in xmpp_trust.get_store().entries().values()):
+            return True
+        xmpp_trust.PENDING.add(key, fp, pem)
+        logging.getLogger("app").warning("XMPP 文件主机证书待审阅: %s %s", key, fp)
+        return False
         if (xmpp_trust.get_store().check(key, fp) == "match"
                 or xmpp_trust.ONCE.is_granted(key)):
             return True
@@ -696,85 +766,95 @@ class XmppClient:
                              full_text, re.IGNORECASE):
             raw = m.group(0)
             if not self._fence_ok(raw, roots):
-                logging.warning("XMPP 拒绝外发围栏外路径: %s", raw)
+                logging.getLogger("app").warning("[XMPP] 拒绝外发围栏外路径: %s", raw)
                 continue
             if not os.path.isfile(raw):
                 continue
             if not self._xep0363_supported:
-                await self._send_text(chat_jid, f"（图片暂无法上传：{os.path.basename(raw)}）")
+                await self._send_text(chat_jid, f"（图片暂无法上传：{os.path.basename(raw)}，"
+                                                "服务器 XEP-0363 不可用）")
                 continue
             try:
                 url = await self._upload_and_share(chat_jid, raw)
                 if not url:
-                    await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(raw)}）")
+                    # 具体原因已由 _upload_and_share 发文字并记 app 日志
+                    pass
             except Exception as e:
-                logging.error(f"XMPP 图片外发失败: {e}")
-                await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(raw)}）")
+                logging.getLogger("app").error("[XMPP] 图片外发失败: %r", e, exc_info=True)
+                await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(raw)}，{e}）")
 
     async def _upload_and_share(self, chat_jid: str, file_path: str) -> Optional[str]:
         size = os.path.getsize(file_path)
         name = os.path.basename(file_path)
         mime = "image/" + name.rsplit(".", 1)[-1].lower().replace("jpg", "jpeg")
-        service = await self._discover_upload_service()
-        if not service:
-            self._xep0363_supported = False
-            return None
-        put_url, get_url = await self._request_slot(service, name, size)
-        if not put_url:
-            return None
-        if not await self._gate_https(put_url):
-            await self._send_text(chat_jid, "（图片上传被拒：上传主机证书未获信任，"
-                                            "请在 SAP 设置→XMPP 卡片完成证书审阅）")
-            return None
-        with open(file_path, "rb") as f:
-            data = f.read()
-        async with self.session.put(put_url, data=data,
-                                    ssl=self._aio_ssl(put_url),
-                                    headers={"Content-Type": "application/octet-stream"}) as resp:
-            if resp.status not in (200, 201):
+        app = logging.getLogger("app")
+        reasons = []
+        for service in await self._discover_upload_services():
+            put_url, get_url, kind = await self._request_slot(service, name, size)
+            if not put_url:
+                reasons.append(f"{service}:{kind or 'no-slot'}")
+                continue
+            if not await self._gate_https(put_url):
+                u = urlparse(put_url)
+                hp = f"{u.hostname}:{u.port or 443}"
+                app.warning("[XMPP] 图片上传被拒：上传主机 %s 证书未获信任（已入待审阅）", hp)
+                await self._send_text(chat_jid, f"（图片上传被拒：上传主机 {hp} 证书未获信任，"
+                                                "请在 SAP 设置→XMPP 卡片完成证书审阅，"
+                                                "或将其加入证书豁免白名单）")
                 return None
-        self._send_sims(chat_jid, get_url, name, size, mime)
-        return get_url
-
-    async def _discover_upload_service(self) -> Optional[str]:
-        if self._upload_service_jid:
-            return self._upload_service_jid
-        candidates = [f"httpfileupload.{self.domain}", f"upload.{self.domain}"]
-        try:
-            disco = await self.xmpp["xep_0030"].get_items(jid=self.domain, timeout=10)
-            for item in disco["iter"]["items"]:
-                nm = (item.get("name") or "").lower()
-                jid = (item.get("jid") or "").lower()
-                if "upload" in nm or "upload" in jid:
-                    self._upload_service_jid = str(item.get("jid"))
-                    return self._upload_service_jid
-        except Exception as e:
-            logging.debug(f"XEP-0363 disco 发现失败: {e}")
-        for c in candidates:
-            self._upload_service_jid = c
-            return c
+            with open(file_path, "rb") as f:
+                data = f.read()
+            async with self.session.put(put_url, data=data,
+                                        ssl=self._aio_ssl(put_url),
+                                        headers={"Content-Type": "application/octet-stream"}) as resp:
+                if resp.status not in (200, 201):
+                    app.warning("[XMPP] XEP-0363 PUT 返回 HTTP %s（%s）", resp.status, name)
+                    await self._send_text(chat_jid, f"（图片上传失败：存储服务器返回 HTTP {resp.status}）")
+                    return None
+            self._upload_service_jid = service
+            self._send_sims(chat_jid, get_url, name, size, mime)
+            return get_url
+        if reasons and all(r.endswith(":noservice") for r in reasons):
+            self._xep0363_supported = False
+            why = "服务器未启用 XEP-0363"
+        else:
+            why = "上传服务暂不可用"
+        app.warning("[XMPP] 图片上传失败：%s（%s）", why, "; ".join(reasons))
+        await self._send_text(
+            chat_jid, f"（图片上传失败：{why}；{'，'.join(r.split(':')[0] for r in reasons[:3])}）")
         return None
+
+    async def _discover_upload_services(self) -> List[str]:
+        """S72: 候选顺序表（disco 命中优先+惯例名），逐候选试到成功，不再一次失败定死。"""
+        if self._upload_service_jid:
+            return [self._upload_service_jid]
+        items = []
+        try:
+            disco = await self.xmpp.plugin["xep_0030"].get_items(jid=self.domain, timeout=10)
+            for it in disco.xml.findall(".//{%s}item" % DISCO_ITEMS_NS):
+                items.append((it.get("jid"), it.get("name")))
+        except Exception as e:
+            logging.getLogger("app").info("XEP-0363 disco 发现失败（改用惯例名）: %r", e)
+        return pick_upload_services(items, self.domain)
 
     async def _request_slot(self, service_jid: str, name: str, size: int):
         iq = self.xmpp.Iq(stype="get", sto=service_jid)
-        req = ET.Element("{%s}request" % UPLOAD_NS)
-        ET.SubElement(req, "filename", {"name": name}).text = name
-        ET.SubElement(req, "size", {}).text = str(size)
-        iq.xml.append(req)
+        iq.xml.append(build_slot_request(name, size))
         try:
             resp = await iq.send(timeout=15)
         except Exception as e:
-            logging.warning(f"XEP-0363 slot 请求失败: {e}")
-            self._xep0363_supported = False
-            return None, None
+            xml = getattr(getattr(e, "iq", None), "xml", None)
+            kind = slot_error_kind(xml) if xml is not None else "error"
+            logging.getLogger("app").info("XEP-0363 slot 请求失败(%s): %r", service_jid, e)
+            return None, None, kind
         slot = resp.xml.find("{%s}slot" % UPLOAD_NS)
         if slot is None:
-            self._xep0363_supported = False
-            return None, None
+            return None, None, "noservice"
         put = slot.find("{%s}put" % UPLOAD_NS)
         get = slot.find("{%s}get" % UPLOAD_NS)
         return (put.get("url") if put is not None else None,
-                get.get("url") if get is not None else None)
+                get.get("url") if get is not None else None,
+                None if put is not None else "noservice")
 
     def _send_sims(self, chat_jid: str, url: str, name: str, size: int, mime: str):
         msg = self.xmpp.Message(bto=chat_jid, mtype="chat")
@@ -835,7 +915,9 @@ class XmppClient:
             resp = await client.chat.completions.create(
                 model=self.XmppAgent, messages=messages, stream=False,
                 extra_body={"is_app_bot": True, "platform": "xmpp",
-                            **self._tools_override()})
+                            "behavior_trigger": True,
+                            **self._tools_override(),
+                            **behavior_item.tools_override()})
             reply = (resp.choices[0].message.content or "").strip()
             if not reply:
                 log_empty_reply("xmpp-behavior", chat_jid)

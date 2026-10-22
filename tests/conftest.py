@@ -6,8 +6,15 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+# S72 hardening: pin the isolated data dir at collection time, before any
+# test module imports py.get_setting — an accidental `pytest` run without
+# the SAP_DATA_DIR env var must never write into the production data dir.
+os.environ.setdefault("SAP_DATA_DIR",
+                      tempfile.mkdtemp(prefix="sap_test_conftest_"))
 
 import pytest
 import requests
