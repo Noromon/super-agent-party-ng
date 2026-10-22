@@ -507,6 +507,17 @@ def _migrate_legacy_keys(target_dict):
     return changed
 
 
+def deep_update(target: dict, updates: dict) -> dict:
+    """B8(b03e7c0e): 深合并——嵌套 dict 递归更新，其余类型直接覆盖。
+    ws save_settings 等部分载荷的写入方必须走它，防止整库覆盖丢键。"""
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            deep_update(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
 async def load_settings():
     await init_db()
     defaults = get_default_settings_sync().copy()
@@ -538,7 +549,7 @@ async def load_settings():
                 if _migrate_legacy_keys(user_settings):
                     has_changes[0] = True
                 if has_changes[0] and parse_ok:
-                    asyncio.create_task(save_settings(user_settings))
+                    await save_settings(user_settings)  # B8(b03e7c0e): 火忘任务改 await，防与后续保存竞态
                 if not parse_ok:
                     return defaults if not IS_DOCKER else {**defaults, "isdocker": True}
                 return secret_box.decrypt_settings(user_settings)

@@ -454,7 +454,7 @@ from py.diary_query_tool import diary_query_tool, diary_books_tool, handle_query
 from py.diary_chat_integration import append_to_chat_buffer, update_buffer_identity, get_chat_buffer
 from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK
 
-from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
+from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH
 from py.llm_tool import get_image_base64,get_image_media_type
 from py.tool_dispatch import (_APPROVAL_PREFIX, _approval_payload,
                               _is_approval_result)
@@ -4415,6 +4415,8 @@ async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usa
         if _chunk_count % 5 == 0:
             await asyncio.sleep(0)  # 定期让出控制权，让事件循环处理WebSocket ping
         choice = chunk.choices[0]
+        if choice.delta is None:  # B1(1775d8d3): 末包 delta:null 兼容（少数兼容服务）
+            continue
         if choice.delta.tool_calls:  # function_calling
             is_tool_call = True
             # C-20: 槽位=协议级 tool.index（多 call 交叠时 delta 数组内
@@ -5243,6 +5245,8 @@ async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usag
             await asyncio.sleep(0)  # 定期让出控制权，防止事件循环饥饿导致1006断开
         if chunk.choices:
             choice = chunk.choices[0]
+            if choice.delta is None:  # B1(1775d8d3): 末包 delta:null 兼容
+                continue
             if hasattr(choice.delta, "audio") and choice.delta.audio:
                 # 只把 Base64 音频数据留在 delta 里，别动它
                 yield f"data: {chunk.model_dump_json()}\n\n"
@@ -5578,6 +5582,27 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
             wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
         logging.getLogger("app").info("记忆更新任务已提交到后台线程")
 
+def _append_loopcap_hint(request, tag):
+    """S78(B2-2/T-8 单点): 工具迭代上限后的收尾提示——强制模型基于已有
+    工作向用户总结（流式与非流式共用）。"""
+    logging.getLogger("app").info(f"[LoopCap] {tag}工具调用迭代上限已达，强制模型收尾")
+    request.messages.append({
+        "role": "user",
+        "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
+    })
+
+
+def _drs_round_cap(loop_count, max_iters, search_not_done, tool_calls, tag):
+    """S78(B2-2 16f079d4 fork 侧补强): 纯深度研究轮（无 tool_calls）也须有
+    出口。返回 False=轮数超限且非可收尾工具轮，调用方应结束循环。"""
+    if loop_count <= max_iters:
+        return True
+    if tool_calls and not search_not_done:
+        return True  # 纯工具轮交给迭代上限收尾提示路径
+    logging.getLogger("app").info(f"[LoopCap] {tag}迭代上限({max_iters})已达，强制结束循环")
+    return False
+
+
 async def stream_generator(client, reasoner_client, request, settings, fastapi_base_url,
                      enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
                      user_prompt, DRS_STAGE, tools, images,
@@ -5767,12 +5792,11 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         force_no_tools = False
         while tool_calls or search_not_done:
             _tool_loop_count += 1
+            if not _drs_round_cap(_tool_loop_count, _max_tool_iterations, search_not_done, tool_calls, "流式"):
+                search_not_done, tool_calls = False, []
+                break
             if tool_calls and _tool_loop_count > _max_tool_iterations:
-                logging.getLogger("app").info(f"[LoopCap] 达到工具调用迭代上限({_max_tool_iterations})，强制模型收尾")
-                request.messages.append({
-                    "role": "user",
-                    "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
-                })
+                _append_loopcap_hint(request, "流式")
                 tool_calls = []
                 force_no_tools = True
             if tool_calls:
@@ -6945,7 +6969,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 extra_body = extra_params, # 其他参数
                 **extra
             )
-        if response.choices[0].message.tool_calls:
+        if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: message 可能为 None
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=True)
@@ -6953,18 +6977,18 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         _ns_loop_count = 0
         _ns_max_iterations = int(settings.get("max_tool_iterations", 100) or 100)
         ns_force_no_tools = False
-        while response.choices[0].message.tool_calls or search_not_done:
+        while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):  # B1: None 守卫
             _ns_loop_count += 1
             # T-8: 取消围栏——后续 LLM 轮次前检查（cancel 端点可停不可停工具链的漏洞封堵）
             _cur_entry = _current_stream_entry.get()
             if _cur_entry and _cur_entry.get("cancelled"):
                 break
+            if not _drs_round_cap(_ns_loop_count, _ns_max_iterations, search_not_done, response.choices[0].message.tool_calls, "非流式"):
+                search_not_done = False
+                response.choices[0].message.tool_calls = None
+                break
             if response.choices[0].message.tool_calls and _ns_loop_count > _ns_max_iterations:
-                logging.getLogger("app").info(f"[LoopCap] 非流式工具调用迭代上限({_ns_max_iterations})，强制模型收尾")
-                request.messages.append({
-                    "role": "user",
-                    "content": "[系统提示] 你已达到本轮工具调用迭代上限，工具已不可用。请基于已完成的工作向用户总结当前进展与剩余步骤。",
-                })
+                _append_loopcap_hint(request, "非流式")
                 ns_force_no_tools = True
                 response.choices[0].message.tool_calls = None
             if response.choices[0].message.tool_calls:
@@ -6997,7 +7021,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     extra_body = extra_params, # 其他参数
                     **extra
                 )
-            if response.choices[0].message.tool_calls:
+            if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: 再生成后 message 可能为 None
                 pass
             elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
                 DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=False)
@@ -7969,6 +7993,38 @@ app.include_router(overlay_router)
 settings_lock = asyncio.Lock()
 
 
+async def _ws_save_settings(websocket: WebSocket, data: dict):
+    """B8(b03e7c0e): ws save_settings 单点——读现库深合并后落盘，部分载荷
+    不再整库覆盖。C-15: 失败必须回 save_error（此前异常被外层吞=前端白等超时）。"""
+    settings_dict = data.get("data", {})
+    try:
+        current = await load_settings()
+        deep_update(current, settings_dict)
+        await save_settings(current)
+        await sync_all_bots_behavior(current)
+        try:
+            from py.diary_engine import global_diary_engine
+            global_diary_engine.update_config(current.get("diarySettings"))
+        except Exception as _de:
+            logger.info(f"日记引擎配置同步异常: {_de}")
+    except Exception as _save_e:
+        logger.error(f"[WS] save_settings 失败: {_save_e}")
+        await ws_manager.send_json({
+            "type": "save_error",
+            "correlationId": data.get("correlationId"),
+            "success": False,
+            "error": str(_save_e),
+        }, websocket)
+        return
+    await ws_manager.send_json({
+        "type": "settings_saved",
+        "correlationId": data.get("correlationId"),
+        "success": True
+    }, websocket)
+    # 广播合并后的权威全量（不含自己）
+    await ws_manager.broadcast_settings_update(current, exclude=websocket)
+
+
 async def _ws_diary_im_targets(websocket: WebSocket):
     """S71：日记主动推送目标候选 = 运行时活跃 ∪ 各平台已配置行为目标 ∪ 落盘 bot 会话。"""
     try:
@@ -8098,33 +8154,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await _ws_diary_im_targets(websocket)
 
             elif msg_type == "save_settings":
-                settings_dict = data.get("data", {})
-                # C-15: 失败必须回 save_error（此前异常被外层吞=前端白等 10s 超时）
-                try:
-                    await save_settings(settings_dict)
-                    await sync_all_bots_behavior(settings_dict)
-                    try:
-                        from py.diary_engine import global_diary_engine
-                        global_diary_engine.update_config(settings_dict.get("diarySettings"))
-                    except Exception as _de:
-                        logger.info(f"日记引擎配置同步异常: {_de}")
-                except Exception as _save_e:
-                    logger.error(f"[WS] save_settings 失败: {_save_e}")
-                    await ws_manager.send_json({
-                        "type": "save_error",
-                        "correlationId": data.get("correlationId"),
-                        "success": False,
-                        "error": str(_save_e),
-                    }, websocket)
-                    continue
-                await ws_manager.send_json({
-                    "type": "settings_saved",
-                    "correlationId": data.get("correlationId"),
-                    "success": True
-                }, websocket)
-                
-                # 广播给其他客户端（不含自己）
-                await ws_manager.broadcast_settings_update(settings_dict, exclude=websocket)
+                # B8(b03e7c0e): 深合并落盘；重活在 _ws_save_settings（保 ws 循环壳尺寸）
+                await _ws_save_settings(websocket, data)
 
             elif msg_type == "save_conversations":
                 try:

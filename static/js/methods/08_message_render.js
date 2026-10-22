@@ -137,8 +137,9 @@ Object.assign(vue_methods, {
             const isStandardHtmlName = /^[a-zA-Z][a-zA-Z0-9-]*$/.test(tagName);
 
             if (isStandardHtmlName) {
-              // 如果是合法标签名（如 div, span, a, br, my-component 等），原样保留
-              return match;
+              // B4(上游 on* 剥离): 合法标签名保留但事件属性一律剥除，防 XSS
+              const safeAttrs = attrs.replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '');
+              return `<${slash}${tagName}${safeAttrs}>`;
             } else {
               // 如果包含中文（如 <雷电将军>）或特殊符号（如 <Character·A>），则视作非法，过滤掉
               return ''; 

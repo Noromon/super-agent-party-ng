@@ -2105,7 +2105,7 @@
           :title="conversationGroupDialogMode === 'create' ? t('createGroup') : t('renameGroup')"
           width="420px"
         >
-          <el-form label-position="top">
+          <el-form label-position="top" @submit.native.prevent>
             <el-form-item :label="t('groupNamePlaceholder')">
               <el-input
                 v-model="conversationGroupForm.name"
@@ -2132,7 +2132,7 @@
           :title="t('renameConversation')"
           width="420px"
         >
-          <el-form label-position="top">
+          <el-form label-position="top" @submit.native.prevent>
             <el-form-item :label="t('renameConversation')">
               <el-input
                 v-model="conversationRenameForm.name"

@@ -389,6 +389,7 @@
   "editMemory",
   "editPrompt",
   "editTTS",
+  "ensureConversationCreated",
   "ensureConversationGroups",
   "escapeHtml",
   "escapeSeparator",

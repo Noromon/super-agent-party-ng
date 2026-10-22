@@ -7,6 +7,36 @@ Object.assign(vue_methods, {
       this._covsDirty.add(this.stringifyEntityId(convId));
     },
 
+    // B2-2(16f079d4): 会话创建/刷新单点——发送首条消息时即分配 conversationId，
+    // 保证长耗时流式回复（深度研究等）期间 30s 增量保存正常工作。
+    // fork 决策：不带上游的 50 条会话裁剪（fork 为全量保留+行表增量策略）。
+    ensureConversationCreated(titleMessages) {
+      if (this.conversationId === null) {
+        this.conversationId = uuid.v4();
+        const newConv = {
+          id: this.conversationId,
+          title: this.generateConversationTitle(titleMessages || this.messages),
+          mainAgent: this.mainAgent,
+          groupId: this.activeConversationGroupId || this.draftConversationGroupId || 'default',
+          timestamp: Date.now(),
+          messages: this.messages,
+          fileLinks: this.fileLinks,
+          system_prompt: this.system_prompt,
+        };
+        this.conversations.unshift(newConv);
+      } else {
+        const conv = this.conversations.find(c => c.id === this.conversationId);
+        if (conv) {
+          conv.messages = this.messages;
+          conv.timestamp = Date.now();
+          conv.fileLinks = this.fileLinks;
+          conv.groupId = conv.groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
+          conv.system_prompt = this.system_prompt;
+        }
+      }
+      this.markConvDirty(this.conversationId);
+    },
+
     sanitizeConversationForSave(conv) {
       return {
         ...conv,

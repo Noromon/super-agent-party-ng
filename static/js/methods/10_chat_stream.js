@@ -342,6 +342,8 @@ Object.assign(vue_methods, {
             this.messages.push(newMsgData);
             currentMsg = this.messages[this.messages.length - 1];
         }
+        // B2-2(16f079d4): 提前创建会话，深度研究等长耗时流式期间 30s 增量保存正常工作
+        this.ensureConversationCreated(messagesPayload);
         const latestUserMessage = [...this.messages].reverse().find(msg => msg.role === 'user');
 
         // 获取块的辅助函数（带冻结，支持流式复用）
@@ -633,31 +635,8 @@ Object.assign(vue_methods, {
                 currentMsg.content = '';
             }
 
-            // 消息去重和保存
-            if (this.conversationId === null) {
-                this.conversationId = uuid.v4();
-                const newConv = {
-                    id: this.conversationId,
-                    title: this.generateConversationTitle(messagesPayload),
-                    mainAgent: this.mainAgent,
-                    groupId: this.activeConversationGroupId || this.draftConversationGroupId || 'default',
-                    timestamp: Date.now(),
-                    messages: this.messages,
-                    fileLinks: this.fileLinks,
-                    system_prompt: this.system_prompt,
-                };
-                this.conversations.unshift(newConv);
-            } else {
-                const conv = this.conversations.find(conv => conv.id === this.conversationId);
-                if (conv) {
-                    conv.messages = this.messages;
-                    conv.timestamp = Date.now();
-                    conv.fileLinks = this.fileLinks;
-                    conv.groupId = conv.groupId || this.activeConversationGroupId || this.draftConversationGroupId || 'default';
-                    conv.system_prompt = this.system_prompt;
-                }
-            }
-            this.markConvDirty(this.conversationId);
+            // 消息去重和保存（B2-2: 创建/刷新逻辑收拢到 ensureConversationCreated 单点）
+            this.ensureConversationCreated(messagesPayload);
 
             // 历史全量保留：旧消息不再截断/掏空（渲染由 MAX_RENDERED_BLOCKS 分块虚拟化，
             // 上下文体积由服务端 contextManagement 管线负责）

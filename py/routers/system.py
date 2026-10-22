@@ -312,18 +312,22 @@ async def update_storage_endpoint(request: Request):
     # 检查UPLOAD_FILES_DIR目录中的文件，根据ALLOWED_EXTENSIONS、ALLOWED_IMAGE_EXTENSIONS、ALLOWED_VIDEO_EXTENSIONS分类，如果不存在于textFiles、imageFiles、videoFiles中则添加进去
     # 三个列表的元素是字典，包含"unique_filename"和"original_filename"两个键
     
+    # B8(b03e7c0e): 列表脏元素（非 dict/缺键）跳过而非 KeyError 崩 500
+    def _names(items):
+        return {item.get("unique_filename") for item in items if isinstance(item, dict)}
+
     for file in os.listdir(UPLOAD_FILES_DIR):
         file_path = os.path.join(UPLOAD_FILES_DIR, file)
         if os.path.isfile(file_path):
             file_extension = os.path.splitext(file)[1][1:]
             if file_extension in ALLOWED_EXTENSIONS:
-                if file not in [item["unique_filename"] for item in textFiles]:
+                if file not in _names(textFiles):
                     textFiles.append({"unique_filename": file, "original_filename": file})
             elif file_extension in ALLOWED_IMAGE_EXTENSIONS:
-                if file not in [item["unique_filename"] for item in imageFiles]:
+                if file not in _names(imageFiles):
                     imageFiles.append({"unique_filename": file, "original_filename": file})
             elif file_extension in ALLOWED_VIDEO_EXTENSIONS:
-                if file not in [item["unique_filename"] for item in videoFiles]:
+                if file not in _names(videoFiles):
                     videoFiles.append({"unique_filename": file, "original_filename": file})
 
     # 发给前端
