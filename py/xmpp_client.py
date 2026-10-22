@@ -857,7 +857,11 @@ class XmppClient:
                 None if put is not None else "noservice")
 
     def _send_sims(self, chat_jid: str, url: str, name: str, size: int, mime: str):
-        msg = self.xmpp.Message(bto=chat_jid, mtype="chat")
+        # S75: slixmpp 1.17 StanzaBase 无 m*/b* kwargs 魔法（bto= 直接 TypeError，
+        # 潜伏自 M5，S72 打通上传后首次暴露）——改显式属性赋值。
+        msg = self.xmpp.Message()
+        msg["to"] = chat_jid
+        msg["type"] = "chat"
         msg["body"] = f"📎 {name}"
         sims = ET.Element("{%s}share" % SIMS_NS)
         preview = ET.SubElement(sims, "preview")

@@ -803,3 +803,55 @@ class TestS72UploadFlow:
         async def services():
             return [c._upload_service_jid]
         assert asyncio.run(c._discover_upload_services()) == ["sticky.local"]
+
+
+class TestS75Sims:
+    """_send_sims 显式属性构造（slixmpp 1.17 无 stanza kwargs 魔法）。"""
+
+    def test_send_sims_explicit_attrs(self):
+        c = make_client()
+
+        class _Msg:
+            def __init__(self):
+                self.attrs = {}
+                self.sent = False
+                from slixmpp.xmlstream import ET as XET
+                self.xml = XET.Element("message")
+
+            def __setitem__(self, k, v):
+                self.attrs[k] = v
+
+            def send(self):
+                self.sent = True
+
+        class _Xmpp:
+            def __init__(self):
+                self.msgs = []
+
+            def Message(self):
+                m = _Msg()
+                self.msgs.append(m)
+                return m
+
+        x = _Xmpp()
+        c.xmpp = x
+        c._send_sims("u@d", "https://h/f.png", "f.png", 12, "image/png")
+        m = x.msgs[0]
+        assert m.attrs.get("to") == "u@d" and m.attrs.get("type") == "chat"
+        assert "f.png" in m.attrs.get("body", "")
+        assert m.sent is True
+        assert any("share" in str(el.tag) for el in list(m.xml))
+
+    def test_slixmpp_stanza_kwargs_magic_absent(self):
+        # 钉死事实：此版本 StanzaBase 无 m*/b* kwargs，未来勿再走 kwargs 构造
+        import slixmpp
+        with pytest.raises(TypeError):
+            slixmpp.Message(mto="x@y")
+        with pytest.raises(TypeError):
+            slixmpp.Message(bto="x@y")
+
+    def test_sims_source_uses_explicit_attrs(self):
+        import inspect
+        src = inspect.getsource(xc.XmppClient._send_sims)
+        assert "Message(bto" not in src and "Message(mto" not in src
+        assert 'msg["to"]' in src and 'msg["type"]' in src
