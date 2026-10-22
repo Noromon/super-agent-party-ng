@@ -252,6 +252,10 @@ Object.assign(vue_methods, {
         else if (data.type === 'trigger_send_message') {
           this.sendMessage();
         }
+        // S80(B6/9a30de93)：扩展推的请求进弹幕队列串行调度（见 enqueueLiveRequest 注释）
+        else if (data.type === 'live_enqueue') {
+          this.enqueueLiveRequest(data.data);
+        }
         // 新增：清空消息列表
         else if (data.type === "trigger_clear_message" ){
           this.clearMessages();

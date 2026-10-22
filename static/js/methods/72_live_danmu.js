@@ -181,20 +181,96 @@ copySubtitleOverlayEndpoint(){
 },
 
 // 处理弹幕队列 - 新版
+  /**
+   * S80(9a30de93) 队列裁剪：保留最新 N 条，但**永不丢弃扩展推来的请求**
+   * （source === 'director'）。导演请求 push 到队尾（=下一个被处理），而裁剪
+   * slice(0, limit) 保留队首砍队尾——不豁免的话一条观众弹幕就能把导演请求挤掉。
+   */
+  trimDanmuQueue() {
+    const limit = this.liveConfig.danmakuQueueLimit || 5;
+    if (this.danmu.length <= limit) return;
+    const keep = this.danmu.slice(0, limit);
+    const pinned = this.danmu.slice(limit).filter((d) => d && d.source === 'director');
+    this.danmu = keep.concat(pinned);
+  },
+
+  /**
+   * S80(9a30de93) 按引用删队列里**指定的那一条**，不是 pop()。
+   * sendMessage 期间队列还会变（观众弹幕 unshift 队首、扩展请求 push 队尾），
+   * pop() 删的「当前最后一条」可能根本不是刚处理完的那条（上游真机实锤：
+   * 处理 A 时 B 入队尾，A 跑完 pop 把 B 删了，B 凭空消失）。
+   */
+  removeDanmuItem(item) {
+    if (!item) return;
+    const i = this.danmu.indexOf(item);
+    if (i >= 0) this.danmu.splice(i, 1);
+  },
+
+  /**
+   * S80(9a30de93) 扩展（如 sap-snack-director）经 /ws live_enqueue 推来的请求：
+   * **进弹幕队列**，不直接 sendMessage()。
+   * 为什么不走 trigger_send_message：sendMessage() 会 stopAllAudioPlayback()+清
+   * TTSrunning ⇒ 打断正在播报的语音；且开头 if (this.isTyping) return ⇒ 正在
+   * 生成时**静默丢弃**。进队列后由 processDanmuQueue 闸门串行调度，忙时排队。
+   * 队列里至多留一条导演请求：新请求替换旧请求（游戏状态已变，旧问题过期）。
+   */
+  enqueueLiveRequest(payload) {
+    const text = String((payload && payload.text) || '').trim();
+    if (!text) return;
+
+    this.danmu = this.danmu.filter((d) => !d || d.source !== 'director');
+    this.danmu.push({
+      id: (payload && payload.id) || ('director-' + Date.now()),
+      content: text,
+      type: (payload && payload.source) || 'director',
+      platform: (payload && payload.platform) || 'director',
+      source: 'director',
+      // 默认不上 OBS 弹幕叠加层（这是一大段提示词）
+      silent: payload ? payload.silent !== false : true,
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    });
+    this.trimDanmuQueue();
+
+    // 没开直播面板时 danmuProcessTimer 可能不存在，这里保证它被挂上
+    this.startDanmuProcessor();
+    // 若当前空闲，别等下一个 1s tick；忙的话闸门会挡住，下一 tick 再来
+    this.processDanmuQueue();
+  },
+
   async processDanmuQueue() {
+    let processing = null;
     try {
-      // 基础检查 (保持不变)
-      if (!this.isLiveRunning || this.danmu.length === 0 || this.isTyping || 
+      // S80(f49f267f)：陈旧 TTS 锁检测——锁为真但没有任何真实播放在跑，
+      // 直接释放，否则弹幕队列被一把假锁永久卡死
+      const hasStaleTTSLock = this.TTSrunning &&
+          this.ttsSettings.enabled &&
+          !this.hasActiveTTSPlayback();
+      if (hasStaleTTSLock) {
+        console.warn('Detected stale TTS lock before processing danmu queue; releasing it.');
+        this.TTSrunning = false;
+      }
+
+      /**
+       * S80(9a30de93) 基础闸门：**正在生成 / 正在播报 / 正在处理** 时一律不取队列——
+       * 这正是「扩展的请求不会打断 LLM 说话」的机制：它排队，不抢麦。
+       * isLiveRunning 只该拦**观众弹幕**；导演请求即使没开直播面板也必须处理，
+       * 否则整个导演功能会被「没开直播」卡死。
+       */
+      if ((!this.isLiveRunning && !this.danmu.some((d) => d && d.source === 'director')) ||
+          this.danmu.length === 0 || this.isTyping ||
           (this.TTSrunning && this.ttsSettings.enabled) || this.isProcessingDanmu) {
         return;
       }
 
       this.isProcessingDanmu = true;
       const oldestDanmu = this.danmu[this.danmu.length - 1];
-      
+
       if (oldestDanmu && oldestDanmu.content) {
-        if (this.lastProcessedContent === oldestDanmu.content) {
-            this.danmu.pop();
+        processing = oldestDanmu;
+        // S80(9a30de93)：导演请求带唯一 id 且游戏没变化时正文会重复，
+        // 连续重复内容去重**只对观众弹幕**生效
+        if (oldestDanmu.source !== 'director' && this.lastProcessedContent === oldestDanmu.content) {
+            this.removeDanmuItem(processing);
             this.isProcessingDanmu = false;
             return;
         }
@@ -208,23 +284,26 @@ copySubtitleOverlayEndpoint(){
         // 设置 LLM 的输入
         this.userInput = oldestDanmu.content;
         
-        // 触发 OBS 弹窗显示 (调用后端 API)
-        try {
-            fetch('/api/overlay/danmaku', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(oldestDanmu)
-            }).catch(()=>{});
-        } catch(e) {}
+        // 触发 OBS 弹窗显示 (调用后端 API)。
+        // S80(9a30de93)：扩展的请求标了 silent，不上画面——它是一大段提示词
+        if (!oldestDanmu.silent) {
+          try {
+              fetch('/api/overlay/danmaku', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(oldestDanmu)
+              }).catch(()=>{});
+          } catch(e) {}
+        }
 
         // 发送消息，启动 AI 生成流程
         await this.sendMessage();
         
-        this.danmu.pop(); 
+        this.removeDanmuItem(processing);
       }
     } catch (error) {
       console.error('处理弹幕出错:', error);
-      this.danmu.pop(); 
+      this.removeDanmuItem(processing);
     } finally {
       this.isProcessingDanmu = false;
     }
@@ -387,9 +466,7 @@ copySubtitleOverlayEndpoint(){
       if (this.danmu.length > 0 && this.danmu[0].content === danmuItem.content) return;
 
       this.danmu.unshift(danmuItem);
-      if (this.danmu.length > this.liveConfig.danmakuQueueLimit) {
-        this.danmu = this.danmu.slice(0, this.liveConfig.danmakuQueueLimit);
-      }
+      this.trimDanmuQueue();  // S80(9a30de93): 裁剪单点（director 豁免）
     }
   },
 

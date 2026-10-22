@@ -315,6 +315,21 @@ Object.assign(vue_methods, {
         const offset = message.chunks_voice.filter(v => v.startsWith('danmaku_vrm_silent:')).length;
         const vrmIndex = index - offset; // 计算发给 VRM 的虚拟索引
 
+        // S80(f49f267f)：纯表情/状态标签块剥离后为空文本——不发 /tts（空文本 400=队列卡死），
+        // 补一个静音占位让播放照常推进
+        if (!chunk_text) {
+            if (chunk_expressions.length > 0 && this.ttsWebSocket && (this.vrmOnline || this.vtsOnline)) {
+                const cmd = JSON.stringify({
+                    type: 'startSpeaking',
+                    data: { chunkIndex: index, text: '', voice: 'silence', expressions: chunk_expressions }
+                });
+                this.ttsWebSocket.send(cmd);
+            }
+            message.audioChunks[index] = { url: null, expressions: chunk_expressions, text: chunk_text, index, _silent: true };
+            this.checkAudioPlayback();
+            return;
+        }
+
         try {
             if (voice === 'silence') {
                 // 静音块走文本通道发指令
@@ -348,10 +363,18 @@ Object.assign(vue_methods, {
                         index 
                     };
                     this.checkAudioPlayback();
+                } else {
+                    // S80(8f06e799)：非 2xx（如羁绊标签致 400）→ 失败占位块，队列不死等
+                    console.warn(`TTS chunk ${index} returned ${response.status}, skipping`);
+                    message.audioChunks[index] = { url: null, expressions: chunk_expressions, text: chunk_text, index, _failed: true };
+                    this.checkAudioPlayback();
                 }
             }
         } catch (error) {
             console.error(`TTS Chunk ${index} error:`, error);
+            // S80(8f06e799)：合成异常同样占位，否则 checkAudioPlayback 永远等不到该 chunk
+            message.audioChunks[index] = { url: null, expressions: chunk_expressions, text: chunk_text, index, _failed: true };
+            this.checkAudioPlayback();
         }
     },
 
@@ -384,6 +407,15 @@ Object.assign(vue_methods, {
 
         const currentIndex = lastMessage.currentChunk;
         const audioChunk = lastMessage.audioChunks[currentIndex];
+
+        // S80(f49f267f/8f06e799)：静音/失败占位块没有音频 URL——跳过推进队列
+        // （占位块仍占一个槽位，后续 chunk 保持原索引）
+        if (audioChunk && !audioChunk.url) {
+            if (audioChunk._failed) console.warn(`Skipping failed TTS chunk ${currentIndex}`);
+            lastMessage.currentChunk++;
+            setTimeout(() => this.checkAudioPlayback(message, resolve), 0);
+            return;
+        }
         
         // 如果该块还没合成好，继续等待
         if (!audioChunk) {
@@ -395,6 +427,8 @@ Object.assign(vue_methods, {
                 if (lastMessage.generationFinished) {
                     console.log("播放全部完成，正常退出");
                     this.TTSrunning = false;
+                    // S80(d35c9eaa)：全部播完后进度归位，UI 显示 1/N 而非越界 (N+1)/N
+                    lastMessage.currentChunk = 0;
                     try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                     if (resolve) resolve();
                     return;
@@ -406,6 +440,7 @@ Object.assign(vue_methods, {
                         console.warn("检测到生成已停止但未标记完成，强行释放锁");
                         lastMessage.generationFinished = true; // 补救状态
                         this.TTSrunning = false;
+                        lastMessage.currentChunk = 0;  // S80(d35c9eaa)：同上，越界归位
                         try { fetch('/api/overlay/danmaku/clear', { method: 'POST' }).catch(()=>{}); } catch(e){}
                         if (resolve) resolve();
                         return;
@@ -577,6 +612,21 @@ Object.assign(vue_methods, {
     },
 
     // 停止所有正在播放的音频
+    /**
+     * S80(f49f267f fork 适配)：是否有**真实**的 TTS/音频播放在跑。
+     * fork 字段适配：全局 currentAudio/currentReadAudio、Omni、阅读态、消息级 isPlaying
+     * （上游为 message._currentAudio/_ttsRunning，fork 无这些字段）。
+     */
+    hasActiveTTSPlayback() {
+      return Boolean(
+        this.isOmniPlaying ||
+        (this.readState && this.readState.isPlaying) ||
+        (this.currentAudio && typeof this.currentAudio.paused === 'boolean' && !this.currentAudio.paused) ||
+        (this.currentReadAudio && typeof this.currentReadAudio.paused === 'boolean' && !this.currentReadAudio.paused) ||
+        (this.messages || []).some(m => m && (m.isPlaying || m._ttsRunning))
+      );
+    },
+
     stopAllAudioPlayback() {
       // 1. 停止 HTML5 Audio (普通 TTS)
       if (this.currentAudio) {
@@ -615,6 +665,10 @@ Object.assign(vue_methods, {
 
       // 6. 发送停止信号到VRM
       this.sendTTSStatusToVRM('stopSpeaking', {});
+
+      // S80(8f06e799)：与 sendMessage 入口对齐——任何停播路径都强制释放弹幕队列锁，
+      // 否则暂停/异常后 TTSrunning 残留为真，队列永不再消费
+      this.TTSrunning = false;
     },
 
     async playAudioChunk(message) {

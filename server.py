@@ -8153,6 +8153,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 # S71：日记主动推送目标候选（重活在 _ws_diary_im_targets，保 ws 循环壳尺寸）
                 await _ws_diary_im_targets(websocket)
 
+            elif msg_type == "live_enqueue":
+                # S80(B6/9a30de93): 扩展（如 sap-snack-director）推的请求不直接 sendMessage
+                # （会打断播报/isTyping 静默丢），广播给主窗口塞弹幕队列由闸门串行调度
+                await ws_manager.broadcast({
+                    "type": "live_enqueue",
+                    "data": data.get("data", {}) or {}
+                }, exclude=websocket)
+
             elif msg_type == "save_settings":
                 # B8(b03e7c0e): 深合并落盘；重活在 _ws_save_settings（保 ws 循环壳尺寸）
                 await _ws_save_settings(websocket, data)
