@@ -508,7 +508,8 @@ class DiscordClient(discord.Client):
                 stream=False, 
                 extra_body={
                     "is_app_bot": True,
-                    "behavior_trigger": True
+                    "behavior_trigger": True,
+                    **behavior_item.tools_override(),
                 }
             )
             

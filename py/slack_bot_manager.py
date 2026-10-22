@@ -373,6 +373,7 @@ class SlackBotManager(BaseBotManager):
                     "is_app_bot": True,
                     "behavior_trigger": True,
                     "platform": "slack",
+                    **behavior_item.tools_override(),
                 }
             )
             

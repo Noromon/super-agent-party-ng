@@ -43,6 +43,22 @@ class BehaviorItem(BaseModel):
     action: BehaviorAction
     platform: Optional[str] = "chat"     # 保留字段以兼容旧版本
     platforms: List[str] = []           # 新字段：支持多选
+    # S73：事件级工具策略。自主事件默认无工具（不碰 shell/edit/技能），
+    # 需要工具的事件由用户显式改为 inherit/whitelist/blacklist。
+    tools_mode: str = "none"            # none | inherit | whitelist | blacklist
+    tools_list: List[str] = []
+
+    def tools_override(self) -> dict:
+        """转成 /v1 请求 extra_body 的工具过滤字段。"""
+        mode = (self.tools_mode or "none").lower()
+        lst = [t for t in (self.tools_list or []) if t]
+        if mode == "whitelist":
+            return {"enable_tools": lst}
+        if mode == "blacklist":
+            return {"disable_tools": lst}
+        if mode == "inherit":
+            return {}
+        return {"enable_tools": []}
 
 class BehaviorSettings(BaseModel):
     enabled: bool

@@ -457,6 +457,8 @@ Object.assign(vue_data, {
         },
       },
       platform:"chat",
+      tools_mode:"none",
+      tools_list:[],
     },
 
     allBriefly:false,

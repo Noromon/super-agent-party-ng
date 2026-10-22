@@ -438,7 +438,13 @@ class DingtalkClientLogic:
             response = await ai_client.chat.completions.create(
                 model=self.config.DingtalkAgent,
                 messages=[{"role": "user", "content": "[system]: "+prompt_content}],
-                stream=False
+                stream=False,
+                extra_body={
+                    "is_app_bot": True,
+                    "platform": "dingtalk",
+                    "behavior_trigger": True,
+                    **behavior_item.tools_override(),
+                }
             )
             reply_content = response.choices[0].message.content
             if not reply_content: return

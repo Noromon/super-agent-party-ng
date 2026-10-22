@@ -177,6 +177,9 @@ resetCycleTimers() {
         // 编辑模式：创建现有数据的深拷贝（切断引用）
         // 假设您的数据在 behaviorSettings.behaviorList 中
         this.tempBehavior = JSON.parse(JSON.stringify(this.behaviorSettings.behaviorList[index]));
+        // S73：旧配置无工具策略字段 -> 回填补齐（后端 pydantic 同样兜底）
+        if (!this.tempBehavior.tools_mode) this.tempBehavior.tools_mode = 'none';
+        if (!Array.isArray(this.tempBehavior.tools_list)) this.tempBehavior.tools_list = [];
       }
       
       this.showBehaviorDialog = true;
@@ -198,6 +201,8 @@ resetCycleTimers() {
           random: { type: 'random', events: [''] }
         },
         platforms: ["chat"],  // 新增多选渠道字段（字符串数组）
+        tools_mode: 'none',   // S73：自主事件工具策略，默认无工具
+        tools_list: [],
       };
     },
 
@@ -225,6 +230,10 @@ resetCycleTimers() {
 
       // 2. 同步旧字段 platform，取数组第一个元素
       this.tempBehavior.platform = this.tempBehavior.platforms[0];
+
+      // S73：工具策略字段兜底（防止旧对象/新增路径缺省）
+      if (!this.tempBehavior.tools_mode) this.tempBehavior.tools_mode = 'none';
+      if (!Array.isArray(this.tempBehavior.tools_list)) this.tempBehavior.tools_list = [];
 
       // 3. 保存逻辑
       if (this.isEditingBehavior) {

@@ -487,7 +487,8 @@ class WeChatClient:
                     extra_body={
                         "is_app_bot": True,
                         "platform": "wechat",
-                        "behavior_trigger": True
+                        "behavior_trigger": True,
+                        **behavior_item.tools_override(),
                     }
                 ),
                 timeout=60.0

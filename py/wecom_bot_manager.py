@@ -280,7 +280,8 @@ class WeComClient:
                 extra_body={
                     "is_app_bot": True,
                     "platform": "wecom",
-                    "behavior_trigger": True
+                    "behavior_trigger": True,
+                    **behavior_item.tools_override(),
                 }
             )
             reply = response.choices[0].message.content

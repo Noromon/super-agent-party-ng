@@ -75,6 +75,7 @@ async def summarize_and_save_buffers(idle_minutes: int = 15):
                 f"当前时间：{now_str}。用户已经 {idle_minutes} 分钟没有与你对话。"
                 "请将下方最近的对话记录总结为一篇简短的日记，用第一人称、自然真诚地书写。"
                 "只需要总结要点、用户的需求或情绪、以及你的想法，不需要逐条复述。"
+                "这是一次纯文本写作任务：禁止调用任何工具/技能，不要操作文件或命令，直接输出日记正文。"
             )
             messages = [
                 {"role": "system", "content": sys_prompt},

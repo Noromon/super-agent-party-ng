@@ -4150,13 +4150,19 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
 
 
 def _stream_filter_tools(request, tools):
-    """enable/disable whitelist-blacklist filter + subagent safety policy."""
-    if request.is_sub_agent or request.enable_tools or request.disable_tools:
+    """enable/disable whitelist-blacklist filter + subagent safety policy.
+
+    S73: 显式空列表（[] 而非 None）= 有效指令：enable_tools=[] -> 0 工具。
+    旧语义把 [] 当“未指定”导致日记总结的无工具意图被静默忽略（全量工具）。
+    """
+    _has_enable = request.enable_tools is not None
+    _has_disable = request.disable_tools is not None
+    if request.is_sub_agent or _has_enable or _has_disable:
         original_tool_count = len(tools)
                     
         # 1. Enable Tools 过滤（白名单模式）
-        if request.enable_tools and len(request.enable_tools) > 0:
-            # 只保留白名单中的工具
+        if _has_enable:
+            # 只保留白名单中的工具（空名单 -> 无工具）
             filtered_tools = []
             enable_set = set(request.enable_tools)
                         
@@ -4169,7 +4175,7 @@ def _stream_filter_tools(request, tools):
             logging.getLogger("app").info(f"[Tool Filter] Enable mode: {original_tool_count} -> {len(tools)} tools (enabled: {request.enable_tools})")
                     
         # 2. Disable Tools 过滤（黑名单模式）
-        elif request.disable_tools and len(request.disable_tools) > 0:
+        elif _has_disable and len(request.disable_tools) > 0:
             # 移除黑名单中的工具
             disable_set = set(request.disable_tools)
             filtered_tools = []

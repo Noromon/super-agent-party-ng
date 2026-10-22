@@ -582,7 +582,8 @@ class TelegramClient:
                 extra_body={
                     "is_app_bot": True,
                     "behavior_trigger": True,
-                    "platform": "slack",
+                    "platform": "telegram",
+                    **behavior_item.tools_override(),
                 }
             )
             

@@ -1252,7 +1252,8 @@ class FeishuClient:
                 extra_body={
                     "is_app_bot": True,
                     "platform": "feishu",
-                    "behavior_trigger": True
+                    "behavior_trigger": True,
+                    **behavior_item.tools_override(),
                 }
             )
             

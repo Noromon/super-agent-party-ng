@@ -2506,6 +2506,22 @@
                             <el-option :label="t('weComBot')" value="wecom"></el-option>
                           </el-select>
                         </el-form-item>
+                        <!-- S73：事件级工具策略（自主事件默认无工具，防 shell/edit 失控） -->
+                        <el-form-item :label="t('behaviorToolsPolicy')">
+                          <el-select v-model="tempBehavior.tools_mode" class="full-width-input">
+                            <el-option :label="t('behaviorToolsNone')" value="none"></el-option>
+                            <el-option :label="t('behaviorToolsInherit')" value="inherit"></el-option>
+                            <el-option :label="t('behaviorToolsWhitelist')" value="whitelist"></el-option>
+                            <el-option :label="t('behaviorToolsBlacklist')" value="blacklist"></el-option>
+                          </el-select>
+                        </el-form-item>
+                        <el-form-item v-if="tempBehavior.tools_mode === 'whitelist' || tempBehavior.tools_mode === 'blacklist'"
+                                      :label="t('behaviorToolsList')">
+                          <el-select v-model="tempBehavior.tools_list" multiple filterable allow-create
+                                     default-first-option class="full-width-input"
+                                     :placeholder="t('behaviorToolsListHint')">
+                          </el-select>
+                        </el-form-item>
                       </div>
 
                       <el-alert type="info" :closable="false" class="mb-2">
