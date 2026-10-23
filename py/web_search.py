@@ -14,7 +14,13 @@ from urllib.parse import urlparse
 
 async def DDGsearch(query):
     settings = await load_settings()
-    proxy_url = settings.get('systemSettings', {}).get('proxy', '') or None
+    # S85-D：统一 normalize（支持 http/socks5/socks5h 与裸 host:port；
+    # system 模式探测 env/WinINET）。垃圾输入 → None 直连，绝不抛异常。
+    from py.proxy_util import active_proxy
+    proxy_url = active_proxy(settings)
+    if proxy_url and proxy_url.split("://", 1)[0] in ("socks4", "socks4a"):
+        return ("[Error] DuckDuckGo 引擎（primp 内核）不支持 SOCKS4 代理，"
+                "请在 设置→系统→代理 改用 socks5h:// 或 http:// 代理。")
     def sync_search():
         max_results = settings['webSearch']['duckduckgo_max_results'] or 10
         try:
@@ -891,7 +897,13 @@ async def simple_fetch(url):
     支持抓取内网和外网页面
     """
     from py.net_guard import url_public_ok
-    if not url_public_ok(url, allow_loopback=True):
+    from py.proxy_util import active_proxy, is_literal_ip
+    settings = await load_settings()
+    _px = active_proxy(settings)
+    # S85-D4：代理链激活时域名解析发生在代理端，本地 getaddrinfo 预判定
+    # （fake-ip/污染）不可信 → 域名跳过，字面 IP 仍检。
+    if not (_px and not is_literal_ip(urlparse(url).hostname)) \
+            and not url_public_ok(url, allow_loopback=True):
         return None, "[Fetch blocked] 私网/保留地址目标已被 SSRF 防护拒绝，请改用公网地址或本机地址。"
 
     def sync_fetch():

@@ -10,12 +10,19 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+# S85-D4：RFC2544 198.18.0.0/15 是代理软件 fake-ip 池，不是真内网——
+# 永久按公网放行（与 load_files.is_private_ip 的既有豁免对齐），
+# 否则 fake-ip 环境会把所有公网域名一票误杀。
+_FAKE_IP_NET = ipaddress.ip_network("198.18.0.0/15")
+
 
 def ip_ok(ip_str, allow_loopback=True):
     try:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return False
+    if ip in _FAKE_IP_NET:
+        return True
     if ip.is_loopback:
         return bool(allow_loopback)
     if ip.is_private or ip.is_reserved or ip.is_link_local \

@@ -150,11 +150,17 @@ Object.assign(vue_methods, {
         }
         let accArgs = this.toolArgsAccumulator[toolCallId] || "";
         if (progress.arguments !== undefined) {
-            if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
-                accArgs = progress.arguments;
+            if (progress.incremental) {
+                accArgs += progress.arguments;                 // S85-A 新协议：服务端只发本帧增量
+            } else if (progress.arguments.startsWith(accArgs) && accArgs !== "") {
+                accArgs = progress.arguments;                  // 旧全量协议：前缀延长，整串替换
             } else {
-                accArgs += progress.arguments;
+                // S85-B 防卡死：全量但前缀断裂 = 跨轮复用同一 id 的新调用 → 整体替换。
+                // 旧实现在此 append 全量串，复读风暴下 O(n²) 字符串膨胀 → 渲染进程
+                // GC 死亡螺旋 → Electron 整窗无响应（含自定义标题栏关闭按钮）。
+                accArgs = progress.arguments;
             }
+            if (accArgs.length > 65536) accArgs = accArgs.slice(0, 65536);  // S85-B 封顶
             this.toolArgsAccumulator[toolCallId] = accArgs;
         }
         const b = getBlock('tool_call', toolCallId, progress.name);

@@ -8,6 +8,7 @@ from io import BytesIO
 import asyncio
 from urllib.parse import urlparse
 from py.get_setting  import get_host,get_port,BLOCKLIST,load_settings
+from py.proxy_util import active_proxy, is_literal_ip
 import zipfile
 # 平台检测
 IS_WINDOWS = sys.platform == 'win32'
@@ -51,13 +52,22 @@ USER_AGENT = "Mozilla/5.0 (compatible; MyOpenSourceBot/1.0)"
 ROBOTS_CACHE = {} # 缓存 robots.txt 避免重复请求
 
 
-def _make_session(**kwargs) -> aiohttp.ClientSession:
+def _make_session(proxy_url: str = None, **kwargs) -> aiohttp.ClientSession:
     """Shared session factory routing DNS through the system resolver:
     when slixmpp is installed its aiodns dependency hijacks aiohttp's default
     resolver, and aiodns ignores hosts files and NetBIOS names — local
-    hostname URLs then die with 'Could not contact DNS servers'."""
+    hostname URLs then die with 'Could not contact DNS servers'.
+    S85-D：可选出口代理（aiohttp 不读 env，必须显式传）；socks:// 需
+    aiohttp-socks，缺库降级直连并 warning，绝不 raise。"""
+    if proxy_url and proxy_url.split("://", 1)[0].startswith("socks"):
+        try:
+            from aiohttp_socks import ProxyConnector
+            return aiohttp.ClientSession(connector=ProxyConnector.from_url(proxy_url), **kwargs)
+        except Exception as e:
+            logger.warning(f"SOCKS 代理不可用（{e}），已降级为直连")
+            proxy_url = None
     connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
-    return aiohttp.ClientSession(connector=connector, **kwargs)
+    return aiohttp.ClientSession(connector=connector, proxy=proxy_url or None, **kwargs)
 
 def is_private_ip(hostname):
     """检测是否为私有/内网IP，放行代理软件的 Fake-IP"""
@@ -145,7 +155,9 @@ def is_local_equivalent(hostname: str) -> bool:
             continue
     return False
 
-NET_BLOCK_HINT = "（如需访问本机/局域网资源，请在 设置→网络访问控制 开启对应放行开关）"
+NET_BLOCK_HINT = ("（如需访问本机/局域网资源，请在 设置→网络访问控制 开启对应放行开关；"
+                  "若目标是公网域名却被判内网，多为本地 DNS 污染/黑洞解析，"
+                  "建议在 设置→系统→代理 填写 socks5h://127.0.0.1:<端口> 走远端解析）")
 
 async def get_network_access_flags():
     try:
@@ -167,8 +179,9 @@ async def ssrf_gate(hostname: str, scope: str) -> bool:
 def get_domain(url: str) -> str:
     return urlparse(url).netloc.lower()
 
-async def check_robots_txt(url):
-    """异步检查 robots.txt 合规性"""
+async def check_robots_txt(url, proxy_url=None):
+    """异步检查 robots.txt 合规性（S85-D：代理激活时经代理取 robots，
+    拉不到仍 fail-open 放行）"""
     domain = get_domain(url)
 
     # 先看黑名单
@@ -184,7 +197,7 @@ async def check_robots_txt(url):
     robots_url = urljoin(base_url, "/robots.txt")
     rp = RobotFileParser()
     try:
-        async with _make_session() as session:
+        async with _make_session(proxy_url=proxy_url) as session:
             async with session.get(robots_url, timeout=5) as resp:
                 if resp.status == 200:
                     text_data = await resp.text()
@@ -266,14 +279,22 @@ async def handle_url(url):
 
     # --- 2. 外部公网 URL 爬取逻辑 ---
     else:
+        # S85-D4：代理链激活时，域名解析由代理端完成——本地 DNS 预判定
+        # （fake-ip/污染解析）不可信，域名目标跳过；字面 IP 与 metadata 检查保留。
+        px = active_proxy(await load_settings())
+        bypass_local_dns = bool(px) and not is_literal_ip(parsed_url.hostname)
         # A. SSRF 安全检查（受"网络访问控制"开关门控：文件链仅认「允许局域网URL」）
         internal_ok = False
-        if is_private_ip(parsed_url.hostname):
+        if bypass_local_dns:
+            pass
+        elif is_private_ip(parsed_url.hostname):
             if not await ssrf_gate(parsed_url.hostname, 'file'):
                 raise PermissionError(f"安全拒绝: 不允许访问内部网络地址 ({parsed_url.hostname}){NET_BLOCK_HINT}")
             internal_ok = True
-        # B. Robots.txt 检查（放行的内部源跳过）
-        elif not await check_robots_txt(url):
+        # B. Robots.txt 检查（放行的内部源跳过；代理激活时经代理拉取）
+        elif not await check_robots_txt(url, proxy_url=px):
+            raise PermissionError(f"合规拒绝: robots.txt 禁止访问")
+        if bypass_local_dns and not await check_robots_txt(url, proxy_url=px):
             raise PermissionError(f"合规拒绝: robots.txt 禁止访问")
 
         # D. 执行外部请求（开关放行内部源时同走此路，不再谎称"外部"）
@@ -281,7 +302,7 @@ async def handle_url(url):
         safe_url = sanitize_url(url)
 
         # E. 执行请求
-        async with _make_session() as session:
+        async with _make_session(proxy_url=None if internal_ok else px) as session:
             headers = {'User-Agent': USER_AGENT}
             try:
                 # 传入 safe_url，安全工具会认为该变量是“已清洗”的；门控放行的内部源豁免 TLS 校验

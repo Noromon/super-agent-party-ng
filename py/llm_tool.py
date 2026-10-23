@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from py.get_setting import load_settings, get_host, get_port # 确保导入了这两个函数
 from openai import AsyncOpenAI
 
-from py.load_files import check_robots_txt, is_private_ip, sanitize_url, ssrf_gate, NET_BLOCK_HINT
+from py.load_files import check_robots_txt, is_private_ip, sanitize_url, ssrf_gate, NET_BLOCK_HINT, _make_session
 from py import llm_gate
 
 # ================= 安全配置 =================
@@ -51,8 +51,14 @@ async def get_image_base64(image_url: str) -> str:
     
     # --- 场景 2: 公网 URL 爬取 ---
     else:
+        # S85-D4：代理激活时域名跳过本地 DNS 预判定（fake-ip/污染会误杀）
+        from py.proxy_util import active_proxy as _active_proxy, is_literal_ip as _is_literal_ip
+        _px = _active_proxy(await load_settings())
+        _bypass_dns_check = bool(_px) and not _is_literal_ip(parsed_url.hostname)
         # A. SSRF 安全拦截（受"网络访问控制"开关门控：本机等价∨局域网）
-        if is_private_ip(parsed_url.hostname):
+        if _bypass_dns_check:
+            internal_source = False
+        elif is_private_ip(parsed_url.hostname):
             if not await ssrf_gate(parsed_url.hostname, 'image'):
                 raise PermissionError(f"安全拒绝: 不允许从内部网络获取图像 ({parsed_url.hostname}){NET_BLOCK_HINT}")
             internal_source = True
@@ -60,8 +66,8 @@ async def get_image_base64(image_url: str) -> str:
         else:
             internal_source = False
 
-        # B. Robots.txt 检查（放行的内部源跳过）
-        if not internal_source and not await check_robots_txt(image_url):
+        # B. Robots.txt 检查（放行的内部源跳过；代理激活时经代理拉取）
+        if not internal_source and not await check_robots_txt(image_url, proxy_url=_px):
             raise PermissionError(f"合规拒绝: 目标网站禁止爬虫抓取该图像")
 
         # C. 【安全动作】清洗外部 URL，生成扫描器认可的 safe_url
@@ -69,8 +75,9 @@ async def get_image_base64(image_url: str) -> str:
         # 门控放行的内部源同样豁免 TLS 校验（自签证书常态），公网保持完整校验
         no_ssl_verify = internal_source
 
-    # --- 执行下载 ---
-    async with aiohttp.ClientSession() as session:
+    # --- 执行下载 ---（S85-D：_make_session 统一处理 http/socks 代理与解析器）
+    _dl_proxy = None if no_ssl_verify else _px
+    async with _make_session(proxy_url=_dl_proxy) as session:
         # 统一使用 safe_target_url 发起请求
         headers = {'User-Agent': USER_AGENT}
         try:

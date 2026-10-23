@@ -296,6 +296,7 @@ import ipaddress
 from urllib.parse import urlparse, urlunparse, urljoin
 from urllib.robotparser import RobotFileParser
 from py.load_files import check_robots_txt, get_file_content, is_private_ip, sanitize_url
+from py.proxy_util import net_error_hint
 
 # 修复 sherpa-onnx 在 macOS arm64 上的 onnxruntime dylib 路径问题
 import site
@@ -868,16 +869,14 @@ async def lifespan(app: FastAPI):
         manual_url = sys_set.get("proxy", "").strip()
         isChinaProxy = sys_set.get("isChinaProxy", False)
 
-        if mode == "manual" and manual_url:
-            # 手动模式：如果是 socks，由于没安装库，直接跳过并警告
-            if manual_url.lower().startswith("socks"):
-                logger.error("检测到手动设置了 SOCKS 代理，但当前环境不支持。代理已失效。")
-                proxy_url = None
-            else:
-                proxy_url = manual_url
+        # S85-D：normalize 容错——代理栏任何形态（http/socks5h/裸host:port/垃圾）
+        # 都只会得到 None+warning，永不炸启动；env 兜底让全部 SDK 同步生效
+        from py.proxy_util import apply_env_proxy, normalize_proxy_url
+        if mode == "manual":
+            proxy_url = normalize_proxy_url(manual_url)
         elif mode == "system":
-            # 系统模式：信任环境（此时环境里已经没有 socks 了，很安全）
             trust_env = True
+        apply_env_proxy(settings)
         if isChinaProxy:
             # 2. 注入 Node.js / NPM 镜像源 (重点)
             # 设置这个环境变量后，所有的 npm install (包括你的 node_runner) 都会默认使用这个源
@@ -889,11 +888,13 @@ async def lifespan(app: FastAPI):
 
     # 初始化全局带连接池的 HTTP 客户端
     timeout_config = httpx.Timeout(None, connect=10.0)
-    app_state.global_http_client = httpx.AsyncClient(
-        timeout=timeout_config,
-        proxy=proxy_url,
-        trust_env=trust_env
-    )
+    try:
+        app_state.global_http_client = httpx.AsyncClient(
+            timeout=timeout_config, proxy=proxy_url, trust_env=trust_env)
+    except Exception as _px_e:  # S85-D：socks 依赖缺失等 → 降级直连，绝不阻断启动
+        logger.error(f"HTTP 客户端带代理初始化失败（{_px_e}），已降级为直连")
+        app_state.global_http_client = httpx.AsyncClient(
+            timeout=timeout_config, trust_env=False)
 
     # --- [模型 Client 初始化] ---
     # 辅助函数：统一注入 app_state.global_http_client
@@ -1807,7 +1808,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         return ret_out
     except Exception as e:
         logger.error(f"Error calling tool {tool_name}: {e}")
-        return f"Error calling tool {tool_name}: {e}"
+        return f"Error calling tool {tool_name}: {e}{net_error_hint(e)}"
 
 def process_extra_params(extra_params_list):
     extra_body = {}
@@ -3436,25 +3437,92 @@ def get_tcs(m):
     if get_role(m) != "assistant": return None
     return m.get("tool_calls") if isinstance(m, dict) else getattr(m, "tool_calls", None)
 
+_ARG_SHELL_KEYS = ("arguments", "params", "input", "tool_arguments")
+
+
+def _unwrap_arg_shell(data, depth=3):
+    """S85-A：单键壳解包。llama 系本地模型常输出 {"arguments": {...}} 双层包裹
+    （内层还可能是字符串化 JSON），直接 **dict 会得到 unexpected keyword 'arguments'。"""
+    while depth > 0 and isinstance(data, dict) and len(data) == 1:
+        key = next(iter(data)).lower()
+        if key not in _ARG_SHELL_KEYS:
+            break
+        val = data[next(iter(data))]
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except Exception:
+                break
+        if not isinstance(val, dict):
+            break
+        data, depth = val, depth - 1
+    return data
+
+
+def _merge_tool_delta(tool_calls, tool):
+    """S85-A(C-20 扩展)：流式 tool_call delta 槽位合并。返回 (槽对象, 本帧参数片段)。
+    槽位定位优先级：协议 tool.index → 既有槽中 id 匹配 → 末槽（无 index 旧模型）。
+    修复顺序多 call 无 index 时后一 call 的参数拼进前一 buffer（'}{' 拼接串）。"""
+    _slot = getattr(tool, "index", None)
+    if _slot is None:
+        _slot = None
+        tc_id = getattr(tool, "id", None)
+        if tc_id:
+            for i, ex in enumerate(tool_calls):
+                if getattr(ex, "id", None) == tc_id:
+                    _slot = i
+                    break
+            if _slot is None:
+                _slot = len(tool_calls)  # 带 id 但无匹配 = 无 index provider 的新调用
+            elif (getattr(tool, "function", None)
+                  and getattr(tool.function, "name", None)
+                  and tool_calls[_slot].function
+                  and getattr(tool_calls[_slot].function, "arguments", "")):
+                # id 跨轮复用：带 name 且旧槽已有参数 → 新一轮调用，开新槽
+                _slot = len(tool_calls)
+        if _slot is None:
+            _slot = max(len(tool_calls) - 1, 0)  # 无 index 无 id 旧模型：回退末槽
+    while len(tool_calls) <= _slot:
+        _fill = copy.deepcopy(tool)
+        if _fill.function is not None:
+            _fill.function.arguments = ""
+        tool_calls.append(_fill)
+    current = tool_calls[_slot]
+    if getattr(tool, "id", None) and not current.id:
+        current.id = tool.id
+    frag = ""
+    if tool.function:
+        if tool.function.name and not current.function.name:
+            current.function.name = tool.function.name
+        if tool.function.arguments:
+            current.function.arguments = (current.function.arguments or "") + tool.function.arguments
+            frag = tool.function.arguments
+    return current, frag
+
+
 def parse_tool_arguments(raw):
     """解析工具调用参数。返回 (args_dict, error_msg)。
-    先直接 JSON 解析；失败则回退到 '}{ 拼接拆分旧 hack；仍失败返回错误供模型自愈，不炸流。"""
+    先直接 JSON 解析（含单键壳解包）；失败则回退 '}{ 拼接拆分，取首个非空片段
+    再解壳；仍失败返回错误供模型自愈，不炸流。"""
     raw = (raw or "").strip()
     if not raw:
         return {}, None
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
-            return data, None
+            return _unwrap_arg_shell(data), None
         if isinstance(data, list):
-            return (data[0] if data and isinstance(data[0], dict) else {}), None
+            return _unwrap_arg_shell(data[0] if data and isinstance(data[0], dict) else {}), None
         return {}, None
     except Exception:
         pass
     try:
         data_list = json.loads('[' + raw.replace('}{', '},{') + ']')
-        if isinstance(data_list, list) and data_list and isinstance(data_list[0], dict):
-            return data_list[0], None
+        if isinstance(data_list, list):
+            for item in data_list:
+                if isinstance(item, dict) and item:
+                    return _unwrap_arg_shell(item), None
+            return {}, None
         return {}, None
     except Exception as e:
         return None, (
@@ -4420,35 +4488,19 @@ async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usa
             continue
         if choice.delta.tool_calls:  # function_calling
             is_tool_call = True
-            # C-20: 槽位=协议级 tool.index（多 call 交叠时 delta 数组内
-            # 位置≠call 编号，旧逻辑把第二个 call 的 arguments 拼进第一个
-            # slot=两个 JSON 挤进同一 fragment；无 index 的旧模型回退末槽）
+            # C-20+S85-A: 槽位合并统一走 _merge_tool_delta
+            # （index → id 匹配 → 末槽），progress 帧只下发本帧增量。
             for tool in choice.delta.tool_calls:
-                _slot = getattr(tool, "index", None)
-                if _slot is None:
-                    _slot = max(len(tool_calls) - 1, 0)
-                while len(tool_calls) <= _slot:
-                    _fill = copy.deepcopy(tool)
-                    if _fill.function is not None:
-                        _fill.function.arguments = ""
-                    tool_calls.append(_fill)
-                current_tool = tool_calls[_slot]
-                if tool.id and not current_tool.id:
-                    current_tool.id = tool.id
-                if tool.function:
-                    if tool.function.name and not current_tool.function.name:
-                        current_tool.function.name = tool.function.name
-                    if tool.function.arguments:
-                        current_tool.function.arguments = (
-                            current_tool.function.arguments or ""
-                        ) + tool.function.arguments
+                current_tool, _frag = _merge_tool_delta(tool_calls, tool)
+                _slot = tool_calls.index(current_tool)
                 if current_tool.function and current_tool.function.name:
                     progress_chunk = {
                         "choices": [{
                             "delta": {
                                 "tool_progress": {  # 新增字段，区别于最终的 tool_content
                                     "name": current_tool.function.name,
-                                    "arguments": current_tool.function.arguments or "",
+                                    "arguments": _frag,
+                                    "incremental": True,
                                     "index": _slot,
                                     "id": current_tool.id or f"call_{_slot}"
                                 }
@@ -5253,27 +5305,22 @@ async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usag
                 yield f"data: {chunk.model_dump_json()}\n\n"
                 continue
             if choice.delta.tool_calls:  # function_calling
-                for idx, tool_call in enumerate(choice.delta.tool_calls):
-                    tool = choice.delta.tool_calls[idx]
-                    if len(tool_calls) <= idx:
-                        tool_calls.append(tool)
-                        continue
-                    if tool.function.arguments:
-                        # function参数为流式响应，需要拼接
-                        if tool_calls[idx].function.arguments:
-                            tool_calls[idx].function.arguments += tool.function.arguments
-                        else:
-                            tool_calls[idx].function.arguments = tool.function.arguments
-                current_tool = tool_calls[idx]
+                current_tool, _frag = None, ""
+                for tool in choice.delta.tool_calls:
+                    current_tool, _frag = _merge_tool_delta(tool_calls, tool)
+                _idx = tool_calls.index(current_tool)
                 if current_tool.function and current_tool.function.name:
                     progress_chunk = {
                         "choices": [{
                             "delta": {
                                 "tool_progress": {  # 新增字段，区别于最终的 tool_content
                                     "name": current_tool.function.name,
-                                    "arguments": current_tool.function.arguments or "",
-                                    "index": idx,
-                                    "id": current_tool.id or f"call_{idx}"
+                                    # S85-A：本帧只下发增量片段（incremental=true），
+                                    # 旧实现每帧下发全量累积串 → 前端拼接 O(n²) 膨胀
+                                    "arguments": _frag,
+                                    "incremental": True,
+                                    "index": _idx,
+                                    "id": current_tool.id or f"call_{_idx}"
                                 }
                             }
                         }]
@@ -8046,6 +8093,15 @@ app.include_router(overlay_router)
 settings_lock = asyncio.Lock()
 
 
+def _apply_proxy_env_safe(settings):
+    """S85-D：代理设置保存后即时同步进程 env（manual=注入/system=探测/none=清除）。"""
+    try:
+        from py.proxy_util import apply_env_proxy
+        apply_env_proxy(settings)
+    except Exception as e:
+        logger.info(f"代理环境同步异常: {e}")
+
+
 async def _ws_save_settings(websocket: WebSocket, data: dict):
     """B8(b03e7c0e): ws save_settings 单点——读现库深合并后落盘，部分载荷
     不再整库覆盖。C-15: 失败必须回 save_error（此前异常被外层吞=前端白等超时）。"""
@@ -8054,6 +8110,7 @@ async def _ws_save_settings(websocket: WebSocket, data: dict):
         current = await load_settings()
         deep_update(current, settings_dict)
         await save_settings(current)
+        _apply_proxy_env_safe(current)
         await sync_all_bots_behavior(current)
         try:
             from py.diary_engine import global_diary_engine
