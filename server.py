@@ -856,7 +856,7 @@ async def lifespan(app: FastAPI):
     # --- [日志系统初始化] ---
     from py.log_setup import setup_logger
     logger = setup_logger(LOG_DIR)
-    logger.info("===== 日志系统初始化成功 =====")
+    logger.info("===== 日志系统初始化成功 =====\n[Version] " + _version_fingerprint())
 
     # --- [代理与 HTTP 客户端初始化] ---
     proxy_url = None
@@ -6262,6 +6262,37 @@ def _diary_recall_sample(payload, memory_limit):
         return {**payload, "results": random.sample(results, memory_limit)}
     except Exception:
         return payload
+
+
+def _version_fingerprint():
+    """S84：运行树+代码版本指纹。多份同名 fork 拷贝共存时用于日志判别。"""
+    import subprocess
+    root = os.path.dirname(os.path.abspath(__file__))
+    head = "-"
+    try:
+        head = subprocess.run(
+            ["git", "-C", root, "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=(0x08000000 if os.name == "nt" else 0),  # CREATE_NO_WINDOW
+        ).stdout.strip() or "-"
+    except Exception:
+        pass
+    try:
+        mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(
+            os.path.getmtime(os.path.join(root, "server.py"))))
+    except Exception:
+        mtime = "?"
+    dirty = ""
+    try:
+        out = subprocess.run(
+            ["git", "-C", root, "status", "--porcelain", "--", "server.py", "py/"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=(0x08000000 if os.name == "nt" else 0),
+        ).stdout.strip()
+        dirty = " dirty" if out else ""
+    except Exception:
+        pass
+    return f"tree={root} HEAD={head}{dirty} server.py-mtime={mtime}"
 
 
 async def _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):

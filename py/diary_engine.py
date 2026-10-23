@@ -98,6 +98,72 @@ async def build_recall_seed(book_id: str = DEFAULT_BOOK_ID, prev_ratio: float = 
     return random.choice(RECALL_SEEDS)
 
 
+# S84：自主日记没有对话历史，模型会幻觉「用户今天还没找过我」。
+# 把当天已发生的记录（日记条目+mem0 当天新增记忆）注入 system，纠正时间认知。
+_TODAY_TYPE_CN = {
+    "think": "自我思考", "webSearch": "联网搜索", "knowledge": "知识库",
+    "imMessage": "主动消息", "browserControl": "浏览器", "smartHome": "智能家居",
+    "chatSummary": "对话摘要",
+}
+
+
+async def _fetch_today_new_memories(limit: int = 5):
+    """今天新加入 mem0 的长期记忆（多来自当天真实对话的提取）。失败返回空。"""
+    settings = await load_settings()
+    ms = (settings or {}).get("memorySettings", {}) or {}
+    if not (ms.get("is_memory") and ms.get("selectedMemory")):
+        return []
+    memory_id = ms["selectedMemory"]
+    cur = next((m for m in (settings.get("memories") or []) if m.get("id") == memory_id), None)
+    if not cur:
+        return []
+    from py.llm_gate import get_mem0_instance
+    m0 = get_mem0_instance(memory_id, cur, settings)
+    if not m0:
+        return []
+    today = datetime.date.today().strftime("%Y-%m-%d")
+
+    def _collect():
+        data = m0.get_all(user_id=memory_id, limit=50)
+        items = data.get("results", []) if isinstance(data, dict) else list(data or [])
+        out = []
+        for it in items:
+            meta = it.get("metadata") or {}
+            created = str(it.get("created_at") or meta.get("timetamp") or "")
+            if created.startswith(today):
+                text = (it.get("memory") or "").strip().replace("\n", " ")
+                if text:
+                    out.append(text[:60])
+        return out[-limit:]
+    return await asyncio.to_thread(_collect)
+
+
+async def build_today_context(book_id: str, now=None, max_entries: int = 6):
+    """S84：【今日概况】块。两个数据源都异常/为空时明示「今天确实尚未交流」。"""
+    now = now or datetime.datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    lines = []
+    try:
+        entries = await get_recent_diary_entries(book_id, n=40)
+        todays = [e for e in entries if str(e.get("created_at", "")).startswith(today)]
+        for e in todays[-max_entries:]:
+            t = str(e.get("created_at", ""))[11:16]
+            head = (e.get("content") or "").strip().replace("\n", " ")[:30]
+            kind = _TODAY_TYPE_CN.get(e.get("type"), e.get("type") or "记录")
+            lines.append(f"- {t} {kind}：{head}")
+    except Exception as e:
+        logging.debug(f"[DiaryEngine] 读取今日日记条目失败: {e}")
+    try:
+        for m in await _fetch_today_new_memories():
+            lines.append(f"- 新记忆：{m}")
+    except Exception as e:
+        logging.debug(f"[DiaryEngine] 读取今日新增记忆失败: {e}")
+    if not lines:
+        return "【今日概况】今天还没有与用户交流的任何记录——今天确实尚未互动。"
+    return ("【今日概况】以下是今天已经发生的记录，据此认知时间线，"
+            "切勿写出「用户今天还没找过我」之类与记录矛盾的话：\n" + "\n".join(lines))
+
+
 class DiaryEngine:
     _instance = None
 
@@ -496,15 +562,20 @@ class DiaryEngine:
 
     async def _build_messages(self, action: str):
         persona = self.config.get("prompt", "") or ""
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.datetime.now()
+        now_str = now.strftime("%Y-%m-%d %H:%M")
+        weekday = "一二三四五六日"[now.weekday()]
         sys_parts = []
         if persona:
             sys_parts.append(persona)
-        sys_parts.append(f"当前时间：{now_str}。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。")
+        sys_parts.append(f"当前时间：{now_str}（星期{weekday}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。")
         system_prompt = "\n\n".join(sys_parts)
         user_prompt = ACTION_DEFAULT_PROMPTS.get(action, ACTION_DEFAULT_PROMPTS["think"])
         # S83：思绪种子——让每次检索 query 变化，长期记忆召回不再恒为同一条
+        # S84：同一 book 顺带拼【今日概况】，纠正「今天还没说过话」类时间幻觉
         book_id, _cid, _cname = await self._resolve_active_book()
+        today_block = await build_today_context(book_id, now)
+        system_prompt = system_prompt + "\n\n" + today_block
         seed = await build_recall_seed(book_id)
         user_prompt = f"{user_prompt}\n\n（本次思绪不妨从以下内容开始：{seed}。）"
         return [
