@@ -426,6 +426,7 @@ from functools import partial
 # 用于在工具调用时传递当前对话上下文（特别是 review_image 工具需要）
 current_request_messages = contextvars.ContextVar('current_request_messages', default=None)
 import json
+import random
 import re
 import shutil
 from fastapi import BackgroundTasks, Body, FastAPI, File, Form, HTTPException, UploadFile, WebSocket, Request, WebSocketDisconnect
@@ -6247,6 +6248,22 @@ def _apply_context_compression(request, DRS_STAGE):
     return DRS_STAGE
 
 
+def _diary_recall_sample(payload, memory_limit):
+    """S83：日记（自主触发，query 变化有限）长期记忆召回抽样。
+
+    m0.search 为确定性语义 top-k，固定/近固定提示词永远召回同一批条目；
+    这里从扩大召回的候选集中随机抽 memory_limit 条制造多样性。
+    仅日记平台调用；候选不足或结构异常时原样返回。
+    """
+    try:
+        results = payload.get("results")
+        if not isinstance(results, list) or memory_limit <= 0 or len(results) <= memory_limit:
+            return payload
+        return {**payload, "results": random.sample(results, memory_limit)}
+    except Exception:
+        return payload
+
+
 async def _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):
     """Character-book lore + persona fields + mem0 relevant-memory recall."""
     if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
@@ -6320,6 +6337,9 @@ async def _complete_character_context(request, settings, user_prompt, cur_memory
                     
         if m0:
             memoryLimit = settings["memorySettings"]["memoryLimit"]
+            # S83：日记平台扩大召回×3（下限 6）后随机抽样，主对话行为不变
+            is_diary = getattr(request, "platform", "") == "diary"
+            search_limit = max(memoryLimit * 3, 6) if is_diary else memoryLimit
             try:
                 # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
                 # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
@@ -6327,8 +6347,10 @@ async def _complete_character_context(request, settings, user_prompt, cur_memory
                     m0.search, 
                     query=user_prompt, 
                     user_id=memoryId, 
-                    limit=memoryLimit
+                    limit=search_limit
                 )
+                if is_diary:
+                    relevant_memories = _diary_recall_sample(relevant_memories, memoryLimit)
                 relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
             except Exception as e:
                 print("m0.search error:",e)

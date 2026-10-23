@@ -7,7 +7,7 @@ import datetime
 import httpx
 
 from py.get_setting import get_port, load_settings, save_settings
-from py.diary_system import append_diary_entry, DEFAULT_BOOK_ID
+from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAULT_BOOK_ID
 from py.diary_chat_integration import summarize_and_save_buffers
 
 # 日记智能体「允许」使用的低权限只读工具（白名单）。
@@ -65,6 +65,37 @@ ACTION_DEFAULT_PROMPTS = {
         "请用第一人称、自然真诚地书写。"
     ),
 }
+
+# S83：自主触发的提示词是固定常量，长期记忆语义检索（m0.search query=该常量）
+# 因此每次都命中同一批条目。追加「思绪种子」让每次 query 变化，召回随种子流动。
+RECALL_SEEDS = [
+    "最近和用户的某次互动里一个没聊完的话题",
+    "今天天气或季节带来的一个小感受",
+    "重读自己旧日记时冒出的新看法",
+    "最近学到或看到的一个新东西",
+    "此刻环境中一个细微的变化",
+    "对用户近况的一点好奇或关心",
+    "一个突发奇想的假设或想象",
+    "对之前某个想法的复盘和修正",
+    "一件想做但还没开始的小计划",
+    "一种说不太清楚的心情",
+    "用户某个习惯背后让你想到的事",
+    "如果把今天当作一篇故事的开头会怎样",
+]
+
+
+async def build_recall_seed(book_id: str = DEFAULT_BOOK_ID, prev_ratio: float = 0.5):
+    """S83：生成本次日记的思绪种子（约半数概率引用上一篇开头作引子）。"""
+    if random.random() < prev_ratio:
+        try:
+            recent = await get_recent_diary_entries(book_id, n=1)
+            if recent:
+                head = (recent[-1].get("content") or "").strip().replace("\n", " ")
+                if head:
+                    return f"上一篇日记你写到「{head[:40]}」，可以顺着往下想，也可以彻底想点别的"
+        except Exception as e:
+            logging.debug(f"[DiaryEngine] 读取上一篇日记失败，退回词池种子: {e}")
+    return random.choice(RECALL_SEEDS)
 
 
 class DiaryEngine:
@@ -463,7 +494,7 @@ class DiaryEngine:
         finally:
             self._busy = False
 
-    def _build_messages(self, action: str):
+    async def _build_messages(self, action: str):
         persona = self.config.get("prompt", "") or ""
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         sys_parts = []
@@ -472,6 +503,10 @@ class DiaryEngine:
         sys_parts.append(f"当前时间：{now_str}。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。")
         system_prompt = "\n\n".join(sys_parts)
         user_prompt = ACTION_DEFAULT_PROMPTS.get(action, ACTION_DEFAULT_PROMPTS["think"])
+        # S83：思绪种子——让每次检索 query 变化，长期记忆召回不再恒为同一条
+        book_id, _cid, _cname = await self._resolve_active_book()
+        seed = await build_recall_seed(book_id)
+        user_prompt = f"{user_prompt}\n\n（本次思绪不妨从以下内容开始：{seed}。）"
         return [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"[system]: {user_prompt}"},
@@ -512,7 +547,7 @@ class DiaryEngine:
         enable_tools = await self._get_enable_tools_for_action(action)
         payload = {
             "model": "super-model",
-            "messages": self._build_messages(action),
+            "messages": await self._build_messages(action),
             "stream": False,
             "is_app_bot": True,
             "platform": "diary",
