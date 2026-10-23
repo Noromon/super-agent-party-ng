@@ -57,9 +57,12 @@ def _today_at(hm):
 def test_today_entries_only_today_and_formatted(monkeypatch):
     async def fake_recent(book_id, n=5):
         return [
-            {"type": "chatSummary", "created_at": _today_at("00:37"), "content": "今晚主人哭得很凶。\n第二行"},
-            {"type": "think", "created_at": _today_at("07:05"), "content": "清晨随笔"},
-            {"type": "think", "created_at": "2026-01-01T07:00:00", "content": "昨天及更早不该出现"},
+            # S86：真实条目字段是 time（diary_system.add_diary_entry 写入口径）
+            {"type": "chatSummary", "time": _today_at("00:37"), "content": "今晚主人哭得很凶。\n第二行"},
+            {"type": "think", "time": _today_at("07:05"), "content": "清晨随笔（思考类不展开只计数）"},
+            # 兼容旧数据 created_at 字段
+            {"type": "imMessage", "created_at": _today_at("08:15"), "content": "旧字段兼容条目"},
+            {"type": "think", "time": "2026-01-01T07:00:00", "content": "昨天及更早不该出现"},
         ]
 
     async def no_mem():
@@ -69,9 +72,36 @@ def test_today_entries_only_today_and_formatted(monkeypatch):
     monkeypatch.setattr(de, "_fetch_today_new_memories", no_mem)
     block = asyncio.run(de.build_today_context("book-a"))
     assert "00:37 对话摘要" in block and "今晚主人哭得很凶" in block
-    assert "07:05 自我思考" in block
+    assert "08:15 主动消息" in block          # created_at 旧字段兼容
+    assert "发呆写下 1 篇思考" in block          # think 只计数（昨日那篇不计入）
+    assert "清晨随笔" not in block             # think 不展开（防自证循环）
     assert "昨天及更早" not in block and "2026" not in block.split("切勿")[0].split("】")[-1]
     assert "用户今天还没找过我" in block          # 反幻觉指令句本身在场
+
+
+def test_think_only_day_not_claimed_as_interaction(monkeypatch):
+    async def fake_recent(book_id, n=5):
+        return [{"type": "think", "time": _today_at("09:00"), "content": "他今天没来"},
+                {"type": "think", "time": _today_at("10:00"), "content": "还是没来"}]
+
+    async def no_mem():
+        return []
+
+    monkeypatch.setattr(de, "get_recent_diary_entries", fake_recent)
+    monkeypatch.setattr(de, "_fetch_today_new_memories", no_mem)
+    block = asyncio.run(de.build_today_context("b"))
+    assert "还没有与用户交流的记录" in block and "2 篇思考" in block
+    assert "他还没来找你" in block              # 允许如实写没互动
+    assert "切勿写出" not in block              # 但不得反向禁写
+
+
+def test_entry_time_field_contract():
+    """S86 事故 pin：S84 曾按 created_at 过滤而真实条目是 time → 概况恒空。
+    写入口径与读取口径必须有交叉兼容，任何一侧改名先在此爆红。"""
+    ds = _read("py/diary_system.py")
+    assert '"time": datetime.now().isoformat()' in ds
+    de_src = _read("py/diary_engine.py")
+    assert 'e.get("time") or e.get("created_at")' in de_src
 
 
 def test_today_memories_and_empty_day(monkeypatch):
@@ -138,7 +168,7 @@ def test_build_messages_has_weekday_and_today_block(monkeypatch):
     eng.config = {}
 
     async def no_entries(book_id, n=5):
-        return [{"type": "chatSummary", "created_at": _today_at("10:09"), "content": "主人抱怨睡眠"}]
+        return [{"type": "chatSummary", "time": _today_at("10:09"), "content": "主人抱怨睡眠"}]
 
     async def none_mem():
         return []

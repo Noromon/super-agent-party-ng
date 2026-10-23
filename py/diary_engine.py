@@ -142,26 +142,43 @@ async def build_today_context(book_id: str, now=None, max_entries: int = 6):
     """S84：【今日概况】块。两个数据源都异常/为空时明示「今天确实尚未交流」。"""
     now = now or datetime.datetime.now()
     today = now.strftime("%Y-%m-%d")
-    lines = []
+    interact = []
+    think_n = 0
     try:
         entries = await get_recent_diary_entries(book_id, n=40)
-        todays = [e for e in entries if str(e.get("created_at", "")).startswith(today)]
-        for e in todays[-max_entries:]:
-            t = str(e.get("created_at", ""))[11:16]
+        # S86：日记条目时间字段实为 time（diary_system 写入口径），created_at 仅兼容旧数据。
+        # think 是自我思考非互动证据，且幻觉 think 会以「事实」回灌后续思考（自证循环），
+        # 只计数不展开。
+        todays = [e for e in entries
+                  if str(e.get("time") or e.get("created_at") or "").startswith(today)]
+        think_n = sum(1 for e in todays if e.get("type") == "think")
+        for e in [e for e in todays if e.get("type") != "think"][-max_entries:]:
+            t = str(e.get("time") or e.get("created_at") or "")[11:16]
             head = (e.get("content") or "").strip().replace("\n", " ")[:30]
             kind = _TODAY_TYPE_CN.get(e.get("type"), e.get("type") or "记录")
-            lines.append(f"- {t} {kind}：{head}")
+            interact.append(f"- {t} {kind}：{head}")
     except Exception as e:
         logging.debug(f"[DiaryEngine] 读取今日日记条目失败: {e}")
+    _n_diary = len(interact)
     try:
         for m in await _fetch_today_new_memories():
-            lines.append(f"- 新记忆：{m}")
+            interact.append(f"- 新记忆：{m}")
     except Exception as e:
         logging.debug(f"[DiaryEngine] 读取今日新增记忆失败: {e}")
-    if not lines:
-        return "【今日概况】今天还没有与用户交流的任何记录——今天确实尚未互动。"
-    return ("【今日概况】以下是今天已经发生的记录，据此认知时间线，"
-            "切勿写出「用户今天还没找过我」之类与记录矛盾的话：\n" + "\n".join(lines))
+    logging.getLogger("app").info(
+        f"[DiaryEngine] 今日概况：互动={len(interact)}（日记={_n_diary} "
+        f"mem0={len(interact) - _n_diary}）思考={think_n}")
+    if interact:
+        tail = f"\n（此外今天你已自行发呆写下 {think_n} 篇思考，非互动证据）" if think_n else ""
+        return ("【今日概况】以下是今天已经发生的记录，据此认知时间线，"
+                "切勿写出「用户今天还没找过我」之类与记录矛盾的话：\n"
+                + "\n".join(interact) + tail)
+    if think_n:
+        return ("【今日概况】到目前为止，今天还没有与用户交流的记录"
+                f"（今天你自己已写过 {think_n} 篇思考，非互动）。"
+                "若此刻确实还没有互动，可以照实写他还没来找你；"
+                "但只要上下文或记忆中显示今天其实聊过，就绝不能那样写。")
+    return "【今日概况】今天还没有与用户交流的任何记录——今天确实尚未互动。"
 
 
 class DiaryEngine:
