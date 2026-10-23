@@ -132,7 +132,11 @@ GUARD_FILES = {
 @pytest.mark.parametrize("rel,marker", sorted(GUARD_FILES.items()))
 def test_guard_present_in_each_collector(rel, marker):
     src = _read(rel)
-    assert "from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply" in src
+    # S89-B：xmpp 换用错误帧感知的 empty_reply_msg，import 口径随之更新
+    imp = ("from py.im_empty_guard import empty_reply_msg, error_from_delta, log_empty_reply"
+           if rel == "py/xmpp_client.py"
+           else "from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply")
+    assert imp in src
     assert marker in src
 
 

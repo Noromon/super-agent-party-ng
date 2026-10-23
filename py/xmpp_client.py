@@ -115,7 +115,7 @@ def system_tls_ok(host, port) -> bool:
 
 
 from py import llm_gate
-from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
+from py.im_empty_guard import empty_reply_msg, error_from_delta, log_empty_reply
 
 
 class XmppClient:
@@ -664,7 +664,13 @@ class XmppClient:
             user_msg = {"role": "user", "content": send_content}
         else:
             user_msg = store_msg = {"role": "user", "content": text}
-        self.memoryList[chat_jid].append(store_msg)
+        # S89-C：上一轮空回复后重发同文本 → 不在历史里重复堆积（三连重试 ×N 膨胀）
+        _flags = self.__dict__.setdefault("_empty_reply_flags", {})
+        _last = self.memoryList[chat_jid][-1] if self.memoryList[chat_jid] else None
+        if not (_last is not None and _last.get("role") == "user"
+                and _last.get("content") == store_msg.get("content")
+                and _flags.get(chat_jid)):
+            self.memoryList[chat_jid].append(store_msg)
         history = [*self.memoryList[chat_jid][:-1], user_msg]
 
         settings = await load_settings()
@@ -674,6 +680,7 @@ class XmppClient:
         full_text = []
         reasoning_chars = 0
         finish_reason = ""
+        err_text = ""
         try:
             stream = await client.chat.completions.create(
                 model=self.XmppAgent,
@@ -697,6 +704,8 @@ class XmppClient:
                 reasoning_chars += len(reasoning)
                 tool_link = getattr(delta, "tool_link", "") or ""
                 async_tool_id = getattr(delta, "async_tool_id", "") or ""
+                if not err_text:
+                    err_text = error_from_delta(delta)  # S89-B：流内错误帧不再沉默
                 if tool_link and settings["tools"]["toolMemorandum"]["enabled"]:
                     self.fileLinks[chat_jid].append(tool_link)
                 if async_tool_id:
@@ -720,8 +729,11 @@ class XmppClient:
         assistant_text = "".join(full_text)
         if not assistant_text.strip():
             log_empty_reply("xmpp", chat_jid, reasoning_chars, finish_reason)
-            await self._send_text(chat_jid, EMPTY_REPLY_MSG)
+            # S89-B/C：带流内错误摘要如实告知；标记本轮空回复供重发去重
+            self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = True
+            await self._send_text(chat_jid, empty_reply_msg(err_text))
             return
+        self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = False
         self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
         if self.memoryLimit > 0:
             while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:

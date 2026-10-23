@@ -5931,7 +5931,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
 
         return
     except Exception as e:
-        logger.error(f"{request.messages}")
+        logger.error(f"[StreamError] {type(e).__name__}: {e} | msgs={len(request.messages)}", exc_info=True)
         # 捕获异常并返回结构化错误信息
         error_chunk = {
             "choices": [{
