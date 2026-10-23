@@ -99,11 +99,22 @@ def test_requests_proxies_local_target_bypass():
 
 # ---------------- apply_env_proxy：注入/清除/NO_PROXY 默认 ----------------
 
-def test_apply_env_proxy_manual_and_clear(monkeypatch):
+def test_apply_env_proxy_socks_never_enters_env(monkeypatch):
+    """S87：httpx trust_env 默认 True 的裸 AsyncOpenAI 构造点会被 env 里的
+    socks:// 在构造期炸（缺 socksio ImportError）——socks 绝不入 env。"""
     monkeypatch.delenv("NO_PROXY", raising=False)
     monkeypatch.delenv("no_proxy", raising=False)
     px = pu.apply_env_proxy(_settings("manual", "socks5h://127.0.0.1:1080"))
-    assert px == "socks5h://127.0.0.1:1080"
+    assert px == "socks5h://127.0.0.1:1080"      # 返回值仍是规范化代理（显式通道用）
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy"):
+        assert k not in os.environ
+
+
+def test_apply_env_proxy_http_injects_and_clears(monkeypatch):
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    px = pu.apply_env_proxy(_settings("manual", "http://127.0.0.1:1080"))
+    assert px == "http://127.0.0.1:1080"
     assert os.environ["HTTPS_PROXY"] == px and os.environ["all_proxy"] == px
     assert "127.0.0.1" in os.environ["NO_PROXY"]
     pu.apply_env_proxy(_settings("none"))
@@ -176,6 +187,8 @@ def test_fetch_chain_wiring_pins():
     ws = _read("py/web_search.py")
     assert "proxy_url = active_proxy(settings)" in ws
     assert "不支持 SOCKS4" in ws
+    # S87：socks 不入 env 后，requests 链靠显式接线（searxng/bocha/jina×2/fetch/markdown）
+    assert ws.count("proxies=requests_proxies(") >= 6
     lt = _read("py/llm_tool.py")
     assert "_bypass_dns_check" in lt and "_make_session(proxy_url=_dl_proxy)" in lt
 

@@ -6,9 +6,10 @@
 无法识别的形态返回 None 并记一条 warning，保证"代理栏填什么都不炸"。
 
 应用三层：
-1. env 注入（apply_env_proxy）：requests/httpx(trust_env)/Tavily/Firecrawl 等
-   SDK 全部自动生效；none 模式清空，避免陈旧 env。
-2. 显式接线：primp(DDG) 只认构造参数；aiohttp 不读 env → load_files 显式传。
+1. env 注入（apply_env_proxy）：**仅 http/https 型**（S87——socks:// 入 env 会让
+   httpx trust_env 默认 True 的裸构造点在构造期炸）；none 模式清空，避免陈旧 env。
+2. 显式接线（socks 唯一通道）：primp(DDG) 构造参数；aiohttp ProxyConnector；
+   web_search 各 requests 点显式 proxies=requests_proxies(settings, url)。
 3. SSRF 防护感知（net_guard/load_files/llm_tool/web_search 调用点）：
    代理链激活时域名跳过本地 DNS 预判定（fake-ip/污染解析会误杀），
    字面 IP 与 198.18.0.0/15 永久放行的判定不变。
@@ -142,17 +143,27 @@ def requests_proxies(settings, target_url=None):
 
 
 def apply_env_proxy(settings):
-    """按代理模式写/清进程 env（manual=注入，system=探测到则注入，none=清除）。"""
+    """按代理模式写/清进程 env（manual=注入，system=探测到则注入，none=清除）。
+
+    S87：SOCKS 型绝不入 env——httpx trust_env 默认 True 的裸构造点（全仓 20+ 处
+    AsyncOpenAI 回连本地 LLM）会在**构造期**建 SOCKS transport：缺 socksio 直接
+    ImportError，装上也会让本地回连被迫绕代理软件。socks 只走显式通道
+    （DDG/primp、aiohttp ProxyConnector、requests 显式 proxies 接线点）。
+    """
     px = active_proxy(settings)
     for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
               "http_proxy", "https_proxy", "all_proxy"):
         os.environ.pop(k, None)
-    if px:
+    if px and px.split("://", 1)[0] in ("http", "https"):
         for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                   "http_proxy", "https_proxy", "all_proxy"):
             os.environ[k] = px
         os.environ.setdefault("NO_PROXY", NO_PROXY_DEFAULT)
         os.environ.setdefault("no_proxy", NO_PROXY_DEFAULT)
+    elif px:
+        logging.getLogger("app").info(
+            f"[Proxy] {px.split('://', 1)[0]}:// 型代理不注入 env"
+            "（防 httpx 构造期炸/本地回连绕行），仅显式接线点生效")
     return px
 
 

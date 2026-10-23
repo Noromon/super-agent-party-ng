@@ -10,6 +10,7 @@ from tavily import TavilyClient
 from ddgs import DDGS
 from py.get_setting import load_settings
 from py.load_files import check_robots_txt, is_private_ip
+from py.proxy_util import requests_proxies
 from urllib.parse import urlparse
 
 async def DDGsearch(query):
@@ -80,7 +81,8 @@ async def searxng(query,categories="general"):
             params["engines"] = engines
 
         try:
-            response = requests.get(api_url + "/search", headers=headers, params=params)
+            response = requests.get(api_url + "/search", headers=headers, params=params,
+                                    proxies=requests_proxies(settings, api_url))
             html_content = response.text
 
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -164,7 +166,8 @@ async def bochaai_search(query):
         })
 
         try:
-            response = requests.post(url, headers=headers, data=payload, timeout=30)
+            response = requests.post(url, headers=headers, data=payload, timeout=30,
+                                     proxies=requests_proxies(settings, url))
             if response.status_code == 200:
                 result_data = response.json()
                 
@@ -480,9 +483,10 @@ async def jina_crawler(original_url):
                 headers = {
                     'Authorization': f'Bearer {jina_api_key}',
                 }
-                response = requests.get(url, headers=headers)
+                response = requests.get(url, headers=headers,
+                                        proxies=requests_proxies(settings, url))
             else:
-                response = requests.get(url)
+                response = requests.get(url, proxies=requests_proxies(settings, url))
             if response.status_code == 200:
                 return response.text
             else:
@@ -913,7 +917,8 @@ async def simple_fetch(url):
             }
             # 内网/本机服务多为自签证书，跳过 TLS 校验；公网保持完整校验
             verify_tls = not is_private_ip(urlparse(url).hostname)
-            response = requests.get(url, headers=headers, timeout=30, verify=verify_tls)
+            response = requests.get(url, headers=headers, timeout=30, verify=verify_tls,
+                                    proxies=requests_proxies(settings, url))
             if response.status_code == 200:
                 return response.text
             else:
@@ -1035,7 +1040,8 @@ async def markdown_new(original_url):
     """
     通过 markdown.new 服务将网页转换为 Markdown 格式
     """
-    
+    settings = await load_settings()
+
     def sync_crawler():
         # 拼接 markdown.new 的服务地址
         detail_url = "https://markdown.new/"
@@ -1048,7 +1054,8 @@ async def markdown_new(original_url):
             }
             
             # 发起请求
-            response = requests.get(url, headers=headers, timeout=60)
+            response = requests.get(url, headers=headers, timeout=60,
+                                    proxies=requests_proxies(settings, url))
             
             if response.status_code == 200:
                 # markdown.new 默认直接返回纯文本的 markdown 内容
