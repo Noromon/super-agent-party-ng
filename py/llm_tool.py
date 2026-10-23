@@ -37,6 +37,7 @@ async def get_image_base64(image_url: str) -> str:
             raise RuntimeError(f"读取本地图片失败: {str(e)}")
 
     parsed_url = urlparse(image_url)
+    _img_ua = USER_AGENT  # S88：场景 2 会被 UA 配置覆盖
     
     # --- 场景 1: 内部文件路径处理 ---
     if 'uploaded_files' in parsed_url.path:
@@ -52,8 +53,11 @@ async def get_image_base64(image_url: str) -> str:
     # --- 场景 2: 公网 URL 爬取 ---
     else:
         # S85-D4：代理激活时域名跳过本地 DNS 预判定（fake-ip/污染会误杀）
-        from py.proxy_util import active_proxy as _active_proxy, is_literal_ip as _is_literal_ip
-        _px = _active_proxy(await load_settings())
+        from py.proxy_util import (active_proxy as _active_proxy,
+                                   is_literal_ip as _is_literal_ip, http_ua as _http_ua)
+        _st = await load_settings()
+        _px = _active_proxy(_st)
+        _img_ua = _http_ua(_st, USER_AGENT)  # S88：UA 配置注入图像抓取
         _bypass_dns_check = bool(_px) and not _is_literal_ip(parsed_url.hostname)
         # A. SSRF 安全拦截（受"网络访问控制"开关门控：本机等价∨局域网）
         if _bypass_dns_check:
@@ -79,7 +83,7 @@ async def get_image_base64(image_url: str) -> str:
     _dl_proxy = None if no_ssl_verify else _px
     async with _make_session(proxy_url=_dl_proxy) as session:
         # 统一使用 safe_target_url 发起请求
-        headers = {'User-Agent': USER_AGENT}
+        headers = {'User-Agent': _img_ua}
         try:
             async with session.get(safe_target_url, headers=headers, timeout=20, ssl=(False if no_ssl_verify else None)) as response:
                 if response.status != 200:

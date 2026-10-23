@@ -79,6 +79,18 @@ def is_literal_ip(host):
         return False
 
 
+def http_ua(settings, default=""):
+    """S88：全局抓取 User-Agent。systemSettings.httpUserAgent 非空 → 覆盖
+    抓取/搜索族的 UA（DDG/jina/searxng/markdown.new/网页与图片下载/robots）；
+    留空返回 default（各站保持原行为，零变更）。"""
+    try:
+        ua = str(((settings or {}).get("systemSettings", {}) or {})
+                 .get("httpUserAgent") or "").strip()
+        return ua or default
+    except Exception:
+        return default
+
+
 def _system_proxy_probe():
     """system 模式下探测"真代理"是否存在：env 优先，其次 Windows WinINET。"""
     log = logging.getLogger("app")

@@ -10,8 +10,26 @@ from tavily import TavilyClient
 from ddgs import DDGS
 from py.get_setting import load_settings
 from py.load_files import check_robots_txt, is_private_ip
-from py.proxy_util import requests_proxies
+from py.proxy_util import http_ua, requests_proxies
 from urllib.parse import urlparse
+
+def _apply_ddg_ua(settings):
+    """S88：配置了全局 UA 时覆盖 ddgs 引擎 headers_update（未配置保持 primp
+    impersonate 随机浏览器指纹）。引擎实例每次 text() 时按类属性读取，
+    DDGS() 每轮新建 → 类级 patch 即时生效。"""
+    _ua = http_ua(settings, "")
+    if not _ua:
+        return False
+    try:
+        from ddgs.engines import ENGINES
+        for _cls in ENGINES.get("text", {}).values():
+            _cls.headers_update = {**dict(_cls.headers_update or {}),
+                                   "User-Agent": _ua}
+        return True
+    except Exception as _ua_e:
+        logging.getLogger("app").info(f"[UA] DDG 引擎 UA 注入失败: {_ua_e}")
+        return False
+
 
 async def DDGsearch(query):
     settings = await load_settings()
@@ -22,6 +40,8 @@ async def DDGsearch(query):
     if proxy_url and proxy_url.split("://", 1)[0] in ("socks4", "socks4a"):
         return ("[Error] DuckDuckGo 引擎（primp 内核）不支持 SOCKS4 代理，"
                 "请在 设置→系统→代理 改用 socks5h:// 或 http:// 代理。")
+    # S88：全局 UA 注入（详见 _apply_ddg_ua）
+    _apply_ddg_ua(settings)
     def sync_search():
         max_results = settings['webSearch']['duckduckgo_max_results'] or 10
         try:
@@ -71,7 +91,7 @@ async def searxng(query,categories="general"):
         api_url = settings['webSearch']['searxng_url'] or "http://127.0.0.1:8080"
         engines = settings['webSearch']['searxng_engines'] or None
         is_select = settings['webSearch']['searxng_is_select'] or False
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {"User-Agent": http_ua(settings, "Mozilla/5.0")}
         params = {
             "q": query, 
             "categories": categories,
@@ -159,6 +179,9 @@ async def bochaai_search(query):
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
         }
+        _ua = http_ua(settings, "")
+        if _ua:
+            headers["User-Agent"] = _ua
         payload = json.dumps({
             "query": query,
             "summary": True,
@@ -479,14 +502,18 @@ async def jina_crawler(original_url):
         url = f"{detail_url}{original_url}"
         try:
             jina_api_key = settings['webSearch'].get('jina_api_key', "")
+            _ua = http_ua(settings, "")
             if jina_api_key:
                 headers = {
                     'Authorization': f'Bearer {jina_api_key}',
                 }
+                if _ua:
+                    headers['User-Agent'] = _ua
                 response = requests.get(url, headers=headers,
                                         proxies=requests_proxies(settings, url))
             else:
-                response = requests.get(url, proxies=requests_proxies(settings, url))
+                response = requests.get(url, headers=({"User-Agent": _ua} if _ua else None),
+                                        proxies=requests_proxies(settings, url))
             if response.status_code == 200:
                 return response.text
             else:
@@ -913,7 +940,7 @@ async def simple_fetch(url):
     def sync_fetch():
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': http_ua(settings, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             }
             # 内网/本机服务多为自签证书，跳过 TLS 校验；公网保持完整校验
             verify_tls = not is_private_ip(urlparse(url).hostname)
@@ -1050,7 +1077,7 @@ async def markdown_new(original_url):
         try:
             # 添加一个基础的 User-Agent 防屏蔽
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': http_ua(settings, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
             }
             
             # 发起请求

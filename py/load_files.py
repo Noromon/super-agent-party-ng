@@ -8,7 +8,7 @@ from io import BytesIO
 import asyncio
 from urllib.parse import urlparse
 from py.get_setting  import get_host,get_port,BLOCKLIST,load_settings
-from py.proxy_util import active_proxy, is_literal_ip
+from py.proxy_util import active_proxy, is_literal_ip, http_ua
 import zipfile
 # 平台检测
 IS_WINDOWS = sys.platform == 'win32'
@@ -190,15 +190,18 @@ async def check_robots_txt(url, proxy_url=None):
 
     parsed = urlparse(url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
-    
+    # S88：UA 配置注入 robots 抓取与合规判定身份（保持两者一致）
+    _ua = http_ua(await load_settings(), USER_AGENT)
+
     if base_url in ROBOTS_CACHE:
-        return ROBOTS_CACHE[base_url].can_fetch(USER_AGENT, url)
+        return ROBOTS_CACHE[base_url].can_fetch(_ua, url)
     
     robots_url = urljoin(base_url, "/robots.txt")
     rp = RobotFileParser()
     try:
         async with _make_session(proxy_url=proxy_url) as session:
-            async with session.get(robots_url, timeout=5) as resp:
+            async with session.get(robots_url, timeout=5,
+                                   headers={'User-Agent': _ua}) as resp:
                 if resp.status == 200:
                     text_data = await resp.text()
                     rp.parse(text_data.splitlines())
@@ -208,7 +211,7 @@ async def check_robots_txt(url, proxy_url=None):
         rp.allow_all = True # 无法获取robots.txt时，默认允许
         
     ROBOTS_CACHE[base_url] = rp
-    return rp.can_fetch(USER_AGENT, url)
+    return rp.can_fetch(_ua, url)
 
 def sanitize_url(input_url: str, default_base: str = "", endpoint: str = "",force_netloc: str = "") -> str:
     """
@@ -281,7 +284,8 @@ async def handle_url(url):
     else:
         # S85-D4：代理链激活时，域名解析由代理端完成——本地 DNS 预判定
         # （fake-ip/污染解析）不可信，域名目标跳过；字面 IP 与 metadata 检查保留。
-        px = active_proxy(await load_settings())
+        _s = await load_settings()
+        px = active_proxy(_s)
         bypass_local_dns = bool(px) and not is_literal_ip(parsed_url.hostname)
         # A. SSRF 安全检查（受"网络访问控制"开关门控：文件链仅认「允许局域网URL」）
         internal_ok = False
@@ -303,7 +307,7 @@ async def handle_url(url):
 
         # E. 执行请求
         async with _make_session(proxy_url=None if internal_ok else px) as session:
-            headers = {'User-Agent': USER_AGENT}
+            headers = {'User-Agent': http_ua(_s, USER_AGENT)}
             try:
                 # 传入 safe_url，安全工具会认为该变量是“已清洗”的；门控放行的内部源豁免 TLS 校验
                 async with session.get(safe_url, headers=headers, timeout=30, ssl=(False if internal_ok else None)) as response:
