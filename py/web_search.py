@@ -1338,3 +1338,62 @@ youcom_tool = {
         },
     },
 }
+
+
+# ============ S90：统一引擎入口 + 内置浏览器回退 ============
+# browser_search/guide 供 server 接线 re-export（web_search_browser 内 CDP
+# 均为惰性 import，非 Electron 环境零副作用）。
+from py.web_search_browser import (  # noqa: E402
+    GUIDE_HINT, browser_equiv, browser_search, browser_search_tool,
+    search_result_ok)
+
+
+ENGINE_FUNCS = {
+    "duckduckgo": DDGsearch,
+    "searxng": searxng,
+    "tavily": Tavily_search,
+    "bing": Bing_search,
+    "google": Google_search,
+    "brave": Brave_search,
+    "exa": Exa_search,
+    "serper": Serper_search,
+    "bochaai": bochaai_search,
+    "youcom": youcom_search,
+    "browser": None,
+}
+
+
+async def websearch_with_fallback(engine, query):
+    """web_search 单一入口：配置引擎失败 → 内置浏览器兜底 → 仍败合并文案+引导。"""
+    if engine == "browser":
+        r = await browser_search(query)
+        return r if search_result_ok(r) else r + GUIDE_HINT
+    fn = ENGINE_FUNCS.get(engine)
+    if fn is None:
+        return f"[Error] 未配置的搜索引擎: {engine}{GUIDE_HINT}"
+    try:
+        result = await fn(query)
+    except Exception as e:
+        result = f"[Error] {type(e).__name__}: {e}"
+    if search_result_ok(result):
+        return result
+    br = await browser_search(query, engine=browser_equiv(engine))
+    if search_result_ok(br):
+        return "（经内置浏览器）\n" + br
+    return f"{result}\n{br}{GUIDE_HINT}"
+
+
+def make_engine_with_fallback(engine_key, fn):
+    """tool hook 包壳：模型直调的单引擎工具也享受浏览器兜底。"""
+    async def _wrapped(query):
+        try:
+            result = await fn(query)
+        except Exception as e:
+            result = f"[Error] {type(e).__name__}: {e}"
+        if search_result_ok(result):
+            return result
+        br = await browser_search(query, engine=browser_equiv(engine_key))
+        if search_result_ok(br):
+            return "（经内置浏览器）\n" + br
+        return f"{result}\n{br}{GUIDE_HINT}"
+    return _wrapped

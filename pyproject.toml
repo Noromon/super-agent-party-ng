@@ -189,6 +189,7 @@ max-complexity = 60
 "server.py" = ["C901", "E402", "E701", "E702", "E712", "E721", "E722", "E731", "F401", "F402", "F541", "F811", "F841"]
 "tests/test_bot_lifecycle.py" = ["E402"]
 "tests/test_bot_store.py" = ["F401"]
+"tests/test_browser_search.py" = ["E402"]
 "tests/test_contract_sse.py" = ["F401"]
 "tests/test_covs_rescue.py" = ["F401"]
 "tests/test_data_backup.py" = ["E402"]

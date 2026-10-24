@@ -22,9 +22,11 @@ _S = io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
 
 def test_engine_tools_announced_by_engine_key():
     # serper/bochaai/youcom 是 engine 值，公告必须挂 engine==（crawler UI 无这三个值）
+    # S90：检索分支收敛进 websearch_with_fallback，engine== 仅剩公告 ×2
     for v in ("serper", "bochaai", "youcom"):
         assert "settings['webSearch']['crawler'] == '%s'" % v not in _S, v
-        assert _S.count("settings['webSearch']['engine'] == '%s'" % v) == 4, v  # 2 检索 + 2 公告
+        assert _S.count("settings['webSearch']['engine'] == '%s'" % v) == 2, v  # 2 公告
+    assert _S.count("websearch_with_fallback(") >= 2  # 检索单一入口（pre ×2）
 
 
 def test_real_crawlers_stay_on_crawler_key():

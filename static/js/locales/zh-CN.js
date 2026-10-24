@@ -49,6 +49,7 @@ window.lang_zhCN = {
         'assistantLanguage': '助手语言',
         'assistantTone': '助手语气',
         'searchEngine': '搜索引擎',
+        'browserEngineOption': '内置浏览器（可过 DDG 等风控）',
         'webCrawling': '网页解析',
         'webSearchTiming': '联网时机',
         'beforeThinking': '回复前必然触发',

@@ -1450,7 +1450,7 @@ def _build_tool_hooks():
     global _TOOL_HOOKS
     from py.web_search import (
         DDGsearch, 
-        searxng, 
+        searxng,
         Tavily_search,
         Bing_search,
         Google_search,
@@ -1460,10 +1460,11 @@ def _build_tool_hooks():
         bochaai_search,
         youcom_search,
         jina_crawler,
-        Crawl4Ai_search, 
+        Crawl4Ai_search,
         firecrawl_search,
         simple_fetch,
         markdown_new,
+        make_engine_with_fallback as _fb, browser_search,
     )
     from py.know_base import query_knowledge_base
     from py.agent_tool import agent_tool_call
@@ -1568,9 +1569,8 @@ def _build_tool_hooks():
 
     # ==================== 2. 定义工具映射表 ====================
     _TOOL_HOOKS = {
-        "DDGsearch": DDGsearch,
-        "searxng": searxng,
-        "Tavily_search": Tavily_search,
+        "DDGsearch": _fb("duckduckgo", DDGsearch), "browser_lookup": browser_search, "searxng": _fb("searxng", searxng),
+        "Tavily_search": _fb("tavily", Tavily_search),
         "query_knowledge_base": query_knowledge_base,
         "jina_crawler": jina_crawler,
         "Crawl4Ai_search": Crawl4Ai_search,
@@ -1592,13 +1592,13 @@ def _build_tool_hooks():
         "openai_chat_image":openai_chat_image,
         "query_diary": handle_query_diary,
         "list_diary_books": handle_list_diary_books,
-        "Bing_search": Bing_search,
-        "Google_search": Google_search,
-        "Brave_search": Brave_search,
-        "Exa_search": Exa_search,
-        "Serper_search": Serper_search,
-        "bochaai_search": bochaai_search,
-        "youcom_search": youcom_search,
+        "Bing_search": _fb("bing", Bing_search),
+        "Google_search": _fb("google", Google_search),
+        "Brave_search": _fb("brave", Brave_search),
+        "Exa_search": _fb("exa", Exa_search),
+        "Serper_search": _fb("serper", Serper_search),
+        "bochaai_search": _fb("bochaai", bochaai_search),
+        "youcom_search": _fb("youcom", youcom_search),
         "comfyui_tool_call": comfyui_tool_call,
         "time": time,
         "get_weather": get_weather,
@@ -4132,6 +4132,7 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
         duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
         brave_tool, exa_tool, serper_tool, bochaai_tool, youcom_tool, jina_crawler_tool,
         simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
+        websearch_with_fallback, browser_search_tool,
     )
     if settings['webSearch']['enabled'] or enable_web_search:
         if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
@@ -4150,26 +4151,9 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
                 ]
             }
             yield f"data: {json.dumps(chunk_dict)}\n\n"
-            if settings['webSearch']['engine'] == 'duckduckgo':
-                results = await DDGsearch(user_prompt)
-            elif settings['webSearch']['engine'] == 'searxng':
-                results = await searxng(user_prompt)
-            elif settings['webSearch']['engine'] == 'tavily':
-                results = await Tavily_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'bing':
-                results = await Bing_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'google':
-                results = await Google_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'brave':
-                results = await Brave_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'exa':
-                results = await Exa_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'serper':
-                results = await Serper_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'bochaai':
-                results = await bochaai_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'youcom':
-                results = await youcom_search(user_prompt)
+            # S90：统一入口——配置引擎失败自动走内置浏览器兜底
+            results = await websearch_with_fallback(
+                settings['webSearch']['engine'], user_prompt)
             if results:
                 content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}\n\n请根据联网搜索结果组织你的回答，并确保你的回答是准确的。")
                 tool_chunk = {
@@ -4201,6 +4185,8 @@ async def _stream_web_search_pre(request, settings, user_prompt, tools, enable_w
                 tools.append(bochaai_tool)
             elif settings['webSearch']['engine'] == 'youcom':
                 tools.append(youcom_tool)
+            elif settings['webSearch']['engine'] == 'browser':
+                tools.append(browser_search_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
                 tools.append(jina_crawler_tool)
@@ -6445,29 +6431,13 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
         duckduckgo_tool, searxng_tool, tavily_tool, bing_tool, google_tool,
         brave_tool, exa_tool, serper_tool, bochaai_tool, youcom_tool, jina_crawler_tool,
         simple_fetch_tool, Crawl4Ai_tool, firecrawl_tool, markdown_new_tool,
+        websearch_with_fallback, browser_search_tool,
     )
     if settings['webSearch']['enabled'] or enable_web_search:
         if settings['webSearch']['when'] == 'before_thinking' or settings['webSearch']['when'] == 'both':
-            if settings['webSearch']['engine'] == 'duckduckgo':
-                results = await DDGsearch(user_prompt)
-            elif settings['webSearch']['engine'] == 'searxng':
-                results = await searxng(user_prompt)
-            elif settings['webSearch']['engine'] == 'tavily':
-                results = await Tavily_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'bing':
-                results = await Bing_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'google':
-                results = await Google_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'brave':
-                results = await Brave_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'exa':
-                results = await Exa_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'serper':
-                results = await Serper_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'bochaai':
-                results = await bochaai_search(user_prompt)
-            elif settings['webSearch']['engine'] == 'youcom':
-                results = await youcom_search(user_prompt)
+            # S90：统一入口——配置引擎失败自动走内置浏览器兜底
+            results = await websearch_with_fallback(
+                settings['webSearch']['engine'], user_prompt)
             if results:
                 content_append(request.messages, 'user',  f"\n\n联网搜索结果：{results}")
         if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
@@ -6491,6 +6461,8 @@ async def _complete_web_search_setup(request, settings, user_prompt, tools, enab
                 tools.append(bochaai_tool)
             elif settings['webSearch']['engine'] == 'youcom':
                 tools.append(youcom_tool)
+            elif settings['webSearch']['engine'] == 'browser':
+                tools.append(browser_search_tool)
 
             if settings['webSearch']['crawler'] == 'jina':
                 tools.append(jina_crawler_tool)
@@ -7170,7 +7142,7 @@ async def execute_tool_manually(request: Request):
     # ==================== 1. 导入所有工具函数 ====================
     from py.web_search import (
         DDGsearch, 
-        searxng, 
+        searxng,
         Tavily_search,
         Bing_search,
         Google_search,
@@ -7180,10 +7152,11 @@ async def execute_tool_manually(request: Request):
         bochaai_search,
         youcom_search,
         jina_crawler,
-        Crawl4Ai_search, 
+        Crawl4Ai_search,
         firecrawl_search,
         simple_fetch,
         markdown_new,
+        make_engine_with_fallback as _fb, browser_search,
     )
     from py.know_base import query_knowledge_base
     from py.agent_tool import agent_tool_call
@@ -7288,9 +7261,8 @@ async def execute_tool_manually(request: Request):
 
     # ==================== 2. 定义工具映射表 ====================
     _TOOL_HOOKS = {
-        "DDGsearch": DDGsearch,
-        "searxng": searxng,
-        "Tavily_search": Tavily_search,
+        "DDGsearch": _fb("duckduckgo", DDGsearch), "browser_lookup": browser_search, "searxng": _fb("searxng", searxng),
+        "Tavily_search": _fb("tavily", Tavily_search),
         "query_knowledge_base": query_knowledge_base,
         "jina_crawler": jina_crawler,
         "Crawl4Ai_search": Crawl4Ai_search,
@@ -7312,13 +7284,13 @@ async def execute_tool_manually(request: Request):
         "openai_chat_image":openai_chat_image,
         "query_diary": handle_query_diary,
         "list_diary_books": handle_list_diary_books,
-        "Bing_search": Bing_search,
-        "Google_search": Google_search,
-        "Brave_search": Brave_search,
-        "Exa_search": Exa_search,
-        "Serper_search": Serper_search,
-        "bochaai_search": bochaai_search,
-        "youcom_search": youcom_search,
+        "Bing_search": _fb("bing", Bing_search),
+        "Google_search": _fb("google", Google_search),
+        "Brave_search": _fb("brave", Brave_search),
+        "Exa_search": _fb("exa", Exa_search),
+        "Serper_search": _fb("serper", Serper_search),
+        "bochaai_search": _fb("bochaai", bochaai_search),
+        "youcom_search": _fb("youcom", youcom_search),
         "comfyui_tool_call": comfyui_tool_call,
         "time": time,
         "get_weather": get_weather,

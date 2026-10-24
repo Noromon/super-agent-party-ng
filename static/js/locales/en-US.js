@@ -49,6 +49,7 @@ window.lang_enUS = {
         'assistantLanguage': 'Assistant Language',
         'assistantTone': 'Assistant Tone',
         'searchEngine': 'Search Engine',
+        'browserEngineOption': 'Built-in Browser (bypasses DDG bot-blocks)',
         'webCrawling': 'Web parsing',
         'webSearchTiming': 'Web Search Timing',
         'beforeThinking': 'Triggered before replying',
