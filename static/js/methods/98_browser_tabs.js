@@ -25,6 +25,7 @@ Object.assign(vue_methods, {
         this.currentTabId = id;
         const tab = this.browserTabs.find(t => t.id === id);
         if (tab) {
+            if (!tab.loaded && tab.url) tab.loaded = true; // S94: 切到才真正加载（隐藏懒 tab 唤醒点）
             // --- ✅ 修改此处 ---
             // 优先显示页面实际所在的 currentUrl，否则显示 tab.url
             this.urlInput = tab.currentUrl || tab.url;

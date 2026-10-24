@@ -19,8 +19,8 @@
                   v-show="currentTabId === tab.id && tab.url"
                   style="flex: 1; display: flex; flex-direction: column; height: 100%;"
               >
-                <webview 
-                    :src="tab.url" 
+                <webview
+                    :src="tab.loaded ? tab.url : 'about:blank'"
                     :id="'webview-' + tab.id"
                     class="webview-element"
                     :useragent="dynamicUserAgent" 

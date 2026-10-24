@@ -1953,16 +1953,21 @@ app.on('before-quit', async (event) => {
     
     // 1. 停止前端的机器人 (保留你原有的逻辑)
     if (mainWindow && !mainWindow.isDestroyed()) {
-      await mainWindow.webContents.executeJavaScript(`
-        if (window.stopQQBotHandler) window.stopQQBotHandler();
-        if (window.stopFeishuBotHandler) window.stopFeishuBotHandler();
-        if (window.stopWechatBotHandler) window.stopWechatBotHandler();
-        if (window.stopDingtalkBotHandler) window.stopDingtalkBotHandler();
-        if (window.stopDiscordBotHandler) window.stopDiscordBotHandler();
-        if (window.stopTelegramBotHandler) window.stopTelegramBotHandler();
-        if (window.stopSlackBotHandler) window.stopSlackBotHandler();
-        if (window.stopWeComBotHandler) window.stopWeComBotHandler();
-      `);
+      // S94：渲染进程繁忙时 executeJavaScript 会无限排队——3 秒超时直接放弃
+      // 前端清理继续退出流程（退出指令不再被卡死的渲染进程劫持）
+      await Promise.race([
+        mainWindow.webContents.executeJavaScript(`
+          if (window.stopQQBotHandler) window.stopQQBotHandler();
+          if (window.stopFeishuBotHandler) window.stopFeishuBotHandler();
+          if (window.stopWechatBotHandler) window.stopWechatBotHandler();
+          if (window.stopDingtalkBotHandler) window.stopDingtalkBotHandler();
+          if (window.stopDiscordBotHandler) window.stopDiscordBotHandler();
+          if (window.stopTelegramBotHandler) window.stopTelegramBotHandler();
+          if (window.stopSlackBotHandler) window.stopSlackBotHandler();
+          if (window.stopWeComBotHandler) window.stopWeComBotHandler();
+        `).catch(() => {}),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]);
       // 给前端一点时间清理
       await new Promise(resolve => setTimeout(resolve, 500));
     }

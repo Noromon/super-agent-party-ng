@@ -78,27 +78,35 @@ async def get_webview_ws(index=None):
         return webviews[target_idx].get('webSocketDebuggerUrl')
     return None
 
-async def cdp_command(ws_url, method, params=None):
-    """发送 CDP 命令的通用函数"""
+CDP_CALL_TIMEOUT = 60  # S94: 单次 CDP 往返上限；渲染进程繁忙时工具超时回错而非无限挂起
+
+
+async def cdp_command(ws_url, method, params=None, timeout=None):
+    """发送 CDP 命令的通用函数（S94：全链超时，渲染进程繁忙时不再无限挂起后端协程）"""
     if not ws_url:
         return {"error": "Target not found"}
-    
-    # 修改这里：增加 max_size 参数
-    # 设置为 None 表示不限制大小，或者设置为 10 * 1024 * 1024 (10MB)
-    async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
-        cmd_id = 1
-        message = {
-            "id": cmd_id,
-            "method": method,
-            "params": params or {}
-        }
-        await ws.send(json.dumps(message))
-        
-        while True:
-            response = await ws.recv()
-            data = json.loads(response)
-            if data.get('id') == cmd_id:
-                return data.get('result', {})
+    if timeout is None:
+        timeout = CDP_CALL_TIMEOUT
+
+    async def _exchange():
+        # 修改这里：增加 max_size 参数
+        # 设置为 None 表示不限制大小，或者设置为 10 * 1024 * 1024 (10MB)
+        async with websockets.connect(ws_url, max_size=10 * 1024 * 1024) as ws:
+            cmd_id = 1
+            message = {
+                "id": cmd_id,
+                "method": method,
+                "params": params or {}
+            }
+            await ws.send(json.dumps(message))
+
+            while True:
+                response = await ws.recv()
+                data = json.loads(response)
+                if data.get('id') == cmd_id:
+                    return data.get('result', {})
+
+    return await asyncio.wait_for(_exchange(), timeout=timeout)
 
 # ==========================================
 # Input Automation (Via Vue Controller)
@@ -129,9 +137,9 @@ async def call_vue_method(method_name, args_list=None):
         try:
             res = await cdp_command(ws_url, "Runtime.evaluate", {
                 "expression": expression,
-                "returnByValue": True, 
+                "returnByValue": True,
                 "awaitPromise": True
-            })
+            }, timeout=CDP_CALL_TIMEOUT)
             
             # 1. 检查 CDP 协议本身的异常
             if 'exceptionDetails' in res:
@@ -164,6 +172,12 @@ async def call_vue_method(method_name, args_list=None):
                 
             return f"Operation completed (Type: {remote_object.get('type')})"
 
+        except asyncio.TimeoutError:
+            # S94：渲染进程繁忙/页面加载中——超时不重试（防 new_page 等副作用重复执行），
+            # 直接回可读错误让 LLM 继续推理，后端协程不再无限挂起
+            logging.getLogger("app").info(f"[Warn] {method_name} 超时（渲染进程繁忙）")
+            return ("浏览器操作超时：页面仍在加载或浏览器界面繁忙。"
+                    "请稍后重试该操作，或减少同时打开的标签页数量。")
         except Exception as e:
             # 如果是最后一次尝试，则放弃
             if attempt == max_retries - 1:
