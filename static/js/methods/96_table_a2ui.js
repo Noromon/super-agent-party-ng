@@ -1,5 +1,8 @@
 // 批 3 F2：自 vue_methods.js 搬移的 methods/96_table_a2ui.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
+// S97: splitMessageContent 缓存。必须模块级（响应式实例上的 Map = 渲染期写入死循环，
+// S93-F1 教训）。命中纯读；仅 miss 写；FIFO 淘汰。
+const SAP_SEG_CACHE = new Map();
 Object.assign(vue_methods, {
   addTableEnhancements() {
     this.$nextTick(() => {
@@ -201,10 +204,12 @@ Object.assign(vue_methods, {
     },
 
     // [A2UI 新增] 拆分消息内容为 文本/UI 段
+    // S96: 回滚实例级缓存（渲染期响应式写入死循环）。
+    // S97: 模块级纯读缓存——命中纯读（返回拷贝，段对象引用不外泄）、仅 miss 写。
     splitMessageContent(content) {
       if (!content) return [];
-      // S96: 回滚 S93(F1) 实例级缓存——同 formatMessage：响应式实例上的 Map
-      // 在渲染表达式里 delete/set = 渲染期响应式写入 → 渲染自我触发死循环。
+      const hit = SAP_SEG_CACHE.get(content);
+      if (hit !== undefined) return hit.map(s => ({ ...s }));
       const segments = [];
       const regex = /```a2ui\s*([\s\S]*?)\s*```/g;
 
@@ -230,8 +235,8 @@ Object.assign(vue_methods, {
         segments.push({ type: 'text', content: content.slice(lastIndex) });
       }
 
-      cache.set(content, segments);
-      if (cache.size > 150) cache.delete(cache.keys().next().value);
+      SAP_SEG_CACHE.set(content, segments);
+      if (SAP_SEG_CACHE.size > 300) SAP_SEG_CACHE.delete(SAP_SEG_CACHE.keys().next().value);
       return segments.map(s => ({ ...s }));
     }
 });

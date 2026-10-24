@@ -191,6 +191,7 @@
   "NextPage",
   "PrevPage",
   "_flushToolStream",
+  "_formatCompute",
   "_humanDelay",
   "_ingestToolFrame",
   "_ingestToolProgress",

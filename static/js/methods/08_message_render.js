@@ -1,4 +1,8 @@
 // 批 3 F2：自 vue_methods.js 搬移的消息渲染与编辑域（Object.assign 装配）。
+// S97: formatMessage 缓存。必须模块级——挂在响应式实例上会被深层 reactive 包裹，
+// 渲染表达式里的写入 = 渲染期响应式写入 → render effect 自我触发死循环（S93-F1 教训）。
+// 契约：命中纯读（绝不回写 touch）；仅 miss 写；FIFO 淘汰（插入序），不做 LRU touch。
+const SAP_FMT_CACHE = new Map();
 Object.assign(vue_methods, {
   // A2: 系统提示词改动写入当前会话副本并持久化（防过期副本在重启后覆盖顶层值）
   async _persistSystemPrompt() {
@@ -81,10 +85,27 @@ Object.assign(vue_methods, {
   },
 
     //  使用占位符处理 LaTeX 公式
-    // S96: 回滚 S93(F1) 实例级缓存。缓存挂在响应式实例(this)上时，命中分支的
-    // delete/set 属于渲染期响应式写入 → render effect 自我触发死循环（实测
-    // [WinUnresponsive] 永久冻结）。重做缓存必须模块级 + 命中纯读。
+    // S96: 回滚 S93(F1) 实例级缓存（渲染期响应式写入死循环根治）。
+    // S97: 重新引入【模块级纯读】缓存——SAP_FMT_CACHE 在文件顶部，不经任何 Proxy；
+    // 命中=纯读零写入；流式活跃消息只读不写；FIFO 300 淘汰。
     formatMessage(content, index) {
+      if (!content) return '';
+      const lang = this.currentLanguage || '';
+      let bucket = SAP_FMT_CACHE.get(lang);
+      if (!bucket) { bucket = new Map(); SAP_FMT_CACHE.set(lang, bucket); }
+      const active = index >= 0 && this.messages && index === this.messages.length - 1 && this.isTyping;
+      if (!active) {
+        const hit = bucket.get(content);
+        if (hit !== undefined) return hit;
+      }
+      const out = this._formatCompute(content, index);
+      if (!active) {
+        bucket.set(content, out);
+        if (bucket.size > 300) bucket.delete(bucket.keys().next().value);
+      }
+      return out;
+    },
+    _formatCompute(content, index) {
       if (!content) return '';
 
       // 目的是防止 markdown-it 因为最后一行缺少 '|' 而在 Table 和 Paragraph 之间反复横跳

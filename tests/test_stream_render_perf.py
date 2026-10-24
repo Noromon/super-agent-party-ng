@@ -1,4 +1,5 @@
 # S92：主会话流式渲染性能 pins（reasoning 缓冲 + morph 合帧/自适应预算）
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,3 +97,41 @@ def test_s93_server_display_frame_capped():
     assert '"content": _disp_chunk,' in src
     # LLM 全文链不受影响
     assert "buffer.append(chunk)" in src
+
+
+# ===== S97: 模块级纯读缓存（命中零写入、FIFO、活跃只读） =====
+
+def test_s97_module_cache_pins():
+    src = _read("static/js/methods/08_message_render.js")
+    assert "const SAP_FMT_CACHE = new Map();" in src
+    # 命中 = 纯读直接返回，无任何写回（LRU touch 是 S96 死循环根因）
+    assert "if (hit !== undefined) return hit;" in src
+    # 活跃流式消息不写缓存（逐帧变化的内容写进去只会冲刷历史条目）
+    assert "if (!active) {\n        bucket.set(content, out);" in src
+    assert "bucket.size > 300" in src
+    src2 = _read("static/js/methods/96_table_a2ui.js")
+    assert "const SAP_SEG_CACHE = new Map();" in src2
+    assert "hit.map(s => ({ ...s }))" in src2
+    # S96 回滚地雷防回归：裸 cache 标识符（声明已被删）不得再出现
+    assert " cache.set(" not in src2
+    assert " cache.size" not in src2
+
+
+def test_s97_split_runtime(tmp_path):
+    # node 真跑：miss 解析正确、命中返回纯拷贝、空输入安全
+    src = _read("static/js/methods/96_table_a2ui.js")
+    harness = tmp_path / "seg_harness.js"
+    harness.write_text(
+        "globalThis.vue_methods = {};\n" + src + "\n"
+        "const f = vue_methods.splitMessageContent;\n"
+        "const c = 'before\\n```a2ui\\n{\"a\":1}\\n```\\nafter';\n"
+        "const r1 = f(c); const r2 = f(c);\n"
+        "if (r1.length !== 3 || r1.map(x=>x.type).join(',') !== 'text,ui,text') throw new Error('miss-parse wrong');\n"
+        "if (JSON.stringify(r2) !== JSON.stringify(r1)) throw new Error('hit mismatch');\n"
+        "if (r1 === r2 || r1[0] === r2[0]) throw new Error('hit must return fresh copies');\n"
+        "if (f('').length !== 0) throw new Error('empty input');\n"
+        "console.log('SEG_OK');\n",
+        encoding="utf-8",
+    )
+    out = subprocess.run(["node", str(harness)], capture_output=True, text=True, timeout=60)
+    assert "SEG_OK" in out.stdout, out.stderr
