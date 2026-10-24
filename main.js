@@ -479,9 +479,61 @@ function attachFreezeProbe(win) {
       try { win.webContents.debugger.detach() } catch (_) {}
     }
   }
+  // S99: 当场断点——Debugger.* 走 debugger 通道，可打断忙死/阻塞的主线程；
+  // Profiler.* 命令排主线程的队，只能恢复后生效（实测两次采样全部迟到=88% idle）。
+  // 流程：paused 事件→栈落盘→立即 resume→disable→再跑 Profiler 采样(恢复对照)。
+  // 四路兜底 resume/disable：paused、超时、通道异常、重复触发(settled)。
+  const tryPauseThenProfile = () => {
+    const dbg = win.webContents.debugger
+    let settled = false
+    let timer = null
+    const onMsg = (event, params) => {
+      if (event !== 'Debugger.paused' || settled) return
+      try {
+        const frames = (params.callFrames || []).slice(0, 40).map((f) => ({
+          fn: f.functionName || '(anonymous)',
+          url: f.url,
+          line: (f.lineNumber || 0) + 1,
+          col: f.columnNumber,
+        }))
+        const file = path.join(app.getPath('temp'), `sap-freeze-pause-${Date.now()}.json`)
+        require('fs').writeFileSync(file, JSON.stringify({ reason: params.reason, frames }, null, 1))
+        console.log('[FreezeDiag] 当场断点栈已保存:', file)
+      } catch (e) {
+        console.log('[FreezeDiag] 断点栈落盘失败:', e.message)
+      }
+      dbg.sendCommand('Debugger.resume').catch(() => {})
+      dbg.sendCommand('Debugger.disable').catch(() => {})
+      finish()
+    }
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      dbg.removeListener('message', onMsg)
+      startProfile()
+    }
+    dbg.on('message', onMsg)
+    ;(async () => {
+      try {
+        if (!dbg.isAttached()) dbg.attach('1.3')
+        await dbg.sendCommand('Debugger.enable')
+        await dbg.sendCommand('Debugger.pause')
+        console.log('[FreezeDiag] 断点已下，等待命中（5 秒）…')
+        timer = setTimeout(() => {
+          console.log('[FreezeDiag] 断点 5 秒未命中（主线程可能不在可中断点）')
+          dbg.sendCommand('Debugger.disable').catch(() => {})
+          finish()
+        }, 5000)
+      } catch (e) {
+        console.log('[FreezeDiag] 断点通道不可用:', e.message)
+        finish()
+      }
+    })()
+  }
   win.on('unresponsive', () => {
     console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
-    startProfile()
+    tryPauseThenProfile()
   })
   win.on('responsive', () => {
     console.log('[WinResponsive] 主窗口渲染进程已恢复响应')

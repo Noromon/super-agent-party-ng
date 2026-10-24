@@ -876,6 +876,38 @@ const app = Vue.createApp({
         this.generateQRCode(); // 生成二维码
       });
     }
+
+    // S99: 冻结取证通道 B——长动画帧归因 + 主线程饥饿心跳（warn 不计 console.log 棘轮）。
+    // 冻结结束后 long-animation-frame 自带肇事脚本归因（invoker+sourceLocation），
+    // 直接打进控制台，无需 DevTools。
+    try {
+      if (typeof PerformanceObserver !== 'undefined') {
+        const loafObs = new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) {
+            if ((e.duration || 0) < 500) continue;
+            const scripts = (e.scripts || []).slice(0, 3).map((s) => {
+              const loc = s.sourceLocation || {};
+              const f = (loc.url || '').split('/').pop();
+              return (s.invoker || '?') + '@' + f + ':' + (loc.lineNumber || '?') + ':' + (loc.columnNumber || '?');
+            }).join(' | ');
+            console.warn('[LongFrame] duration=' + Math.round(e.duration) + 'ms blocking=' + Math.round(e.blockingDuration || 0) +
+              'ms scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)'));
+          }
+        });
+        loafObs.observe({ type: 'long-animation-frame', durationThreshold: 500 });
+      }
+    } catch (e) { console.warn('[LongFrame] observer 注册失败:', e && e.message); }
+    try {
+      let hbPrev = Date.now();
+      const hbTick = () => {
+        const now = Date.now();
+        const gap = now - hbPrev;
+        if (gap > 2000) console.warn('[Starve] 主线程饥饿 ' + gap + 'ms');
+        hbPrev = now;
+        setTimeout(hbTick, 100);
+      };
+      setTimeout(hbTick, 100);
+    } catch (_) {}
     
     // 1. 时间触发器
     this.behaviorTimeTimer = setInterval(() => {

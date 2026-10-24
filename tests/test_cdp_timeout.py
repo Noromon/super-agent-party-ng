@@ -128,3 +128,17 @@ def test_s98_freeze_auto_profiler():
     assert "webContents.debugger" in src
     assert "isAttached()" in src
     assert "debugger: cdpDebugger" not in src
+
+
+def test_s99_inflight_freeze_evidence():
+    # 通道 A：unresponsive 当场 Debugger.pause（debugger 通道不排主线程的队）
+    src = _read("main.js")
+    for tok in ("Debugger.enable", "Debugger.pause", "Debugger.paused",
+                "Debugger.resume", "sap-freeze-pause-"):
+        assert tok in src, tok
+    assert "tryPauseThenProfile()" in src
+    # 通道 B：渲染侧 long-animation-frame 归因 + 饥饿心跳（恢复后自曝肇事脚本）
+    r = _read("static/js/renderer.js")
+    assert "long-animation-frame" in r
+    assert "[LongFrame]" in r
+    assert "[Starve]" in r
