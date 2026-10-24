@@ -1,7 +1,6 @@
 const remoteMain = require('@electron/remote/main')
 const { app, BrowserWindow, ipcMain, screen, shell, dialog, Tray, Menu, session,globalShortcut} = require('electron')
 const { clipboard, nativeImage,desktopCapturer  } = require('electron')
-const { debugger: cdpDebugger } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const { spawn } = require('child_process')
@@ -441,26 +440,29 @@ function createSkeletonWindow() {
 
 // S98: unresponsive 一触发=主进程直接对渲染进程采样 10 秒调用栈（渲染进程忙死时
 // DevTools 打不开，必须从外部拿证据）。profile 落 %TEMP%，控制台打 [FreezeDiag] 路径。
+// S98b: Electron 39 起 debugger 是 webContents 实例属性（顶层 require('electron').debugger
+// 已不存在=顶层解构得 undefined，实测踩爆）。
 function attachFreezeProbe(win) {
   let profFile = null
   const startProfile = async () => {
     if (profFile) return
+    const dbg = win.webContents.debugger
     try {
-      cdpDebugger.attach(win.webContents)
+      if (!dbg.isAttached()) dbg.attach('1.3')
     } catch (e) {
-      console.log('[FreezeDiag] debugger attach 失败（可能被浏览器工具的 CDP 会话占用）:', e.message)
+      console.log('[FreezeDiag] debugger attach 失败（可能被其它调试会话占用）:', e.message)
       return
     }
     try {
-      await cdpDebugger.sendCommand(win.webContents, 'Profiler.enable')
-      await cdpDebugger.sendCommand(win.webContents, 'Profiler.setSamplingInterval', { interval: 1000 })
-      await cdpDebugger.sendCommand(win.webContents, 'Profiler.start')
+      await dbg.sendCommand('Profiler.enable')
+      await dbg.sendCommand('Profiler.setSamplingInterval', { interval: 1000 })
+      await dbg.sendCommand('Profiler.start')
       profFile = path.join(app.getPath('temp'), `sap-freeze-profile-${Date.now()}.json`)
       console.log('[FreezeDiag] 冻结 CPU 采样已开始（10 秒）…')
       setTimeout(stopProfile, 10000)
     } catch (e) {
       console.log('[FreezeDiag] Profiler 启动失败:', e.message)
-      try { cdpDebugger.detach(win.webContents) } catch (_) {}
+      try { dbg.detach() } catch (_) {}
     }
   }
   const stopProfile = async () => {
@@ -468,13 +470,13 @@ function attachFreezeProbe(win) {
     const file = profFile
     profFile = null
     try {
-      const { profile } = await cdpDebugger.sendCommand(win.webContents, 'Profiler.stop')
+      const { profile } = await win.webContents.debugger.sendCommand('Profiler.stop')
       require('fs').writeFileSync(file, JSON.stringify(profile))
       console.log('[FreezeDiag] CPU profile 已保存:', file)
     } catch (e) {
       console.log('[FreezeDiag] Profiler 停止失败:', e.message)
     } finally {
-      try { cdpDebugger.detach(win.webContents) } catch (_) {}
+      try { win.webContents.debugger.detach() } catch (_) {}
     }
   }
   win.on('unresponsive', () => {

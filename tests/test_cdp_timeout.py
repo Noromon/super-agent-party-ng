@@ -124,3 +124,7 @@ def test_s98_freeze_auto_profiler():
     assert "[FreezeDiag]" in src
     # 两条建窗路径都必须挂上
     assert src.count("attachFreezeProbe(mainWindow)") == 2
+    # S98b: Electron>=39 debugger 是 webContents 实例属性；顶层解构=undefined（已踩爆）
+    assert "webContents.debugger" in src
+    assert "isAttached()" in src
+    assert "debugger: cdpDebugger" not in src
