@@ -1956,36 +1956,61 @@ const app = Vue.createApp({
   methods: {
     ...vue_methods,
   },
-directives: {
+  directives: {
     morph: {
       mounted(el, binding, vnode) {
-        const vm = binding.instance; 
-        el._update = (content) => {
-           // 1. 解析 Markdown
+        const vm = binding.instance;
+        el._pending = null;
+        el._timer = 0;
+        el._lastRun = 0;
+        el._minInterval = 0;
+        el._render = (content) => {
+          // S92(A3): 记录上轮 formatMessage+morph 耗时，超预算则本实例自动降频
+          const t0 = performance.now();
           const html = vm.formatMessage(content, -1);
           const wrapper = document.createElement('div');
           wrapper.innerHTML = html;
-           
-           // 2. 更新真实 DOM
-           morphdom(el, wrapper, { 
-               childrenOnly: true,
-                onBeforeElUpdated: (fromEl, toEl) => {
-                    if (fromEl.tagName === 'PRE' && fromEl.isEqualNode(toEl)) return false;
-                    return true;
-                }
-           });
-           
-            // 🌟 【核心修复点】直接调用，不加 requestAnimationFrame，让 scrollToBottom 自带的 setTimeout 去处理时序
-            if (vm && typeof vm.scrollToBottom === 'function') {
-                vm.scrollToBottom();
-            }
+          morphdom(el, wrapper, {
+              childrenOnly: true,
+              onBeforeElUpdated: (fromEl, toEl) => {
+                  if (fromEl.tagName === 'PRE' && fromEl.isEqualNode(toEl)) return false;
+                  return true;
+              }
+          });
+          el._minInterval = (performance.now() - t0) > 50 ? 150 : 0;
+          if (vm && typeof vm.requestScrollToBottom === 'function') {
+              vm.requestScrollToBottom();
+          } else if (vm && typeof vm.scrollToBottom === 'function') {
+              vm.scrollToBottom();
+          }
         };
-        el._update(binding.value);
+        el._flush = () => {
+          el._timer = 0;
+          const now = performance.now();
+          const wait = Math.max(0, el._minInterval - (now - el._lastRun));
+          if (wait > 0) { el._timer = setTimeout(el._flush, wait); return; }
+          if (el._pending === null) return;
+          const content = el._pending;
+          el._pending = null;
+          el._lastRun = now;
+          el._render(content);
+        };
+        // S92(A2): rAF 合帧——同帧多次 token 变更只渲染最新值
+        el._schedule = (content) => {
+          el._pending = content;
+          if (el._timer) return;
+          el._timer = requestAnimationFrame(el._flush);
+        };
+        el._schedule(binding.value);
       },
       updated(el, binding) {
         if (binding.value !== binding.oldValue) {
-           el._update(binding.value);
+           el._schedule(binding.value);
         }
+      },
+      unmounted(el) {
+        if (el._timer) { cancelAnimationFrame(el._timer); clearTimeout(el._timer); el._timer = 0; }
+        el._pending = null;
       }
     }
 },

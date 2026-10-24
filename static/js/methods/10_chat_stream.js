@@ -440,6 +440,7 @@ Object.assign(vue_methods, {
             // 初始化流式文本批量更新状态
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
+            this._streamReasoningBuffer = '';
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
             // 断线也能 resume，停止按钮也能取消后端生产者流
@@ -482,12 +483,14 @@ Object.assign(vue_methods, {
                         currentMsg.first_token_latency = this.elapsedTime;
                     }
 
-                    // A. 处理思考 (Reasoning) —— 仅更新 displayBlocks，不拼 HTML
+                    // A. 处理思考 (Reasoning) —— S92: 与文本同款 80ms 缓冲，杜绝每 token 触发渲染
                     if (delta.reasoning_content) {
-                        const block = getBlock('reasoning');
-                        block.content += delta.reasoning_content;
-                        // 不再操作 currentMsg.content
-                        this.requestScrollToBottom();
+                        this._streamTargetMsg = currentMsg;
+                        this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
+                        if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                        this._streamUpdateTimer = setTimeout(() => {
+                            this.flushStreamTextBuffer();
+                        }, 80);
                     }
 
                     // B. 处理文本 (Content) —— 流式防抖更新
@@ -689,8 +692,10 @@ Object.assign(vue_methods, {
             }
 
             // 清理流式缓冲区状态
+            this.flushStreamTextBuffer(); // 兜底：异常路径也确保缓冲落账
             this._streamTargetMsg = null;
             this._streamTextBuffer = '';
+            this._streamReasoningBuffer = '';
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
         }
     },
@@ -877,8 +882,14 @@ Object.assign(vue_methods, {
         }
     },
 
-    // 3. 流式文本批量更新（防抖 80ms）
+    // 3. 流式文本批量更新（防抖 80ms；S92: 含 reasoning 缓冲）
     flushStreamTextBuffer() {
+        if (this._streamTargetMsg && this._streamReasoningBuffer) {
+            const rBlock = this.getBlockForMsg(this._streamTargetMsg, 'reasoning');
+            if (rBlock) rBlock.content += this._streamReasoningBuffer;
+            this._streamReasoningBuffer = '';
+            this.requestScrollToBottom();
+        }
         if (this._streamTargetMsg && this._streamTextBuffer) {
             const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
             if (block) {

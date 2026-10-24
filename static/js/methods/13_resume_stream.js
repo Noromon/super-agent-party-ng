@@ -59,9 +59,13 @@ Object.assign(vue_methods, {
                 chunkIndex++;
 
                 if (delta.reasoning_content) {
-                    const block = getBlock('reasoning');
-                    block.content += delta.reasoning_content;
-                    this.requestScrollToBottom();
+                    // S92: reasoning 与文本同款 80ms 缓冲（flush 由共享 flushStreamTextBuffer 处理）
+                    this._streamTargetMsg = currentMsg;
+                    this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
+                    if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
+                    this._streamUpdateTimer = setTimeout(() => {
+                        this.flushStreamTextBuffer();
+                    }, 80);
                 }
 
                 if (delta.content) {
