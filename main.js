@@ -1,6 +1,7 @@
 const remoteMain = require('@electron/remote/main')
 const { app, BrowserWindow, ipcMain, screen, shell, dialog, Tray, Menu, session,globalShortcut} = require('electron')
 const { clipboard, nativeImage,desktopCapturer  } = require('electron')
+const { debugger: cdpDebugger } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
 const { spawn } = require('child_process')
@@ -434,14 +435,57 @@ function createSkeletonWindow() {
     return true
   })
 
-  // S95: 渲染进程挂起诊断探针——"整窗卡死"时 SAP 控制台直接定案（渲染进程忙死 vs 后端在等）
-  mainWindow.on('unresponsive', () => {
+  // S95/S98: 挂起诊断探针 + 冻结自动 CPU 采样
+  attachFreezeProbe(mainWindow)
+}
+
+// S98: unresponsive 一触发=主进程直接对渲染进程采样 10 秒调用栈（渲染进程忙死时
+// DevTools 打不开，必须从外部拿证据）。profile 落 %TEMP%，控制台打 [FreezeDiag] 路径。
+function attachFreezeProbe(win) {
+  let profFile = null
+  const startProfile = async () => {
+    if (profFile) return
+    try {
+      cdpDebugger.attach(win.webContents)
+    } catch (e) {
+      console.log('[FreezeDiag] debugger attach 失败（可能被浏览器工具的 CDP 会话占用）:', e.message)
+      return
+    }
+    try {
+      await cdpDebugger.sendCommand(win.webContents, 'Profiler.enable')
+      await cdpDebugger.sendCommand(win.webContents, 'Profiler.setSamplingInterval', { interval: 1000 })
+      await cdpDebugger.sendCommand(win.webContents, 'Profiler.start')
+      profFile = path.join(app.getPath('temp'), `sap-freeze-profile-${Date.now()}.json`)
+      console.log('[FreezeDiag] 冻结 CPU 采样已开始（10 秒）…')
+      setTimeout(stopProfile, 10000)
+    } catch (e) {
+      console.log('[FreezeDiag] Profiler 启动失败:', e.message)
+      try { cdpDebugger.detach(win.webContents) } catch (_) {}
+    }
+  }
+  const stopProfile = async () => {
+    if (!profFile) return
+    const file = profFile
+    profFile = null
+    try {
+      const { profile } = await cdpDebugger.sendCommand(win.webContents, 'Profiler.stop')
+      require('fs').writeFileSync(file, JSON.stringify(profile))
+      console.log('[FreezeDiag] CPU profile 已保存:', file)
+    } catch (e) {
+      console.log('[FreezeDiag] Profiler 停止失败:', e.message)
+    } finally {
+      try { cdpDebugger.detach(win.webContents) } catch (_) {}
+    }
+  }
+  win.on('unresponsive', () => {
     console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
+    startProfile()
   })
-  mainWindow.on('responsive', () => {
+  win.on('responsive', () => {
     console.log('[WinResponsive] 主窗口渲染进程已恢复响应')
+    stopProfile()
   })
-  mainWindow.webContents.on('render-process-gone', (e, details) => {
+  win.webContents.on('render-process-gone', (e, details) => {
     console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
   })
 }
@@ -1474,16 +1518,8 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       const size = mainWindow.getSize();
       mainWindow.webContents.send('window-resized', size);
     });
-    // S95: 渲染进程挂起诊断探针（与 createWindow 路径一致）
-    mainWindow.on('unresponsive', () => {
-      console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
-    })
-    mainWindow.on('responsive', () => {
-      console.log('[WinResponsive] 主窗口渲染进程已恢复响应')
-    })
-    mainWindow.webContents.on('render-process-gone', (e, details) => {
-      console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
-    })
+    // S95/S98: 挂起诊断探针 + 冻结自动 CPU 采样（与 createWindow 路径一致）
+    attachFreezeProbe(mainWindow)
 
     // ★ 新增：增强型复制函数（同时支持粘贴为图片和粘贴为文件）
     function copyImageToClipboardWithFile(image) {

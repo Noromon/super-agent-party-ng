@@ -102,7 +102,9 @@ def test_s95_main_js_unresponsive_probe():
     src = _read("main.js")
     for token in ("[WinUnresponsive]", "[WinResponsive]", "[WinRendererGone]"):
         assert token in src
-    assert src.count("on('unresponsive'") >= 2  # 两条建窗路径都要挂探针
+    # S98 起探针集中于 attachFreezeProbe，两条建窗路径必须都调用（数量 pin 在
+    # test_s98_freeze_auto_profiler）
+    assert src.count("on('unresponsive'") >= 1
 
 
 def test_s95_timeout_budget_tightened():
@@ -111,3 +113,14 @@ def test_s95_timeout_budget_tightened():
     assert m and float(m.group(1)) <= 30
     ws = _read("py/web_search.py")
     assert "requests.get(url, headers=headers, timeout=30" in ws
+
+
+def test_s98_freeze_auto_profiler():
+    src = _read("main.js")
+    assert "function attachFreezeProbe" in src
+    # unresponsive 触发即采样，profile 落盘可回传分析
+    assert "Profiler.setSamplingInterval" in src
+    assert "sap-freeze-profile-" in src
+    assert "[FreezeDiag]" in src
+    # 两条建窗路径都必须挂上
+    assert src.count("attachFreezeProbe(mainWindow)") == 2
