@@ -281,7 +281,9 @@
                                         <!-- 1. 深度思考块 -->
                                         <div v-if="block.type === 'reasoning'" class="sap-process-block type-reasoning">
                                             <div class="sp-header"><i class="fa-solid fa-brain"></i> {{ t('thinking') }}</div>
-                                            <div class="sp-content" v-morph:format="block.content"></div>
+                                            <!-- S93(F2): 流式期纯文本 pre，done 后一次性全量渲染 -->
+                                            <div v-if="!block.done && isTyping && index === messages.length - 1" class="sp-content" style="white-space: pre-wrap; word-break: break-word; margin: 0; font-family: inherit; font-size: inherit; line-height: inherit;">{{ block.content }}</div>
+                                            <div v-else class="sp-content" v-morph:format="block.content"></div>
                                         </div>
 
                                         <!-- 文本块 -->

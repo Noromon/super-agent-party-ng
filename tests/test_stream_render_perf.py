@@ -42,3 +42,60 @@ def test_morph_directive_coalescing_and_budget():
     seg = src[src.index("directives:"):]
     assert "requestScrollToBottom" in seg
     assert "unmounted" in seg
+
+
+# ===== S93: 渲染放大/CoT 纯文本流式/工具流封顶 pins =====
+
+def test_s93_format_message_lru_cache():
+    src = _read("static/js/methods/08_message_render.js")
+    assert "_fmtCache" in src
+    assert "_formatMessageUncached" in src
+    # 活跃消息旁路缓存、语言分桶
+    assert "this._formatMessageUncached(content, index)" in src
+
+
+def test_s93_split_content_cache():
+    src = _read("static/js/methods/96_table_a2ui.js")
+    assert "_segCache" in src
+    assert "hit.map(s => ({ ...s }))" in src
+
+
+def test_s93_dom_hooks_throttled():
+    src = _read("static/js/methods/08_message_render.js")
+    assert "this.scheduleDomHooks()" in src
+    assert "$nextTick(() => {" not in src[src.index("_formatMessageUncached"):]
+    src2 = _read("static/js/methods/66_render_preview.js")
+    assert "scheduleDomHooks()" in src2
+    assert "300" in src2[src2.index("scheduleDomHooks"):src2.index("scheduleDomHooks") + 320]
+
+
+def test_s93_reasoning_plain_text_while_streaming():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        src = _read(f"static/templates/{tpl}.html")
+        assert "v-if=\"!block.done && isTyping && index === messages.length - 1\"" in src, tpl
+        assert "white-space: pre-wrap" in src, tpl
+    src = _read("static/js/methods/11_tool_blocks.js")
+    assert "_markReasoningDone(msg)" in src
+    src = _read("static/js/methods/13_resume_stream.js")
+    assert "this._markReasoningDone(currentMsg)" in src
+    assert "this._markReasoningDone(this._streamTargetMsg)" in src
+
+
+def test_s93_tool_stream_capped_and_buffered():
+    src = _read("static/js/methods/13_resume_stream.js")
+    assert "_toolStreamPending" in src
+    assert "_flushToolStream()" in src
+    assert "targetBlock.content = this.smartMergeTerminal" not in src
+    assert "50000" in src
+    assert "131072" in src
+    src = _read("static/js/methods/10_chat_stream.js")
+    assert src.count("this._flushToolStream();") >= 3
+
+
+def test_s93_server_display_frame_capped():
+    src = _read("server.py")
+    assert "_disp_chunk" in src
+    assert "16384" in src
+    assert '"content": _disp_chunk,' in src
+    # LLM 全文链不受影响
+    assert "buffer.append(chunk)" in src

@@ -549,12 +549,14 @@ Object.assign(vue_methods, {
             // 循环结束后，强制刷新缓冲区中剩余的文字
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
             this.flushStreamTextBuffer();
+            this._flushToolStream(); // S93(F4)
 
             if (tts_buffer.trim() && this.ttsSettings.enabled) {
                 currentMsg.chunks_voice.push(this.cur_voice);
                 currentMsg.ttsChunks.push(tts_buffer);
             }
 
+            this._markReasoningDone(currentMsg); // S93(F2)
             currentMsg.generationFinished = true;
 
             // S81(A8)：流式收尾不再手动 MathJax typeset——KaTeX/texmath 已在渲染管线内排版
@@ -585,6 +587,8 @@ Object.assign(vue_methods, {
                         // 续传成功后正常完成
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this.flushStreamTextBuffer();
+                        this._flushToolStream(); // S93(F4)
+                        this._markReasoningDone(currentMsg); // S93(F2)
                         currentMsg.generationFinished = true;
                         if (audioResolve) audioResolve();
                         return; // 跳过 finally 中的错误处理
@@ -693,6 +697,7 @@ Object.assign(vue_methods, {
 
             // 清理流式缓冲区状态
             this.flushStreamTextBuffer(); // 兜底：异常路径也确保缓冲落账
+            this._flushToolStream(); // S93(F4)
             this._streamTargetMsg = null;
             this._streamTextBuffer = '';
             this._streamReasoningBuffer = '';
@@ -893,6 +898,7 @@ Object.assign(vue_methods, {
         if (this._streamTargetMsg && this._streamTextBuffer) {
             const block = this.getBlockForMsg(this._streamTargetMsg, 'text');
             if (block) {
+                this._markReasoningDone(this._streamTargetMsg); // S93(F2): 正文开始=思考结束
                 block.content += this._streamTextBuffer;
                 // 同时更新 pure_content 和 content 纯文本（不再拼 HTML）
                 this._streamTargetMsg.pure_content += this._streamTextBuffer;

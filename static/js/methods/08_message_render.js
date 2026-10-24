@@ -80,8 +80,28 @@ Object.assign(vue_methods, {
     await this.autoSaveSettings();
   },
 
-    //  使用占位符处理 LaTeX 公式
     formatMessage(content, index) {
+      // S93(F1): 字符串级 LRU 缓存。聊天页整页是一个组件，流式期间每帧会重新求值
+      // 全部历史消息的 v-html/v-morph 表达式 → 无缓存时每次 formatMessage 都是
+      // 全文正则链+md.render+KaTeX，成本 O(消息数×消息长度)，长对话直接把主线程打死。
+      // 历史消息 content 实例稳定（V8 缓存字符串 hash），Map 命中 O(1)。
+      // 正在流式的最后一条消息跳过缓存（每帧内容都在变）。
+      if (!content) return '';
+      const cache = this._fmtCache || (this._fmtCache = new Map());
+      const lang = this.currentLanguage || '';
+      const active = index >= 0 && this.messages && index === this.messages.length - 1 && this.isTyping;
+      if (active) return this._formatMessageUncached(content, index);
+      let byLang = cache.get(lang);
+      if (!byLang) { byLang = new Map(); cache.set(lang, byLang); }
+      const hit = byLang.get(content);
+      if (hit !== undefined) { byLang.delete(content); byLang.set(content, hit); return hit; }
+      const out = this._formatMessageUncached(content, index);
+      byLang.set(content, out);
+      if (byLang.size > 150) byLang.delete(byLang.keys().next().value);
+      return out;
+    },
+    //  使用占位符处理 LaTeX 公式
+    _formatMessageUncached(content, index) {
       if (!content) return '';
 
       // 目的是防止 markdown-it 因为最后一行缺少 '|' 而在 Table 和 Paragraph 之间反复横跳
@@ -178,11 +198,8 @@ Object.assign(vue_methods, {
       }
 
       // --- 后处理 (S81/A8：公式已由 KaTeX/texmath 在 md 管线内同步排版，无需异步队列) ---
-      this.$nextTick(() => {
-        this.initCopyButtons();
-        this.initPreviewButtons();
-        // Mermaid 也可以在这里懒加载
-      });
+      // S93(F3): 全页 DOM 扫描节流（流式期每帧调用会反复 querySelectorAll 整页）
+      this.scheduleDomHooks();
 
       // 处理链接 (保持您原有的 DOM 操作逻辑，但建议用正则替换以提高性能)
       // 使用正则替换 href，比创建 DOM 树快得多

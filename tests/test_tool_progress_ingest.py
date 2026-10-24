@@ -30,6 +30,7 @@ function makeStub() {
         blocks,
         truncateDisplayContent(s) { return s.length > 5000 ? s.slice(0, 5000) : s; },
         requestScrollToBottom() {},
+        _markReasoningDone() {},
     };
     o.getBlock = (t, id, name) => {
         const k = t + ':' + id;

@@ -21,6 +21,16 @@ Object.assign(vue_methods, {
         .catch(() => showNotification(this.t('copy_failed'), 'error'));
     },
 
+    // S93(F3): DOM 钩子重扫节流（300ms 合并一次），供 formatMessage 调用
+    scheduleDomHooks() {
+      if (this._domHooksTimer) return;
+      this._domHooksTimer = setTimeout(() => {
+        this._domHooksTimer = null;
+        this.initCopyButtons();
+        this.initPreviewButtons();
+      }, 300);
+    },
+
     initPreviewButtons() {
       // 清理旧事件监听器
       if (this._previewEventHandler) {

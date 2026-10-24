@@ -115,6 +115,7 @@ Object.assign(vue_methods, {
                 // 恢复成功，flush 剩余文本
                 if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                 this.flushStreamTextBuffer();
+                this._flushToolStream(); // S93(F4)
 
                 if (tts_buffer.trim() && this.ttsSettings.enabled) {
                     currentMsg.chunks_voice.push(this.cur_voice);
@@ -141,6 +142,7 @@ Object.assign(vue_methods, {
 
     // C-2: tool_progress 帧摄取单一来源 —— 主循环与 resume 重放共用。
     _ingestToolProgress(progress, getBlock, toolCallStack) {
+        this._markReasoningDone(this._streamTargetMsg); // S93(F2): 工具开跑=思考结束
         let toolCallId = progress.tool_call_id || progress.id;
         if (!toolCallId) {
             const existingCall = toolCallStack.find(c => c.name === progress.name && !c.resolved);
@@ -177,6 +179,9 @@ Object.assign(vue_methods, {
     // 且丢 approval_required/async 帧（C-6=审批按钮不重现、工具链永久卡死）。
     _ingestToolFrame(tool, delta, currentMsg, getBlock, toolCallStack) {
         if (!Array.isArray(currentMsg.backend_content)) currentMsg.backend_content = [];
+        this._markReasoningDone(currentMsg); // S93(F2): 工具帧=思考结束
+        // S93(F4): 切换到新工具调用时先落挂起的流式块（同 id 帧保持合并，80ms 后统一 flush）
+        if (this._toolStreamPending && this._toolStreamPending.id !== (delta.tool_call_id || delta.async_tool_id)) this._flushToolStream();
         const toolName = tool.title || 'unknown';
         let toolCallId = delta.tool_call_id || delta.async_tool_id;
         if (tool.type === 'call') {
@@ -220,11 +225,21 @@ Object.assign(vue_methods, {
             currentMsg.backend_content.push({ role: 'assistant', content: '' });
             this.requestScrollToBottom();
         } else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
-            const targetBlock = getBlock('tool_result', toolCallId, toolName);
-            targetBlock.content = this.smartMergeTerminal(targetBlock.content, tool.content);
+            // S93(F4): 流式结果 80ms 合并 + 50K 显示封顶（写满不再改动 block）。
+            // 旧版每帧全文复制+全量重渲染，浏览器工具大结果 → O(总长×帧数) GC 死亡螺旋整窗卡死。
+            const pend = this._toolStreamPending;
+            this._toolStreamPending = {
+                id: toolCallId, name: toolName, msg: currentMsg,
+                chunk: (pend && pend.id === toolCallId ? pend.chunk : '') + (typeof tool.content === 'string' ? tool.content : String(tool.content ?? ''))
+            };
+            if (!this._toolStreamTimer) {
+                this._toolStreamTimer = setTimeout(() => this._flushToolStream(), 80);
+            }
+            const BE_CAP = 131072; // S93(F4): LLM 链累加上限（后端另有二次截断；防 MB 级串每帧复制与 stringify 爆炸）
             for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
                 if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
-                    currentMsg.backend_content[i].content += tool.content;
+                    const it = currentMsg.backend_content[i];
+                    if ((it.content || '').length < BE_CAP) it.content = ((it.content || '') + (tool.content || '')).slice(0, BE_CAP);
                     break;
                 }
             }
@@ -252,6 +267,7 @@ Object.assign(vue_methods, {
             } else if (tool.type === 'tool_result' || tool.type === 'tool_result_stream' || tool.type === 'error') {
                 const hide = this.toolsSettings?.hideToolResults?.enabled && tool.type === 'tool_result';
                 rawContent = hide ? '<hide to save token>' : rawContent;
+                if (typeof rawContent === 'string' && rawContent.length > 131072) rawContent = rawContent.slice(0, 131072) + '\n... [truncated]'; // S93(F4)
                 let updated = false;
                 for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
                     if (currentMsg.backend_content[i].role === 'tool' && currentMsg.backend_content[i].tool_call_id === toolCallId) {
@@ -268,6 +284,18 @@ Object.assign(vue_methods, {
                 }
             }
         }
+        this.requestScrollToBottom();
+    },
+
+    // S93(F4): 流式工具结果 80ms 合并落账；显示块写满 50K 后不再改动（避免每帧全量重渲染）
+    _flushToolStream() {
+        if (this._toolStreamTimer) { clearTimeout(this._toolStreamTimer); this._toolStreamTimer = null; }
+        const p = this._toolStreamPending;
+        this._toolStreamPending = null;
+        if (!p) return;
+        const block = this.getBlockForMsg(p.msg, 'tool_result', p.id, p.name);
+        if ((block.content || '').length >= 50000) return;
+        block.content = this.truncateDisplayContent(this.smartMergeTerminal(block.content || '', p.chunk));
         this.requestScrollToBottom();
     },
 

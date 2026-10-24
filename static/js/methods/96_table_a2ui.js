@@ -203,9 +203,14 @@ Object.assign(vue_methods, {
     // [A2UI 新增] 拆分消息内容为 文本/UI 段
     splitMessageContent(content) {
       if (!content) return [];
+      // S93(F1): 字符串级缓存（同 formatMessage 理由：流式期整页表达式每帧重评）。
+      // 返回浅拷贝，段对象引用不外泄；ui 段的解析结果 JSON 反而因引用稳定少重渲。
+      const cache = this._segCache || (this._segCache = new Map());
+      const hit = cache.get(content);
+      if (hit !== undefined) { cache.delete(content); cache.set(content, hit); return hit.map(s => ({ ...s })); }
       const segments = [];
       const regex = /```a2ui\s*([\s\S]*?)\s*```/g;
-      
+
       let lastIndex = 0;
       let match;
 
@@ -228,6 +233,8 @@ Object.assign(vue_methods, {
         segments.push({ type: 'text', content: content.slice(lastIndex) });
       }
 
-      return segments;
+      cache.set(content, segments);
+      if (cache.size > 150) cache.delete(cache.keys().next().value);
+      return segments.map(s => ({ ...s }));
     }
 });

@@ -5039,6 +5039,10 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
             first = True
             async for chunk in results:
                 buffer.append(chunk)
+                # S93(F4): 显示帧单帧封顶 16KB（buffer 全文进 LLM 不受影响），防 MB 级 chunk 打爆渲染端
+                _disp_chunk = chunk if isinstance(chunk, str) else str(chunk)
+                if len(_disp_chunk) > 16384:
+                    _disp_chunk = _disp_chunk[:16384] + "\n... [frame truncated for display]"
                 if first:
                     # 第一帧带 title
                     stream_chunk = {
@@ -5047,7 +5051,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
                                 "tool_call_id": tool_call_id,
                                 "tool_content": {
                                     "title": response_content.name,
-                                    "content": chunk,
+                                    "content": _disp_chunk,
                                     "type": "tool_result_stream"
                                 }
                             }
@@ -5063,7 +5067,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
                                 "tool_call_id": tool_call_id,
                                 "tool_content": {
                                     "title": "tool_result_stream",
-                                    "content": chunk,
+                                    "content": _disp_chunk,
                                     "type": "tool_result_stream"
                                 }
                             }

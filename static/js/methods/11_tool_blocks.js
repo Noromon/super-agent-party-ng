@@ -63,6 +63,14 @@ Object.assign(vue_methods, {
         return content.replace(/\\n/g, '\n').replace(/\\"/g, '"');
     },
 
+    // S93(F2): reasoning 块完成标记——流式期纯文本 pre，done 后才走 markdown 全量渲染
+    _markReasoningDone(msg) {
+      if (!msg || !Array.isArray(msg.displayBlocks)) return;
+      for (const b of msg.displayBlocks) {
+        if (b.type === 'reasoning' && !b.done) b.done = true;
+      }
+    },
+
     // 获取消息的指定类型 block（复用原逻辑，但独立出来）
     getBlockForMsg(msg, type, id = null, name = null) {
         if (!msg.displayBlocks) msg.displayBlocks = [];
