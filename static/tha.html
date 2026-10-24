@@ -2,6 +2,10 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<script>
+  // M2: session-token bootstrap (sets SameSite=Lax cookie for fetch + WS)
+  fetch('/session_token', { cache: 'no-store' }).catch(function () {});
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>THA Desk Pet</title>
 <link rel="stylesheet" href="fontawesome/css/all.min.css">

@@ -1128,6 +1128,8 @@ SR.init().then(async () => {
     }
   }
 });
+// S91-B3: 先等 cookie 就位再连 WS（fresh session 下防止首个握手被 403）
+try { await fetch('/session_token', { cache: 'no-store' }); } catch (e) {}
 connectRender();
 connectTTS();
 loadModelList();

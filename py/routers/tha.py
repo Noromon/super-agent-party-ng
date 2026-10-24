@@ -164,6 +164,7 @@ async def delete_tha_model(model_id: str):
 async def tha_websocket_endpoint(websocket: WebSocket):
     """THA 桌面宠物 WebSocket：接收控制指令，返回 JPEG 帧。"""
     if not sap_auth.ws_auth_ok(websocket):
+        logging.info("[THA WS] handshake rejected: auth failed (missing/invalid sap_token)")
         await websocket.close(code=4401)
         return
 
@@ -204,9 +205,11 @@ async def tha_websocket_endpoint(websocket: WebSocket):
         await websocket.close()
         return
 
+    logging.info(f"[THA WS] Client connected: model={selected_id} sr={sr_mode}")
     try:
         engine = get_engine(model_path)
         gen = THAPoseGenerator()
+        logging.info(f"[THA WS] Engine ready: {model_path}")
 
         await tts_manager.connect_tha(websocket)
         websocket._tha_gen = gen
@@ -271,3 +274,4 @@ async def tha_websocket_endpoint(websocket: WebSocket):
         logging.error(f"[THA WS] Main loop runtime error: {e}")
     finally:
         tts_manager.disconnect_tha(websocket)
+        logging.info("[THA WS] Client disconnected")

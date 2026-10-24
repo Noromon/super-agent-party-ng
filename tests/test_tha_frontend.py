@@ -87,6 +87,17 @@ def test_tha_static_assets():
     assert (ROOT / "static/libs/anime4k-sr.bundle.js").exists()
     assert (ROOT / "scripts/anime4k-entry.js").exists()
     assert "js/tha.js" in _read("static/tha.html")
+    # S91-B3: fork 鉴权适配——页面级 cookie bootstrap + WS 连接前 await bootstrap
+    assert "/session_token" in _read("static/tha.html")
+    assert "await fetch('/session_token'" in _read("static/js/tha.js")
+
+
+def test_tha_ws_observability_logs():
+    src = _read("py/routers/tha.py")
+    assert "handshake rejected" in src
+    assert "Client connected" in src
+    assert "Engine ready" in src
+    assert "Client disconnected" in src
 
 
 _THA_KEYS = [
