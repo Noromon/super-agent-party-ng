@@ -80,28 +80,11 @@ Object.assign(vue_methods, {
     await this.autoSaveSettings();
   },
 
-    formatMessage(content, index) {
-      // S93(F1): 字符串级 LRU 缓存。聊天页整页是一个组件，流式期间每帧会重新求值
-      // 全部历史消息的 v-html/v-morph 表达式 → 无缓存时每次 formatMessage 都是
-      // 全文正则链+md.render+KaTeX，成本 O(消息数×消息长度)，长对话直接把主线程打死。
-      // 历史消息 content 实例稳定（V8 缓存字符串 hash），Map 命中 O(1)。
-      // 正在流式的最后一条消息跳过缓存（每帧内容都在变）。
-      if (!content) return '';
-      const cache = this._fmtCache || (this._fmtCache = new Map());
-      const lang = this.currentLanguage || '';
-      const active = index >= 0 && this.messages && index === this.messages.length - 1 && this.isTyping;
-      if (active) return this._formatMessageUncached(content, index);
-      let byLang = cache.get(lang);
-      if (!byLang) { byLang = new Map(); cache.set(lang, byLang); }
-      const hit = byLang.get(content);
-      if (hit !== undefined) { byLang.delete(content); byLang.set(content, hit); return hit; }
-      const out = this._formatMessageUncached(content, index);
-      byLang.set(content, out);
-      if (byLang.size > 150) byLang.delete(byLang.keys().next().value);
-      return out;
-    },
     //  使用占位符处理 LaTeX 公式
-    _formatMessageUncached(content, index) {
+    // S96: 回滚 S93(F1) 实例级缓存。缓存挂在响应式实例(this)上时，命中分支的
+    // delete/set 属于渲染期响应式写入 → render effect 自我触发死循环（实测
+    // [WinUnresponsive] 永久冻结）。重做缓存必须模块级 + 命中纯读。
+    formatMessage(content, index) {
       if (!content) return '';
 
       // 目的是防止 markdown-it 因为最后一行缺少 '|' 而在 Table 和 Paragraph 之间反复横跳

@@ -46,24 +46,21 @@ def test_morph_directive_coalescing_and_budget():
 
 # ===== S93: 渲染放大/CoT 纯文本流式/工具流封顶 pins =====
 
-def test_s93_format_message_lru_cache():
+def test_s96_cache_layer_rolled_back():
+    # S93-F1 缓存层已回滚：响应式实例上的 Map 在渲染表达式里 delete/set
+    # = 渲染期响应式写入 → render effect 自我触发死循环（[WinUnresponsive] 实测）。
+    # 防死循环回归：任何实例级缓存不得再出现。
     src = _read("static/js/methods/08_message_render.js")
-    assert "_fmtCache" in src
-    assert "_formatMessageUncached" in src
-    # 活跃消息旁路缓存、语言分桶
-    assert "this._formatMessageUncached(content, index)" in src
-
-
-def test_s93_split_content_cache():
-    src = _read("static/js/methods/96_table_a2ui.js")
-    assert "_segCache" in src
-    assert "hit.map(s => ({ ...s }))" in src
+    assert "_fmtCache" not in src
+    assert "_formatMessageUncached" not in src
+    src2 = _read("static/js/methods/96_table_a2ui.js")
+    assert "_segCache" not in src2
 
 
 def test_s93_dom_hooks_throttled():
     src = _read("static/js/methods/08_message_render.js")
     assert "this.scheduleDomHooks()" in src
-    assert "$nextTick(() => {" not in src[src.index("_formatMessageUncached"):]
+    assert "$nextTick(() => {" not in src[src.index("formatMessage(content, index)"):]
     src2 = _read("static/js/methods/66_render_preview.js")
     assert "scheduleDomHooks()" in src2
     assert "300" in src2[src2.index("scheduleDomHooks"):src2.index("scheduleDomHooks") + 320]

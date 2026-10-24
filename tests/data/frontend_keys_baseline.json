@@ -191,7 +191,6 @@
   "NextPage",
   "PrevPage",
   "_flushToolStream",
-  "_formatMessageUncached",
   "_humanDelay",
   "_ingestToolFrame",
   "_ingestToolProgress",
