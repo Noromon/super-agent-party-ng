@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import re  # S91(THA)：hotkey 权重后缀剥离
 import struct
 import tempfile
 import uuid
@@ -597,6 +598,8 @@ class TTSConnectionManager:
     def __init__(self):
         self.main_connections: List[WebSocket] = []
         self.vrm_connections: List[WebSocket] = []
+        # S91(THA)：桌面宠物姿态生成器连接（websocket._tha_gen 由 /ws/tha 挂载）
+        self.tha_connections: List[WebSocket] = []
         self.overlay_connections: list[WebSocket] = []
 
     async def connect_main(self, websocket: WebSocket):
@@ -616,6 +619,15 @@ class TTSConnectionManager:
     def disconnect_vrm(self, websocket: WebSocket):
         if websocket in self.vrm_connections:
             self.vrm_connections.remove(websocket)
+
+    async def connect_tha(self, websocket: WebSocket):
+        await websocket.accept()
+        self.tha_connections.append(websocket)
+        logging.info(f"THA interface connected. Total: {len(self.tha_connections)}")
+
+    def disconnect_tha(self, websocket: WebSocket):
+        if websocket in self.tha_connections:
+            self.tha_connections.remove(websocket)
 
     # 批 1c 迁出时清理：此处原有第一版 broadcast_to_vrm（只发 vrm_connections），
     # 被下方第二版（二进制→VRM、文本→VRM+字幕）覆盖 = 死代码，已删除。
@@ -660,6 +672,54 @@ class TTSConnectionManager:
             for conn in list(self.overlay_connections):
                 try: await conn.send_text(message)
                 except: self.disconnect_overlay(conn)
+
+    async def broadcast_emotion_to_tha(self, emotion: str):
+        """S91(THA)：单表情/动作指令广播（兼容旧调用，语义同上游）。"""
+        await self.broadcast_expressions_to_tha([emotion])
+
+    async def broadcast_expressions_to_tha(self, expressions: list):
+        """S91(THA)：解析带权重表情标签并混合广播；动作标签一次性触发。
+
+        "happy"=裸标签切换（重置累积，最后一个生效）、"happy:0.3"=加权累加，
+        多表情经 set_emotion_mix 加权混合避免冲突。"""
+        from py.tha_engine import THA_MOTIONS
+
+        # 去重快速路径（随上游）：流式增量重发同一累积列表时，列表比较
+        # 一次即跳过全部解析/广播；新列表以上次为前缀 → 只处理新增尾部。
+        exps = [str(e) for e in expressions]
+        prev = getattr(self, '_last_tha_expressions', None)
+        if prev == exps:
+            return
+        if prev is not None and len(exps) > len(prev) and exps[:len(prev)] == prev:
+            batch = exps[len(prev):]
+        else:
+            batch = exps
+        self._last_tha_expressions = exps
+
+        weights = {}
+        motions = []
+        for exp in batch:
+            name, sep, w = exp.partition(':')
+            name = name.strip()
+            if name in THA_MOTIONS:
+                motions.append(name)
+            elif not sep or not w.strip():
+                weights = {name: 1.0}
+            else:
+                try:
+                    weights[name] = float(w)
+                except ValueError:
+                    continue
+        for conn in list(self.tha_connections):
+            try:
+                gen = getattr(conn, '_tha_gen', None)
+                if gen:
+                    if weights:
+                        gen.set_emotion_mix(weights)
+                    for m in motions:
+                        gen.set_motion(m)
+            except:
+                self.disconnect_tha(conn)
 
 
 tts_manager = TTSConnectionManager()
@@ -750,11 +810,39 @@ async def tts_websocket_endpoint(websocket: WebSocket):
                             "data": {"success": False, "message": "VTS Disconnected"}
                         }))
                     elif msg_type == "startSpeaking":
+                        # S91(THA)：expressions 解析移出 vts 门控（上游终态）
+                        data_content = payload.get("data", {})
+                        expressions = data_content.get("expressions", [])
                         if vts_instance.is_running:
-                            data_content = payload.get("data", {})
-                            expressions = data_content.get("expressions",[])
                             for exp in expressions:
-                                asyncio.create_task(vts_instance.trigger_hotkey(exp))
+                                exp = str(exp)
+                                name, sep, w = exp.partition(':')
+                                # 仅当冒号后缀是数值权重（happy:0.5）时才剥离；
+                                # 含冒号的普通热键名（emote:wave）原样传递
+                                hotkey = name if (sep and re.fullmatch(r'\s*\d*\.?\d+\s*', w)) else exp
+                                asyncio.create_task(vts_instance.trigger_hotkey(hotkey))
+                        # THA 表情广播（整组交给 composer 加权混合）
+                        if expressions:
+                            asyncio.create_task(
+                                tts_manager.broadcast_expressions_to_tha(expressions))
+                    elif msg_type == "omniStreaming":
+                        # S91(THA)：TTS 禁用时的流式表情/动作触发（随上游终态）
+                        data_content = payload.get("data", {})
+                        expressions = data_content.get("expressions", [])
+                        if vts_instance.is_running:
+                            for exp in expressions:
+                                exp = str(exp)
+                                name, sep, w = exp.partition(':')
+                                hotkey = name if (sep and re.fullmatch(r'\s*\d*\.?\d+\s*', w)) else exp
+                                asyncio.create_task(vts_instance.trigger_hotkey(hotkey))
+                        if expressions:
+                            asyncio.create_task(
+                                tts_manager.broadcast_expressions_to_tha(expressions))
+
+                    # S91(THA)：语音会话开始 → 桌宠回到中立表情（防上一轮残留）
+                    if msg_type == "ttsStarted":
+                        asyncio.create_task(
+                            tts_manager.broadcast_emotion_to_tha("neutral"))
 
                     await tts_manager.broadcast_to_vrm(msg["text"])
                 except Exception as e:
