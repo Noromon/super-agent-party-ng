@@ -120,6 +120,7 @@ Object.assign(vue_data, {
       {"name": "httpButton", "enabled": false},
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
+      {"name": "thaButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
@@ -156,6 +157,7 @@ Object.assign(vue_data, {
       {"name": "httpButton", "enabled": false},
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
+      {"name": "thaButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
@@ -192,6 +194,7 @@ Object.assign(vue_data, {
       {"name": "httpButton", "enabled": false},
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
+      {"name": "thaButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": false},
     ],
@@ -230,6 +233,26 @@ Object.assign(vue_data, {
       gaussDefaultScenes: [],   // GAUSS
       gaussUserScenes: [],      // GAUSS
       selectedGaussSceneId: '',
+    },
+
+    // S91(THA)：桌宠配置（随上游终态）
+    THAConfig: {
+      name: 'default',
+      enabledEmotions: false,
+      enabledFineControl: false,
+      enabledMouthSync: false,
+      srMode: 'cnnx2vl',
+      selectedModelId: 'Lyra',
+      windowWidth: 540,
+      windowHeight: 540,
+      defaultModels: [],
+      userModels: []
+    },
+    showThaModelDialog: false,
+    newThaModel: {
+      file: null,
+      name: '',
+      displayName: ''
     },
 
     newAppearanceConfig: {

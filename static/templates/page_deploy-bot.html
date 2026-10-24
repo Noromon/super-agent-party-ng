@@ -2718,6 +2718,280 @@
                     </template>
                   </el-dialog>
 
+                  <!-- S91(THA)：桌宠机器人配置 -->
+                  <div v-show="subMenu === 'THA_pet'">
+
+                    <div class="market-link-banner" @click="openRepository('https://github.com/heshengtao/talking-head-anime-4-demo')">
+                      <div class="banner-main">
+                        <div class="banner-icon-box">
+                          <i class="fa-solid fa-hat-wizard"></i>
+                        </div>
+                        <div class="banner-text">
+                          <h3>{{ t('tha_distill_model') }}</h3>
+                          <p>
+                            <el-link
+                              type="primary"
+                              :underline="false"
+                              href="https://github.com/heshengtao/talking-head-anime-4-demo"
+                              target="_blank"
+                            >
+                              <el-icon class="mr-1">
+                                <i class="fa-solid fa-code"></i>
+                              </el-icon>{{ t('tha_distill_desc') }}
+                            </el-link>
+                          </p>
+                        </div>
+                        <div class="banner-action">
+                          <span>GO</span>
+                          <i class="fa-solid fa-arrow-right-long"></i>
+                        </div>
+                      </div>
+                    </div>
+
+                    <el-form class="settings-form" :model="THAConfig" label-position="top" style="margin-top: 24px;">
+                      <div class="tool-item">
+                        <!-- THA桌宠机器人配置头部 -->
+                        <div class="tool-header" style="display: flex; justify-content: space-between; align-items: center;">
+                          <span>
+                            <el-icon><i class="fa-solid fa-robot"></i></el-icon>
+                            {{ t('tha_table_pet_config') }}
+                          </span>
+                          <div>
+                            <!-- 启动按钮（Electron） -->
+                            <el-tooltip :content="t('start_tha_table_pet')" placement="top">
+                              <el-button
+                                v-if="isElectron"
+                                type="primary"
+                                @click="startTHA"
+                                circle
+                              >
+                                <template v-if="isTHAStarting">
+                                  <i class="fa-solid fa-spinner fa-spin"></i>
+                                </template>
+                                <template v-else>
+                                  <i class="fa-solid fa-play"></i>
+                                </template>
+                              </el-button>
+                            </el-tooltip>
+                            <!-- 在浏览器启动按钮 -->
+                            <el-tooltip :content="t('start_tha_table_pet_web')" placement="top">
+                              <el-button
+                                type="primary"
+                                @click="startTHAweb"
+                                circle
+                              >
+                                <i class="fa-solid fa-window-maximize"></i>
+                              </el-button>
+                            </el-tooltip>
+                            <!-- 停止按钮 -->
+                            <el-tooltip :content="t('stop_tha_table_pet')" placement="top">
+                              <el-button
+                                v-if="isElectron"
+                                type="danger"
+                                @click="stopTHA"
+                                circle
+                              >
+                                <i class="fa-solid fa-stop"></i>
+                              </el-button>
+                            </el-tooltip>
+                          </div>
+                        </div>
+                        <div class="tool-content">
+                          <el-alert type="info" :closable="false" class="mb-2">
+                            <template #default>
+                              <div class="alert-content">
+                                <span v-html="t('thaNotice1')"></span>
+                              </div>
+                            </template>
+                          </el-alert>
+
+                          <el-form-item :label="t('windowWidth')" class="form-item-align" label-position="left">
+                            <el-slider
+                              v-model="THAConfig.windowWidth"
+                              :min="256"
+                              :max="1024"
+                              :step="10"
+                              show-input
+                              @change="autoSaveSettings"
+                            />
+                          </el-form-item>
+                          <el-form-item :label="t('windowHeight')" class="form-item-align" label-position="left">
+                            <el-slider
+                              v-model="THAConfig.windowHeight"
+                              :min="256"
+                              :max="1024"
+                              :step="10"
+                              show-input
+                              @change="autoSaveSettings"
+                            />
+                          </el-form-item>
+
+                          <el-form-item :label="t('enabledExpressions')" class="form-item-align" label-position="left">
+                            <el-switch
+                              v-model="THAConfig.enabledEmotions"
+                              @change="val => { if (!val) THAConfig.enabledFineControl = false; autoSaveSettings(); }"
+                            ></el-switch>
+                          </el-form-item>
+
+                          <!-- 细粒度表情控制：表情控制的子选项，父开关关闭时不可用 -->
+                          <el-form-item :label="' ' + t('enabledFineControl')" class="form-item-align" label-position="left" style="padding-left: 20px;">
+                            <el-switch
+                              v-model="THAConfig.enabledFineControl"
+                              :disabled="!THAConfig.enabledEmotions"
+                              @change="autoSaveSettings"
+                            ></el-switch>
+                          </el-form-item>
+
+                          <el-form-item :label="t('srMode')" class="form-item-align">
+                            <el-select
+                              v-model="THAConfig.srMode"
+                              @change="autoSaveSettings"
+                              style="width: 100%">
+                              <el-option :label="t('srOff')" value="off"></el-option>
+                              <el-option label="CNNx2M" value="cnnx2m"></el-option>
+                              <el-option label="CNNx2VL" value="cnnx2vl"></el-option>
+                              <el-option label="CNNx2UL" value="cnnx2ul"></el-option>
+                            </el-select>
+                          </el-form-item>
+
+                          <!-- THA模型选择框 -->
+                          <el-form-item :label="t('thaModel')">
+                            <el-select
+                              v-model="THAConfig.selectedModelId"
+                              @change="autoSaveSettings"
+                              class="full-width-input"
+                            >
+                              <!-- 默认模型分组 -->
+                              <el-option-group :label="t('defaultModels')">
+                                <el-option
+                                  v-for="model in THAConfig.defaultModels"
+                                  :key="model.id"
+                                  :label="model.name"
+                                  :value="model.id"
+                                >
+                                  <div class="model-option-item">
+                                    <i class="fa-solid fa-star" style="color: #f39c12; margin-right: 6px;"></i>
+                                    <span>{{ model.name }}</span>
+                                  </div>
+                                </el-option>
+                              </el-option-group>
+
+                              <!-- 用户上传模型分组 -->
+                              <el-option-group :label="t('userModels')" v-if="THAConfig.userModels.length > 0">
+                                <el-option
+                                  v-for="model in THAConfig.userModels"
+                                  :key="model.id"
+                                  :label="model.name"
+                                  :value="model.id"
+                                >
+                                  <div class="model-option-item">
+                                    <i
+                                      class="fa-solid fa-trash-can"
+                                      style="color: #ff0000; margin-right: 6px;"
+                                      @click.stop="deleteTHAModel(model.id)"
+                                    ></i>
+                                    <span>{{ model.name }}</span>
+                                  </div>
+                                </el-option>
+                              </el-option-group>
+                            </el-select>
+
+                            <!-- 模型上传按钮 -->
+                            <el-button
+                              @click="showThaModelDialog = true"
+                              type="primary"
+                              class="add-server-btn"
+                            >
+                              <i class="fa-solid fa-plus"></i> {{ t('thaModel') }}
+                            </el-button>
+                          </el-form-item>
+                        </div>
+                      </div>
+                    </el-form>
+
+                    <!-- THA桌宠API -->
+                    <el-form class="settings-form">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <span>
+                            <el-icon><i class='fa-solid fa-server'></i></el-icon>
+                            {{ t('thaAPI') }}
+                          </span>
+                        </div>
+                        <div class="tool-content">
+                          <el-alert
+                            type="info"
+                            :closable="false"
+                            class="mb-2"
+                          >
+                            {{ t('thaAPIInstructions') }}
+                          </el-alert>
+                          <el-form-item :label="t('thaApiEndpoint')" class="form-item-align" label-position="top">
+                            <el-input
+                              :value="partyURL+'/tha.html'"
+                              readonly
+                              class="full-width-input"
+                            >
+                              <template #append>
+                                <el-button
+                                  @click="copyTHAEndpoint"
+                                  class="copy-btn"
+                                >
+                                <i class="fa-solid fa-copy"></i>
+                                </el-button>
+                              </template>
+                            </el-input>
+                          </el-form-item>
+                        </div>
+                      </div>
+                    </el-form>
+
+                  </div>
+                  <!-- S91(THA)：模型上传对话框 -->
+                  <el-dialog append-to-body
+                    v-model="showThaModelDialog"
+                    :title="t('thaModel')"
+                    width="80%"
+                  >
+                    <div class="upload-container">
+                      <div
+                        class="drop-zone"
+                        @dragover.prevent
+                        @drop.prevent="handleTHAModelFileDrop"
+                        @click="browseTHAModelFile"
+                      >
+                        <el-icon :size="50"><i class="fa-solid fa-cloud-arrow-up"></i></el-icon>
+                        <p>{{ t('dropTHAZipFile') }}</p>
+                      </div>
+
+                      <!-- 文件列表 -->
+                      <div class="compact-file-list" v-if="newThaModel.name">
+                        <div class="compact-file-item">
+                          <span class="file-name">{{ newThaModel.name }}</span>
+                          <el-button
+                            @click.stop="removeNewTHAModel"
+                            class="delete-icon"
+                            circle
+                          >
+                            <i class="fa-solid fa-trash"></i>
+                          </el-button>
+                        </div>
+                      </div>
+
+                      <el-input
+                        v-model="newThaModel.displayName"
+                        :placeholder="t('modelDisplayNamePlaceholder')"
+                        required
+                      />
+                    </div>
+                    <template #footer>
+                      <el-button @click="cancelTHAModelUpload">{{ t('cancel') }}</el-button>
+                      <el-button type="primary" @click="uploadTHAModel" :disabled="!newThaModel.name">
+                        {{ t('createImmediately') }}
+                      </el-button>
+                    </template>
+                  </el-dialog>
+
                   <!-- 朗读页面 -->
                   <div v-show="subMenu === 'read_bot'">
                     <el-tabs v-model="activeReadTab">

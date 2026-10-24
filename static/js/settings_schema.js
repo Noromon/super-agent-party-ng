@@ -80,6 +80,7 @@
     ['ttsSettings', 'ttsSettings'],
     ['behaviorSettings', 'behaviorSettings'],
     ['VRMConfig', 'VRMConfig'],
+    ['THAConfig', 'THAConfig'],
     ['comfyuiServers', 'comfyuiServers'],
     ['comfyuiAPIkey', 'comfyuiAPIkey'],
     ['workflows', 'workflows'],

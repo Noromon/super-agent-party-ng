@@ -428,6 +428,7 @@
       {"name": "httpButton", "enabled": false},
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
+      {"name": "thaButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true}
     ],
@@ -461,6 +462,7 @@
       {"name": "httpButton", "enabled": false},
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
+      {"name": "thaButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": false}
     ],
@@ -594,6 +596,7 @@
     "THAConfig": {
       "name": "default",
       "enabledEmotions": false,
+      "enabledFineControl": false,
       "enabledMouthSync": false,
       "srMode": "cnnx2vl",
       "selectedModelId": "Lyra",

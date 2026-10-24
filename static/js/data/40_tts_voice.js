@@ -668,6 +668,7 @@ Object.assign(vue_data, {
     isVRMRunning: false,
 
     isVRMStarting: false,
+    isTHAStarting: false, // S91(THA)
 
     isVRMStopping: false,
 

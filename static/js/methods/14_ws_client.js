@@ -160,6 +160,7 @@ Object.assign(vue_methods, {
           // this.target_lang改成navigator.language || navigator.userLanguage;
           this.target_lang = this.targetLangSelected!="system"? this.targetLangSelected: navigator.language || navigator.userLanguage || 'zh-CN';
           this.loadDefaultModels();
+          this.loadTHAModels(); // S91(THA)
           this.loadDefaultMotions();
           this.loadGaussScenes();
           this.checkMobile();

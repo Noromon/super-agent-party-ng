@@ -3,6 +3,7 @@
 Object.assign(vue_data, {
     deployTiles: [
       { id: 'table_pet', title: 'tablePet', icon: "fa-solid fa-user-ninja"},
+      { id: 'THA_pet', title: 'THAPet', icon: "fa-solid fa-hat-wizard"},
       { id: 'vts_config', title: 'vtsbot', icon: "fa-solid fa-child"},
       { id: 'live_stream', title: 'live_stream_bot', icon: "fa-solid fa-video"},
       { id: 'im_bot', title: 'imBot', icon: 'fa-solid fa-comment' },

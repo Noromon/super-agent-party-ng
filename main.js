@@ -17,6 +17,7 @@ let workspaceWatcher = null; // 声明全局的 watcher 变量
 let vmcUdpPort = null;          // osc.UDPPort 实例
 let vmcReceiverActive = false;  // 接收是否运行
 let vrmWindows = []; 
+let thaWindows = []; // S91(THA)：桌宠窗口列表
 let shotOverlay = null
 let isMac = process.platform === 'darwin';
 const vmcSendSocket = dgram.createSocket('udp4'); // 发送复用同一 socket
@@ -1059,6 +1060,73 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       });
 
       return vrmWindow.id;  // 可选：返回窗口 ID 用于后续操作
+    });
+    // S91(THA)：桌宠窗口（透明置顶无边框，仿 vrm 窗先例，参数随上游终态）
+    ipcMain.handle('start-tha-window', async (_, windowConfig = {}) => {
+      const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+      const windowWidth = windowConfig.width || 540;
+      const windowHeight = windowConfig.height || 540;
+
+      const x = windowConfig.x !== undefined ? windowConfig.x : width - windowWidth - 40;
+      let defaultY;
+      if (height >= windowHeight) {
+        defaultY = height - windowHeight;
+      } else {
+        defaultY = 0;
+      }
+      const y = windowConfig.y !== undefined ? windowConfig.y : defaultY;
+
+      const thaWindow = new BrowserWindow({
+        width: windowWidth,
+        height: windowHeight,
+        x,
+        y,
+        transparent: true,
+        frame: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        acceptFirstMouse: true,
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: true,
+          enableRemoteModule: true,
+          sandbox: false,
+          devTools: isDev,
+          webAudio: true,
+          autoplayPolicy: 'no-user-gesture-required',
+          preload: path.join(__dirname, 'static/js/preload.js')
+        }
+      });
+
+      await thaWindow.loadURL(`http://${HOST}:${PORT}/tha.html`);
+      thaWindow.setIgnoreMouseEvents(false);
+      thaWindow.setAlwaysOnTop(true);
+      thaWindows.push(thaWindow);
+
+      thaWindow.on('closed', () => {
+        thaWindows = thaWindows.filter(w => w !== thaWindow);
+      });
+
+      return thaWindow.id;
+    });
+
+    ipcMain.handle('stop-tha-window', (_, windowId) => {
+      if (windowId !== undefined) {
+        const win = thaWindows.find(w => w.id === windowId);
+        if (win && !win.isDestroyed()) {
+          win.close();
+        }
+        thaWindows = thaWindows.filter(w => w.id !== windowId);
+      } else {
+        thaWindows.forEach(win => {
+          if (!win.isDestroyed()) {
+            win.close();
+          }
+        });
+        thaWindows = [];
+      }
     });
     // 👈 桌面截图
     ipcMain.handle('capture-desktop', async () => {
