@@ -12,6 +12,7 @@ Object.assign(vue_methods, {
             url: url,
             favicon: '',
             isLoading: true,
+            loaded: true,
             canGoBack: false,
             canGoForward: false
         };
@@ -178,6 +179,7 @@ Object.assign(vue_methods, {
 
         // 2. 如果是新 URL
         this.currentTab.url = url;      // 这会触发 :src 更新，开始加载
+        this.currentTab.loaded = true;  // S95: 懒加载 webview 的 URL 写回必须同步放行
         this.currentTab.currentUrl = url; // 同步更新实际地址状态
         this.urlInput = url;
     },
@@ -186,6 +188,7 @@ Object.assign(vue_methods, {
     goHome() {
         if(this.currentTab) {
             this.currentTab.url = '';
+            this.currentTab.loaded = true; // S95
             this.currentTab.title = 'New Tab';
             this.currentTab.favicon = '';
             this.urlInput = '';
@@ -294,6 +297,7 @@ Object.assign(vue_methods, {
             url: url,
             favicon: '',
             isLoading: true,
+            loaded: true,
             canGoBack: false,
             canGoForward: false
         };
@@ -640,6 +644,7 @@ Object.assign(vue_methods, {
         if (this.currentTab) {
             // 更新当前标签的 URL
             this.currentTab.url = url;
+            this.currentTab.loaded = true; // S95: 懒加载放行
             // 更新地址栏输入框显示
             this.urlInput = url; 
             // 触发加载状态 (如果您的 webview逻辑依赖这个)

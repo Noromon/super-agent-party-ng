@@ -433,6 +433,17 @@ function createSkeletonWindow() {
     }
     return true
   })
+
+  // S95: 渲染进程挂起诊断探针——"整窗卡死"时 SAP 控制台直接定案（渲染进程忙死 vs 后端在等）
+  mainWindow.on('unresponsive', () => {
+    console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
+  })
+  mainWindow.on('responsive', () => {
+    console.log('[WinResponsive] 主窗口渲染进程已恢复响应')
+  })
+  mainWindow.webContents.on('render-process-gone', (e, details) => {
+    console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
+  })
 }
 
 function getAcpxPath() {
@@ -1463,6 +1474,16 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       const size = mainWindow.getSize();
       mainWindow.webContents.send('window-resized', size);
     });
+    // S95: 渲染进程挂起诊断探针（与 createWindow 路径一致）
+    mainWindow.on('unresponsive', () => {
+      console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
+    })
+    mainWindow.on('responsive', () => {
+      console.log('[WinResponsive] 主窗口渲染进程已恢复响应')
+    })
+    mainWindow.webContents.on('render-process-gone', (e, details) => {
+      console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
+    })
 
     // ★ 新增：增强型复制函数（同时支持粘贴为图片和粘贴为文件）
     function copyImageToClipboardWithFile(image) {

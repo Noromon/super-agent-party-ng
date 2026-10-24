@@ -78,7 +78,7 @@ async def get_webview_ws(index=None):
         return webviews[target_idx].get('webSocketDebuggerUrl')
     return None
 
-CDP_CALL_TIMEOUT = 60  # S94: 单次 CDP 往返上限；渲染进程繁忙时工具超时回错而非无限挂起
+CDP_CALL_TIMEOUT = 30  # S95: 60→30，单次 CDP 往返上限；渲染进程繁忙时工具超时回错而非无限挂起
 
 
 async def cdp_command(ws_url, method, params=None, timeout=None):

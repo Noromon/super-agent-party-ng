@@ -1,5 +1,6 @@
 # S94：CDP 全链超时 + 退出链不被渲染进程劫持 + 懒加载 webview
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -87,3 +88,26 @@ def test_cdp_tool_timeout_wiring():
     assert "CDP_CALL_TIMEOUT" in src
     assert "asyncio.wait_for" in src
     assert "except asyncio.TimeoutError" in src
+
+
+def test_s95_tab_url_writes_set_loaded():
+    src = _read("static/js/methods/98_browser_tabs.js")
+    # navigateTo / goHome / loadUrlInCurrentTab 三处 URL 写回必须同步放行懒加载
+    assert src.count("currentTab.loaded = true") == 3
+    # openUrlInNewTab / onNewWindow 两处建 tab 即带 URL，直接置 loaded
+    assert src.count("loaded: true,") == 2
+
+
+def test_s95_main_js_unresponsive_probe():
+    src = _read("main.js")
+    for token in ("[WinUnresponsive]", "[WinResponsive]", "[WinRendererGone]"):
+        assert token in src
+    assert src.count("on('unresponsive'") >= 2  # 两条建窗路径都要挂探针
+
+
+def test_s95_timeout_budget_tightened():
+    src = _read("py/cdp_tool.py")
+    m = re.search(r"^CDP_CALL_TIMEOUT\s*=\s*([0-9.]+)", src, re.M)
+    assert m and float(m.group(1)) <= 30
+    ws = _read("py/web_search.py")
+    assert "requests.get(url, headers=headers, timeout=30" in ws

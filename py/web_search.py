@@ -1081,7 +1081,7 @@ async def markdown_new(original_url):
             }
             
             # 发起请求
-            response = requests.get(url, headers=headers, timeout=60,
+            response = requests.get(url, headers=headers, timeout=30,
                                     proxies=requests_proxies(settings, url))
             
             if response.status_code == 200:
