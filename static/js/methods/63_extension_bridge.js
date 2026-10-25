@@ -4,15 +4,23 @@ Object.assign(vue_methods, {
     sendMessagesToExtension(force) {
       const now = Date.now();
       if (!force && now - (this._lastExtSendTime || 0) < 500) return; // 流式期间节流：最多每 500ms 序列化一次
+      const wsOpen = this.ws && this.ws.readyState === WebSocket.OPEN;
+      // S103: 通道断开且已有待发快照 → 直接跳过（重连补发旧快照即可，
+      // 不必每分钟把全历史 stringify 两下）
+      if (!wsOpen && this._pendingExtensionMessage) return;
       this._lastExtSendTime = now;
+      // S103: toRaw 快照。JSON.stringify 走响应式代理 = 逐属性过 Proxy get，
+      // 全历史含 displayBlocks 可达数 MB → 单次秒级长任务（LongFrame 主嫌疑）。
+      // toRaw 拿原始对象图，序列化原生速度，数据形状不变。
+      const rawMessages = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(this.messages) : this.messages;
       const payload = JSON.stringify({
         type: 'broadcast_messages',
         data: {
-          messages: this.messages,
+          messages: rawMessages,
           conversationId: this.conversationId
         }
       });
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (wsOpen) {
         try {
           this.ws.send(payload);
         } catch (e) {

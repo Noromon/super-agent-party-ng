@@ -1,6 +1,29 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S100 loaded');
+console.warn('[Probe] renderer build=S103 loaded');
+
+// S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
+// TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
+// 回调耗时 >1s 把源码摘要压入环形缓冲，LongFrame 日志尾部带出。
+(function () {
+  const origST = window.setTimeout;
+  window.__lateTimers = [];
+  window.setTimeout = function (cb, ms) {
+    if (typeof cb !== 'function') return origST.apply(window, arguments);
+    const wrapped = function () {
+      const t0 = performance.now();
+      try { return cb.apply(this, arguments); } finally {
+        const d = performance.now() - t0;
+        if (d > 1000) {
+          window.__lateTimers.push(Math.round(d) + 'ms ' + (cb.name || 'anon') + '|' +
+            String(cb).replace(/\s+/g, ' ').slice(0, 110));
+          if (window.__lateTimers.length > 12) window.__lateTimers.shift();
+        }
+      }
+    };
+    return origST.call(window, wrapped, ms, ...Array.prototype.slice.call(arguments, 2));
+  };
+})();
 
 // 在页面加载完成后添加 content-loaded 类
 document.addEventListener('DOMContentLoaded', function() {
@@ -895,7 +918,8 @@ const app = Vue.createApp({
               return (s.invoker || '?') + '@' + f + ':' + (loc.lineNumber || '?') + ':' + (loc.columnNumber || '?');
             }).join(' | ');
             console.warn('[LongFrame] duration=' + Math.round(e.duration) + 'ms blocking=' + Math.round(e.blockingDuration || 0) +
-              'ms scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)'));
+              'ms scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)') +
+              ((window.__lateTimers && window.__lateTimers.length) ? ' timers[' + window.__lateTimers.slice(-2).join(' || ') + ']' : ''));
           }
         });
         loafObs.observe({ type: 'long-animation-frame', durationThreshold: 500 });

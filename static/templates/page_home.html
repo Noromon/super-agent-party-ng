@@ -346,9 +346,13 @@
 
                             <!-- === 旧架构兼容：让以前从本地存储读取的历史对话依然能显示 === -->
                             <div v-else>
+                                <!-- S103: 旧架构兼容路径同拆跑步机（同 chat_main）：流式纯文本直出，完成后段循环渲一次 -->
+                                <div v-if="isTyping && index === messages.length - 1" class="stream-content streaming" style="white-space: pre-wrap; word-break: break-word;">{{ message.content }}</div>
+                                <template v-else>
                                 <template v-for="(segment, segIndex) in splitMessageContent(message.content)" :key="segIndex">
-                                    <div v-if="segment.type === 'text'" class="stream-content" :class="{ 'streaming': isTyping && index === messages.length - 1 && segIndex === splitMessageContent(message.content).length - 1 }" v-morph:format="segment.content" style="display: inline-block; width: 100%;"></div>
+                                    <div v-if="segment.type === 'text'" class="stream-content" v-morph:format="segment.content" style="display: inline-block; width: 100%;"></div>
                                     <a2-u-i-renderer v-else-if="segment.type === 'ui'" :config="segment.content" @action="handleA2UIAction"></a2-u-i-renderer>
+                                </template>
                                 </template>
                                 <div v-if="isTyping && index === messages.length - 1 && !message.content"><i class="fa-solid fa-spinner fa-spin"></i></div>
                             </div>

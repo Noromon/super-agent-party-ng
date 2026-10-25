@@ -155,3 +155,27 @@ def test_s102_logs_auto_land():
     assert "SAP_LOG_DIR" in _read("一键启动(start).bat")
     src = _read("main.js")
     assert "frontend-evidence.log" in src
+# ===== S103: 第二条跑步机（旧架构兼容路径）拆除 + 广播 toRaw + setTimeout 归因探针 =====
+
+def test_s103_legacy_path_treadmill_removed():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        src = _read(f"static/templates/{tpl}.html")
+        # 旧架构兼容路径的流式纯文本分支（class 含 streaming 光标态）
+        assert 'class="stream-content streaming"' in src, tpl
+        # :class 内联 splitMessageContent(message.content).length 已去除
+        assert "segIndex === splitMessageContent(message.content).length" not in src, tpl
+        # 三处流式纯文本分支：reasoning(S93) + displayBlocks text(S102) + 旧路径(S103)
+        assert src.count("isTyping && index === messages.length - 1") >= 3, tpl
+
+
+def test_s103_broadcast_toraw_and_skip():
+    src = _read("static/js/methods/63_extension_bridge.js")
+    assert "Vue.toRaw(this.messages)" in src
+    assert "if (!wsOpen && this._pendingExtensionMessage) return;" in src
+
+
+def test_s103_settimeout_attribution_probe():
+    src = _read("static/js/renderer.js")
+    assert "window.__lateTimers" in src
+    assert "timers[' + window.__lateTimers.slice(-2)" in src
+    assert "renderer build=S103" in src
