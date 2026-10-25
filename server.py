@@ -813,7 +813,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logging.getLogger("app").info(f"[Backup] 启动快照异常: {e}")
     asyncio.create_task(_startup_snapshot())
-    
+    _start_mem0_prewarm()  # S123: mem0 预热（函数体在模块级，lifespan 零膨胀）
     # --- [M4-B2': 启动对账探针（只读，mismatch 仅告警留证据，不影响启动）] ---
     async def _startup_reconcile():
         try:
@@ -1141,6 +1141,33 @@ async def auth_guard(request: Request, call_next):
 #       文件变了 → hash 变 → URL 变 → 旧缓存自动作废 → 必然加载新代码（无需强刷）。
 # 配套前端 static/sw.js（sap-cache-v2）对带 ?v= 的资源采用 cache-first。
 _ASSET_VERSION_CACHE = {}   # 文件绝对路径 -> (mtime_ns, hash)
+# S123: mem0 启动预热——首个聊天请求不再在组装段内付 Memory.from_config
+# （embedding+faiss 加载）成本（取证 assemble=14.7s 大头在此）。后台线程，
+# 失败静默（预热不阻断启动）。
+def _mem0_prewarm_loop():
+    try:
+        snap = json.loads(json.dumps(settings.get("memories", [])))
+    except Exception:
+        return
+    for mem in snap:
+        try:
+            if not mem.get("providerId"):
+                continue
+            m0 = llm_gate.get_mem0_instance(mem.get("id"), mem, settings)
+            emb = getattr(m0, "embedding_model", None)
+            if emb is not None:
+                emb.embed("warmup", "search")  # 首跑=加载 embedding 模型
+        except Exception as e:
+            logging.getLogger("app").info(f"[Prewarm] mem0({mem.get('id')}) 跳过: {e}")
+    logging.getLogger("app").info("[Prewarm] mem0 预热完成")
+
+
+def _start_mem0_prewarm():
+    import threading
+    threading.Thread(target=_mem0_prewarm_loop, daemon=True).start()
+# S123: TTFB 分段锚点——中间件 recv 时刻下传（call_next 前的 set 可被内层
+# task 继承），端点/流响应入口各自发声一行，把 assemble 静默段剥细。
+_TTFB_T0 = contextvars.ContextVar("_ttfb_t0", default=None)
 _ASSET_VERSION_RE = re.compile(r'(src|href)="([^"]+?\.(?:css|js|png|jpe?g|svg|gif|webp|ico|woff2?|ttf|eot|mp4|webm))([^"]*)"')
 
 
@@ -1174,6 +1201,8 @@ def _asset_version_hash(base_dir, url):
 @app.middleware("http")
 async def inject_asset_versions(request: Request, call_next):
     _tt0 = time.monotonic()
+    if request.url.path.endswith("/chat/completions"):
+        _TTFB_T0.set(_tt0)
     response = await call_next(request)
     ctype = response.headers.get("content-type", "")
     # S121: TTFB 分账哨兵——assemble=请求进入→响应头（含入站/组装/记忆检索），
@@ -6110,6 +6139,9 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
 async def generate_stream_response(client, reasoner_client, request: ChatRequest, settings: dict, 
                                    fastapi_base_url, enable_thinking, enable_deep_research, 
                                    enable_web_search, async_tools_id):
+    _tt0 = _TTFB_T0.get()
+    if _tt0:
+        logging.getLogger("app").info(f"[TTFBbrk] pre-stream +{int((time.monotonic() - _tt0) * 1000)}ms")
     try:
         # (global decl cleared: migrated to py/app_state.py)
         
@@ -7598,6 +7630,9 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     """
     用来与agent party中的模型聊天
     """
+    _tt0 = _TTFB_T0.get()
+    if _tt0:
+        logging.getLogger("app").info(f"[TTFBbrk] endpoint-enter +{int((time.monotonic() - _tt0) * 1000)}ms")
     fastapi_base_url = str(fastapi_request.base_url)
     # 【注意】引入全局 fast_client
     global client, reasoner_client, fast_client, settings

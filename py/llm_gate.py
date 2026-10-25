@@ -209,6 +209,20 @@ def wait_chat_idle(timeout=600.0, poll=1.5):
     return False
 
 
+def _lower_thread_priority():
+    """S123: 提取线程降 Windows 优先级至 IDLE——mem0-add 实测最长 41.6s，
+    运行期不与聊天请求/渲染抢核（闸门只保证启动时机，运行中无法让路）。"""
+    import sys
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadPriority(
+            ctypes.windll.kernel32.GetCurrentThread(), -1)  # THREAD_PRIORITY_IDLE
+    except Exception:
+        pass
+
+
 def submit_memory_job(memory_id, fn, name="mem0-add",
                       debounce=DEFAULT_DEBOUNCE_SECONDS, wait_idle=True):
     """Run fn() (blocking, e.g. m0.add) serialized against the chat.
@@ -228,6 +242,7 @@ def submit_memory_job(memory_id, fn, name="mem0-add",
         _pending[memory_id] = gen
 
     def runner():
+        _lower_thread_priority()
         acquired = _mem0_lock.acquire(timeout=1800)
         if not acquired:
             logging.getLogger("app").info(f"[LlmGate] {name}: 互斥锁获取超时，放弃本次记忆提取")
