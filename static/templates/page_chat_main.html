@@ -298,7 +298,7 @@
                         </div>
                         
                         <!-- 【修改点4】：外层用绝对定位居中，内部取消按钮自带的绝对定位以修复高度塌陷 -->
-                        <div class="item-actions" @click.stop style="position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center;">
+                        <div class="item-actions" v-if="!isTyping" @click.stop style="position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center;">
                           <el-dropdown trigger="click" placement="bottom-end" @click.stop>
                             <el-button class="item-delete-btn" circle style="position: static; transform: none; display: flex; align-items: center; justify-content: center; margin: 0;">
                               <i class="fa-solid fa-ellipsis"></i>

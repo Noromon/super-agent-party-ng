@@ -414,15 +414,23 @@ Object.assign(vue_methods, {
 
             if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
+            // S108: 每 token 一次 webview.send 曾灌爆 DOMWebSocket（host 侧
+            // onmessage 实测 1s 长任务）→ 80ms 批量合并发送；迭代器让位保证出口 flush
+            let tvBuf = '';
+            let tvTimer = 0;
+            const tvFlush = () => {
+                if (tvTimer) { clearTimeout(tvTimer); tvTimer = 0; }
+                if (!tvBuf) return;
+                const c = tvBuf; tvBuf = '';
+                try { webview.send('ai-stream-chunk', c); } catch (_) {}
+            };
             await iterateNdjsonLines(response, (data) => {
                     const content = data.choices?.[0]?.delta?.content;
-                    
-                    if (content) {
-                        // console.log('Chunk:', content); 
-                        webview.send('ai-stream-chunk', content);
-                    }
+                    if (!content) return;
+                    tvBuf += content;
+                    if (!tvTimer) tvTimer = setTimeout(tvFlush, 80);
             }, { stripDataPrefix: true });
-            
+            tvFlush();
             webview.send('ai-stream-end');
             console.log('流式传输结束');
 

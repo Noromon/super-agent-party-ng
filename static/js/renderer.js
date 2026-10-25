@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S107 loaded');
+console.warn('[Probe] renderer build=S108 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -2239,14 +2239,19 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 }
 
 // 挂载应用（F3：外置页面模板注入完成后挂载；无模板装载器的页面直接挂载）
-// S107 临时取证（凶手落网后拆）：flush 频率+热点组件普查。profile 已证明
-// Vue 管线占 65.5%，但"谁在以什么频率触发全量渲染"必须实测，不再猜。
+// S107/S108 临时取证（凶手落网后拆）：flush 频率+热点组件普查+root 自激侦测。
+// ElButton 20.9万更新/5s 而业务代码自耗≈0=纯框架空转；root 速率单列区分
+// "根组件自激渲染循环(S96 家族)"与"el-popper 链自更新风暴"，自激即自动抓栈。
 (function () {
   const buckets = {};
+  let rootCount = 0;
   let lastReport = Date.now();
+  let lastCapture = 0;
   app.mixin({
     updated() {
       let n = 'root';
+      const isRoot = this.$root === this;
+      if (isRoot) rootCount++;
       try { n = (this.$ && this.$.type && (this.$.type.name || this.$.type.__name)) || (this.$options && this.$options.name) || 'root'; } catch (_) {}
       buckets[n] = (buckets[n] || 0) + 1;
       const now = Date.now();
@@ -2256,9 +2261,15 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
         if (total > 30) {
           const top = Object.keys(buckets).sort((a, b) => buckets[b] - buckets[a]).slice(0, 5)
             .map((k) => k + 'x' + buckets[k]).join(' ');
-          console.warn('[Perf] updates/5s=' + total + ' top=' + top);
+          console.warn('[Perf] updates/5s=' + total + ' root=' + rootCount + '/5s top=' + top);
+          // S108: root>150/5s=调度器自激（正常 12Hz×5=60 封顶）→ 当场抓栈点名触发者
+          if (rootCount > 150 && now - lastCapture > 60000) {
+            lastCapture = now;
+            console.warn('[FreezeDiag] capture-requested');
+          }
         }
         for (const k in buckets) delete buckets[k];
+        rootCount = 0;
         lastReport = now;
       }
     },

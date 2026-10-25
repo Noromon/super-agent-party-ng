@@ -264,4 +264,14 @@ def test_s107_sidebar_memo_and_bump_throttle():
     assert "S107: 流尾终态兜底 bump" in _read("static/js/methods/10_chat_stream.js")
     rd = _read("static/js/renderer.js")
     assert "updates/5s=" in rd
-    assert "renderer build=S107" in rd
+    assert "renderer build=S1" in rd  # 版本戳前缀断言（升版不误炸）
+# ===== S108: root 自激侦测+抓栈 / 流式期下线行操作 popper 链 / 翻译流批量 send =====
+
+def test_s108_root_loop_detector_and_batching():
+    rd = _read("static/js/renderer.js")
+    assert "rootCount > 150" in rd and "root=' + rootCount" in rd
+    assert "renderer build=S108" in rd
+    for tpl in ("page_chat_main", "page_home"):
+        assert 'class="item-actions" v-if="!isTyping"' in _read(f"static/templates/{tpl}.html"), tpl
+    bt = _read("static/js/methods/98_browser_tabs.js")
+    assert "tvFlush" in bt and "setTimeout(tvFlush, 80)" in bt
