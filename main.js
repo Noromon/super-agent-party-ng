@@ -467,18 +467,8 @@ function attachFreezeProbe(win) {
     fdiag('渲染饥饿自报（' + why + '），当场抓栈（断点+采样）…')
     tryPauseThenProfile()
   }
-  // S106: 流式期常开 Profiler。卡顿中途抓栈结构性不可行（心跳自己就被冻住），
-  // 卡顿后 pause 到达时线程已空闲（实测 5 秒不命中）→ 唯一可靠窗口=全程采样。
-  let streamStopTimer = null
-  const startStreamProfile = () => {
-    if (streamStopTimer) { clearTimeout(streamStopTimer); streamStopTimer = null }
-    if (profFile) return
-    startProfile({ hold: 120000 })
-  }
-  const scheduleStreamProfileStop = () => {
-    if (streamStopTimer) clearTimeout(streamStopTimer)
-    streamStopTimer = setTimeout(() => { streamStopTimer = null; stopProfile() }, 1200)
-  }
+  // S119 收尾票：S106 流式期常开 Profiler 拆除（诊断使命完成；120s 采样本身
+  // 已成运行时开销）。卡顿取件改由饥饿自报(requestCapture)与 capture-requested 按需触发。
   let profFile = null
   const startProfile = async (opts) => {
     if (profFile) return
@@ -610,9 +600,7 @@ function attachFreezeProbe(win) {
       evidenceAppend(msg)
       // S105 魔法行：[FreezeDiag] capture-requested → 当场抓栈
       if (msg.indexOf('capture-requested') !== -1) requestCapture('console')
-      // S106 魔法行：流式起止 → Profiler 常开/收尾
-      if (msg.indexOf('stream-active') !== -1) startStreamProfile()
-      if (msg.indexOf('stream-idle') !== -1) scheduleStreamProfileStop()
+      // S119: 流式常开 Profiler 钩子已拆（见上），stream-active/idle 仅入证据通道
     }
   })
 }

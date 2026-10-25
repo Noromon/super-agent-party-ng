@@ -249,10 +249,13 @@ def test_s106_wvexec_guest_cap():
 def test_s106_stream_profiler_and_fetch_probe():
     rd = _read("static/js/renderer.js")
     assert "stream-active" in rd and "stream-idle" in rd
-    assert "fetch-scheduled" in rd
+    # S119: 调度栈探针与流式常开 Profiler 已拆，TTFB 哨兵保留
+    assert "fetch-scheduled" not in rd
+    assert "fetch-TTFB" in rd and "dt > 5000" in rd
     mj = _read("main.js")
-    assert "startStreamProfile" in mj and "scheduleStreamProfileStop" in mj
-    assert "Perf" in mj and "sap-freeze-profile-" in mj
+    assert "startStreamProfile" not in mj
+    assert "startProfile(" in mj and "sap-freeze-profile-" in mj
+    assert "Perf" in mj
 # ===== S107: 侧边栏行 v-memo + tool 帧 bump 节流 + flush 频率普查 =====
 
 def test_s107_sidebar_memo_and_bump_throttle():
@@ -300,7 +303,7 @@ def test_s110_storage_page_destroy_when_hidden():
     assert "<div v-if=\"activeMenu === 'storage'\" class=\"page storage-container\">" in st
     assert "v-show=\"activeMenu === 'storage'\"" not in st
     mj = _read("main.js")
-    assert "startProfile({ hold: 120000 })" in mj
+    assert "hold: 120000" not in mj  # S119 拆除流式常开采样
     assert "renderer build=S1" in _read("static/js/renderer.js")
 # ===== S111: 全库 el-tooltip 归零 + loop-suspect 组件链点名 =====
 
@@ -407,4 +410,17 @@ def test_s118_textarea_memo_and_dashboard_vif():
     assert 'v-if="activeMenu === \'dashboard\'"' in dash
     assert 'v-show="activeMenu === \'dashboard\'"' not in dash
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S118" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S119: 收尾票——探针转哨兵模式（默认静默，超阈才声） =====
+
+def test_s119_sentinel_mode_probes():
+    rd = _read("static/js/renderer.js")
+    assert "total > 800 || pend >= 25" in rd
+    assert "[Perf!] updates/5s=" in rd
+    assert "buckets[n] > 1200" in rd
+    mj = _read("main.js")
+    assert "requestCapture('console')" in mj  # 按需抓栈通道保留
+    assert "evidenceAppend" in mj  # 证据通道保留
+    assert "renderer build=S119" in rd

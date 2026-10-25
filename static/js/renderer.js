@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S118 loaded');
+console.warn('[Probe] renderer build=S119 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -34,12 +34,11 @@ console.warn('[Probe] renderer build=S118 loaded');
     const url = String((input && input.url) || (typeof input === 'string' ? input : ''));
     if (!/(v1\/chat|execute_tool_manually|api\/compact|v1\/streams|load_file)/.test(url)) return of.apply(window, arguments);
     const t0 = performance.now();
-    let sc = '?';
-    try { sc = (new Error().stack || '').split('\n')[2] || '?'; } catch (_) {}
-    console.warn('[Perf] fetch-scheduled ' + url.slice(0, 70) + ' @' + String(sc).trim().slice(0, 100));
+    // S119 收尾票：fetch 调度栈探针拆除（S102-S107 使命完成），
+    // TTFB 哨兵阈值 1200→5000ms，仅网络异常时发声。
     return of.apply(window, arguments).then(function (res) {
       const dt = performance.now() - t0;
-      if (dt > 1200) console.warn('[Perf] fetch-TTFB ' + Math.round(dt) + 'ms ' + url.slice(0, 70));
+      if (dt > 5000) console.warn('[Perf] fetch-TTFB ' + Math.round(dt) + 'ms ' + url.slice(0, 70));
       return res;
     });
   };
@@ -2276,7 +2275,8 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
       if (isRoot) rootCount++;
       try { n = (this.$ && this.$.type && (this.$.type.name || this.$.type.__name)) || (this.$options && this.$options.name) || 'root'; } catch (_) {}
       buckets[n] = (buckets[n] || 0) + 1;
-      if (buckets[n] > 300) {
+      // S119: 哨兵阈值 300→1200（历史风暴 3-8 万仍远超，真实循环照样点名）
+      if (buckets[n] > 1200) {
         if (!suspects[n]) suspects[n] = [];
         if (suspects[n].length < 3) {
           // S111-S113: 组件链 @ DOM 链 @ outerHTML 原形；弹层实例附内容文本=功能名
@@ -2292,13 +2292,14 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
       if (now - lastReport > 5000) {
         let total = 0;
         for (const k in buckets) total += buckets[k];
-        if (total > 30) {
+        // S114 追赶仪表：接收-落账字符差（>0=显示落后于后端）
+        let pend = 0;
+        try { pend = (this.$root._streamRecvChars || 0) - (this.$root._streamFlushChars || 0); } catch (_) {}
+        // S119 收尾票：哨兵模式——默认静默（历史基线 70-210/5s），仅异常超阈发声。
+        if (total > 800 || pend >= 25) {
           const top = Object.keys(buckets).sort((a, b) => buckets[b] - buckets[a]).slice(0, 5)
             .map((k) => k + 'x' + buckets[k]).join(' ');
-          // S114 追赶仪表：接收-落账字符差（>0=显示落后于后端）
-          let pend = 0;
-          try { pend = (this.$root._streamRecvChars || 0) - (this.$root._streamFlushChars || 0); } catch (_) {}
-          console.warn('[Perf] updates/5s=' + total + ' root=' + rootCount + '/5s pending=' + pend + ' top=' + top);
+          console.warn('[Perf!] updates/5s=' + total + ' root=' + rootCount + '/5s pending=' + pend + ' top=' + top);
           const sus = Object.keys(suspects).map((k) => k + '{' + suspects[k].join(' | ') + '}').join(' ');
           if (sus) console.warn('[Perf] loop-suspect ' + sus);
           // S108: root>150/5s=调度器自激（正常 12Hz×5=60 封顶）→ 当场抓栈点名触发者
