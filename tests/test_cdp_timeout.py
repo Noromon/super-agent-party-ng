@@ -142,3 +142,18 @@ def test_s99_inflight_freeze_evidence():
     assert "long-animation-frame" in r
     assert "[LongFrame]" in r
     assert "[Starve]" in r
+
+
+def test_s100_evidence_reaches_console():
+    # 渲染证据必须上终端：console-message 白名单转发
+    src = _read("main.js")
+    assert "console-message" in src
+    assert "console.log('[JS]'" in src
+    # 代码身份双回显：renderer [Probe] 戳 + 后端 [Version] static 指纹
+    r = _read("static/js/renderer.js")
+    assert "[Probe] renderer build=" in r
+    # S100 心跳升级：活动戳互补（泵外阻塞定时器同冻也能测出）
+    assert "addEventListener('keydown', hbCheck" in r
+    s = _read("server.py")
+    assert "static_fp" in s
+    assert "sha1(_f.read()).hexdigest()[:8]" in s

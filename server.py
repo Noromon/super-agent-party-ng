@@ -6396,7 +6396,18 @@ def _version_fingerprint():
         dirty = " dirty" if out else ""
     except Exception:
         pass
-    return f"tree={root} HEAD={head}{dirty} server.py-mtime={mtime}"
+    static_fp = "-"
+    try:
+        import hashlib
+        rp = os.path.join(root, "static", "js", "renderer.js")
+        st = os.stat(rp)
+        with open(rp, "rb") as _f:
+            h = hashlib.sha1(_f.read()).hexdigest()[:8]
+        static_fp = (f" renderer={time.strftime('%m-%d %H:%M', time.localtime(st.st_mtime))}"
+                     f"+{st.st_size}+{h}")
+    except Exception:
+        pass
+    return f"tree={root} HEAD={head}{dirty} server.py-mtime={mtime}{static_fp}"
 
 
 async def _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):

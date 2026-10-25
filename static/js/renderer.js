@@ -1,3 +1,7 @@
+// S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
+// 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
+console.warn('[Probe] renderer build=S100 loaded');
+
 // 在页面加载完成后添加 content-loaded 类
 document.addEventListener('DOMContentLoaded', function() {
   // 设置一个短暂的延迟，确保所有资源都已加载
@@ -897,16 +901,21 @@ const app = Vue.createApp({
         loafObs.observe({ type: 'long-animation-frame', durationThreshold: 500 });
       }
     } catch (e) { console.warn('[LongFrame] observer 注册失败:', e && e.message); }
+    // S99/S100: 饥饿心跳。除定时器外，keydown/mousemove 活动戳互补——泵外阻塞
+    // （同步 IPC/存储锁类）连定时器一起冻结时，冻结期间按下的键在恢复瞬间补发，
+    // 回调里的 gap 检测照样报出精确饥饿时长。
     try {
       let hbPrev = Date.now();
-      const hbTick = () => {
+      const hbCheck = () => {
         const now = Date.now();
         const gap = now - hbPrev;
         if (gap > 2000) console.warn('[Starve] 主线程饥饿 ' + gap + 'ms');
         hbPrev = now;
-        setTimeout(hbTick, 100);
       };
+      const hbTick = () => { hbCheck(); setTimeout(hbTick, 100); };
       setTimeout(hbTick, 100);
+      window.addEventListener('keydown', hbCheck, { passive: true });
+      window.addEventListener('mousemove', hbCheck, { passive: true, capture: true });
     } catch (_) {}
     
     // 1. 时间触发器

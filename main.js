@@ -542,6 +542,14 @@ function attachFreezeProbe(win) {
   win.webContents.on('render-process-gone', (e, details) => {
     console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
   })
+  // S100: 渲染侧证据通道转发——渲染进程 console 原本到不了 SAP 控制台，
+  // [LongFrame]/[Starve] 等一直"没看到"其实是通道不可见。仅白名单前缀，无噪音。
+  win.webContents.on('console-message', (event, levelOrDetails, maybeMessage) => {
+    const msg = (typeof levelOrDetails === 'object' && levelOrDetails !== null)
+      ? String(levelOrDetails.message || '')
+      : String(maybeMessage || '')
+    if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag)\]/.test(msg)) console.log('[JS]', msg)
+  })
 }
 
 function getAcpxPath() {
