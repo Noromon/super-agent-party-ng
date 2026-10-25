@@ -405,50 +405,50 @@
                         <div class="button-group">
                             
                             <!-- 常用功能按钮复用 -->
-                            <el-button :title="t('newChat')" v-if="!isCapsuleMode" @click="startConversationInGroup()" class="icon-btn clear-btn" type="primary" circle>
+                            <button type="button" class="el-button el-button--primary is-circle icon-btn clear-btn" :title="t('newChat')" v-if="!isCapsuleMode" @click="startConversationInGroup()">
                                 <i class="fa-solid fa-comment-medical"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('chatHistory')" v-if="!isCapsuleMode" @click="showHistoryDialog = true" class="icon-btn history-btn" :type="conversations.length === 0 ? 'default' : 'primary'" circle>
+                            <button type="button" class="el-button is-circle icon-btn history-btn" :title="t('chatHistory')" v-if="!isCapsuleMode" @click="showHistoryDialog = true" :class="['el-button--' + (conversations.length === 0 ? 'default' : 'primary')]">
                                 <i class="fa-solid fa-clock-rotate-left"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('uploadFileorImage')" @click="browseAllFiles" class="icon-btn file-btn" :type="(hasFiles || hasImages) ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'fileButton')?.enabled && !isCapsuleMode" circle>
+                            <button type="button" class="el-button is-circle icon-btn file-btn" :title="t('uploadFileorImage')" @click="browseAllFiles" v-if="MoreButtonDict.find(b => b.name === 'fileButton')?.enabled && !isCapsuleMode" :class="['el-button--' + ((hasFiles || hasImages) ? 'primary' : 'default')]">
                                 <i class="fa-solid fa-paperclip"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('desktopVisionButton')" @click="visionSettings.desktopVision = !visionSettings.desktopVision; autoSaveSettings()" class="icon-btn vision-btn" :type="visionSettings.desktopVision ? 'primary' : 'default'" :disabled="!isElectron" circle>
+                            <button type="button" class="el-button is-circle icon-btn vision-btn" :title="t('desktopVisionButton')" @click="visionSettings.desktopVision = !visionSettings.desktopVision; autoSaveSettings()" :disabled="!isElectron" :class="['el-button--' + (visionSettings.desktopVision ? 'primary' : 'default')], { 'is-disabled': !isElectron }">
                                 <i class="fa-solid fa-eye"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('screenshot')" @click="toggleScreenshot(false)" class="icon-btn vision-btn" type="default" circle>
+                            <button type="button" class="el-button is-circle icon-btn vision-btn" :title="t('screenshot')" @click="toggleScreenshot(false)">
                                 <i class="fa-solid fa-scissors"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('asr')" @click="toggleASR" class="icon-btn asr-btn" :type="asrSettings.enabled ? 'primary' : 'default'" circle>
+                            <button type="button" class="el-button is-circle icon-btn asr-btn" :title="t('asr')" @click="toggleASR" :class="['el-button--' + (asrSettings.enabled ? 'primary' : 'default')]">
                                 <i class="fa-solid fa-microphone"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('tts')" @click="ttsSettings.enabled=!ttsSettings.enabled;changeTTSstatus();" class="icon-btn asr-btn" :type="ttsSettings.enabled ? 'primary' : 'default'" circle>
+                            <button type="button" class="el-button is-circle icon-btn asr-btn" :title="t('tts')" @click="ttsSettings.enabled=!ttsSettings.enabled;changeTTSstatus();" :class="['el-button--' + (ttsSettings.enabled ? 'primary' : 'default')]">
                                 <i v-if="ttsSettings.enabled" class="fa-solid fa-volume-high"></i>
                                 <i v-else class="fa-solid fa-volume-xmark"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('browserControl')" @click="chromeMCPSettings.enabled = !chromeMCPSettings.enabled; changeChromeMCPEnabled();" class="icon-btn browserControl-btn" :type="chromeMCPSettings.enabled ? 'primary' : 'default'" circle>
+                            <button type="button" class="el-button is-circle icon-btn browserControl-btn" :title="t('browserControl')" @click="chromeMCPSettings.enabled = !chromeMCPSettings.enabled; changeChromeMCPEnabled();" :class="['el-button--' + (chromeMCPSettings.enabled ? 'primary' : 'default')]">
                                 <i class="fa-solid fa-compass"></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('tablePet')" @click="startVRM" class="icon-btn vrm-btn" :type="'default'" v-if="MoreButtonDict.find(b => b.name === 'vrmButton')?.enabled&&!isCapsuleMode" circle>
+                            <button type="button" class="el-button is-circle icon-btn vrm-btn" :title="t('tablePet')" @click="startVRM" v-if="MoreButtonDict.find(b => b.name === 'vrmButton')?.enabled&&!isCapsuleMode" :class="['el-button--' + ('default')]">
                                 <i :class='isVRMStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-user-ninja"'></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="t('thaDesktopPet')" @click="startTHA" class="icon-btn tha-btn" :type="'default'" v-if="MoreButtonDict.find(b => b.name === 'thaButton')?.enabled&&!isCapsuleMode" circle>
+                            <button type="button" class="el-button is-circle icon-btn tha-btn" :title="t('thaDesktopPet')" @click="startTHA" v-if="MoreButtonDict.find(b => b.name === 'thaButton')?.enabled&&!isCapsuleMode" :class="['el-button--' + ('default')]">
                                 <i :class='isTHAStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-hat-wizard"'></i>
-                              </el-button>
+                              </button>
 
-                            <el-button :title="isSending ? t('stopGenerating') : t('sendMessage')" @click="isSending ? stopGenerate() : sendMessage()" :type="isSending ? 'danger' : 'primary'" class="icon-btn send-btn" circle>
+                            <button type="button" class="el-button is-circle icon-btn send-btn" :title="isSending ? t('stopGenerating') : t('sendMessage')" @click="isSending ? stopGenerate() : sendMessage()" :class="['el-button--' + (isSending ? 'danger' : 'primary')]">
                                 <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
-                              </el-button>
+                              </button>
                         </div>
                         <!-- 1. 附件预览区域 -->
                         <div class="attachment-preview-list" v-show="allItems.length > 0">

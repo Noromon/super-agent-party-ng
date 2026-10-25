@@ -375,4 +375,21 @@ def test_s116_ai_browser_native_message_row():
     assert "<el-button :title=\"t('pause')" not in ab
     assert ab.count('<button type="button" class="el-button') >= 12
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S116" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S117: 组头下拉流式离树 + composer/quick-tool 第四轮原生刀 =====
+
+def test_s117_group_dropdown_typing_gate_and_composer_native():
+    for tpl in ("page_home.html", "page_chat_main.html"):
+        html = _read("static/templates/" + tpl)
+        assert '<el-dropdown v-if="!isTyping" :persistent="false" trigger="click"' in html
+    ab = _read("static/templates/page_ai-browser.html")
+    lines = ab.split("\n")
+    for i in range(407, 455):
+        assert "<el-button" not in lines[i], i + 1
+    home = _read("static/templates/page_home.html")
+    assert home.count('class="el-button is-circle icon-btn send-btn"') >= 1
+    assert "el-button--' + (isSending" in ab
+    rd = _read("static/js/renderer.js")
+    assert "renderer build=S117" in rd

@@ -26,15 +26,15 @@
                 <!-- 按钮并排且紧凑 -->
                 <div class="history-quick-tools">
                   <!-- PR功能：新建分组按钮 -->
-                   <el-button :title="t('newGroup')" @click="createConversationGroup()" circle size="small" class="quick-tool-btn">
+                   <button type="button" class="el-button is-circle el-button--small quick-tool-btn" :title="t('newGroup')" @click="createConversationGroup()">
                       <i class="fa-solid fa-folder-plus"></i>
-                    </el-button>
-                  <el-button :title="t('keepLastWeek')" @click="keepLastWeek" circle size="small" class="quick-tool-btn">
+                    </button>
+                  <button type="button" class="el-button is-circle el-button--small quick-tool-btn" :title="t('keepLastWeek')" @click="keepLastWeek">
                       <i class="fa-solid fa-calendar-week"></i>
-                    </el-button>
-                  <el-button :title="t('clearAllHistory')" @click="confirmClearAll" circle size="small" class="quick-tool-btn danger">
+                    </button>
+                  <button type="button" class="el-button is-circle el-button--small quick-tool-btn danger" :title="t('clearAllHistory')" @click="confirmClearAll">
                       <i class="fa-solid fa-trash-can"></i>
-                    </el-button>
+                    </button>
                 </div>
               </div>
 
@@ -56,8 +56,9 @@
                       {{ group.name }} ({{ group.conversations.length }})
                     </span>
                     <!-- 【修改点2】：操作区强行横向排列，重置按钮原有的 absolute 定位 -->
-                    <div class="group-actions" style="display: flex; align-items: center; flex-shrink: 0;" @click.stop>
-                      <el-dropdown :persistent="false" trigger="click" placement="bottom-end" @click.stop>
+                     <div class="group-actions" style="display: flex; align-items: center; flex-shrink: 0;" @click.stop>
+                       <!-- S117: 流式期整条 dropdown->tooltip->popper 触发器链离树（S108 同款取舍） -->
+                       <el-dropdown v-if="!isTyping" :persistent="false" trigger="click" placement="bottom-end" @click.stop>
                         <!-- 这个按钮现在对所有组（包括默认组）都可见 -->
                         <el-button class="item-delete-btn" circle style="position: relative; right: auto; top: auto; transform: none; margin-right: 4px; display: flex; align-items: center; justify-content: center;">
                           <i class="fa-solid fa-ellipsis"></i>
@@ -619,7 +620,7 @@
                               <div class="ctx-seg-bar"><div class="ctx-seg-fill" :style="{ width: Math.min(100, ((ctxUsage().breakdown || {})[seg.k] || 0) / ctxUsage().window * 100) + '%' }"></div></div>
                             </div>
                             <div class="ctx-panel-actions">
-                              <el-button size="small" type="primary" plain @click="compactNow">{{ t('contextCompactNow') }}</el-button>
+                              <button type="button" class="el-button el-button--small el-button--primary is-plain" @click="compactNow">{{ t('contextCompactNow') }}</button>
                             </div>
                           </div>
                         </teleport>
@@ -665,9 +666,9 @@
 
 
 
-                      <el-button :title="isSending ? t('stopGenerating') : t('sendMessage')" v-if="!isCapsuleMode" @click="isSending ? stopGenerate() : sendMessage()" :type="isSending ? 'danger' : 'primary'" class="icon-btn send-btn" circle>
+                      <button type="button" class="el-button is-circle icon-btn send-btn" :title="isSending ? t('stopGenerating') : t('sendMessage')" v-if="!isCapsuleMode" @click="isSending ? stopGenerate() : sendMessage()" :class="['el-button--' + (isSending ? 'danger' : 'primary')]">
                           <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
-                        </el-button>
+                        </button>
                     </div>
 
                     <!-- 1. 附件预览区域 -->

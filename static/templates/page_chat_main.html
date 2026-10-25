@@ -205,8 +205,9 @@
                       {{ group.name }} ({{ group.conversations.length }})
                     </span>
                     <!-- 【修改点2】：操作区强行横向排列，重置按钮原有的 absolute 定位 -->
-                    <div class="group-actions" style="display: flex; align-items: center; flex-shrink: 0;" @click.stop>
-                      <el-dropdown :persistent="false" trigger="click" placement="bottom-end" @click.stop>
+                     <div class="group-actions" style="display: flex; align-items: center; flex-shrink: 0;" @click.stop>
+                       <!-- S117: 流式期整条 dropdown->tooltip->popper 触发器链离树（S108 同款取舍） -->
+                       <el-dropdown v-if="!isTyping" :persistent="false" trigger="click" placement="bottom-end" @click.stop>
                         <!-- 这个按钮现在对所有组（包括默认组）都可见 -->
                         <el-button class="item-delete-btn" circle style="position: relative; right: auto; top: auto; transform: none; margin-right: 4px; display: flex; align-items: center; justify-content: center;">
                           <i class="fa-solid fa-ellipsis"></i>
