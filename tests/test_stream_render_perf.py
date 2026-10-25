@@ -364,4 +364,15 @@ def test_s115_chat_main_native_hotzone_and_card_div():
     rd = _read("static/js/renderer.js")
     assert "durationThreshold: 400" in rd
     assert "typing=" in rd
-    assert "renderer build=S115" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S116: 第三聊天宿主 ai-browser 消息区原生刀（三宿主收口） =====
+
+def test_s116_ai_browser_native_message_row():
+    ab = _read("static/templates/page_ai-browser.html")
+    assert "<el-button :title=\"t('copy')\"" not in ab
+    assert "<el-button :title=\"t('pause')" not in ab
+    assert ab.count('<button type="button" class="el-button') >= 12
+    rd = _read("static/js/renderer.js")
+    assert "renderer build=S116" in rd

@@ -196,12 +196,12 @@
 
                     <!-- TTS 控制区 -->
                     <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant'" class="tts-controls">
-                      <el-button :title="message.isPlaying ? t('pause') : t('play')" @click="toggleTTS(message)" circle size="small">
+                      <button type="button" class="el-button is-circle el-button--small" :title="message.isPlaying ? t('pause') : t('play')" @click="toggleTTS(message)">
                           <i :class="message.isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i>
-                        </el-button>
+                        </button>
                       <template v-if="!message.isOmni">
-                        <el-button @click="backwardTTS(message)" circle size="small"><i class="fa-solid fa-backward"></i></el-button>
-                        <el-button @click="forwardTTS(message)" circle size="small"><i class="fa-solid fa-forward"></i></el-button>
+                        <button type="button" class="el-button is-circle el-button--small" @click="backwardTTS(message)"><i class="fa-solid fa-backward"></i></button>
+                        <button type="button" class="el-button is-circle el-button--small" @click="forwardTTS(message)"><i class="fa-solid fa-forward"></i></button>
                         <span class="tts-status" v-if="message.ttsChunks">
                           {{ (message.currentChunk || 0) + 1 }}/{{ message.ttsChunks.length }}
                         </span>
@@ -368,15 +368,15 @@
 
                     <!-- 操作按钮区 -->
                     <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
-                      <el-button v-if="message.role === 'user'" :title="t('edit')" @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
-                      <el-button v-if="message.role === 'assistant'" :title="t('briefly')" class="briefly-btn" @click="toggleBriefly(index)" circle size="small"><i class="fa-solid fa-asterisk"></i></el-button>
-                      <el-button v-if="message.role === 'assistant'" :title="t('rewrite')" class="rewrite-btn" @click="rewrite(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
-                      <el-button :title="t('copy')" class="copy-btn" @click="copyMessageContent(message)" circle size="small"><i class="fa-solid fa-copy"></i></el-button>
-                      <el-button :title="t('translateAndMark')" @click="translateMessage(index)" circle size="small"><i class="fa-solid fa-language"></i></el-button>
-                      <el-button v-if="index !== 0" :title="t('delete')" @click="deleteMessage(index)" circle size="small"><i class="fa-solid fa-trash-can"></i></el-button>
-                      <el-button v-if="index == 0" :title="t('reset')" @click="resetMessage(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
-                      <el-button v-if="message.role === 'system'&&index == 0" :title="t('oneClickExpand')" class="Gen-btn" @click="toggleQuickGen(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-wand-magic-sparkles"></i></el-button>
-                      <el-button v-if="message.role === 'system'&&index == 0" :title="t('save')" class="Gen-btn" @click="saveSystemPrompt(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-floppy-disk"></i></el-button>
+                      <button type="button" class="el-button is-circle el-button--small" v-if="message.role === 'user'" :title="t('edit')" @click="openEditDialog(message.role, message.content,index)"><i class="fa-solid fa-pen-to-square"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small briefly-btn" v-if="message.role === 'assistant'" :title="t('briefly')" @click="toggleBriefly(index)"><i class="fa-solid fa-asterisk"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small rewrite-btn" v-if="message.role === 'assistant'" :title="t('rewrite')" @click="rewrite(index)"><i class="fa-solid fa-rotate"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small copy-btn" :title="t('copy')" @click="copyMessageContent(message)"><i class="fa-solid fa-copy"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small" :title="t('translateAndMark')" @click="translateMessage(index)"><i class="fa-solid fa-language"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small" v-if="index !== 0" :title="t('delete')" @click="deleteMessage(index)"><i class="fa-solid fa-trash-can"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small" v-if="index == 0" :title="t('reset')" @click="resetMessage(index)"><i class="fa-solid fa-rotate"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small Gen-btn" v-if="message.role === 'system'&&index == 0" :title="t('oneClickExpand')" @click="toggleQuickGen(index)" :disabled="isQuickGenerating" :class="{ 'is-disabled': isQuickGenerating }"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                      <button type="button" class="el-button is-circle el-button--small Gen-btn" v-if="message.role === 'system'&&index == 0" :title="t('save')" @click="saveSystemPrompt(index)" :disabled="isQuickGenerating" :class="{ 'is-disabled': isQuickGenerating }"><i class="fa-solid fa-floppy-disk"></i></button>
                       <span class="msg-status" v-if="message.role === 'assistant' && !isMobile">
                           {{ t('total_tokens')+': '+ (message?.total_tokens ?? 0) +',    '+ t('first_token_latency')+': '+(message?.first_token_latency ?? 0) +'ms'}}
                       </span>
