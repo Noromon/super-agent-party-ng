@@ -1173,8 +1173,26 @@ def _asset_version_hash(base_dir, url):
 
 @app.middleware("http")
 async def inject_asset_versions(request: Request, call_next):
+    _tt0 = time.monotonic()
     response = await call_next(request)
     ctype = response.headers.get("content-type", "")
+    # S121: TTFB 分账哨兵——assemble=请求进入→响应头（含入站/组装/记忆检索），
+    # first-chunk=响应头→LLM 首块（≈prefill）。仅 chat/completions SSE。
+    if "text/event-stream" in ctype and request.url.path.endswith("/chat/completions"):
+        _t1 = time.monotonic()
+        _orig_iter = response.body_iterator
+        _st = {"done": False}
+
+        async def _ttfb_tap():
+            async for _c in _orig_iter:
+                if not _st["done"]:
+                    _st["done"] = True
+                    logging.getLogger("app").info(
+                        f"[TTFBbrk] assemble={int((_t1 - _tt0) * 1000)}ms "
+                        f"to-first-chunk={int((time.monotonic() - _t1) * 1000)}ms")
+                yield _c
+        response.body_iterator = _ttfb_tap()
+        return response
     if "text/html" not in ctype:
         return response
     # 扩展/上传/临时/模型等挂载点下的 HTML 不做版本化处理

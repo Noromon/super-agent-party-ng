@@ -58,13 +58,20 @@ async function iterateSse(response, onFrame, opts = {}) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let eof = false;
+  // S121: 供给缺口哨兵——read() pending 时长>1.5s=网络/服务端断供（本地渲染
+  // 耗时落在 read 之外不计入）；循环结束仅当出现过缺口才发声一行。
+  let _gapMax = 0;
   while (true) {
+    const _tIssue = performance.now();
     const r = await reader.read();
+    const _g = performance.now() - _tIssue;
+    if (_g > _gapMax) _gapMax = _g;
     if (r.done) { eof = true; break; }
     if (r.value) buffer += decoder.decode(r.value, { stream: true });
     if (await flushEvents()) { serverDone = true; break; }
     if (serverDone && stopOnDone) break;
   }
+  if (_gapMax > 1500) console.warn('[Perf] chunk-gap max=' + Math.round(_gapMax) + 'ms');
   decoder.decode(); // decoder 终态冲刷
   // 拉平：冲刷残缓冲里未闭合的最后一个 data: 事件
   const tail = buffer.trim();

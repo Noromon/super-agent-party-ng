@@ -423,4 +423,26 @@ def test_s119_sentinel_mode_probes():
     mj = _read("main.js")
     assert "requestCapture('console')" in mj  # 按需抓栈通道保留
     assert "evidenceAppend" in mj  # 证据通道保留
-    assert "renderer build=S119" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S121: TTFB 分账+供给缺口+rAF 帧距探针（掉帧体感取证轮） =====
+
+def test_s121_ttfb_breakdown_in_middleware():
+    sp = _read("server.py")
+    assert "[TTFBbrk] assemble=" in sp
+    assert "to-first-chunk=" in sp
+    assert "/chat/completions" in sp
+
+
+def test_s121_chunk_gap_sentinel():
+    sc = _read("static/js/stream_client.js")
+    assert "chunk-gap max=" in sc
+    assert "_gapMax > 1500" in sc
+
+
+def test_s121_raf_frame_probe():
+    rd = _read("static/js/renderer.js")
+    assert "raf frames=" in rd
+    assert "__rafHandle" in rd
+    assert "requestAnimationFrame(tick)" in rd

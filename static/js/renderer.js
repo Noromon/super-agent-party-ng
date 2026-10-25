@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S119 loaded');
+console.warn('[Probe] renderer build=S120 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -1182,6 +1182,32 @@ const app = Vue.createApp({
     // 改为主进程在流式窗口持续采样（魔法行走已证明能通的 console 通道）
     isTyping(v) {
       try { console.warn('[Probe] ' + (v ? 'stream-active' : 'stream-idle')); } catch (_) {}
+      // S121: rAF 帧距探针——LongFrame(400ms) 盲区（<400ms 连帧掉帧）取证。
+      // 流式期 rAF 逐帧记距，idle 时汇报一行 frames/p95/max（每轮一行，低频）。
+      try {
+        if (v) {
+          window.__rafFrames = [performance.now()];
+          const tick = () => {
+            if (!this.isTyping) return;
+            window.__rafFrames.push(performance.now());
+            if (window.__rafFrames.length > 60000) window.__rafFrames.shift();
+            window.__rafHandle = requestAnimationFrame(tick);
+          };
+          window.__rafHandle = requestAnimationFrame(tick);
+        } else if (window.__rafHandle) {
+          cancelAnimationFrame(window.__rafHandle);
+          window.__rafHandle = 0;
+          const ts = window.__rafFrames || [];
+          if (ts.length > 10) {
+            const d = [];
+            for (let i = 1; i < ts.length; i++) d.push(ts[i] - ts[i - 1]);
+            d.sort((a, b) => a - b);
+            console.warn('[Perf] raf frames=' + ts.length +
+              ' p95=' + Math.round(d[Math.floor(d.length * 0.95)]) + 'ms' +
+              ' max=' + Math.round(d[d.length - 1]) + 'ms');
+          }
+        }
+      } catch (_) {}
     },
 
     'CLISettings.cc_path': {
