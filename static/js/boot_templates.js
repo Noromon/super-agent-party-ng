@@ -14,11 +14,15 @@
         if (!res.ok) throw new Error('template load failed: ' + a.getAttribute('data-tpl'));
         return { a: a, html: await res.text() };
       }));
+      let memoSites = 0;
       fetched.forEach(({ a, html }) => {
+        memoSites += (html.match(/v-memo=/g) || []).length;
         const tpl = document.createElement('template');
         tpl.innerHTML = html.trim();
         a.replaceWith(tpl.content);
       });
+      // S124: 运行版本自证——终结"加载的哪份模板"取证盲区
+      console.warn('[Probe] templates ready n=' + fetched.length + ' memo-sites=' + memoSites);
     } catch (err) {
       // RA-10：装载失败不再只剩白屏+console——渲染可见错误条并保留 reject（renderer 不挂载半成品）
       console.error('[templates] 模板装载失败:', err);

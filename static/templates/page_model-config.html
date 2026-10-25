@@ -6,7 +6,6 @@
                 <div 
                   v-for="tile in modelTiles" 
                   :key="tile.id"
-                  v-memo="['nav-model', subMenu, tile.id === subMenu, currentLanguage]"
                   class="nav-item"
                   :class="{ active: subMenu === tile.id }"
                   @click="subMenu = tile.id">
@@ -44,8 +43,7 @@
                 <!-- 磁贴网格 -->
                 <div class="provider-grid">
                   <!-- 已有供应商磁贴 -->
-                  <div class="provider-card" v-for="(provider, index) in modelProviders" :key="provider.id"
-                       v-memo="['prov-card', provider.id, provider.vendor, provider.url, provider.apiKey, provider.modelId, provider.models, index, currentLanguage]">
+                  <div class="provider-card" v-for="(provider, index) in modelProviders" :key="provider.id">
                     <div class="card-header">
                       <img 
                         :src="getVendorLogo(provider.vendor)" 

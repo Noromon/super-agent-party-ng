@@ -6,7 +6,6 @@
                 <div 
                   v-for="tile in roleTiles" 
                   :key="tile.id"
-                  v-memo="['nav-role', subMenu, tile.id === subMenu, currentLanguage]"
                   class="nav-item"
                   :class="{ active: subMenu === tile.id }"
                   @click="subMenu = tile.id">
@@ -315,8 +314,7 @@
                     </div>
                     <div class="provider-grid">
                       <!-- 已有记忆磁贴 -->
-                      <div class="provider-card knowledge-card" v-for="memory in memories" :key="memory.id"
-                           v-memo="['mem-card', memory.id, memory.name, memory.avatar, memory.providerId, currentLanguage]">
+                      <div class="provider-card knowledge-card" v-for="memory in memories" :key="memory.id">
                         <div class="card-header">
                           <img 
                             :src="memory.avatar? memory.avatar : 'source/Avatar.png'" 
