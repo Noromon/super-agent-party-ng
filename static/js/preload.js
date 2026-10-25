@@ -84,6 +84,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getInternalCDPInfo: () => ipcRenderer.invoke('get-internal-cdp-info'),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
+  // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈
+  requestFreezeCapture: () => ipcRenderer.send('sap-freeze-capture'),
   startVRMWindow: (windowConfig) => ipcRenderer.invoke('start-vrm-window', windowConfig),
   stopVRMWindow: () => ipcRenderer.invoke('stop-vrm-window'),
   // S91(THA)：桌宠窗口

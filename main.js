@@ -443,6 +443,9 @@ function createSkeletonWindow() {
 // S98b: Electron 39 起 debugger 是 webContents 实例属性（顶层 require('electron').debugger
 // 已不存在=顶层解构得 undefined，实测踩爆）。
 function attachFreezeProbe(win) {
+  // S104: 幂等——历史上两条建窗路径都会 attach，导致每个证据行双份回显
+  if (win.__freezeProbeOn) return
+  win.__freezeProbeOn = true
   let profFile = null
   const startProfile = async () => {
     if (profFile) return
@@ -533,6 +536,16 @@ function attachFreezeProbe(win) {
   }
   win.on('unresponsive', () => {
     console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
+    tryPauseThenProfile()
+  })
+  // S104: 渲染侧饥饿心跳(gap>2.5s)主动请抓——不等挂死看门狗（其阈值更高，
+  // 4~8s 级卡顿恰好躲过）。20s 冷却防抓取风暴。
+  ipcMain.on('sap-freeze-capture', (event) => {
+    if (event.sender !== win.webContents) return
+    if (win.__freezeCaptureBusy) return
+    win.__freezeCaptureBusy = true
+    setTimeout(() => { win.__freezeCaptureBusy = false }, 20000)
+    console.log('[FreezeDiag] 渲染饥饿自报，当场抓栈（断点+采样）…')
     tryPauseThenProfile()
   })
   win.on('responsive', () => {

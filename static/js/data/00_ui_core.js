@@ -151,6 +151,10 @@ Object.assign(vue_data, {
 
     isTyping: false,
 
+    // S104: 消息显示窗口。null=自动(最近30条)；滚动上翻时显式前移(每次+30，上限150)。
+    // 巨型消息列表 = Vue 全屏 patch + 巨型 DOM 的布局风暴（4s 长帧主嫌疑），窗口化封顶。
+    msgWindowOffset: null,
+
     currentMessage: '',
 
     conversationId: null, // 当前对话ID,

@@ -8,6 +8,21 @@ Object.assign(vue_methods, {
       return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
     },
 
+    // S104: 显示窗口——只把最近 30 条消息渲染进 DOM（index 保持全局真实值），
+    // 上翻到顶自动再放 30 条，常驻上限 150 条。
+    msgWindowStart() {
+      const len = this.messages ? this.messages.length : 0;
+      const auto = Math.max(0, len - 30);
+      const s = this.msgWindowOffset === null ? auto : Math.min(this.msgWindowOffset, auto);
+      return Math.max(s, Math.max(0, len - 150));
+    },
+
+    expandMsgWindow() {
+      const cur = this.msgWindowStart();
+      if (cur === 0) return;
+      this.msgWindowOffset = Math.max(0, cur - 30);
+    },
+
     scrollToBottom() {
       this.$nextTick(() => {
         const container = this.$refs.messagesContainer;

@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S103 loaded');
+console.warn('[Probe] renderer build=S104 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -909,6 +909,7 @@ const app = Vue.createApp({
     // 直接打进控制台，无需 DevTools。
     try {
       if (typeof PerformanceObserver !== 'undefined') {
+        let loafCount = 0;
         const loafObs = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
             if ((e.duration || 0) < 500) continue;
@@ -917,8 +918,19 @@ const app = Vue.createApp({
               const f = (loc.url || '').split('/').pop();
               return (s.invoker || '?') + '@' + f + ':' + (loc.lineNumber || '?') + ':' + (loc.columnNumber || '?');
             }).join(' | ');
+            // S104 探针 v2: 帧相位分解（renderStart 前=脚本+微任务，后=渲染），
+            // forcedSL=脚本强制同步布局合计；每 10 报带一次规模读数 dom/msgs 验证
+            // 巨型 DOM/大列表假设。
+            const pre = e.renderStart ? Math.round(e.renderStart - e.startTime) : Math.round(e.duration);
+            const ren = e.renderStart ? Math.round(e.startTime + e.duration - e.renderStart) : 0;
+            const forced = Math.round((e.scripts || []).reduce((a, s) => a + (s.forcedStyleAndLayoutDuration || 0), 0));
+            let size = '';
+            if (++loafCount % 10 === 1) {
+              size = ' dom=' + document.getElementsByTagName('*').length + ' msgs=' + (this.messages ? this.messages.length : -1);
+            }
             console.warn('[LongFrame] duration=' + Math.round(e.duration) + 'ms blocking=' + Math.round(e.blockingDuration || 0) +
-              'ms scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)') +
+              'ms phases[script=' + pre + 'ms render=' + ren + 'ms forcedSL=' + forced + 'ms]' + size +
+              ' scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)') +
               ((window.__lateTimers && window.__lateTimers.length) ? ' timers[' + window.__lateTimers.slice(-2).join(' || ') + ']' : ''));
           }
         });
@@ -930,16 +942,31 @@ const app = Vue.createApp({
     // 回调里的 gap 检测照样报出精确饥饿时长。
     try {
       let hbPrev = Date.now();
+      let hbLastCapture = 0;
       const hbCheck = () => {
         const now = Date.now();
         const gap = now - hbPrev;
         if (gap > 2000) console.warn('[Starve] 主线程饥饿 ' + gap + 'ms');
+        // S104: 饥饿 >2.5s 请主进程 Debugger.pause 当场抓栈（不受挂死看门狗阈值
+        // 限制）。30s 冷却，暂停命令会打断当前 4s 任务——抓的就是正在卡的那口。
+        if (gap > 2500 && now - hbLastCapture > 30000) {
+          hbLastCapture = now;
+          try { window.electron.requestFreezeCapture(); } catch (_) {}
+        }
         hbPrev = now;
       };
       const hbTick = () => { hbCheck(); setTimeout(hbTick, 100); };
       setTimeout(hbTick, 100);
       window.addEventListener('keydown', hbCheck, { passive: true });
       window.addEventListener('mousemove', hbCheck, { passive: true, capture: true });
+    } catch (_) {}
+    // S104: 消息容器上翻到顶 → 显示窗口再放 30 条（capture 收所有滚动源，
+    // 只对当前活跃页的 messagesContainer 生效）
+    try {
+      document.addEventListener('scroll', (e) => {
+        const el = e.target;
+        if (el && el === this.$refs.messagesContainer && el.scrollTop < 160) this.expandMsgWindow();
+      }, { passive: true, capture: true });
     } catch (_) {}
     
     // 1. 时间触发器

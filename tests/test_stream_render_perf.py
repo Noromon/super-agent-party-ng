@@ -178,4 +178,30 @@ def test_s103_settimeout_attribution_probe():
     src = _read("static/js/renderer.js")
     assert "window.__lateTimers" in src
     assert "timers[' + window.__lateTimers.slice(-2)" in src
-    assert "renderer build=S103" in src
+    assert "[Probe] renderer build=S1" in src  # 版本号随升级变，前缀恒定
+# ===== S104: 显示窗口切片 + 饥饿自报抓栈 + 探针 v2 帧相位 =====
+
+def test_s104_message_window():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        src = _read(f"static/templates/{tpl}.html")
+        assert '<template v-for="(message, index) in messages" :key="index">' in src, tpl
+        assert 'v-if="index >= msgWindowStart()"' in src, tpl
+    sc = _read("static/js/methods/68_scroll.js")
+    assert "msgWindowStart()" in sc and "expandMsgWindow()" in sc
+    assert "msgWindowOffset: null" in _read("static/js/data/00_ui_core.js")
+
+
+def test_s104_capture_channel():
+    assert "requestFreezeCapture" in _read("static/js/preload.js")
+    mj = _read("main.js")
+    assert "sap-freeze-capture" in mj
+    assert "win.__freezeProbeOn" in mj  # 幂等守卫（历史双份回显修复）
+    rd = _read("static/js/renderer.js")
+    assert "window.electron.requestFreezeCapture()" in rd
+
+
+def test_s104_probe_v2_phases():
+    rd = _read("static/js/renderer.js")
+    assert "phases[script=" in rd
+    assert "forcedStyleAndLayoutDuration" in rd
+    assert "renderer build=S104" in rd
