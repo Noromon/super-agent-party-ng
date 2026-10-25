@@ -12,8 +12,8 @@ def _read(rel: str) -> str:
 def test_s101_yield_pins():
     src = _read("static/js/stream_client.js")
     assert "const yieldToPump" in src
-    assert src.count("framesSinceYield >= 4") == 2  # SSE 与 NDJSON 两个迭代器（S105: 24→4+200ms 双闸）
-    assert src.count("Date.now() - batchT0 > 200") == 2
+    assert src.count("framesSinceYield >= 6") == 2  # SSE 与 NDJSON 两个迭代器（S105: 24→4+200ms 双闸）
+    assert src.count("Date.now() - batchT0 > 250") == 2
     # 写入点全部改走 _setResultDisplay，且旧模板 live-replace 已摘除
     tb = _read("static/js/methods/11_tool_blocks.js")
     assert "_setResultDisplay(block, content)" in tb
@@ -48,7 +48,7 @@ def test_s101_yield_runtime(tmp_path):
         "iterateSse(response, (p) => { frames += 1; }).then((r) => {\n"
         "  if (frames !== N) throw new Error('frame loss: ' + frames);\n"
         "  if (!r.serverDone) throw new Error('no done handling path exercised');\n"
-        "  const min = Math.floor(N / 4);\n"
+        "  const min = Math.floor(N / 6);\n"
         "  if (yieldCalls < min) throw new Error('yields=' + yieldCalls + ' < ' + min);\n"
         "  console.log('YIELD_OK frames=' + frames + ' yields=' + yieldCalls);\n"
         "}).catch((e) => { console.error('FAIL', e.message); process.exit(1); });\n",

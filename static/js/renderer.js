@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S113 loaded');
+console.warn('[Probe] renderer build=S114 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -2293,7 +2293,10 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
         if (total > 30) {
           const top = Object.keys(buckets).sort((a, b) => buckets[b] - buckets[a]).slice(0, 5)
             .map((k) => k + 'x' + buckets[k]).join(' ');
-          console.warn('[Perf] updates/5s=' + total + ' root=' + rootCount + '/5s top=' + top);
+          // S114 追赶仪表：接收-落账字符差（>0=显示落后于后端）
+          let pend = 0;
+          try { pend = (this.$root._streamRecvChars || 0) - (this.$root._streamFlushChars || 0); } catch (_) {}
+          console.warn('[Perf] updates/5s=' + total + ' root=' + rootCount + '/5s pending=' + pend + ' top=' + top);
           const sus = Object.keys(suspects).map((k) => k + '{' + suspects[k].join(' | ') + '}').join(' ');
           if (sus) console.warn('[Perf] loop-suspect ' + sus);
           // S108: root>150/5s=调度器自激（正常 12Hz×5=60 封顶）→ 当场抓栈点名触发者

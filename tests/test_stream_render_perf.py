@@ -219,7 +219,7 @@ def test_s105_capture_and_evidence():
     assert "msgsDom=" in rd
     # 泵：帧数帽+耗时帽
     sc = _read("static/js/stream_client.js")
-    assert sc.count("framesSinceYield >= 4") == 2
+    assert sc.count("framesSinceYield >= 6") == 2
 # ===== S106: v-memo 行隔离 + 写入节流 + webview 截断网关 + 流式常开 Profiler =====
 
 def test_s106_memo_and_throttle():
@@ -333,7 +333,18 @@ def test_s113_pages_vif_and_reasoning_causal():
         assert f"v-if=\"activeMenu === '{p}'\"" in s, p
         assert "v-show" not in s, p
     rd = _read("static/js/renderer.js")
-    assert "outerHTML" in rd and "renderer build=S113" in rd
+    assert "outerHTML" in rd and "renderer build=S1" in rd
     tb = _read("static/js/methods/11_tool_blocks.js")
     assert "b.done = false; return b;" in tb
     assert "b.type === 'text' || b.type === 'tool_result' || b.type === 'error'" in tb
+# ===== S114: 热区 el-button 原生刀 + pending 追赶仪表 + 泵预算 6/250 =====
+
+def test_s114_native_buttons_and_pending_meter():
+    lines = _read("static/templates/page_home.html").split("\n")
+    for i in list(range(184, 200)) + list(range(359, 375)) + list(range(1129, 1160)):
+        assert "<el-button" not in lines[i], i + 1
+    home = "\n".join(lines)
+    assert home.count('<button type="button" class="el-button') >= 16
+    rd = _read("static/js/renderer.js")
+    assert "pending=" in rd and "_streamRecvChars || 0) - (this.$root._streamFlushChars" in rd
+    assert "renderer build=S114" in rd

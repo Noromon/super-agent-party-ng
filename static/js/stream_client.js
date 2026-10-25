@@ -48,7 +48,7 @@ async function iterateSse(response, onFrame, opts = {}) {
         continue; // 拉平：解析失败吞掉继续
       }
       await onFrame(parsed);
-      if (++framesSinceYield >= 4 || Date.now() - batchT0 > 200) {
+      if (++framesSinceYield >= 6 || Date.now() - batchT0 > 250) {
         framesSinceYield = 0; batchT0 = Date.now(); await yieldToPump();
       }
     }
@@ -121,7 +121,7 @@ async function iterateNdjsonLines(response, onFrame, opts = {}) {
     let batchT0 = Date.now(); // S105: 帧数帽+耗时帽双闸（同 SSE 路径）
     for (const ln of lines) {
       await handleLine(ln);
-      if (++framesSinceYield >= 4 || Date.now() - batchT0 > 200) {
+      if (++framesSinceYield >= 6 || Date.now() - batchT0 > 250) {
         framesSinceYield = 0; batchT0 = Date.now(); await yieldToPump();
       }
     }
