@@ -449,15 +449,41 @@ def test_s121_raf_frame_probe():
 
 
 # ===== S122: 设置页族风暴刀（tile-nav + provider-card 卡行 v-memo） =====
+# S122b 关键教训：v-memo 缓存存于根实例 memos 数组按调用索引对齐，四页同属
+# activeMenu v-if 分支=索引漂移会串线（页面内容互串事故）。防线=每站唯一前缀
+# 键：任何跨站漂移键必不等→必失效重渲染，功能恒正确。新站禁止无前缀 memo。
 
 def test_s122_suite_memos():
-    for f in ("page_api-group.html", "page_deploy-bot.html",
-              "page_model-config.html", "page_role.html"):
-        assert "v-memo=\"[subMenu, tile.id === subMenu, currentLanguage]\"" in _read("static/templates/" + f), f
+    nav = {
+        "page_api-group.html": "v-memo=\"['nav-api', subMenu, tile.id === subMenu, currentLanguage]\"",
+        "page_deploy-bot.html": "v-memo=\"['nav-deploy', subMenu, tile.id === subMenu, currentLanguage]\"",
+        "page_model-config.html": "v-memo=\"['nav-model', subMenu, tile.id === subMenu, currentLanguage]\"",
+        "page_role.html": "v-memo=\"['nav-role', subMenu, tile.id === subMenu, currentLanguage]\"",
+    }
+    for f, needle in nav.items():
+        assert needle in _read("static/templates/" + f), f
     mc = _read("static/templates/page_model-config.html")
-    assert "provider.models, index, currentLanguage]" in mc
+    assert "'prov-card', provider.id" in mc
     ag = _read("static/templates/page_api-group.html")
-    assert "agent.system_prompt, currentLanguage]" in ag
-    assert "extension.hasUpdate, currentLanguage]" in ag
-    assert "memory.avatar, memory.providerId, currentLanguage]" in _read("static/templates/page_role.html")
+    assert "'agent-card', agent.id" in ag
+    assert "'ext-card', extension.id" in ag
+    assert "'mem-card', memory.id" in _read("static/templates/page_role.html")
     assert "renderer build=S122" in _read("static/js/renderer.js")
+
+
+def test_s122b_no_prefixless_memo_in_suite_pages():
+    # 全局 memo 安全规则：每站 v-memo 要么带站点前缀（首元素字符串），
+    # 要么键含恒变高频源（uiRev/userInput），要么键=内容本体（stale 后果=
+    # 内容相同良性，message._rv 系）——否则 v-if 分支/窗口漂移时根实例 memos
+    # 索引串线=内容互串（S122 事故红线）。
+    import re
+    files = ["static/templates/" + f for f in (
+        "page_api-group.html", "page_deploy-bot.html", "page_model-config.html",
+        "page_role.html", "page_home.html", "page_chat_main.html",
+        "page_ai-browser.html")]
+    for path in files:
+        for m in re.finditer(r"v-memo=\"\[([^\]]+)\]", _read(path)):
+            k = m.group(1)
+            assert (k.lstrip().startswith("'") or "uiRev" in k
+                    or "userInput" in k or "message._rv" in k), \
+                path + ": unsafe prefixless memo " + k[:40]
