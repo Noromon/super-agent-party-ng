@@ -54,6 +54,7 @@
     ['ccSettings', 'ccSettings'],
     ['qcSettings', 'qcSettings'],
     ['dsSettings', 'dsSettings'],
+    ['wslSettings', 'wslSettings'],
     ['localEnvSettings', 'localEnvSettings'],
     ['ocSettings', 'ocSettings'],
     ['HASettings', 'HASettings'],

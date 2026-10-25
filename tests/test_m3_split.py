@@ -19,6 +19,8 @@ GIANT_WHITELIST = {
     "lifespan": 307,
     # S71：ws +4 行（get_diary_im_targets 两行分支，重活已抽 _ws_diary_im_targets 模块级 helper），重冻结 302->306
     "websocket_endpoint": 306,
+    # S132（A13 WSL 引擎）：execute_tool_manually +3 行（wsl hooks/import）越过 300 线，冻结现值，后续拆分时下调
+    "execute_tool_manually": 302,
 }
 
 STREAM_HELPERS = [

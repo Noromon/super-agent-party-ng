@@ -27,7 +27,7 @@ def _assemble_toolkit():
     from py.llm_tool import get_llm_tool
     from py.agent_tool import get_agent_tool
     from py.a2a_tool import get_a2a_tool
-    from py.cli_tool import get_tools_for_permission, get_local_tools_for_permission
+    from py.cli_tool import get_tools_for_permission, get_local_tools_for_permission, get_wsl_tools_for_permission
     from py.load_files import file_tool, image_tool, analyze_image_tool, review_image_tool, analyze_images_tool
     from py.pollinations import pollinations_image_tool, openai_image_tool, openai_chat_image_tool
     from py.code_interpreter import e2b_code_tool, local_run_code_tool
@@ -52,6 +52,7 @@ def _assemble_toolkit():
         "cli_permission_mode_for": cli_permission_mode_for,
         "get_tools_for_permission": get_tools_for_permission,
         "get_local_tools_for_permission": get_local_tools_for_permission,
+        "get_wsl_tools_for_permission": get_wsl_tools_for_permission,
         "all_cdp_tools": all_cdp_tools,
         "acp_agent_tool": acp_agent_tool,
         "mode_change_tool": mode_change_tool,
@@ -1595,9 +1596,12 @@ def _build_tool_hooks():
         list_processes_tool,
         get_process_logs_tool,
         kill_process_tool,
-        docker_manage_ports_tool,
-        read_skill_tool,
-    )
+    docker_manage_ports_tool,
+    read_skill_tool,
+    # WSL 沙箱引擎（S132/A13，Windows 专属）
+    shell_tool_wsl,
+    get_wsl_tools_for_permission,
+)
 
     # 新增：本地环境 CLI 工具（假设保存在 py/local_cli_tool.py）
     from py.cli_tool import (
@@ -1740,6 +1744,7 @@ def _build_tool_hooks():
         
         # 本地环境工具（新增）- 与 Docker 版本功能相同但操作本地文件系统
         "shell_tool_local": shell_tool_local,                     # 本地 bash 执行
+    "shell_tool_wsl": shell_tool_wsl,                         # WSL bash 执行（S132/A13）
         "list_files_tool_local": list_files_tool_local,         # 本地文件列表
         "read_file_tool_local": read_file_tool_local,           # 本地文件读取
         "read_file_range_tool_local": read_file_range_tool_local, # <--- 映射新工具
@@ -1788,6 +1793,8 @@ def _plan_mode_block(tool_name, settings):
             _env0 = settings.get("localEnvSettings", {})
         elif _engine0 == "ds":
             _env0 = settings.get("dsSettings", {})
+        elif _engine0 == "wsl":
+            _env0 = settings.get("wslSettings", {})
         else:
             _env0 = settings.get("acpSettings", {})
         if normalize_permission_mode(_env0.get("permissionMode", "default")) == "plan":
@@ -1811,11 +1818,13 @@ def _sensitive_approval(tool_name, tool_params, settings):
             env_settings = settings.get("localEnvSettings", {})
         elif engine == "ds":
             env_settings = settings.get("dsSettings", {})
+        elif engine == "wsl":
+            env_settings = settings.get("wslSettings", {})
         else:
             env_settings = settings.get("acpSettings", {})
-        
+
         permission_mode = cli_permission_mode_for(settings)
-        
+
         is_allowed = False
 
         # --- 规则 A: 全局 YOLO 模式 (Bypass Permissions) ---
@@ -1887,7 +1896,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         
     tool_call = _TOOL_HOOKS[tool_name]
     try:
-        if tool_name in ("shell_tool_local", "docker_sandbox"):
+        if tool_name in ("shell_tool_local", "docker_sandbox", "shell_tool_wsl"):
             # 异步生成器：调用即返回 AsyncIterator，无需 await
             return tool_call(**tool_params)
         if tool_name == "acpx_agent":
@@ -3281,9 +3290,11 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         env_settings = settings.get("localEnvSettings", {})
     elif engine == "ds":
         env_settings = settings.get("dsSettings", {})
+    elif engine == "wsl":
+        env_settings = settings.get("wslSettings", {})
     else:
         env_settings = settings.get("acpSettings", {})
-    
+
     permissionMode = cli_permission_mode_for(settings)
     
     if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
@@ -3298,10 +3309,10 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         _append_permission_mode_message(request, permissionMode)
 
     if permissionMode == "cowork" and not request.is_sub_agent:
-        if cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
+        if cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local", "wsl"]:
             sub_task_context = await query_task_progress(cwd)
             content_append(request.messages, 'system', sub_task_context)
-    elif cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local"]:
+    elif cwd and Path(cwd).exists() and cli_settings.get("enabled", False) and engine in ["ds", "local", "wsl"]:
         
         if engine == "local":
             # 在本地环境下，首先注入系统环境信息
@@ -3383,6 +3394,19 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
    
 """
             content_append(request.messages, 'system', system_context)
+        elif engine == "wsl":
+            # 在 WSL 环境下，注入 Linux (WSL2) 环境信息（S132/A13）
+            system_context_wsl = (
+                "【环境信息】操作系统：Linux (WSL2) | Shell：bash\n\n"
+                "重要提示：\n"
+                "1. 当前为 WSL2 沙盒环境，请使用 Linux 命令和工具链\n"
+                "2. 文件系统路径格式为 Linux 标准路径（如 /mnt/d/project）\n"
+                "3. 命令通过 bash 执行，请使用 Linux 语法规范\n"
+                "4. 工作目录已自动映射到 WSL 路径\n"
+                "5. apt、pip、npm 等包管理器可直接使用\n"
+                "6. 端口监听在 WSL 内，可通过 localhost 从 Windows 访问"
+            )
+            content_append(request.messages, 'system', system_context_wsl)
 
         await _append_todos_context(request, cwd)
 
@@ -3713,6 +3737,8 @@ def cli_permission_mode_for(settings: dict) -> str:
         env = settings.get("localEnvSettings", {})
     elif engine == "ds":
         env = settings.get("dsSettings", {})
+    elif engine == "wsl":
+        env = settings.get("wslSettings", {})
     else:
         env = settings.get("acpSettings", {})
     return normalize_permission_mode(env.get("permissionMode", "default"))
@@ -5914,9 +5940,11 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             env_settings = settings.get("localEnvSettings", {})
         elif engine == "ds":
             env_settings = settings.get("dsSettings", {})
+        elif engine == "wsl":
+            env_settings = settings.get("wslSettings", {})
         else:
             env_settings = settings.get("acpSettings", {})
-                
+
         permission_mode = cli_permission_mode_for(settings)
         if permission_mode == "cowork" and settings['CLISettings']['enabled'] and not request.is_sub_agent:
             tools = []
@@ -7397,9 +7425,11 @@ async def execute_tool_manually(request: Request):
         list_processes_tool,
         get_process_logs_tool,
         kill_process_tool,
-        docker_manage_ports_tool,
-        read_skill_tool,
-    )
+    docker_manage_ports_tool,
+    read_skill_tool,
+    # WSL 沙箱引擎（S132/A13，complete 域 hooks 用 shell_tool_wsl）
+    shell_tool_wsl,
+)
 
     # 新增：本地环境 CLI 工具（假设保存在 py/local_cli_tool.py）
     from py.cli_tool import (
@@ -7542,6 +7572,7 @@ async def execute_tool_manually(request: Request):
         
         # 本地环境工具（新增）- 与 Docker 版本功能相同但操作本地文件系统
         "shell_tool_local": shell_tool_local,                     # 本地 bash 执行
+    "shell_tool_wsl": shell_tool_wsl,                         # WSL bash 执行（S132/A13）
         "list_files_tool_local": list_files_tool_local,         # 本地文件列表
         "read_file_tool_local": read_file_tool_local,           # 本地文件读取
         "read_file_range_tool_local": read_file_range_tool_local, # <--- 映射新工具
@@ -7586,7 +7617,7 @@ async def execute_tool_manually(request: Request):
     tool_func = _TOOL_HOOKS[tool_name]
     
     try:
-        if tool_name in ("shell_tool_local", "docker_sandbox"):
+        if tool_name in ("shell_tool_local", "docker_sandbox", "shell_tool_wsl"):
             # 异步生成器：调用即返回 AsyncIterator，无需 await
             result = tool_func(**tool_params)
         elif tool_name == "acpx_agent":

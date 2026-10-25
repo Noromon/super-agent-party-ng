@@ -94,6 +94,8 @@ async def build_llm_tools(request, settings, tk):
             tools.extend(tk["get_tools_for_permission"](_cli_mode))
         elif settings['CLISettings']['engine'] == 'local':
             tools.extend(tk["get_local_tools_for_permission"](_cli_mode))
+        elif settings['CLISettings']['engine'] == 'wsl':
+            tools.extend(tk["get_wsl_tools_for_permission"](_cli_mode))
         elif settings['CLISettings']['engine'] == 'acp':
             if _cli_mode != "plan":
                 tools.append(tk["acp_agent_tool"])

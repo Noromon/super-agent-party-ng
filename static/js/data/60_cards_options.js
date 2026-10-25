@@ -487,6 +487,12 @@ main();`,
       extraEnv: '',              // 额外环境变量
     },
 
+    // ★ WSL 沙箱设置（S132/A13，Windows 专属）
+    wslSettings: {
+      enabled: false,
+      permissionMode: 'default',
+    },
+
     // ★ ACPX 状态
     acpxStatus: null,            // null | 'available' | 'unavailable',
 

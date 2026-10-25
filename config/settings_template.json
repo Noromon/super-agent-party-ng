@@ -257,6 +257,10 @@
       "enabled": false,
       "permissionMode": "default"
     },
+    "wslSettings": {
+      "enabled": false,
+      "permissionMode": "default"
+    },
     "localEnvSettings": {
       "enabled": false,
       "permissionMode": "default"

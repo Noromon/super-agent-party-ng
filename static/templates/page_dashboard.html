@@ -242,8 +242,9 @@
               <el-form-item :label="t('CLIEngine')">
                 <el-select :persistent="false" v-model="CLISettings.engine" class="full-width">
                   <el-option :label="t('localEnvironment')" value="local"></el-option>
-                  <el-option :label="t('dockerSandbox')" value="ds"></el-option>
-                  <el-option :label="t('ACPProtocol') || 'ACP Protocol'" value="acp" ></el-option>
+                    <el-option :label="t('dockerSandbox')" value="ds"></el-option>
+                    <el-option v-if="isWindows" :label="t('wslSandbox') || 'WSL Sandbox'" value="wsl"></el-option>
+                    <el-option :label="t('ACPProtocol') || 'ACP Protocol'" value="acp" ></el-option>
                 </el-select>
               </el-form-item>
               <el-form-item :label="t('workspace')" required>

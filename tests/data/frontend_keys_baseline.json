@@ -1692,6 +1692,7 @@
   "workspaceTreeProps",
   "ws",
   "wsConnected",
+  "wslSettings",
   "xmppBotConfig",
   "xmppBotSessions",
   "xmppCertPending",

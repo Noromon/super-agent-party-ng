@@ -372,18 +372,6 @@ function isPortAvailable(port) {
   })
 }
 
-// 新增：查找可用端口
-async function findAvailablePort(startPort = DEFAULT_PORT, maxAttempts = 20000) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const port = startPort + i
-    if (await isPortAvailable(port)) {
-      return port
-    }
-  }
-  throw new Error(`无法找到可用端口，已尝试 ${startPort} 到 ${startPort + maxAttempts - 1}`)
-}
-
-
 // 创建骨架屏窗口
 function createSkeletonWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize

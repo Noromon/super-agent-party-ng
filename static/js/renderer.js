@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S131 loaded');
+console.warn('[Probe] renderer build=S132 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -861,7 +861,12 @@ const app = Vue.createApp({
       this.isMac = window.electron.isMac;
       this.isWindows = window.electron.isWindows;
     }
-    
+
+    // S132/A13(c427eee9): 非 Windows 平台不提供 WSL 沙箱，误配置回退本地引擎
+    if (!this.isWindows && this.CLISettings.engine === 'wsl') {
+      this.CLISettings.engine = 'local';
+    }
+
     this.initWebSocket();
     this.highlightCode();
     this.initDownloadButtons();
