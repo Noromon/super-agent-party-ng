@@ -57,13 +57,12 @@
                               </div>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="startQQBot" 
                                     :disabled="!isQQBotConfigValid || isQQBotRunning || isStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -71,16 +70,14 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopQQBot" 
                                     :disabled="!isQQBotRunning || isStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -88,15 +85,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button 
                                     @click="reloadQQBotConfig" 
                                     :disabled="!isQQBotRunning || isReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -104,7 +99,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
                             <div class="tool-content">
@@ -270,13 +264,12 @@
                               </div>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('wechat_start_tooltip')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startWechatBot"
                                     :disabled="!isWechatBotConfigValid || isWechatBotRunning || isWechatStarting"
                                     circle
-                                  >
+                                   :title="t('wechat_start_tooltip')">
                                     <template v-if="isWechatStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -284,28 +277,24 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
                                 <!-- 强制换号按钮 -->
-                                <el-tooltip :content="t('wechat_force_relogin_tooltip')" placement="top">
                                   <el-button
                                     type="warning"
                                     @click="forceReLoginWechatBot"
                                     :disabled="isWechatStarting"
                                     circle
-                                  >
+                                   :title="t('wechat_force_relogin_tooltip')">
                                     <i class="fa-solid fa-qrcode"></i>
                                   </el-button>
-                                </el-tooltip>
 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopWechatBot"
                                     :disabled="!isWechatBotRunning || isWechatStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isWechatStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -313,15 +302,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadWechatBotConfig"
                                     :disabled="!isWechatBotRunning || isWechatReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isWechatReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -329,7 +316,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -505,13 +491,12 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startFeishuBot"
                                     :disabled="!isfeishuBotConfigValid || isFeishuBotRunning || isFeishuStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isFeishuStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -519,15 +504,13 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopFeishuBot"
                                     :disabled="!isFeishuBotRunning || isFeishuStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isFeishuStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -535,14 +518,12 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadfeishuBotConfig"
                                     :disabled="!isFeishuBotRunning || isFeishuReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isFeishuReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -550,7 +531,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -737,40 +717,34 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startWeComBot"
                                     :disabled="!isWeComBotConfigValid || isWeComBotRunning || isWeComStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isWeComStarting"><i class="fa-solid fa-spinner fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-play"></i></template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopWeComBot"
                                     :disabled="!isWeComBotRunning || isWeComStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isWeComStopping"><i class="fa-solid fa-spinner fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-stop"></i></template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadWeComBotConfig"
                                     :disabled="!isWeComBotRunning || isWeComReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isWeComReloading"><i class="fa-solid fa-rotate fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-rotate"></i></template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -876,40 +850,34 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startDingtalkBot"
                                     :disabled="!isdingtalkBotConfigValid || isDingtalkBotRunning || isDingtalkStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <i v-if="isDingtalkStarting" class="fa-solid fa-spinner fa-spin"></i>
                                     <i v-else class="fa-solid fa-play"></i>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopDingtalkBot"
                                     :disabled="!isDingtalkBotRunning || isDingtalkStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <i v-if="isDingtalkStopping" class="fa-solid fa-spinner fa-spin"></i>
                                     <i v-else class="fa-solid fa-stop"></i>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadDingtalkBot"
                                     :disabled="!isDingtalkBotRunning || isDingtalkReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <i v-if="isDingtalkReloading" class="fa-solid fa-rotate fa-spin"></i>
                                     <i v-else class="fa-solid fa-rotate"></i>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -1073,13 +1041,12 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startTelegramBot"
                                     :disabled="!isTelegramBotConfigValid || isTelegramBotRunning || isTelegramStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isTelegramStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1087,15 +1054,13 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopTelegramBot"
                                     :disabled="!isTelegramBotRunning || isTelegramStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isTelegramStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1103,14 +1068,12 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadTelegramBotConfig"
                                     :disabled="!isTelegramBotRunning || isTelegramReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isTelegramReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -1118,7 +1081,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -1275,27 +1237,21 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button type="primary" @click="startXmppBot"
-                                    :disabled="!isXmppBotConfigValid || isXmppBotRunning || isXmppStarting" circle>
+                                    :disabled="!isXmppBotConfigValid || isXmppBotRunning || isXmppStarting" circle :title="t('start_bot')">
                                     <template v-if="isXmppStarting"><i class="fa-solid fa-spinner fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-play"></i></template>
                                   </el-button>
-                                </el-tooltip>
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button type="danger" @click="stopXmppBot"
-                                    :disabled="!isXmppBotRunning || isXmppStopping" circle>
+                                    :disabled="!isXmppBotRunning || isXmppStopping" circle :title="t('stop_bot')">
                                     <template v-if="isXmppStopping"><i class="fa-solid fa-spinner fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-stop"></i></template>
                                   </el-button>
-                                </el-tooltip>
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button @click="reloadXmppBotConfig"
-                                    :disabled="!isXmppBotRunning || isXmppReloading" circle>
+                                    :disabled="!isXmppBotRunning || isXmppReloading" circle :title="t('reload_bot')">
                                     <template v-if="isXmppReloading"><i class="fa-solid fa-rotate fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-rotate"></i></template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -1521,13 +1477,12 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startDiscordBot"
                                     :disabled="!isDiscordBotConfigValid || isDiscordBotRunning || isDiscordStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isDiscordStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1535,15 +1490,13 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopDiscordBot"
                                     :disabled="!isDiscordBotRunning || isDiscordStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isDiscordStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1551,14 +1504,12 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadDiscordBot"
                                     :disabled="!isDiscordBotRunning || isDiscordReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isDiscordReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -1566,7 +1517,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -1718,13 +1668,12 @@
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
-                                <el-tooltip :content="t('start_bot')" placement="top">
                                   <el-button
                                     type="primary"
                                     @click="startSlackBot"
                                     :disabled="!isSlackBotConfigValid || isSlackBotRunning || isSlackStarting"
                                     circle
-                                  >
+                                   :title="t('start_bot')">
                                     <template v-if="isSlackStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1732,15 +1681,13 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('stop_bot')" placement="top">
                                   <el-button
                                     type="danger"
                                     @click="stopSlackBot"
                                     :disabled="!isSlackBotRunning || isSlackStopping"
                                     circle
-                                  >
+                                   :title="t('stop_bot')">
                                     <template v-if="isSlackStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -1748,14 +1695,12 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
 
-                                <el-tooltip :content="t('reload_bot')" placement="top">
                                   <el-button
                                     @click="reloadSlackBot"
                                     :disabled="!isSlackBotRunning || isSlackReloading"
                                     circle
-                                  >
+                                   :title="t('reload_bot')">
                                     <template v-if="isSlackReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -1763,7 +1708,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -1920,43 +1864,35 @@
 
                           <div class="header-buttons">
                             <!-- 复制 -->
-                            <el-tooltip :content="t('copy')" placement="top">
-                              <el-button circle @click="copyTranslated">
+                              <el-button circle @click="copyTranslated" :title="t('copy')">
                                 <i class="fa-solid fa-copy"></i>
                               </el-button>
-                            </el-tooltip>
 
                             <!-- 翻译 -->
-                            <el-tooltip :content="t('translate')" placement="top">
                               <el-button
                                 type="primary"
                                 circle
                                 :disabled="!sourceText.trim() || isTranslating"
                                 @click="handleTranslate"
-                              >
+                               :title="t('translate')">
                                 <i v-if="isTranslating" class="fa-solid fa-spinner fa-spin"></i>
                                 <i v-else class="fa-solid fa-play"></i>
                               </el-button>
-                            </el-tooltip>
 
                             <!-- 停止 -->
-                            <el-tooltip :content="t('stop')" placement="top">
                               <el-button
                                 type="danger"
                                 circle
                                 :disabled="!isTranslating"
                                 @click="abortTranslate"
-                              >
+                               :title="t('stop')">
                                 <i class="fa-solid fa-stop"></i>
                               </el-button>
-                            </el-tooltip>
 
                             <!-- 清空 -->
-                            <el-tooltip :content="t('clear')" placement="top">
-                              <el-button type="danger" circle @click="clearAll">
+                              <el-button type="danger" circle @click="clearAll" :title="t('clear')">
                                 <i class="fa-solid fa-broom"></i>
                               </el-button>
-                            </el-tooltip>
                           </div>
                         </div>
 
@@ -2084,12 +2020,11 @@
 
                           <!-- 启停大按钮（参考 VRM 模式） -->
                           <div>
-                            <el-tooltip :content="VTSConfig.enabled ? t('stop_vts') : t('start_vts')" placement="top">
                               <el-button 
                                 :type="VTSConfig.enabled ? 'danger' : 'primary'" 
                                 @click="toggleVTSConnection" 
                                 circle
-                              >
+                               :title="VTSConfig.enabled ? t('stop_vts') : t('start_vts')">
                                 <template v-if="isVTSStarting">
                                   <i class="fa-solid fa-spinner fa-spin"></i>
                                 </template>
@@ -2097,7 +2032,6 @@
                                   <i :class="VTSConfig.enabled ? 'fa-solid fa-stop' : 'fa-solid fa-play'"></i>
                                 </template>
                               </el-button>
-                            </el-tooltip>
                           </div>
                         </div>
                         
@@ -2275,13 +2209,12 @@
                           </span>
                           <div>
                             <!-- 启动按钮 -->
-                            <el-tooltip :content="t('start_table_pet')" placement="top">
                               <el-button 
                                 v-if="isElectron"
                                 type="primary" 
                                 @click="startVRM" 
                                 circle
-                              >
+                               :title="t('start_table_pet')">
                                 <template v-if="isVRMStarting">
                                   <i class="fa-solid fa-spinner fa-spin"></i>
                                 </template>
@@ -2289,14 +2222,12 @@
                                   <i class="fa-solid fa-play"></i>
                                 </template>
                               </el-button>
-                            </el-tooltip>
                             <!-- 在浏览器启动按钮 -->
-                            <el-tooltip :content="t('start_table_pet_web')" placement="top">
                               <el-button 
                                 type="primary" 
                                 @click="startVRMweb" 
                                 circle
-                              >
+                               :title="t('start_table_pet_web')">
                                 <template v-if="isVRMStarting">
                                   <i class="fa-solid fa-spinner fa-spin"></i>
                                 </template>
@@ -2304,7 +2235,6 @@
                                   <i class="fa-solid fa-window-maximize"></i>
                                 </template>
                               </el-button>
-                            </el-tooltip>
                           </div>
                         </div>
                         <div class="tool-content">
@@ -2758,13 +2688,12 @@
                           </span>
                           <div>
                             <!-- 启动按钮（Electron） -->
-                            <el-tooltip :content="t('start_tha_table_pet')" placement="top">
                               <el-button
                                 v-if="isElectron"
                                 type="primary"
                                 @click="startTHA"
                                 circle
-                              >
+                               :title="t('start_tha_table_pet')">
                                 <template v-if="isTHAStarting">
                                   <i class="fa-solid fa-spinner fa-spin"></i>
                                 </template>
@@ -2772,28 +2701,23 @@
                                   <i class="fa-solid fa-play"></i>
                                 </template>
                               </el-button>
-                            </el-tooltip>
                             <!-- 在浏览器启动按钮 -->
-                            <el-tooltip :content="t('start_tha_table_pet_web')" placement="top">
                               <el-button
                                 type="primary"
                                 @click="startTHAweb"
                                 circle
-                              >
+                               :title="t('start_tha_table_pet_web')">
                                 <i class="fa-solid fa-window-maximize"></i>
                               </el-button>
-                            </el-tooltip>
                             <!-- 停止按钮 -->
-                            <el-tooltip :content="t('stop_tha_table_pet')" placement="top">
                               <el-button
                                 v-if="isElectron"
                                 type="danger"
                                 @click="stopTHA"
                                 circle
-                              >
+                               :title="t('stop_tha_table_pet')">
                                 <i class="fa-solid fa-stop"></i>
                               </el-button>
-                            </el-tooltip>
                           </div>
                         </div>
                         <div class="tool-content">
@@ -3008,13 +2932,12 @@
                               <div>
                                 
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t(isReadRunning ? (isReadPaused ? 'resume_read' : 'pause_read') : 'start_read')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="toggleRead" 
                                     :disabled="!readConfig.longText || isReadStarting"
                                     circle
-                                  >
+                                   :title="t(isReadRunning ? (isReadPaused ? 'resume_read' : 'pause_read') : 'start_read')">
                                     <template v-if="isReadStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3025,40 +2948,34 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 <!-- 转换音频按钮 -->
-                                <el-tooltip :content="t('convertAudioOnly')" placement="top">
                                   <el-button 
                                     type="success" 
                                     @click="convertAudioOnly" 
                                     circle
                                     :disabled="!readConfig.longText || isConvertingAudio"
-                                  >
+                                   :title="t('convertAudioOnly')">
                                     <i v-if="isConvertingAudio" class="fa-solid fa-spinner fa-spin"></i>
                                     <i v-else class="fa-solid fa-wand-magic-sparkles"></i>
                                   </el-button>
-                                </el-tooltip>
                                 <!-- 下载音频按钮 -->
-                                <el-tooltip :content="t('downloadAudio')" placement="top">
                                   <el-button 
                                     type="default" 
                                     @click="downloadAudio" 
                                     circle
                                     :disabled="(isAudioSynthesizing && isConvertingAudio) || audioChunksCount === 0"
-                                  >
+                                   :title="t('downloadAudio')">
                                     <i v-if="isAudioSynthesizing && isConvertingAudio" class="fa-solid fa-spinner fa-spin"></i>
                                     <i v-else class="fa-solid fa-download"></i>
                                   </el-button>
-                                </el-tooltip>
 
                                 <!-- 停止按钮（更新为通用停止功能） -->
-                                <el-tooltip :content="t('stop_all_tts')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopTTSActivities" 
                                     :disabled="(!isReadRunning && !isConvertingAudio) || isReadStopping || isConvertStopping"
                                     circle
-                                  >
+                                   :title="t('stop_all_tts')">
                                     <template v-if="isReadStopping || isConvertStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3066,7 +2983,6 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
                             <div class="tool-content">
@@ -3118,45 +3034,37 @@
                                 </template>
                               </el-alert>
                               <div style="display: flex; justify-content: flex-end;margin-bottom: 16px;">
-                                <el-tooltip :content="t('prevChapter')" placement="top">
                                   <el-button 
                                     v-show="this.readConfig.longTextList?.length > 0"
                                     type="default" 
                                     @click="PrevPage" 
                                     circle
-                                  >
+                                   :title="t('prevChapter')">
                                     <i class="fa-solid fa-arrow-left"></i>
                                   </el-button>
-                                </el-tooltip>
-                                <el-tooltip :content="t('nextChapter')" placement="top">
                                   <el-button 
                                     v-show="this.readConfig.longTextList?.length > 0"
                                     type="default" 
                                     @click="NextPage" 
                                     circle
-                                  >
+                                   :title="t('nextChapter')">
                                     <i class="fa-solid fa-arrow-right"></i>
                                   </el-button>
-                                </el-tooltip>
                                 <!-- 新增上传文件按钮 -->
-                                <el-tooltip :content="t('uploadFile')" placement="top">
                                   <el-button 
                                     type="success" 
                                     @click="showFileDialog = true" 
                                     circle
-                                  >
+                                   :title="t('uploadFile')">
                                     <i class="fa-solid fa-file-arrow-up"></i>
                                   </el-button>
-                                </el-tooltip>
-                                <el-tooltip :content="t('clearText')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="clearLongText" 
                                     circle
-                                  >
+                                   :title="t('clearText')">
                                     <i class="fa-solid fa-broom"></i>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                               <el-form-item>
                                 <el-input
@@ -3178,38 +3086,32 @@
                             <div class="tool-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                               <span><el-icon><i class="fa-solid fa-list-ol"></i></el-icon> {{ t('segmentRead') }}</span>
                               <div>
-                                <el-tooltip :content="t('playNextSegment')" placement="top">
                                   <el-button
                                     type="primary"
                                     circle
                                     :disabled="readState.ttsChunks.length===0 || readState.isPlaying"
                                     @click="playNextSegmentOnce"
-                                  >
+                                   :title="t('playNextSegment')">
                                     <i class="fa-solid fa-step-forward"></i>
                                   </el-button>
-                                </el-tooltip>
                                 <!-- 连续播放 / 暂停 -->
-                                <el-tooltip :content="t('continuousPlay')" placement="top">
                                   <el-button
                                     type="primary"
                                     circle
                                     :disabled="readState.ttsChunks.length===0 || isReadRunning"
                                     @click="toggleContinuousPlay"
-                                  >
+                                   :title="t('continuousPlay')">
                                     <i :class="readState.isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i>
                                   </el-button>
-                                </el-tooltip>
                                 <!-- 停止 -->
-                                <el-tooltip :content="t('stopSegmentTTS')" placement="top">
                                   <el-button
                                     type="danger"
                                     circle
                                     :disabled="!readState.isPlaying && !isReadRunning"
                                     @click="stopSegmentTTS"
-                                  >
+                                   :title="t('stopSegmentTTS')">
                                     <i class="fa-solid fa-stop"></i>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -3316,13 +3218,12 @@
                               </span>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('start_live')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="startLive" 
                                     :disabled="!isLiveConfigValid || isLiveRunning || isLiveStarting"
                                     circle
-                                  >
+                                   :title="t('start_live')">
                                     <template v-if="isLiveStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3330,16 +3231,14 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_live')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopLive" 
                                     :disabled="!isLiveRunning || isLiveStopping"
                                     circle
-                                  >
+                                   :title="t('stop_live')">
                                     <template v-if="isLiveStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3347,15 +3246,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_live')" placement="top">
                                   <el-button 
                                     @click="reloadLiveConfig" 
                                     :disabled="!isLiveRunning || isLiveReloading"
                                     circle
-                                  >
+                                   :title="t('reload_live')">
                                     <template v-if="isLiveReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -3363,7 +3260,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
                             <div class="tool-header">
@@ -3515,13 +3411,12 @@
                               </span>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('start_live')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="startLive" 
                                     :disabled="!isLiveConfigValid || isLiveRunning || isLiveStarting"
                                     circle
-                                  >
+                                   :title="t('start_live')">
                                     <template v-if="isLiveStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3529,16 +3424,14 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_live')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopLive" 
                                     :disabled="!isLiveRunning || isLiveStopping"
                                     circle
-                                  >
+                                   :title="t('stop_live')">
                                     <template v-if="isLiveStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3546,15 +3439,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_live')" placement="top">
                                   <el-button 
                                     @click="reloadLiveConfig" 
                                     :disabled="!isLiveRunning || isLiveReloading"
                                     circle
-                                  >
+                                   :title="t('reload_live')">
                                     <template v-if="isLiveReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -3562,7 +3453,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -3636,13 +3526,12 @@
                               </span>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('start_live')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="startLive" 
                                     :disabled="!isLiveConfigValid || isLiveRunning || isLiveStarting"
                                     circle
-                                  >
+                                   :title="t('start_live')">
                                     <template v-if="isLiveStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3650,16 +3539,14 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_live')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopLive" 
                                     :disabled="!isLiveRunning || isLiveStopping"
                                     circle
-                                  >
+                                   :title="t('stop_live')">
                                     <template v-if="isLiveStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3667,15 +3554,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_live')" placement="top">
                                   <el-button 
                                     @click="reloadLiveConfig" 
                                     :disabled="!isLiveRunning || isLiveReloading"
                                     circle
-                                  >
+                                   :title="t('reload_live')">
                                     <template v-if="isLiveReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -3683,7 +3568,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 
@@ -3751,13 +3635,12 @@
                               </span>
                               <div>
                                 <!-- 启动按钮 -->
-                                <el-tooltip :content="t('start_live')" placement="top">
                                   <el-button 
                                     type="primary" 
                                     @click="startLive" 
                                     :disabled="!isLiveConfigValid || isLiveRunning || isLiveStarting"
                                     circle
-                                  >
+                                   :title="t('start_live')">
                                     <template v-if="isLiveStarting">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3765,16 +3648,14 @@
                                       <i class="fa-solid fa-play"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 停止按钮 -->
-                                <el-tooltip :content="t('stop_live')" placement="top">
                                   <el-button 
                                     type="danger" 
                                     @click="stopLive" 
                                     :disabled="!isLiveRunning || isLiveStopping"
                                     circle
-                                  >
+                                   :title="t('stop_live')">
                                     <template v-if="isLiveStopping">
                                       <i class="fa-solid fa-spinner fa-spin"></i>
                                     </template>
@@ -3782,15 +3663,13 @@
                                       <i class="fa-solid fa-stop"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                                 
                                 <!-- 重载按钮 -->
-                                <el-tooltip :content="t('reload_live')" placement="top">
                                   <el-button 
                                     @click="reloadLiveConfig" 
                                     :disabled="!isLiveRunning || isLiveReloading"
                                     circle
-                                  >
+                                   :title="t('reload_live')">
                                     <template v-if="isLiveReloading">
                                       <i class="fa-solid fa-rotate fa-spin"></i>
                                     </template>
@@ -3798,7 +3677,6 @@
                                       <i class="fa-solid fa-rotate"></i>
                                     </template>
                                   </el-button>
-                                </el-tooltip>
                               </div>
                             </div>
 

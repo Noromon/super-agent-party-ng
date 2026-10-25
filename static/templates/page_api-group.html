@@ -296,26 +296,16 @@
                 <div class="provider-grid">
                   <div class="provider-card" v-for="extension in filteredManageExtensions" :key="extension.id">
                     <div class="card-header">
-                      <el-tooltip :content="t('useExtension')" placement="top">
-                        <el-button type="primary" @click="switchExtension(extension);this.activeMenu = 'home';" circle>
+                        <el-button type="primary" @click="switchExtension(extension);this.activeMenu = 'home';" circle :title="t('useExtension')">
                           <i class="fa-solid fa-play"></i>
                         </el-button>
-                      </el-tooltip>
                       <div class="card-actions">
                         <!-- 新增：如果有更新则显示更新小按钮 -->
-                        <el-tooltip v-if="extension.hasUpdate" :content="t('update')" placement="top">
-                          <el-button type="warning" circle size="small" @click.stop="updatePlugin(extension)"><i class="fa-solid fa-arrow-up"></i></el-button>
-                        </el-tooltip>
+                          <el-button type="warning" circle size="small" @click.stop="updatePlugin(extension)" :title="t('update')"><i class="fa-solid fa-arrow-up"></i></el-button>
                         
-                        <el-tooltip :content="t('openExtensionInBrowser')" placement="top">
-                          <el-button type="default" circle size="small" @click.stop="openExtension(extension)"><i class="fa-solid fa-external-link"></i></el-button>
-                        </el-tooltip>
-                        <el-tooltip :content="t('openExtensionInWindow')" placement="top">
-                          <el-button v-if="isElectron" type="primary" circle size="small" @click.stop="openExtensionInWindow(extension)" style="margin-left: 8px;"><i class="fa-solid fa-window-restore"></i></el-button>
-                        </el-tooltip>
-                        <el-tooltip :content="t('deleteExtension')" placement="top">
-                          <el-button @click="removeExtension(extension)" type="danger" circle size="small"><i class="fa-solid fa-trash"></i></el-button>
-                        </el-tooltip>
+                          <el-button type="default" circle size="small" @click.stop="openExtension(extension)" :title="t('openExtensionInBrowser')"><i class="fa-solid fa-external-link"></i></el-button>
+                          <el-button v-if="isElectron" type="primary" circle size="small" @click.stop="openExtensionInWindow(extension)" style="margin-left: 8px;" :title="t('openExtensionInWindow')"><i class="fa-solid fa-window-restore"></i></el-button>
+                          <el-button @click="removeExtension(extension)" type="danger" circle size="small" :title="t('deleteExtension')"><i class="fa-solid fa-trash"></i></el-button>
                       </div>
                     </div>
                     <div class="kb-content">

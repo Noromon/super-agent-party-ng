@@ -124,40 +124,34 @@
               <div class="btn-top-right">
                 
                 <!-- 1. 收藏按钮 -->
-                <el-tooltip :content="favoriteExtensionIds.includes(ext.id) ? t('unfavorite') : t('favorite')" placement="top">
                   <el-button
                     type="default"
                     circle
                     size="small"
-                    @click.stop.prevent="toggleFavoriteExtension(ext)">
+                    @click.stop.prevent="toggleFavoriteExtension(ext)" :title="favoriteExtensionIds.includes(ext.id) ? t('unfavorite') : t('favorite')">
                     <i :class="favoriteExtensionIds.includes(ext.id) ? 'fa-solid fa-star star-active' : 'fa-regular fa-star'"></i>
                   </el-button>
-                </el-tooltip>
 
                 <!-- 2. 浏览器打开按钮 -->
-                <el-tooltip :content="t('openExtensionInBrowser')" placement="top">
                   <el-button
                     type="default"
                     circle
                     size="small"
                     @click.stop.prevent="openExtension(ext)"
-                    style="margin-left: 8px;">
+                    style="margin-left: 8px;" :title="t('openExtensionInBrowser')">
                     <i class="fa-solid fa-external-link"></i>
                   </el-button>
-                </el-tooltip>
 
                 <!-- 3. 独立窗口打开按钮（仅在Electron环境下显示） -->
-                <el-tooltip :content="t('openExtensionInWindow')" placement="top">
                   <el-button
                     v-if="isElectron"
                     type="primary"
                     circle
                     size="small"
                     @click.stop.prevent="openExtensionInWindow(ext)"
-                    style="margin-left: 8px;">
+                    style="margin-left: 8px;" :title="t('openExtensionInWindow')">
                     <i class="fa-solid fa-window-restore"></i>
                   </el-button>
-                </el-tooltip>
               </div>
 
               <div class="extension-info">

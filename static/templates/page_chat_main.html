@@ -107,9 +107,8 @@
                 <div class="right-actions" style="display: flex; gap: 8px; align-items: center;">
                  
                   <!-- ✨ 移动端/桌面端 适配切换 ✨ -->
-                  <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
                     <!-- 桌面端：显示胶囊 Pill -->
-                    <div v-if="!isMobile" class="status-pill hero-model-pill" @click="showModelDialog = true">
+                    <div v-if="!isMobile" class="status-pill hero-model-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                       <i class="fa-solid fa-microchip"></i>
                       <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                     </div>
@@ -118,7 +117,6 @@
                     <el-button v-else @click="showModelDialog = true" class="icon-btn">
                       <i class="fa-solid fa-microchip"></i>
                     </el-button>
-                  </el-tooltip>
                  
                   <!-- 随机话题按钮 -->
                   <el-button :title="t('randomTopic')" @click="generateRandomTopic">
@@ -821,31 +819,25 @@
                         </div>
 
                         <!-- 模型指示器 -->
-                        <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
-                          <div class="status-pill" @click="showModelDialog = true">
+                          <div class="status-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                             <i class="fa-solid fa-microchip"></i>
                             <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                           </div>
-                        </el-tooltip>
 
                         <!-- ✨ 3. 将原有的桌面端状态胶囊包裹在一个 template 中，并在这里加 !isMobile 限制 -->
                         <template  v-if="!isAssistantMode && !isMobile">
                             
                             <!-- 扩展指示器 -->
-                            <el-tooltip :content="t('clickToSwitchExtensions')" placement="top" :show-after="500">
-                              <div class="status-pill" v-if="currentViewName" @click="openExtensionsDialog">
+                              <div class="status-pill" v-if="currentViewName" @click="openExtensionsDialog" :title="t('clickToSwitchExtensions')">
                                 <i class="fa-solid fa-puzzle-piece"></i>
                                 <span class="pill-text">{{ currentViewName }}</span>
                               </div>
-                            </el-tooltip>
 
                             <!-- 3. 工作区目录指示器 (仅 CLI 启用时显示) -->
-                            <el-tooltip :content="t('workspace')" placement="top" :show-after="500">
-                              <div class="status-pill" v-if="CLISettings.enabled" @click="browseDirectory">
+                              <div class="status-pill" v-if="CLISettings.enabled" @click="browseDirectory" :title="t('workspace')">
                                 <i class="fa-solid fa-folder-open"></i>
                                 <span class="pill-text">{{ CLISettings.cc_path ? CLISettings.cc_path.split(/[/\\]/).filter(Boolean).pop() : t('pleaseSelectWorkspaceFirst') }}</span>
                               </div>
-                            </el-tooltip>
 
                             <!-- 4. CLI 权限模式指示器 (仅 CLI 启用时显示) -->
                             <el-dropdown 
@@ -856,9 +848,8 @@
                             >
                               <!-- ⚠️ 关键修复：让 status-pill 直接作为下拉组件的触发器 -->
                               <div class="status-pill">
-                                <el-tooltip :content="t('permissionMode')" placement="top" :show-after="500">
                                   <!-- 将内容包裹在一个 span 中，使得 tooltip 正常工作 -->
-                                  <span style="display: inline-flex; align-items: center; gap: 6px;">
+                                  <span style="display: inline-flex; align-items: center; gap: 6px;" :title="t('permissionMode')">
                                     <i class="fa-solid fa-shield-halved"></i>
                                     <span class="pill-text">
                                       {{ 
@@ -868,7 +859,6 @@
                                       }}
                                     </span>
                                   </span>
-                                </el-tooltip>
                               </div>
                               
                               <template #dropdown>

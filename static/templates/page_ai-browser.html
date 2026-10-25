@@ -513,12 +513,10 @@
                           <div class="input-status-bar" v-if="!isAssistantMode && !isMobile">
                             
                             <!-- 模型指示器 -->
-                            <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
-                              <div class="status-pill" @click="showModelDialog = true">
+                              <div class="status-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                                 <i class="fa-solid fa-microchip"></i>
                                 <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                               </div>
-                            </el-tooltip>
 
                           </div>
 

@@ -77,31 +77,26 @@
               <div class="hero-input-footer">
                 <div class="left-actions" style="display: flex; gap: 8px;">
                   <!-- 附件上传按钮 -->
-                  <el-tooltip :content="t('uploadFileorImage')" placement="top">
-                    <el-button @click="browseAllFiles">
+                    <el-button @click="browseAllFiles" :title="t('uploadFileorImage')">
                       <i class="fa-solid fa-paperclip"></i>
                     </el-button>
-                  </el-tooltip>
 
                   <!-- ✨ 迁移：语音合成 (TTS) 开关 ✨ -->
-                  <el-tooltip :content="t('tts')" placement="top">
                     <el-button
                       @click="ttsSettings.enabled=!ttsSettings.enabled;changeTTSstatus();"
                       class="icon-btn"
                       :type="ttsSettings.enabled ? 'primary' : 'default'"
-                    >
+                     :title="t('tts')">
                       <i v-if="ttsSettings.enabled" class="fa-solid fa-volume-high"></i>
                       <i v-else class="fa-solid fa-volume-xmark"></i>
                     </el-button>
-                  </el-tooltip>
                 </div>
                 
                 <div class="right-actions" style="display: flex; gap: 8px; align-items: center;">
                  
                   <!-- ✨ 移动端/桌面端 适配切换 ✨ -->
-                  <el-tooltip :content="t('clickToSwitchModel')" placement="top" :show-after="500">
                     <!-- 桌面端：显示胶囊 Pill -->
-                    <div v-if="!isMobile" class="status-pill hero-model-pill" @click="showModelDialog = true">
+                    <div v-if="!isMobile" class="status-pill hero-model-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                       <i class="fa-solid fa-microchip"></i>
                       <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                     </div>
@@ -110,35 +105,28 @@
                     <el-button v-else @click="showModelDialog = true" class="icon-btn">
                       <i class="fa-solid fa-microchip"></i>
                     </el-button>
-                  </el-tooltip>
                  
                   <!-- 随机话题按钮 -->
-                  <el-tooltip :content="t('randomTopic')" placement="top">
-                    <el-button @click="generateRandomTopic">
+                    <el-button @click="generateRandomTopic" :title="t('randomTopic')">
                       <i v-if="!isTopicGenerating" class="fa-solid fa-dice"></i>
                       <i v-else class="fa-solid fa-dice fa-spin"></i>
                     </el-button>
-                  </el-tooltip>
 
                   <!-- ✨ 迁移与逻辑切换：语音识别 (ASR) / 发送按钮 ✨ -->
                   <template v-if="!userInput">
-                    <el-tooltip :content="t('asr')" placement="top">
                       <el-button
                         @click="toggleASR"
                         class="icon-btn"
                         :type="asrSettings.enabled ? 'primary' : 'default'"
-                      >
+                       :title="t('asr')">
                         <i class="fa-solid fa-microphone"></i>
                       </el-button>
-                    </el-tooltip>
                   </template>
                   
                   <template v-else>
-                    <el-tooltip :content="t('sendMessage')" placement="top">
-                      <el-button type="primary" class="hero-send-btn" @click="handleDashboardSend">
+                      <el-button type="primary" class="hero-send-btn" @click="handleDashboardSend" :title="t('sendMessage')">
                         <i class="fa-solid fa-paper-plane"></i>
                       </el-button>
-                    </el-tooltip>
                   </template>
                 </div>
               </div>

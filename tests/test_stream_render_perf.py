@@ -301,4 +301,14 @@ def test_s110_storage_page_destroy_when_hidden():
     assert "v-show=\"activeMenu === 'storage'\"" not in st
     mj = _read("main.js")
     assert "startProfile({ hold: 120000 })" in mj
-    assert "renderer build=S110" in _read("static/js/renderer.js")
+    assert "renderer build=S1" in _read("static/js/renderer.js")
+# ===== S111: 全库 el-tooltip 归零 + loop-suspect 组件链点名 =====
+
+def test_s111_zero_popper_chains():
+    import glob as _glob
+    for f in _glob.glob("static/templates/*.html"):
+        assert "el-tooltip" not in _read(f), f
+    home = _read("static/templates/page_home.html")
+    assert "clickToSwitchModel" in home and home.count(':title="t(') >= 4
+    rd = _read("static/js/renderer.js")
+    assert "compChain" in rd and "renderer build=S111" in rd

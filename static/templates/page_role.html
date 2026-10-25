@@ -289,7 +289,6 @@
                       >
                       </el-input>
                       <!-- 生成按钮 -->
-                      <el-tooltip :content="t('oneClickGenCard')" placement="top">
                         <el-button
                           type="primary"
                           size="large"
@@ -297,12 +296,10 @@
                           style="margin: 0;"
                           :disabled="!quickCreatePrompt.trim()||isGenerating"
                           @click="handleQuickGen"
-                        >
+                         :title="t('oneClickGenCard')">
                           <i v-if="!isGenerating" class="fa-solid fa-wand-magic-sparkles"></i>
                           <i v-else class="fa-solid fa-spinner fa-spin"></i>
                         </el-button>
-                      </el-tooltip>
-                      <el-tooltip :content="t('stopGenCard')" placement="top">
                         <!-- 停止生成按钮 -->
                         <el-button
                           type="danger"
@@ -311,10 +308,9 @@
                           style="margin: 0;"
                           :disabled="!isGenerating"
                           @click="stopQuickGen"
-                        >
+                         :title="t('stopGenCard')">
                           <i class="fa-solid fa-stop"></i>
                         </el-button>
-                      </el-tooltip>
                     </div>
                     <div class="provider-grid">
                       <!-- 已有记忆磁贴 -->
@@ -325,48 +321,40 @@
                             class="mini-vendor-logo"
                           />
                           <div class="card-actions">
-                            <el-tooltip :content="t('vectorInteract')" placement="top">
                               <el-button
                                 type="warning"
                                 circle
                                 size="small"
                                 @click="openVectorDialog(memory.id)"
                                 v-if="memory.providerId"
-                              >
+                               :title="t('vectorInteract')">
                                 <i class="fa-solid fa-brain"></i>
                               </el-button>
-                            </el-tooltip>
-                            <el-tooltip :content="t('downloadMemory')" placement="top">
                               <el-button
                                 @click="downloadMemory(memory)"
                                 type="primary"
                                 circle
                                 size="small"
-                              >
+                               :title="t('downloadMemory')">
                                 <i class="fa-solid fa-download"></i>
                               </el-button>
-                            </el-tooltip>
-                            <el-tooltip :content="t('editMemory')" placement="top">
                               <el-button
                                 @click="editMemory(memory.id)"
                                 :disabled="isGenerating"
                                 type="default"
                                 circle
                                 size="small"
-                              >
+                               :title="t('editMemory')">
                                 <i class="fa-solid fa-pen-to-square"></i>
                               </el-button>
-                            </el-tooltip>
-                            <el-tooltip :content="t('removeMemory')" placement="top">
                               <el-button
                                 @click="removeMemory(memory.id)"
                                 type="danger"
                                 circle
                                 size="small"
-                              >
+                               :title="t('removeMemory')">
                                 <i class="fa-solid fa-trash"></i>
                               </el-button>
-                            </el-tooltip>
                           </div>
                         </div>
                         <div class="kb-content">
@@ -413,11 +401,9 @@
                             ></el-input>
 
                             <!-- 上传按钮 -->
-                            <el-tooltip :content="t('uploadImage')" placement="top">
-                              <el-button @click="triggerAvatarUpload" type="primary" circle>
+                              <el-button @click="triggerAvatarUpload" type="primary" circle :title="t('uploadImage')">
                                 <i class="fa-solid fa-cloud-arrow-up"></i>
                               </el-button>
-                            </el-tooltip>
 
                             <!-- 隐藏的文件输入控件 -->
                             <input
@@ -776,7 +762,6 @@
                       >
                       </el-input>
                       <!-- 生成按钮 -->
-                      <el-tooltip :content="t('oneClickGenCard')" placement="top">
                         <el-button
                           type="primary"
                           size="large"
@@ -784,12 +769,10 @@
                           style="margin: 0;"
                           :disabled="!quickCreateSystemPrompt.trim()||isSystemPromptGenerating"
                           @click="handleSystemPromptQuickGen"
-                        >
+                         :title="t('oneClickGenCard')">
                           <i v-if="!isSystemPromptGenerating" class="fa-solid fa-wand-magic-sparkles"></i>
                           <i v-else class="fa-solid fa-spinner fa-spin"></i>
                         </el-button>
-                      </el-tooltip>
-                      <el-tooltip :content="t('stopGenCard')" placement="top">
                         <!-- 停止生成按钮 -->
                         <el-button
                           type="danger"
@@ -798,10 +781,9 @@
                           style="margin: 0;"
                           :disabled="!isSystemPromptGenerating"
                           @click="stopSystemPromptQuickGen"
-                        >
+                         :title="t('stopGenCard')">
                           <i class="fa-solid fa-stop"></i>
                         </el-button>
-                      </el-tooltip>
                     </div>
                     <div class="provider-grid">
                       <!-- 已有提示词磁贴 -->
@@ -811,15 +793,13 @@
                         :key="prompt.id || idx"
                       >
                         <div class="card-header">
-                          <el-tooltip :content="t('usePrompt')" placement="top">
                             <el-button 
                               type="primary" 
                               @click="usePrompt(prompt.content)"
                               circle
-                            >
+                             :title="t('usePrompt')">
                               <i class="fa-solid fa-play"></i>
                             </el-button>
-                          </el-tooltip>
                           <div class="card-actions">
                             <el-button
                               @click="editPrompt(prompt)"
@@ -970,15 +950,13 @@
                         @change="autoSaveSettings"
                       >
                       </el-input>
-                      <el-tooltip :content="t('ClickToListen')" placement="top">
                         <el-button 
                           type="primary" 
                           @click="ClickToListen(newTTSConfig.SampleText)" 
                           circle
-                        >
+                         :title="t('ClickToListen')">
                           <i class="fa-solid fa-headphones"></i>
                         </el-button>
-                      </el-tooltip>
                     </el-form-item>
 
 
@@ -1940,12 +1918,11 @@
                   <div v-for="(config, name) in VRMConfig.newVRM" :key="name" class="provider-card knowledge-card">
                     <div class="card-header">
                       <!-- 启动按钮 -->
-                      <el-tooltip :content="t('start_table_pet')" placement="top">
                         <el-button 
                           type="primary" 
                           @click="startNewVRM(name)" 
                           circle
-                        >
+                         :title="t('start_table_pet')">
                           <template v-if="isVRMStarting">
                             <i class="fa-solid fa-spinner fa-spin"></i>
                           </template>
@@ -1953,7 +1930,6 @@
                             <i class="fa-solid fa-play"></i>
                           </template>
                         </el-button>
-                      </el-tooltip>
                       <div class="card-actions">
                         <el-button @click="editAppearance(name)" type="primary" circle size="small">
                           <i class="fa-solid fa-pen-to-square"></i>

@@ -2679,13 +2679,12 @@
                               @change="autoSaveSettings"
                             >
                             </el-input>
-                            <el-tooltip :content="t('connectComfyUIServer')" placement="top">
                               <el-button 
                                 type="primary" 
                                 @click="connectComfyUI(index)" 
                                 :disabled="comfyuiServers.length === 0 || isConnecting"
                                 circle
-                              >
+                               :title="t('connectComfyUIServer')">
                                 <template v-if="isConnecting">
                                   <i class="fa-solid fa-spinner fa-spin"></i>
                                 </template>
@@ -2693,16 +2692,13 @@
                                   <i class="fa-solid fa-plug"></i>
                                 </template>
                               </el-button>
-                            </el-tooltip>
-                            <el-tooltip :content="t('removeComfyUIServer')" placement="top">
                               <el-button 
                                 v-if="index !== 0"
                                 @click="removeComfyUIServer(index)"
                                 type="danger" 
-                                circle>
+                                circle :title="t('removeComfyUIServer')">
                                 <i class="fa-solid fa-trash"></i>
                               </el-button>
-                            </el-tooltip>
                           </div>
                           <el-button 
                             @click="addComfyUIServer"
@@ -2968,9 +2964,7 @@
                   <div class="plugin-header">
                     <h3>MCP</h3>
                     <div style="flex:1;display:flex;justify-content:flex-end;align-items:center;gap:8px;margin:0 16px;">
-                      <el-tooltip :content="t('mcpCallTimeoutHint')" placement="top">
-                        <span>{{ t('mcpCallTimeout') }}</span>
-                      </el-tooltip>
+                        <span :title="t('mcpCallTimeoutHint')">{{ t('mcpCallTimeout') }}</span>
                       <el-input-number
                         v-model="settings.mcpCallTimeout"
                         :min="10" :max="3600" :step="10" size="small"
@@ -3165,9 +3159,7 @@
                                   <div class="tool-info-left">
                                     <div class="tool-header-row">
                                       <span class="tool-name">{{ tool.name }}</span>
-                                      <el-tooltip v-if="tool.description" :content="tool.description" placement="top" :show-after="500">
-                                        <el-icon class="tool-info-icon"><i class="fa-solid fa-circle-info"></i></el-icon>
-                                      </el-tooltip>
+                                        <el-icon class="tool-info-icon" :title="tool.description"><i class="fa-solid fa-circle-info"></i></el-icon>
                                     </div>
                                     <div class="tool-desc">
                                       {{ tool.description || t('noDescription') }}

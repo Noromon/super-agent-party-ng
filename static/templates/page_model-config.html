@@ -50,48 +50,40 @@
                         class="mini-vendor-logo"
                       />
                       <div class="card-actions">
-                        <el-tooltip :content="t('copyProvider')" placement="top">
                           <el-button
                             @click="copyProvider(provider,index)"
                             type="default"
                             circle
                             size="small"
-                          >
+                           :title="t('copyProvider')">
                           <i class="fa-solid fa-copy"></i>
                           </el-button>
-                        </el-tooltip>
-                        <el-tooltip :content="t('getAPIkey')" placement="top">
                           <el-button
                             @click="goToURL(provider)"
                             type="info"
                             circle
                             size="small"
                             id="get-API-key"
-                          >
+                           :title="t('getAPIkey')">
                           <i class="fa-solid fa-key"></i>
                           </el-button>
-                        </el-tooltip>
-                        <el-tooltip :content="t('getModelsList')" placement="top">
                           <el-button
                             @click="fetchModelsForProvider(provider)"
                             type="primary"
                             circle
                             size="small"
                             id="get-Models-List"
-                          >
+                           :title="t('getModelsList')">
                           <i class="fa-solid fa-magnifying-glass"></i>
                           </el-button>
-                        </el-tooltip>
-                        <el-tooltip :content="t('delete')" placement="top">
                           <el-button
                             @click="removeProvider(index)"
                             type="danger"
                             circle
                             size="small"
-                          >
+                           :title="t('delete')">
                             <i class="fa-solid fa-trash"></i>
                           </el-button>
-                        </el-tooltip>
                       </div>
                     </div>
 
@@ -100,17 +92,15 @@
                       <div class="input-item">
                         <label>
                           {{ t('apiAddress') }}
-                          <el-tooltip :content="t('copy')" placement="top">
                             <el-button
                               @click="copyApiKey(provider.url)"
                               type="default"
                               circle
                               size="small"
                               style="margin-bottom: 2px;"
-                            >
+                             :title="t('copy')">
                               <i class="fa-solid fa-copy"></i>
                             </el-button>
-                          </el-tooltip>
                         </label>
                         <el-input
                           v-model="provider.url"
@@ -122,17 +112,15 @@
                       <div class="input-item">
                         <label>
                           {{ t('apiKey') }}
-                          <el-tooltip :content="t('copy')" placement="top">
                             <el-button
                               @click="copyApiKey(provider.apiKey)"
                               type="default"
                               circle
                               size="small"
                               style="margin-bottom: 2px;"
-                            >
+                             :title="t('copy')">
                               <i class="fa-solid fa-copy"></i>
                             </el-button>
-                          </el-tooltip>
                         </label>
 
                         <el-input
@@ -147,17 +135,15 @@
                       <div class="input-item" id="model-Id">
                         <label>
                           {{ t('modelId') }}
-                          <el-tooltip :content="t('copy')" placement="top">
                             <el-button
                               @click="copyApiKey(provider.modelId)"
                               type="default"
                               circle
                               size="small"
                               style="margin-bottom: 2px;"
-                            >
+                             :title="t('copy')">
                               <i class="fa-solid fa-copy"></i>
                             </el-button>
-                          </el-tooltip>
                         </label>
                         <el-select
                           v-model="provider.modelId"
@@ -1813,15 +1799,13 @@
                         @change="autoSaveSettings"
                       >
                       </el-input>
-                      <el-tooltip :content="t('ClickToListen')" placement="top">
                         <el-button 
                           type="primary" 
                           @click="ClickToListen(ttsSettings.SampleText)" 
                           circle
-                        >
+                         :title="t('ClickToListen')">
                           <i class="fa-solid fa-headphones"></i>
                         </el-button>
-                      </el-tooltip>
                     </el-form-item>
                     </div>
                   </div>
