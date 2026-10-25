@@ -232,9 +232,9 @@ def test_s106_memo_and_throttle():
     assert "_streamLastFlushTs = Date.now()" in cs
     assert "if (__m) __m._rv = (__m._rv || 0) + 1;" in cs
     assert "toolCallStack, currentMsg)" in cs
-    assert cs.count("> 150 ? 0 : 80)") >= 2  # 防抖饥饿守卫
+    assert cs.count("this.streamFlushWait())") >= 2  # 防抖饥饿守卫（S109 起在 streamFlushWait 内）
     rs = _read("static/js/methods/13_resume_stream.js")
-    assert "_lastArgsW" in rs and "nowMs - b._lastArgsW > 120" in rs
+    assert "_lastArgsW" in rs and "? 300 : 120" in rs
     assert "currentMsg._rv = (currentMsg._rv || 0) + 1;" in rs  # S107 起带节流包裹
     assert "p.msg._rv = (p.msg._rv || 0) + 1" in rs
 
@@ -259,7 +259,7 @@ def test_s107_sidebar_memo_and_bump_throttle():
     for tpl in ("page_chat_main", "page_home"):
         assert 'v-for="conv in group.conversations" v-memo=' in _read(f"static/templates/{tpl}.html"), tpl
     rs = _read("static/js/methods/13_resume_stream.js")
-    assert "_lastRvBump" in rs and "nowMsRv - this._lastRvBump > 80" in rs
+    assert "_lastRvBump" in rs and "? 240 : 80" in rs
     assert "S107: 流尾终态兜底 bump" in rs
     assert "S107: 流尾终态兜底 bump" in _read("static/js/methods/10_chat_stream.js")
     rd = _read("static/js/renderer.js")
@@ -270,8 +270,24 @@ def test_s107_sidebar_memo_and_bump_throttle():
 def test_s108_root_loop_detector_and_batching():
     rd = _read("static/js/renderer.js")
     assert "rootCount > 150" in rd and "root=' + rootCount" in rd
-    assert "renderer build=S108" in rd
+    assert "renderer build=S1" in rd  # 前缀断言（升版不误炸）
     for tpl in ("page_chat_main", "page_home"):
         assert 'class="item-actions" v-if="!isTyping"' in _read(f"static/templates/{tpl}.html"), tpl
     bt = _read("static/js/methods/98_browser_tabs.js")
     assert "tvFlush" in bt and "setTimeout(tvFlush, 80)" in bt
+# ===== S109: 消息行 tooltip→原生 title / loop-suspect 探针 / 追赶模式 =====
+
+def test_s109_native_title_and_backlog_mode():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        s = _read(f"static/templates/{tpl}.html")
+        import re as _re
+        assert not _re.search(r"<el-tooltip[^>]*>\s*<el-button", s), tpl
+    assert ':title="t(\'copy\')"' in _read("static/templates/page_chat_main.html")
+    rd = _read("static/js/renderer.js")
+    assert "loop-suspect" in rd and "renderer build=S109" in rd
+    cs = _read("static/js/methods/10_chat_stream.js")
+    assert "streamBacklog()" in cs and "return 240" in cs
+    assert "_streamRecvChars = (this._streamRecvChars || 0) + delta.content.length" in cs
+    rs = _read("static/js/methods/13_resume_stream.js")
+    assert "? 300 : 120" in rs and "? 240 : 80" in rs
+    assert "this.streamFlushWait()" in rs and "this.streamFlushWait()" in cs

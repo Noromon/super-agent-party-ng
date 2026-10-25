@@ -441,6 +441,8 @@ Object.assign(vue_methods, {
             this._streamTargetMsg = currentMsg;
             this._streamTextBuffer = '';
             this._streamReasoningBuffer = '';
+            this._streamRecvChars = 0;
+            this._streamFlushChars = 0;
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
             // 断线也能 resume，停止按钮也能取消后端生产者流
@@ -487,16 +489,18 @@ Object.assign(vue_methods, {
                     if (delta.reasoning_content) {
                         this._streamTargetMsg = currentMsg;
                         this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
+                        this._streamRecvChars = (this._streamRecvChars || 0) + delta.reasoning_content.length;
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this._streamUpdateTimer = setTimeout(() => {
                             this.flushStreamTextBuffer();
-                        }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
+                        }, this.streamFlushWait());
                     }
 
                     // B. 处理文本 (Content) —— 流式防抖更新
                     if (delta.content) {
                         // 缓冲文本，不再直接操作 DOM
                         this._streamTextBuffer += delta.content;
+                        this._streamRecvChars = (this._streamRecvChars || 0) + delta.content.length;
 
                         // 为 TTS 即时处理
                         const parts = delta.content.split('```');
@@ -516,7 +520,7 @@ Object.assign(vue_methods, {
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this._streamUpdateTimer = setTimeout(() => {
                             this.flushStreamTextBuffer();
-                        }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
+                        }, this.streamFlushWait());
                     }
 
                     // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
@@ -702,6 +706,8 @@ Object.assign(vue_methods, {
             this._streamTargetMsg = null;
             this._streamTextBuffer = '';
             this._streamReasoningBuffer = '';
+            this._streamRecvChars = 0;
+            this._streamFlushChars = 0;
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
         }
     },
@@ -892,9 +898,19 @@ Object.assign(vue_methods, {
     },
 
     // 3. 流式文本批量更新（防抖 80ms；S92: 含 reasoning 缓冲）
+    // S109 追赶模式：接收-落账字符差 >4000 判定积压，放宽提交/工具 bump 节奏，
+    // 用更少更大渲染换泵吞吐；追平自动回到 80ms 手感档
+    streamBacklog() {
+        return (this._streamRecvChars || 0) - (this._streamFlushChars || 0) > 4000;
+    },
+    streamFlushWait() {
+        if (this.streamBacklog()) return 240;
+        return Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80;
+    },
     flushStreamTextBuffer() {
         // S106: flush 时间戳（防抖饥饿守卫用）+ 行修订号 bump（v-memo 依赖）
         this._streamLastFlushTs = Date.now();
+        this._streamFlushChars = this._streamRecvChars || 0;
         const __m = this._streamTargetMsg;
         if (this._streamTargetMsg && this._streamReasoningBuffer) {
             const rBlock = this.getBlockForMsg(this._streamTargetMsg, 'reasoning');

@@ -196,11 +196,9 @@
 
                     <!-- TTS 控制区 -->
                     <div v-if="(ttsSettings.enabled || settings.enableOmniTTS || fastSettings.enableOmniTTS) && message.role === 'assistant'" class="tts-controls">
-                      <el-tooltip :content="message.isPlaying ? t('pause') : t('play')">
-                        <el-button @click="toggleTTS(message)" circle size="small">
+                      <el-button :title="message.isPlaying ? t('pause') : t('play')" @click="toggleTTS(message)" circle size="small">
                           <i :class="message.isPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'"></i>
                         </el-button>
-                      </el-tooltip>
                       <template v-if="!message.isOmni">
                         <el-button @click="backwardTTS(message)" circle size="small"><i class="fa-solid fa-backward"></i></el-button>
                         <el-button @click="forwardTTS(message)" circle size="small"><i class="fa-solid fa-forward"></i></el-button>
@@ -370,33 +368,15 @@
 
                     <!-- 操作按钮区 -->
                     <div class="message-actions" v-if="!allBriefly||message.role !== 'system'||index === 0">
-                      <el-tooltip v-if="message.role === 'user'" :content="t('edit')" placement="bottom">
-                        <el-button @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="message.role === 'assistant'" :content="t('briefly')" placement="bottom">
-                        <el-button class="briefly-btn" @click="toggleBriefly(index)" circle size="small"><i class="fa-solid fa-asterisk"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="message.role === 'assistant'" :content="t('rewrite')" placement="bottom">
-                        <el-button class="rewrite-btn" @click="rewrite(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip :content="t('copy')" placement="bottom">
-                        <el-button class="copy-btn" @click="copyMessageContent(message)" circle size="small"><i class="fa-solid fa-copy"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip :content="t('translateAndMark')" placement="bottom">
-                        <el-button @click="translateMessage(index)" circle size="small"><i class="fa-solid fa-language"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="index !== 0" :content="t('delete')" placement="bottom">
-                        <el-button @click="deleteMessage(index)" circle size="small"><i class="fa-solid fa-trash-can"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="index == 0" :content="t('reset')" placement="bottom">
-                        <el-button @click="resetMessage(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="message.role === 'system'&&index == 0" :content="t('oneClickExpand')" placement="bottom">
-                        <el-button class="Gen-btn" @click="toggleQuickGen(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-wand-magic-sparkles"></i></el-button>
-                      </el-tooltip>
-                      <el-tooltip v-if="message.role === 'system'&&index == 0" :content="t('save')" placement="bottom">
-                        <el-button class="Gen-btn" @click="saveSystemPrompt(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-floppy-disk"></i></el-button>
-                      </el-tooltip>
+                      <el-button v-if="message.role === 'user'" :title="t('edit')" @click="openEditDialog(message.role, message.content,index)" circle size="small"><i class="fa-solid fa-pen-to-square"></i></el-button>
+                      <el-button v-if="message.role === 'assistant'" :title="t('briefly')" class="briefly-btn" @click="toggleBriefly(index)" circle size="small"><i class="fa-solid fa-asterisk"></i></el-button>
+                      <el-button v-if="message.role === 'assistant'" :title="t('rewrite')" class="rewrite-btn" @click="rewrite(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
+                      <el-button :title="t('copy')" class="copy-btn" @click="copyMessageContent(message)" circle size="small"><i class="fa-solid fa-copy"></i></el-button>
+                      <el-button :title="t('translateAndMark')" @click="translateMessage(index)" circle size="small"><i class="fa-solid fa-language"></i></el-button>
+                      <el-button v-if="index !== 0" :title="t('delete')" @click="deleteMessage(index)" circle size="small"><i class="fa-solid fa-trash-can"></i></el-button>
+                      <el-button v-if="index == 0" :title="t('reset')" @click="resetMessage(index)" circle size="small"><i class="fa-solid fa-rotate"></i></el-button>
+                      <el-button v-if="message.role === 'system'&&index == 0" :title="t('oneClickExpand')" class="Gen-btn" @click="toggleQuickGen(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-wand-magic-sparkles"></i></el-button>
+                      <el-button v-if="message.role === 'system'&&index == 0" :title="t('save')" class="Gen-btn" @click="saveSystemPrompt(index)" :disabled="isQuickGenerating" circle size="small"><i class="fa-solid fa-floppy-disk"></i></el-button>
                       <span class="msg-status" v-if="message.role === 'assistant' && !isMobile">
                           {{ t('total_tokens')+': '+ (message?.total_tokens ?? 0) +',    '+ t('first_token_latency')+': '+(message?.first_token_latency ?? 0) +'ms'}}
                       </span>
@@ -425,122 +405,50 @@
                         <div class="button-group">
                             
                             <!-- 常用功能按钮复用 -->
-                            <el-tooltip :content="t('newChat')" placement="top">
-                              <el-button
-                                v-if="!isCapsuleMode"
-                                @click="startConversationInGroup()"
-                                class="icon-btn clear-btn"
-                                type="primary"
-                                circle>
+                            <el-button :title="t('newChat')" v-if="!isCapsuleMode" @click="startConversationInGroup()" class="icon-btn clear-btn" type="primary" circle>
                                 <i class="fa-solid fa-comment-medical"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('chatHistory')" placement="top">
-                              <el-button
-                                v-if="!isCapsuleMode"
-                                @click="showHistoryDialog = true"
-                                class="icon-btn history-btn"
-                                :type="conversations.length === 0 ? 'default' : 'primary'"
-                                circle>
+                            <el-button :title="t('chatHistory')" v-if="!isCapsuleMode" @click="showHistoryDialog = true" class="icon-btn history-btn" :type="conversations.length === 0 ? 'default' : 'primary'" circle>
                                 <i class="fa-solid fa-clock-rotate-left"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('uploadFileorImage')" placement="top">
-                              <el-button
-                                @click="browseAllFiles" 
-                                class="icon-btn file-btn"
-                                :type="(hasFiles || hasImages) ? 'primary' : 'default'"
-                                v-if="MoreButtonDict.find(b => b.name === 'fileButton')?.enabled && !isCapsuleMode"
-                                circle>
+                            <el-button :title="t('uploadFileorImage')" @click="browseAllFiles" class="icon-btn file-btn" :type="(hasFiles || hasImages) ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'fileButton')?.enabled && !isCapsuleMode" circle>
                                 <i class="fa-solid fa-paperclip"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('desktopVisionButton')" placement="top">
-                              <el-button
-                                @click="visionSettings.desktopVision = !visionSettings.desktopVision; autoSaveSettings()"
-                                class="icon-btn vision-btn"
-                                :type="visionSettings.desktopVision ? 'primary' : 'default'"
-                                :disabled="!isElectron"
-                                circle>
+                            <el-button :title="t('desktopVisionButton')" @click="visionSettings.desktopVision = !visionSettings.desktopVision; autoSaveSettings()" class="icon-btn vision-btn" :type="visionSettings.desktopVision ? 'primary' : 'default'" :disabled="!isElectron" circle>
                                 <i class="fa-solid fa-eye"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('screenshot')" placement="top">
-                              <el-button
-                                @click="toggleScreenshot(false)"
-                                class="icon-btn vision-btn"
-                                type="default"
-                                circle>
+                            <el-button :title="t('screenshot')" @click="toggleScreenshot(false)" class="icon-btn vision-btn" type="default" circle>
                                 <i class="fa-solid fa-scissors"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('asr')" placement="top">
-                              <el-button
-                                @click="toggleASR"
-                                class="icon-btn asr-btn"
-                                :type="asrSettings.enabled ? 'primary' : 'default'"
-                                circle>
+                            <el-button :title="t('asr')" @click="toggleASR" class="icon-btn asr-btn" :type="asrSettings.enabled ? 'primary' : 'default'" circle>
                                 <i class="fa-solid fa-microphone"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('tts')" placement="top">
-                              <el-button
-                                @click="ttsSettings.enabled=!ttsSettings.enabled;changeTTSstatus();"
-                                class="icon-btn asr-btn"
-                                :type="ttsSettings.enabled ? 'primary' : 'default'"
-                                circle>
+                            <el-button :title="t('tts')" @click="ttsSettings.enabled=!ttsSettings.enabled;changeTTSstatus();" class="icon-btn asr-btn" :type="ttsSettings.enabled ? 'primary' : 'default'" circle>
                                 <i v-if="ttsSettings.enabled" class="fa-solid fa-volume-high"></i>
                                 <i v-else class="fa-solid fa-volume-xmark"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('browserControl')" placement="top">
-                              <el-button
-                                @click="chromeMCPSettings.enabled = !chromeMCPSettings.enabled; changeChromeMCPEnabled();"
-                                class="icon-btn browserControl-btn"
-                                :type="chromeMCPSettings.enabled ? 'primary' : 'default'"
-                                circle>
+                            <el-button :title="t('browserControl')" @click="chromeMCPSettings.enabled = !chromeMCPSettings.enabled; changeChromeMCPEnabled();" class="icon-btn browserControl-btn" :type="chromeMCPSettings.enabled ? 'primary' : 'default'" circle>
                                 <i class="fa-solid fa-compass"></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('tablePet')" placement="top">
-                              <el-button
-                                @click="startVRM"
-                                class="icon-btn vrm-btn"
-                                :type="'default'"
-                                v-if="MoreButtonDict.find(b => b.name === 'vrmButton')?.enabled&&!isCapsuleMode"
-                                circle>
+                            <el-button :title="t('tablePet')" @click="startVRM" class="icon-btn vrm-btn" :type="'default'" v-if="MoreButtonDict.find(b => b.name === 'vrmButton')?.enabled&&!isCapsuleMode" circle>
                                 <i :class='isVRMStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-user-ninja"'></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="t('thaDesktopPet')" placement="top">
-                              <el-button
-                                @click="startTHA"
-                                class="icon-btn tha-btn"
-                                :type="'default'"
-                                v-if="MoreButtonDict.find(b => b.name === 'thaButton')?.enabled&&!isCapsuleMode"
-                                circle>
+                            <el-button :title="t('thaDesktopPet')" @click="startTHA" class="icon-btn tha-btn" :type="'default'" v-if="MoreButtonDict.find(b => b.name === 'thaButton')?.enabled&&!isCapsuleMode" circle>
                                 <i :class='isTHAStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-hat-wizard"'></i>
                               </el-button>
-                            </el-tooltip>
 
-                            <el-tooltip :content="isSending ? t('stopGenerating') : t('sendMessage')" placement="top">
-                              <el-button
-                                @click="isSending ? stopGenerate() : sendMessage()"
-                                :type="isSending ? 'danger' : 'primary'"
-                                class="icon-btn send-btn"
-                                circle>
+                            <el-button :title="isSending ? t('stopGenerating') : t('sendMessage')" @click="isSending ? stopGenerate() : sendMessage()" :type="isSending ? 'danger' : 'primary'" class="icon-btn send-btn" circle>
                                 <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
                               </el-button>
-                            </el-tooltip>
                         </div>
                         <!-- 1. 附件预览区域 -->
                         <div class="attachment-preview-list" v-show="allItems.length > 0">

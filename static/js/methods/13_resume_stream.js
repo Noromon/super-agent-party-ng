@@ -62,15 +62,17 @@ Object.assign(vue_methods, {
                     // S92: reasoning 与文本同款 80ms 缓冲（flush 由共享 flushStreamTextBuffer 处理）
                     this._streamTargetMsg = currentMsg;
                     this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
+                    this._streamRecvChars = (this._streamRecvChars || 0) + delta.reasoning_content.length;
                     if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                     this._streamUpdateTimer = setTimeout(() => {
                         this.flushStreamTextBuffer();
-                    }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
+                    }, this.streamFlushWait());
                 }
 
                 if (delta.content) {
                     this._streamTargetMsg = currentMsg;
                     this._streamTextBuffer = (this._streamTextBuffer || '') + delta.content;
+                    this._streamRecvChars = (this._streamRecvChars || 0) + delta.content.length;
 
                     const parts = delta.content.split('```');
                     for (let i = 0; i < parts.length; i++) {
@@ -87,7 +89,7 @@ Object.assign(vue_methods, {
                     if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                     this._streamUpdateTimer = setTimeout(() => {
                         this.flushStreamTextBuffer();
-                    }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
+                    }, this.streamFlushWait());
                 }
 
                 if (delta.tool_progress) {
@@ -174,7 +176,7 @@ Object.assign(vue_methods, {
         // S106: args 显示写节流(≥120ms)+行 rv bump——66KB 级文件参数的 token 流
         // 曾每帧全文重写+全屏 flush，是排空积压的头号贡献者
         const nowMs = Date.now();
-        if (!b._lastArgsW || nowMs - b._lastArgsW > 120) {
+        if (!b._lastArgsW || nowMs - b._lastArgsW > (this.streamBacklog() ? 300 : 120)) {
             b._lastArgsW = nowMs;
             this._setToolArgs(b, this.truncateDisplayContent(accArgs));
             if (msg) msg._rv = (msg._rv || 0) + 1;
@@ -189,7 +191,7 @@ Object.assign(vue_methods, {
         // S107: bump 节流(≥80ms)——tool 帧 token 流曾每帧一次全屏 flush（profile
         // 实锤 Vue 管线 65.5%）；终态兜底=流尾 bump+审批/result 直写 bump
         const nowMsRv = Date.now();
-        if (!this._lastRvBump || nowMsRv - this._lastRvBump > 80) {
+        if (!this._lastRvBump || nowMsRv - this._lastRvBump > (this.streamBacklog() ? 240 : 80)) {
             this._lastRvBump = nowMsRv;
             currentMsg._rv = (currentMsg._rv || 0) + 1;
         }

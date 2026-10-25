@@ -33,6 +33,7 @@ function makeStub() {
         _markReasoningDone() {},
         _setResultDisplay(b, c) { b.content = c; b.displayContent = c; },
         _setToolArgs(b, a) { b.args = a; b.displayArgs = a; },
+        streamBacklog() { return false; },
     };
     o.getBlock = (t, id, name) => {
         const k = t + ':' + id;

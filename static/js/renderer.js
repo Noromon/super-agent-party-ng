@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S108 loaded');
+console.warn('[Probe] renderer build=S109 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -2244,9 +2244,21 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 // "根组件自激渲染循环(S96 家族)"与"el-popper 链自更新风暴"，自激即自动抓栈。
 (function () {
   const buckets = {};
+  const suspects = {};
   let rootCount = 0;
   let lastReport = Date.now();
   let lastCapture = 0;
+  const ctxOf = (el) => {
+    try {
+      const out = [];
+      let cur = el && el.parentElement;
+      for (let d = 0; cur && out.length < 4 && d < 8; d++, cur = cur.parentElement) {
+        const cl = cur.classList && cur.classList.length ? '.' + cur.classList[0] : (cur.id ? '#' + cur.id : '');
+        if (cl) out.push(cl);
+      }
+      return out.join('>');
+    } catch (_) { return '?'; }
+  };
   app.mixin({
     updated() {
       let n = 'root';
@@ -2254,6 +2266,10 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
       if (isRoot) rootCount++;
       try { n = (this.$ && this.$.type && (this.$.type.name || this.$.type.__name)) || (this.$options && this.$options.name) || 'root'; } catch (_) {}
       buckets[n] = (buckets[n] || 0) + 1;
+      if (buckets[n] > 300) {
+        if (!suspects[n]) suspects[n] = [];
+        if (suspects[n].length < 3) suspects[n].push(ctxOf(this.$el));
+      }
       const now = Date.now();
       if (now - lastReport > 5000) {
         let total = 0;
@@ -2262,6 +2278,8 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
           const top = Object.keys(buckets).sort((a, b) => buckets[b] - buckets[a]).slice(0, 5)
             .map((k) => k + 'x' + buckets[k]).join(' ');
           console.warn('[Perf] updates/5s=' + total + ' root=' + rootCount + '/5s top=' + top);
+          const sus = Object.keys(suspects).map((k) => k + '{' + suspects[k].join(' | ') + '}').join(' ');
+          if (sus) console.warn('[Perf] loop-suspect ' + sus);
           // S108: root>150/5s=调度器自激（正常 12Hz×5=60 封顶）→ 当场抓栈点名触发者
           if (rootCount > 150 && now - lastCapture > 60000) {
             lastCapture = now;
@@ -2269,6 +2287,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
           }
         }
         for (const k in buckets) delete buckets[k];
+        for (const k in suspects) delete suspects[k];
         rootCount = 0;
         lastReport = now;
       }

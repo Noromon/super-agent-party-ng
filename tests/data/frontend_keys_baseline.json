@@ -954,6 +954,8 @@
   "stopWeComBot",
   "stopWechatBot",
   "stopXmppBot",
+  "streamBacklog",
+  "streamFlushWait",
   "streamTranslateInWebview",
   "stringifyEntityId",
   "submitConversationGroupDialog",
@@ -1719,12 +1721,12 @@
   "methods/88_extensions.js": 11,
   "methods/90_panel_resize.js": 1,
   "methods/96_table_a2ui.js": 2,
-  "methods/98_browser_tabs.js": 9,
+  "methods/98_browser_tabs.js": 8,
   "methods/99_skills.js": 3,
   "preload.js": 1,
   "renderer.js": 7,
   "vrm.js": 41
  },
- "console_log_total": 200,
+ "console_log_total": 199,
  "styles_css_lines": 12781
 }
