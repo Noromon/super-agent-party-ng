@@ -62,7 +62,7 @@ def test_renderer_appearance_watches_and_computed():
         "codeFontPxModel:",
         "fontSizeOptions()",
         "codeFontSizeOptions()",
-        "build=S12",
+        "build=S1",
     ):
         assert needle in rjs, f"renderer.js missing: {needle}"
 
@@ -234,6 +234,20 @@ def test_vendor_params_r25():
     en = _read("static", "js", "locales", "en-US.js")
     for key in descs + ["suggestedParams"]:
         assert f"'{key}'" in zh and f"'{key}'" in en, key
+
+
+def test_topbar_panel_buttons_r2():
+    # R2 ④：顶栏左右面板切换按钮 + 右侧面板记住拖拽宽度
+    idx = _read("static", "index.html")
+    assert '@click="handleHistoryToggle()"' in idx
+    assert '@click="toggleSidePanel"' in idx
+    assert "t('chatHistory')" in idx and "t('extensionsView')" in idx
+    m = _read("static", "js", "methods", "90_panel_resize.js")
+    assert "toggleSidePanel()" in m
+    assert m.count("savedSidePanelWidth") >= 4
+    assert "const saved = this.savedSidePanelWidth;" in m
+    d = _read("static", "js", "data", "20_brain_settings.js")
+    assert "savedSidePanelWidth: null" in d
 
 
 def test_completion_notification_r25():

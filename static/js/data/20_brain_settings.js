@@ -313,6 +313,7 @@ Object.assign(vue_data, {
     chatAreaWidth: 50,         // 对话区域宽度百分比,
 
     sidePanelWidth: 50,        // 侧边栏宽度百分比,
+    savedSidePanelWidth: null, // 记住上次面板宽度（R2 ④）,
 
     isResizing: false,         // 是否正在调整大小,
 
