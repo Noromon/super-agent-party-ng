@@ -33,7 +33,7 @@
                       <h3 class="kb-title">{{ t('currentTime') }}</h3>
                     </div>
                     <el-form-item :label="t('triggerMode')">
-                      <el-select
+                      <el-select :persistent="false"
                         v-model="toolsSettings.time.triggerMode"
                         @change="autoSaveSettings"
                       >
@@ -424,7 +424,7 @@
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('browserType')"  v-if="isElectron">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="chromeMCPSettings.type"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -435,7 +435,7 @@
                         </el-select>
                       </el-form-item>
                       <el-form-item :label="t('mcpName')"  v-if="chromeMCPSettings.type=='external'">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="chromeMCPSettings.mcpName"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -526,7 +526,7 @@
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('sqlEngine')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="sqlSettings.engine"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -636,7 +636,7 @@
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('codeEngine')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="codeSettings.engine"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -794,7 +794,7 @@
                       </div>
                       <div class="tool-content">
                         <el-form-item :label="t('CLIEngine')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="CLISettings.engine"
                             @change="autoSaveSettings"
                             class="full-width-input"
@@ -861,7 +861,7 @@
 
                         <!-- ★ CLI 智能体选择 -->
                         <el-form-item :label="t('CLIAgent') || 'CLI Agent'" class="form-item-align">
-                          <el-select 
+                          <el-select :persistent="false" 
                             v-model="acpSettings.agent" 
                             @change="autoSaveSettings" 
                             class="full-width-input"
@@ -888,7 +888,7 @@
 
                         <!-- ★ 权限模式选择 -->
                         <el-form-item :label="t('permissionMode')" class="form-item-align">
-                          <el-select 
+                          <el-select :persistent="false" 
                             v-model="acpSettings.permissionMode" 
                             @change="autoSaveSettings" 
                             class="full-width-input"
@@ -968,7 +968,7 @@
 
                         <!-- 权限模式选择 -->
                         <el-form-item :label="t('permissionMode')" class="form-item-align">
-                          <el-select v-model="localEnvSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
+                          <el-select :persistent="false" v-model="localEnvSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
                             <el-option :label="t('planMode')" value="plan" ></el-option>
                             <el-option :label="t('defaultPermissionMode')" value="default" ></el-option>
                             <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
@@ -989,7 +989,7 @@
                         </el-form-item>
 
                         <el-form-item :label="t('subAgentPlanProvider')" class="form-item-align" v-if="localEnvSettings.permissionMode=='cowork'">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="fastSettings.selectedProvider"
                             :placeholder="t('selectProvider')"
                             filterable
@@ -1052,7 +1052,7 @@
 
                         <!-- 权限模式选择 -->
                         <el-form-item :label="t('permissionMode')" class="form-item-align">
-                          <el-select v-model="dsSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
+                          <el-select :persistent="false" v-model="dsSettings.permissionMode" @change="autoSaveSettings" class="full-width-input">
                             <el-option :label="t('planMode')" value="plan" ></el-option>
                             <el-option :label="t('defaultPermissionMode')" value="default" ></el-option>
                             <el-option :label="t('acceptEdits')" value="auto-approve" ></el-option>
@@ -1073,7 +1073,7 @@
                         </el-form-item>
 
                         <el-form-item :label="t('subAgentPlanProvider')" class="form-item-align" v-if="dsSettings.permissionMode=='cowork'">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="fastSettings.selectedProvider"
                             :placeholder="t('selectProvider')"
                             filterable
@@ -1161,7 +1161,7 @@
                   <div class="plugin-header">
                     <h3>{{ t('agentSkills') }}</h3>
                     <div class="plugin-button-group">
-                      <el-select
+                      <el-select :persistent="false"
                         style="width: 200px;"
                         v-model="CLISettings.visibilityScope"
                         @change="autoSaveSettings"
@@ -1282,7 +1282,7 @@
                 </el-tab-pane>
               </el-tabs>
                 <!-- 技能预览对话框 -->
-                <el-dialog append-to-body 
+                <el-dialog destroy-on-close append-to-body 
                   v-model="showSkillPreviewDialog" 
                   :title="t('skillPreview')" 
                   width="80%"
@@ -1299,7 +1299,7 @@
                   </template>
                 </el-dialog>
                 <!-- === 新增: 添加 Skill 对话框 === -->
-                <el-dialog append-to-body v-model="showAddSkillDialog" :title="t('addSkill')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showAddSkillDialog" :title="t('addSkill')" width="80%">
                   <el-tabs v-model="addSkillTab">
                     
                     <!-- GitHub 安装 -->
@@ -1387,7 +1387,7 @@
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('searchEngine')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="webSearchSettings.engine"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -1406,7 +1406,7 @@
                         </el-select>
                       </el-form-item>
                       <el-form-item :label="t('webCrawling')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="webSearchSettings.crawler"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -1419,7 +1419,7 @@
                         </el-select>
                       </el-form-item>
                       <el-form-item :label="t('webSearchTiming')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="webSearchSettings.when"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -2028,7 +2028,7 @@
                       </el-form-item>
                       
                       <el-form-item :label="t('operationMode')" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="webSearchSettings.firecrawl_mode"
                           @change="autoSaveSettings"
                           class="full-width-input"
@@ -2121,7 +2121,7 @@
                         <div class="tool-content">
                           <!-- 原有搜索时机设置 -->
                           <el-form-item :label="t('KBSearchTiming')" class="form-item-align">
-                            <el-select
+                            <el-select :persistent="false"
                               v-model="KBSettings.when"
                               @change="autoSaveSettings"
                               class="full-width-input"
@@ -2150,7 +2150,7 @@
                           </el-form-item>
                           <!-- 模型参数 -->
                           <el-form-item :label="t('rerankProvider')" class="form-item-align" v-show="KBSettings.is_rerank">
-                            <el-select
+                            <el-select :persistent="false"
                               v-model="KBSettings.selectedProvider"
                               :placeholder="t('selectProvider')"
                               filterable
@@ -2345,7 +2345,7 @@
                     </div>
 
                     <!-- 添加知识库对话框 -->
-                    <el-dialog append-to-body
+                    <el-dialog destroy-on-close append-to-body
                       v-model="showAddKbDialog"
                       :title="t('addNewKnowledgeBase')"
                       width="80%"
@@ -2374,7 +2374,7 @@
                         </el-form-item>
 
                         <el-form-item :label="t('embeddingProvider')" required>
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newKb.providerId"
                             :placeholder="t('selectProvider')"
                             filterable
@@ -2576,7 +2576,7 @@
                 </div>
 
                 <!-- 表情包创建对话框 -->
-                <el-dialog append-to-body
+                <el-dialog destroy-on-close append-to-body
                   v-model="showStickerDialog"
                   :title="t('createStickerPack')"
                   width="80%">
@@ -2601,7 +2601,7 @@
                     </el-form-item>
 
                     <!-- 预览弹窗 -->
-                    <el-dialog append-to-body v-model="dialogVisible" width="80%">
+                    <el-dialog destroy-on-close append-to-body v-model="dialogVisible" width="80%">
                       <img :src="imageUrl" style="width: 100%" alt="Preview">
                     </el-dialog>
 
@@ -2773,7 +2773,7 @@
                   </el-tab-pane>
                 </el-tabs>
                 <!-- 工作流上传对话框 -->
-                <el-dialog append-to-body
+                <el-dialog destroy-on-close append-to-body
                   v-model="showWorkflowUploadDialog"
                   :title="t('uploadWorkflowJson')"
                   width="80%"
@@ -2814,7 +2814,7 @@
 
                     <div class="input-box">
                       <!-- 文字输入位置选择 -->
-                      <el-select v-model="selectedTextInput" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedTextInput" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in textInputOptions"
                           :key="index"
@@ -2825,7 +2825,7 @@
                     </div>
                     <div class="input-box">
                       <!-- 文字输入位置选择 -->
-                      <el-select v-model="selectedTextInput2" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedTextInput2" value-key="id"  :placeholder="t('selectTextInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in textInputOptions"
                           :key="index"
@@ -2836,7 +2836,7 @@
                     </div>
                     <div class="input-box">
                       <!-- 图片输入位置选择 -->
-                      <el-select v-model="selectedImageInput" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedImageInput" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in imageInputOptions"
                           :key="index"
@@ -2847,7 +2847,7 @@
                     </div>
                     <div class="input-box">
                       <!-- 图片输入位置选择 -->
-                      <el-select v-model="selectedImageInput2" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedImageInput2" value-key="id" :placeholder="t('selectImageInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in imageInputOptions"
                           :key="index"
@@ -2858,7 +2858,7 @@
                     </div>
                     <div class="input-box">
                       <!-- 种子位置选择 -->
-                      <el-select v-model="selectedSeedInput" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedSeedInput" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in seedInputOptions"
                           :key="index"
@@ -2869,7 +2869,7 @@
                     </div>
                     <div class="input-box">
                       <!-- 种子位置选择 -->
-                      <el-select v-model="selectedSeedInput2" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
+                      <el-select :persistent="false" v-model="selectedSeedInput2" value-key="id" :placeholder="t('selectSeedInput')" class="full-width-input">
                         <el-option
                           v-for="(node, index) in seedInputOptions"
                           :key="index"
@@ -2926,7 +2926,7 @@
                 </div>
             
                 <!-- 添加A2A服务器对话框 -->
-                <el-dialog append-to-body v-model="showAddA2ADialog" :title="t('addA2AServer')" width="80%" label-position="top">
+                <el-dialog destroy-on-close append-to-body v-model="showAddA2ADialog" :title="t('addA2AServer')" width="80%" label-position="top">
                   <el-form label-position="top">
                     <el-form-item :label="t('A2AUrl')" required>
                       <el-input v-model="newA2AUrl" placeholder="http://127.0.0.1:5000"></el-input>
@@ -3055,7 +3055,7 @@
                   </div>
 
                   <!-- 添加/编辑 MCP 对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showAddMCPDialog"
                     :title="isEditMode ? t('editMCP') : t('addNewMCP')"
                     width="80%"
@@ -3076,7 +3076,7 @@
                             <!-- 基础配置 (添加模式或编辑模式都显示) -->
                             <div class="config-section">
                                 <el-form-item :label="t('serverType')">
-                                  <el-select 
+                                  <el-select :persistent="false" 
                                     v-model="newMCPType" 
                                     @change="updateMCPExample"
                                     class="full-width-input"
@@ -3089,7 +3089,7 @@
                                 </el-form-item>
                             
                                 <el-form-item :label="t('inputMethod')">
-                                  <el-select 
+                                  <el-select :persistent="false" 
                                     v-model="mcpInputType" 
                                     @change="handleInputMethodChange" 
                                     class="full-width-input">
@@ -3219,7 +3219,7 @@
                       </div>
                     </template>
                   </el-dialog>   
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showMCPConfirm"
                     :title="t('confirmDeleteTitle')"
                     width="80%"
@@ -3262,14 +3262,14 @@
                 </div>
 
                 <!-- 添加/编辑LLM工具对话框 -->
-                <el-dialog append-to-body v-model="showLLMForm" :title="editingLLM ? t('editLLMTool') : t('addLLMTool')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showLLMForm" :title="editingLLM ? t('editLLMTool') : t('addLLMTool')" width="80%">
                   <el-form label-position="top">
                     <el-form-item :label="t('toolName')" required>
                       <el-input v-model="newLLMTool.name" :placeholder="t('toolNamePlaceholder')"/>
                     </el-form-item>
 
                     <el-form-item :label="t('interfaceType')" required>
-                      <el-select 
+                      <el-select :persistent="false" 
                         v-model="newLLMTool.type" 
                         @change="handleTypeChange"
                         filterable
@@ -3355,7 +3355,7 @@
                 </div>
 
                 <!-- 添加/编辑自定义HTTP工具对话框 -->
-                <el-dialog append-to-body v-model="showCustomHttpToolForm" :title="editingCustomHttpTool ? t('editCustomHttpTool') : t('addCustomHttpTool')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showCustomHttpToolForm" :title="editingCustomHttpTool ? t('editCustomHttpTool') : t('addCustomHttpTool')" width="80%">
                   <el-form label-position="top">
                     <el-form-item :label="t('toolName')" required>
                       <el-input v-model="newCustomHttpTool.name" :placeholder="t('HTTPNamePlaceholder')"></el-input>
@@ -3367,7 +3367,7 @@
                       <el-input v-model="newCustomHttpTool.url" :placeholder="t('urlPlaceholder')"></el-input>
                     </el-form-item>
                     <el-form-item :label="t('method')" required>
-                      <el-select v-model="newCustomHttpTool.method" placeholder="Select method">
+                      <el-select :persistent="false" v-model="newCustomHttpTool.method" placeholder="Select method">
                         <el-option label="GET" value="GET"></el-option>
                         <el-option label="POST" value="POST"></el-option>
                         <el-option label="PUT" value="PUT"></el-option>

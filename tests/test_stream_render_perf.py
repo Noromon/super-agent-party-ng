@@ -311,4 +311,17 @@ def test_s111_zero_popper_chains():
     home = _read("static/templates/page_home.html")
     assert "clickToSwitchModel" in home and home.count(':title="t(') >= 4
     rd = _read("static/js/renderer.js")
-    assert "compChain" in rd and "renderer build=S111" in rd
+    assert "compChain" in rd and "renderer build=S1" in rd
+# ===== S112: 弹层常驻通用解药（persistent=false + destroy-on-close 全量） =====
+
+def test_s112_persistent_off_and_dialog_destroy():
+    import glob as _glob
+    tp = td = 0
+    for f in _glob.glob("static/templates/*.html"):
+        s = _read(f)
+        tp += s.count(':persistent="false"')
+        td += s.count('destroy-on-close')
+        assert "el-tooltip" not in s, f
+    assert tp >= 203 and td >= 66
+    rd = _read("static/js/renderer.js")
+    assert "compChain(this) + ' @ ' + ctxOf(this.$el)" in rd

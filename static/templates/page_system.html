@@ -11,7 +11,7 @@
               </div>
               <div class="tool-content">
                 <el-form-item class="form-item-align">
-                  <el-select
+                  <el-select :persistent="false"
                     v-model="systemSettings.language"
                     @change="handleSystemLanguageChange"
                     class="full-width-input">
@@ -37,7 +37,7 @@
               </div>
               <div class="tool-content">
                 <el-form-item class="form-item-align">
-                  <el-select
+                  <el-select :persistent="false"
                     v-model="targetLangSelected"
                     filterable
                     allow-create
@@ -72,7 +72,7 @@
               </div>
               <div class="tool-content">
                 <el-form-item class="form-item-align">
-                  <el-select
+                  <el-select :persistent="false"
                     v-model="systemSettings.theme"
                     @change="handleThemeChange"
                     class="full-width-input">
@@ -98,7 +98,7 @@
               </div>
               <div class="tool-content">
                 <el-form-item class="form-item-align">
-                  <el-select
+                  <el-select :persistent="false"
                     v-model="systemSettings.network"
                     @change="handleNetworkChange"
                     class="full-width-input">
@@ -134,7 +134,7 @@
                 </el-form-item>
 
                 <el-form-item :label="t('proxyMode')" class="form-item-align">
-                  <el-select v-model="systemSettings.proxyMode" placeholder="Select method" @change="updateProxy">
+                  <el-select :persistent="false" v-model="systemSettings.proxyMode" placeholder="Select method" @change="updateProxy">
                     <el-option :label="t('systemProxy')" value="system"></el-option>
                     <el-option :label="t('manualProxy')" value="manual"></el-option>
                     <el-option :label="t('noneProxy')" value="none"></el-option>

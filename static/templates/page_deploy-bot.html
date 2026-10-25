@@ -104,7 +104,7 @@
                             <div class="tool-content">
                                 <!-- 主智能体选择 -->
                                 <el-form-item :label="t('mainAgent')" required>
-                                  <el-select 
+                                  <el-select :persistent="false" 
                                     v-model="qqBotConfig.QQAgent"
                                     @change="changeQQAgent">
                                     <el-option
@@ -150,7 +150,7 @@
                                   ></el-switch>
                                 </el-form-item>
                                 <el-form-item :label="t('selectMemory')">
-                                  <el-select 
+                                  <el-select :persistent="false" 
                                     v-model="memorySettings.selectedMemory" 
                                     :placeholder="t('selectMemoryPlaceholder')"
                                     class="full-width-input"
@@ -186,7 +186,7 @@
                                   </template>
                                 </el-alert>
                                 <el-form-item :label="t('separators')">
-                                  <el-select
+                                  <el-select :persistent="false"
                                     v-model="qqBotConfig.separators"
                                     multiple
                                     :reserve-keyword="false"
@@ -323,7 +323,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="wechatBotConfig.WeChatAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="wechatBotConfig.WeChatAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -343,7 +343,7 @@
                               </el-form-item>
                               
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -360,7 +360,7 @@
 
                               <!-- 分隔符 -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="wechatBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -417,7 +417,7 @@
 
                               <!-- 行为主动推送群组或用户列表 -->
                               <el-form-item :label="t('behaviorTargetChatIds')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="wechatBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -434,7 +434,7 @@
                         </el-form>
 
                         <!-- 扫码弹窗国际化 -->
-                        <el-dialog append-to-body v-model="showWechatQR" :title="t('wechat_security_verify')" width="400px" center>
+                        <el-dialog destroy-on-close append-to-body v-model="showWechatQR" :title="t('wechat_security_verify')" width="400px" center>
                           <div style="text-align: center;">
                             <p style="margin-bottom: 20px; font-weight: bold;">{{ t('wechat_scan_hint') }}</p>
                             <el-image 
@@ -538,7 +538,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="feishuBotConfig.FeishuAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="feishuBotConfig.FeishuAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -557,7 +557,7 @@
                                 ></el-switch>
                               </el-form-item>
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -574,7 +574,7 @@
 
                               <!-- 分隔符 -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="feishuBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -643,7 +643,7 @@
                                     <span>{{ t('behaviorTargetChatIds') }}</span>
                                   </div>
                                 </template>
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="feishuBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -752,7 +752,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="weComBotConfig.WeComAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="weComBotConfig.WeComAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option v-for="(agent, id) in agents" :key="id" :label="agent.name" :value="id" />
                                 </el-select>
@@ -764,7 +764,7 @@
                               </el-form-item>
                               
                               <el-form-item :label="t('selectMemory')">
-                                <el-select v-model="memorySettings.selectedMemory" class="full-width-input" @change="changeMemory">
+                                <el-select :persistent="false" v-model="memorySettings.selectedMemory" class="full-width-input" @change="changeMemory">
                                   <el-option v-for="mem in memories" :key="mem.id" :label="mem.name" :value="mem.id" />
                                 </el-select>
                               </el-form-item>
@@ -799,7 +799,7 @@
 
                               <!-- 行为目标 ChatID -->
                               <el-form-item :label="t('behaviorTargetChatIds')">
-                                <el-select v-model="weComBotConfig.behaviorTargetChatIds" multiple filterable allow-create default-first-option class="full-width-input" @change="autoSaveSettings"></el-select>
+                                <el-select :persistent="false" v-model="weComBotConfig.behaviorTargetChatIds" multiple filterable allow-create default-first-option class="full-width-input" @change="autoSaveSettings"></el-select>
                               </el-form-item>
 
                               <!-- 机器人长连接凭据 -->
@@ -885,7 +885,7 @@
                             <div class="tool-content">
                               <!-- 主智能体选择 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="dingtalkBotConfig.DingtalkAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="dingtalkBotConfig.DingtalkAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -902,7 +902,7 @@
                               </el-form-item>
                               
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -914,7 +914,7 @@
 
                               <!-- 分隔符 (钉钉由于不支持流式原地更新，分隔符尤为重要) -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="dingtalkBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -967,7 +967,7 @@
                                     <span>{{ t('behaviorTargetChatIds') }}</span>
                                   </div>
                                 </template>
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="dingtalkBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -1088,7 +1088,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="telegramBotConfig.TelegramAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="telegramBotConfig.TelegramAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -1107,7 +1107,7 @@
                                 ></el-switch>
                               </el-form-item>
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -1124,7 +1124,7 @@
 
                               <!-- 分隔符 -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="telegramBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -1193,7 +1193,7 @@
                                     <span>{{ t('behaviorTargetChatIds') }}</span>
                                   </div>
                                 </template>
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="telegramBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -1275,7 +1275,7 @@
 
                             <div class="tool-content" style="margin-bottom:8px;">
                               <el-form-item :label="t('xmppToolsMode')">
-                                <el-select v-model="xmppBotConfig.tools_mode" class="full-width-input"
+                                <el-select :persistent="false" v-model="xmppBotConfig.tools_mode" class="full-width-input"
                                   @change="autoSaveSettings">
                                   <el-option :label="t('xmppToolsInherit')" value="inherit" />
                                   <el-option :label="t('xmppToolsWhitelist')" value="whitelist" />
@@ -1283,13 +1283,13 @@
                                 </el-select>
                               </el-form-item>
                               <el-form-item v-if="xmppBotConfig.tools_mode !== 'inherit'" :label="t('xmppToolsList')">
-                                <el-select v-model="xmppBotConfig.tools_list" multiple filterable
+                                <el-select :persistent="false" v-model="xmppBotConfig.tools_list" multiple filterable
                                   :reserve-keyword="false" class="full-width-input" @change="autoSaveSettings">
                                   <el-option v-for="(v, k) in toolsSettings" :key="k" :label="k" :value="k" />
                                 </el-select>
                               </el-form-item>
                               <el-form-item :label="t('xmppExtraOutboundDirs')">
-                                <el-select v-model="xmppBotConfig.extra_outbound_dirs" multiple allow-create filterable
+                                <el-select :persistent="false" v-model="xmppBotConfig.extra_outbound_dirs" multiple allow-create filterable
                                   default-first-option :reserve-keyword="false" :placeholder="t('xmppExtraOutboundHint')"
                                   class="full-width-input" @change="autoSaveSettings">
                                 </el-select>
@@ -1367,7 +1367,7 @@
                               </el-table>
                             </div>
 
-                            <el-dialog v-model="xmppSessionOpen" :title="'📱 ' + xmppSessionTitle" width="640px" append-to-body>
+                            <el-dialog destroy-on-close v-model="xmppSessionOpen" :title="'📱 ' + xmppSessionTitle" width="640px" append-to-body>
                               <div style="max-height:60vh; overflow-y:auto;">
                                 <div v-for="(m, i) in xmppSessionDetail" :key="i"
                                      :style="'margin:6px 0; padding:8px 10px; border-radius:8px; font-size:13px; white-space:pre-wrap; word-break:break-word;'
@@ -1379,14 +1379,14 @@
 
                             <div class="tool-content">
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="xmppBotConfig.XmppAgent" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="xmppBotConfig.XmppAgent" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option v-for="(agent, id) in agents" :key="id" :label="agent.name" :value="id" />
                                 </el-select>
                               </el-form-item>
 
                               <el-form-item :label="t('separators')">
-                                <el-select v-model="xmppBotConfig.separators" multiple :reserve-keyword="false"
+                                <el-select :persistent="false" v-model="xmppBotConfig.separators" multiple :reserve-keyword="false"
                                   filterable allow-create @create="handleCreateXmppSeparator" @change="autoSaveSettings">
                                   <el-option v-for="sep in filteredXmppSeparators" :key="sep.value"
                                     :label="sep.label" :value="sep.value" />
@@ -1413,7 +1413,7 @@
                               </el-form-item>
 
                               <el-form-item :label="t('behaviorTargetChatIds')">
-                                <el-select v-model="xmppBotConfig.behaviorTargetJids" multiple :reserve-keyword="false"
+                                <el-select :persistent="false" v-model="xmppBotConfig.behaviorTargetJids" multiple :reserve-keyword="false"
                                   filterable allow-create default-first-option
                                   :placeholder="t('enterChatIdPlaceholder')" class="full-width-input"
                                   @change="autoSaveSettings">
@@ -1441,7 +1441,7 @@
                               </el-form-item>
 
                               <el-form-item :label="t('xmppIgnoreCertHosts')">
-                                <el-select v-model="xmppBotConfig.ignore_cert_hosts" multiple :reserve-keyword="false"
+                                <el-select :persistent="false" v-model="xmppBotConfig.ignore_cert_hosts" multiple :reserve-keyword="false"
                                   filterable allow-create default-first-option
                                   :placeholder="t('xmppIgnoreCertHint')" class="full-width-input"
                                   @change="autoSaveSettings">
@@ -1524,7 +1524,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="discordBotConfig.llm_model" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="discordBotConfig.llm_model" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -1540,7 +1540,7 @@
                                 <el-switch v-model="memorySettings.is_memory" @change="changeMemory"></el-switch>
                               </el-form-item>
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -1557,7 +1557,7 @@
 
                               <!-- 分隔符 -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="discordBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -1617,7 +1617,7 @@
                                     <span>{{ t('behaviorTargetChatIds') }}</span>
                                   </div>
                                 </template>
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="discordBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -1715,7 +1715,7 @@
                             <div class="tool-content">
                               <!-- 主智能体 -->
                               <el-form-item :label="t('mainAgent')" required>
-                                <el-select v-model="slackBotConfig.llm_model" @change="autoSaveSettings">
+                                <el-select :persistent="false" v-model="slackBotConfig.llm_model" @change="autoSaveSettings">
                                   <el-option :label="t('defaultAgent')" value="super-model" />
                                   <el-option
                                     v-for="(agent, id) in agents"
@@ -1731,7 +1731,7 @@
                                 <el-switch v-model="memorySettings.is_memory" @change="changeMemory"></el-switch>
                               </el-form-item>
                               <el-form-item :label="t('selectMemory')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="memorySettings.selectedMemory"
                                   :placeholder="t('selectMemoryPlaceholder')"
                                   class="full-width-input"
@@ -1748,7 +1748,7 @@
 
                               <!-- 分隔符 -->
                               <el-form-item :label="t('separators')">
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="slackBotConfig.separators"
                                   multiple
                                   :reserve-keyword="false"
@@ -1808,7 +1808,7 @@
                                     <span>{{ t('behaviorTargetChatIds') }}</span>
                                   </div>
                                 </template>
-                                <el-select
+                                <el-select :persistent="false"
                                   v-model="slackBotConfig.behaviorTargetChatIds"
                                   multiple
                                   :reserve-keyword="false"
@@ -1898,7 +1898,7 @@
 
                         <!-- 目标语言 -->
                         <el-form-item :label="t('targetLang')"  class="form-item-align"  label-position="left">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="targetLangSelected"
                             filterable
                             allow-create
@@ -1921,7 +1921,7 @@
                         </el-form-item>
 
                         <el-form-item :label="t('fastProvider')" class="form-item-align" label-position="left">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="fastSettings.selectedProvider"
                             :placeholder="t('selectProvider')"
                             filterable
@@ -2045,7 +2045,7 @@
                               />
                             </el-form-item>
                             <el-form-item :label="t('selectMemory')">
-                              <el-select 
+                              <el-select :persistent="false" 
                                 v-model="memorySettings.selectedMemory" 
                                 :placeholder="t('selectMemoryPlaceholder')"
                                 class="full-width-input"
@@ -2093,7 +2093,7 @@
 
                           <!-- 智能体选择 -->
                           <el-form-item :label="t('mainAgent')" required class="form-item-align">
-                            <el-select
+                            <el-select :persistent="false"
                               v-model="mainAgent"
                               @change="autoSaveSettings"
                               class="full-width-input"
@@ -2110,7 +2110,7 @@
                           
                           <!-- 记忆卡选择 -->
                           <el-form-item :label="t('selectMemory')" class="form-item-align">
-                            <el-select 
+                            <el-select :persistent="false" 
                               v-model="memorySettings.selectedMemory" 
                               :placeholder="t('selectMemoryPlaceholder')"
                               class="full-width-input"
@@ -2246,7 +2246,7 @@
                               />
                             </el-form-item>
                             <el-form-item :label="t('selectMemory')">
-                              <el-select 
+                              <el-select :persistent="false" 
                                 v-model="memorySettings.selectedMemory" 
                                 :placeholder="t('selectMemoryPlaceholder')"
                                 class="full-width-input"
@@ -2325,7 +2325,7 @@
 
                             <!-- VRM模型选择框 -->
                             <el-form-item :label="t('selectVrmModel')">
-                              <el-select
+                              <el-select :persistent="false"
                                 v-model="VRMConfig.selectedModelId"
                                 @change="handleModelChange"
                                 class="full-width-input"
@@ -2379,7 +2379,7 @@
 
                             <!-- VRMA动作选择框（已统一） -->
                             <el-form-item :label="t('selectVrmaMotions')">
-                              <el-select
+                              <el-select :persistent="false"
                                 v-model="VRMConfig.selectedMotionIds"
                                 @change="handleMotionChange"
                                 class="full-width-input"
@@ -2432,7 +2432,7 @@
                             
                             <!-- 高斯场景选择框  GAUSS -->
                             <el-form-item :label="t('selectGaussScene')">
-                              <el-select
+                              <el-select :persistent="false"
                                 v-model="VRMConfig.selectedGaussSceneId"
                                 @change="handleGaussSceneChange"
                                 class="full-width-input"
@@ -2511,7 +2511,7 @@
                   </div>
 
                   <!-- VRM模型上传对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showVrmModelDialog"
                     :title="t('uploadVrmModel')"
                     width="80%"
@@ -2557,7 +2557,7 @@
                   </el-dialog>
 
                   <!-- VRMA动作上传对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showVrmaMotionDialog"
                     :title="t('uploadVrmaMotion')"
                     width="80%"
@@ -2603,7 +2603,7 @@
                   </el-dialog>
 
                   <!-- 高斯场景上传对话框  GAUSS -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showGaussSceneDialog"
                     :title="t('uploadGaussScene')"
                     width="80%"
@@ -2767,7 +2767,7 @@
                           </el-form-item>
 
                           <el-form-item :label="t('srMode')" class="form-item-align">
-                            <el-select
+                            <el-select :persistent="false"
                               v-model="THAConfig.srMode"
                               @change="autoSaveSettings"
                               style="width: 100%">
@@ -2780,7 +2780,7 @@
 
                           <!-- THA模型选择框 -->
                           <el-form-item :label="t('thaModel')">
-                            <el-select
+                            <el-select :persistent="false"
                               v-model="THAConfig.selectedModelId"
                               @change="autoSaveSettings"
                               class="full-width-input"
@@ -2872,7 +2872,7 @@
 
                   </div>
                   <!-- S91(THA)：模型上传对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showThaModelDialog"
                     :title="t('thaModel')"
                     width="80%"
@@ -3002,7 +3002,7 @@
                               <!-- 文件选择区域 -->
                               <el-form-item>
                                 <!-- 选择textFiles中的文件 -->
-                                <el-select class="full-width-input" v-model="selectedFile" @change="parseSelectedFile" :placeholder="t('selectFile')">
+                                <el-select :persistent="false" class="full-width-input" v-model="selectedFile" @change="parseSelectedFile" :placeholder="t('selectFile')">
                                   <el-option
                                     v-for="file in textFiles"
                                     :key="file.unique_filename"
@@ -3140,7 +3140,7 @@
                                     {{ readState.chunks_voice[idx] }}
                                   </el-tag>
 
-                                  <el-select v-else
+                                  <el-select :persistent="false" v-else
                                             v-model="segmentVoiceEditBuffer[idx]"
                                             size="small"
                                             style="margin-right:8px;width:80px">
@@ -3184,7 +3184,7 @@
                     </el-tabs>
 
                     <!-- 文件上传对话框 -->
-                    <el-dialog append-to-body 
+                    <el-dialog destroy-on-close append-to-body 
                       :title="t('uploadFile')" 
                       v-model="showFileDialog" 
                       width="80%"
@@ -3271,7 +3271,7 @@
                             </div>
                             <div class="tool-content">
                               <el-form-item :label="t('liveFilterMode') || '监听模式'" class="form-item-align" label-position="left">
-                                <el-select 
+                                <el-select :persistent="false" 
                                   v-model="liveConfig.filterMode" 
                                   class="full-width-input"
                                   @change="autoSaveSettings"
@@ -3310,7 +3310,7 @@
                               </el-form-item>  
 
                               <el-form-item v-if="liveConfig.enableDanmakuTTS" :label="t('danmakuVoice') || 'Danmaku Voice (念弹幕音色)'" class="form-item-align" label-position="left">
-                                <el-select 
+                                <el-select :persistent="false" 
                                   v-model="liveConfig.danmakuVoice" 
                                   class="full-width-input"
                                   @change="autoSaveSettings"

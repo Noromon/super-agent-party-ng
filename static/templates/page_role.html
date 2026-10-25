@@ -63,7 +63,7 @@
                             </template>
                           </el-alert>
                           <el-form-item :label="t('selectMemory')">
-                            <el-select 
+                            <el-select :persistent="false" 
                               v-model="memorySettings.selectedMemory" 
                               :placeholder="t('selectMemoryPlaceholder')"
                               class="full-width-input"
@@ -197,7 +197,7 @@
                   <!-- 添加新记忆标签页 -->
                   <el-tab-pane :label="t('addNewMemory')" name="add">
                       <el-form-item :label="t('fastProvider')" class="form-item-align" label-position="left">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="fastSettings.selectedProvider"
                           :placeholder="t('selectProvider')"
                           filterable
@@ -223,7 +223,7 @@
                       </el-form-item>
 
                     <!-- 向量库交互 Dialog -->
-                    <el-dialog append-to-body
+                    <el-dialog destroy-on-close append-to-body
                       v-model="vectorDialogVisible"
                       :title="t('vectorInteractTitle') + ' —— ' + vectorDialogMemoryName"
                       width="80%"
@@ -267,7 +267,7 @@
                     </el-dialog>
 
                     <!-- 单行编辑小弹窗 -->
-                    <el-dialog append-to-body
+                    <el-dialog destroy-on-close append-to-body
                       v-model="editRowVisible"
                       width="40%"
                       :title="t('editText')"
@@ -377,7 +377,7 @@
                       </div>
                     </div>
                     <!-- 添加记忆对话框 -->
-                    <el-dialog append-to-body v-model="showAddMemoryDialog" :title="t('memoryConfig')" width="80%">
+                    <el-dialog destroy-on-close append-to-body v-model="showAddMemoryDialog" :title="t('memoryConfig')" width="80%">
                       <el-form label-position="top">
                         <el-form-item :label="t('memoryName')" required>
                           <el-input v-model="newMemory.name" />
@@ -418,7 +418,7 @@
 
                         <!-- 新增已有记忆选择框 -->
                         <el-form-item :label="t('selectExistingMemory')">
-                          <el-select 
+                          <el-select :persistent="false" 
                             v-model="selectedExistingMemoryId" 
                             :placeholder="t('selectExistingMemoryPlaceholder')"
                             @change="copyExistingMemoryData"
@@ -457,7 +457,7 @@
                               <span>{{ t('autoUpdateSetting') }}</span>
                             </template>
                             <el-form-item :label="t('embeddingProvider')">
-                              <el-select
+                              <el-select :persistent="false"
                                 v-model="newMemory.providerId"
                                 :placeholder="t('selectProvider')"
                                 clearable
@@ -727,7 +727,7 @@
                   <!-- 系统提示词标签页 -->
                   <el-tab-pane :label="t('addSystemPrompt')" name="prompts">
                     <el-form-item :label="t('fastProvider')" class="form-item-align" label-position="left">
-                      <el-select
+                      <el-select :persistent="false"
                         v-model="fastSettings.selectedProvider"
                         :placeholder="t('selectProvider')"
                         filterable
@@ -833,7 +833,7 @@
                     </div>
 
                     <!-- 编辑/新增对话框 -->
-                    <el-dialog append-to-body
+                    <el-dialog destroy-on-close append-to-body
                       v-model="showPromptDialog"
                       :title="t('editSystemPrompt')"
                       width="80%"
@@ -899,11 +899,11 @@
                 </div>
 
                 <!-- 新增 TTS 配置对话框 -->
-                <el-dialog append-to-body v-model="showAddTTSDialog" :title="t('addNewTTS')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showAddTTSDialog" :title="t('addNewTTS')" width="80%">
                   <el-form ref="form" :model="newTTSConfig" label-position="top">
                     <!-- 名称输入 -->
                     <el-form-item :label="t('ttsName')" required>
-                      <el-select 
+                      <el-select :persistent="false" 
                         v-model="newTTSConfig.name" 
                         filterable
                         allow-create
@@ -920,7 +920,7 @@
 
                     <!-- 引擎选择 -->
                     <el-form-item :label="t('ttsEngine')" class="form-item-align">
-                      <el-select 
+                      <el-select :persistent="false" 
                         v-model="newTTSConfig.engine" 
                         class="full-width-input"
                         @change="fetchTetosNewVoices(newTTSConfig.engine)"
@@ -982,7 +982,7 @@
                     <div class="tool-content">
                       <!-- 默认音色选择 -->
                       <el-form-item :label="t('DefaultVoice') || '默认音色'" class="form-item-align">
-                        <el-select v-model="newTTSConfig.mossVoice" @change="autoSaveSettings" class="full-width-input">
+                        <el-select :persistent="false" v-model="newTTSConfig.mossVoice" @change="autoSaveSettings" class="full-width-input">
                           <!-- 中文音色 -->
                           <el-option label="Junhao (zh-male)" value="Junhao"></el-option>
                           <el-option label="Zhiming (zh-male)" value="Zhiming"></el-option>
@@ -1023,7 +1023,7 @@
 
                       <!-- 音色克隆：复用已有提示音频选择框 -->
                       <el-form-item :label="t('promptAudio') || '参考音频 (音色克隆)'" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="newTTSConfig.gsvRefAudioPath"
                           @change="handleRefAudioPathChange(newTTSConfig.gsvRefAudioPath,'model')"
                           class="full-width-input"
@@ -1130,7 +1130,7 @@
                           <el-input v-model="newTTSConfig.azureRegion" placeholder="e.g. eastus" @change="autoSaveSettings"/>
                         </el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.azureVoice" filterable allow-create placeholder="Select Voice" class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.azureVoice" filterable allow-create placeholder="Select Voice" class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1174,7 +1174,7 @@
                       </el-form-item>
 
                       <el-form-item label="Resource ID" class="form-item-align">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="newTTSConfig.volcResourceId"
                           filterable
                           allow-create
@@ -1242,7 +1242,7 @@
                           <el-input v-model="newTTSConfig.googleServiceAccount" type="textarea" :rows="3" placeholder='Paste JSON content here: {"type": "service_account", ...}' @change="autoSaveSettings"/>
                         </el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.googleVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.googleVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1285,7 +1285,7 @@
                         <el-form-item label="API Key" class="form-item-align"><el-input v-model="newTTSConfig.baiduApiKey" @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Secret Key" class="form-item-align"><el-input v-model="newTTSConfig.baiduSecretKey" type="password" show-password @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.baiduVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.baiduVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1327,7 +1327,7 @@
                         <el-form-item label="API Key" class="form-item-align"><el-input v-model="newTTSConfig.minimaxApiKey" type="password" show-password @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Group ID" class="form-item-align"><el-input v-model="newTTSConfig.minimaxGroupId" @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.minimaxVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.minimaxVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1370,7 +1370,7 @@
                         <el-form-item label="API Key" class="form-item-align"><el-input v-model="newTTSConfig.xunfeiApiKey" type="password" show-password @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="API Secret" class="form-item-align"><el-input v-model="newTTSConfig.xunfeiApiSecret" type="password" show-password @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.xunfeiVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.xunfeiVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1412,7 +1412,7 @@
                       <div class="tool-content">
                         <el-form-item label="API Key" class="form-item-align"><el-input v-model="newTTSConfig.fishApiKey" type="password" show-password @change="autoSaveSettings"/></el-form-item>
                         <el-form-item label="Voice" class="form-item-align">
-                          <el-select v-model="newTTSConfig.fishVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
+                          <el-select :persistent="false" v-model="newTTSConfig.fishVoice" filterable allow-create class="full-width-input" @change="autoSaveSettings">
                             <el-option 
                               v-for="(v, index) in newTTSConfig.tetosVoices" 
                               :key="index" 
@@ -1456,7 +1456,7 @@
                         </el-form-item>
 
                         <el-form-item :label="t('Timbre')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.systemVoiceName"
                             class="full-width-input"
                             filterable
@@ -1502,7 +1502,7 @@
                       </div>
                       <div class="tool-content">
                         <el-form-item :label="t('TTSModelProvider')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.selectedProvider"
                             :placeholder="t('selectProvider')"
                             filterable
@@ -1533,7 +1533,7 @@
                           ></el-switch>
                         </el-form-item>
                         <el-form-item :label="t('TTSVoice')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.openaiVoice"
                             :placeholder="t('selectVoice')"
                             filterable
@@ -1551,7 +1551,7 @@
                         </el-form-item>
                         <!-- 提示音频选择框 -->
                         <el-form-item :label="t('promptAudio')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.gsvRefAudioPath"
                             @change="handleRefAudioPathChange(newTTSConfig.gsvRefAudioPath,'role')"
                             class="full-width-input"
@@ -1724,7 +1724,7 @@
                         </el-form-item>
                         <!-- 语言选择框 -->
                         <el-form-item :label="t('edgettsLanguage')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.edgettsLanguage"
                             @change="updateNewLanguages"
                             class="full-width-input"
@@ -1740,7 +1740,7 @@
 
                         <!-- 性别选择框 -->
                         <el-form-item :label="t('edgettsGender')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.edgettsGender"
                             @change="updateNewGenders"
                             class="full-width-input"
@@ -1756,7 +1756,7 @@
 
                         <!-- 语音选择框 -->
                         <el-form-item :label="t('edgettsVoice')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.edgettsVoice"
                             class="full-width-input"
                           >
@@ -1824,7 +1824,7 @@
 
                         <!-- 语言选择框 -->
                         <el-form-item :label="t('gsvTextLang')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.gsvTextLang"
                             @change="autoSaveSettings"
                             class="full-width-input"
@@ -1840,7 +1840,7 @@
 
                         <!-- 提示语言选择框 -->
                         <el-form-item :label="t('gsvPromptLang')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.gsvPromptLang"
                             @change="autoSaveSettings"
                             class="full-width-input"
@@ -1856,7 +1856,7 @@
 
                         <!-- 提示音频选择框 -->
                         <el-form-item :label="t('gsvPromptAudio')" class="form-item-align">
-                          <el-select
+                          <el-select :persistent="false"
                             v-model="newTTSConfig.gsvRefAudioPath"
                             @change="handleRefAudioPathChange(newTTSConfig.gsvRefAudioPath,'role')"
                             class="full-width-input"
@@ -1950,11 +1950,11 @@
                     <div style="color: #606266; margin-top: 10px;">{{ t('addNewAppearance') }}</div>
                   </div>
                 <!-- 新增 形象 配置对话框 -->
-                <el-dialog append-to-body v-model="showAddAppearanceDialog" :title="t('addNewAppearance')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showAddAppearanceDialog" :title="t('addNewAppearance')" width="80%">
                   <div class="tool-content">
                     <!-- 名称输入 -->
                     <el-form-item :label="t('AppearanceName')" required label-position="top">
-                      <el-select 
+                      <el-select :persistent="false" 
                         v-model="newAppearanceConfig.name" 
                         filterable
                         allow-create
@@ -1991,7 +1991,7 @@
 
                       <!-- VRM模型选择框 -->
                       <el-form-item :label="t('selectVrmModel')" label-position="top">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="newAppearanceConfig.selectedModelId"
                           @change="handleModelChange"
                           class="full-width-input"
@@ -2045,7 +2045,7 @@
 
                       <!-- VRMA动作选择框（已统一） -->
                       <el-form-item :label="t('selectVrmaMotions')" label-position="top">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="newAppearanceConfig.selectedMotionIds"
                           @change="handleMotionChange"
                           class="full-width-input"
@@ -2112,7 +2112,7 @@
                   </div>
 
                   <!-- VRM模型上传对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showVrmModelDialog"
                     :title="t('uploadVrmModel')"
                     width="80%"
@@ -2158,7 +2158,7 @@
                   </el-dialog>
 
                   <!-- VRMA动作上传对话框 -->
-                  <el-dialog append-to-body
+                  <el-dialog destroy-on-close append-to-body
                     v-model="showVrmaMotionDialog"
                     :title="t('uploadVrmaMotion')"
                     width="80%"
@@ -2311,7 +2311,7 @@
                 </div>
 
                 <!-- 添加/编辑 行为对话框 -->
-                <el-dialog append-to-body
+                <el-dialog destroy-on-close append-to-body
                   v-model="showBehaviorDialog"
                   :title="isEditingBehavior ? t('editBehavior') : t('addBehavior')"
                   width="80%"
@@ -2326,7 +2326,7 @@
                       <h2>{{ t('triggerSettings') }}</h2>
                       
                       <el-form-item :label="t('triggerType')">
-                        <el-select v-model="tempBehavior.trigger.type" class="full-width-input">
+                        <el-select :persistent="false" v-model="tempBehavior.trigger.type" class="full-width-input">
                           <el-option :label="t('timeName')"   value="time"></el-option>
                           <el-option :label="t('noInputName')" value="noInput"></el-option>
                           <el-option :label="t('cycleName')" value="cycle"></el-option>
@@ -2338,7 +2338,7 @@
                         <el-row :gutter="12">
                           <el-col :span="24">
                             <el-form-item :label="t('time')">
-                              <el-time-picker
+                              <el-time-picker :persistent="false"
                                 v-model="tempBehavior.trigger.time.timeValue"
                                 value-format="HH:mm:ss"
                                 format="HH:mm:ss"
@@ -2349,7 +2349,7 @@
                           </el-col>
                         </el-row>
                         <el-form-item :label="t('repeatDays')">
-                          <el-select v-model="tempBehavior.trigger.time.days" multiple style="width: 100%">
+                          <el-select :persistent="false" v-model="tempBehavior.trigger.time.days" multiple style="width: 100%">
                             <el-option :label="t('monday')"    :value="1"></el-option>
                             <el-option :label="t('tuesday')"   :value="2"></el-option>
                             <el-option :label="t('wednesday')" :value="3"></el-option>
@@ -2379,7 +2379,7 @@
                         <el-row :gutter="12">
                           <el-col :span="24">
                             <el-form-item :label="t('cycleValue')+t('minLimit1min')">
-                              <el-time-picker
+                              <el-time-picker :persistent="false"
                                 v-model="tempBehavior.trigger.cycle.cycleValue"
                                 value-format="HH:mm:ss"
                                 format="HH:mm:ss"
@@ -2411,7 +2411,7 @@
                       <h2>{{ t('actionSettings') }}</h2>
 
                       <el-form-item :label="t('actionType')">
-                        <el-select v-model="tempBehavior.action.type" class="full-width-input">
+                        <el-select :persistent="false" v-model="tempBehavior.action.type" class="full-width-input">
                           <el-option :label="t('prompt')" value="prompt"></el-option>
                           <el-option :label="t('randomEvent')" value="random"></el-option>
                         </el-select>
@@ -2434,7 +2434,7 @@
                         
                         <!-- 类型选择 -->
                         <el-form-item :label="t('eventType')">
-                          <el-select v-model="tempBehavior.action.random.type" class="full-width-input">
+                          <el-select :persistent="false" v-model="tempBehavior.action.random.type" class="full-width-input">
                             <el-option :label="t('random')" value="random"></el-option>
                             <el-option :label="t('order')" value="order"></el-option>
                           </el-select>
@@ -2479,7 +2479,7 @@
                       <div class="sub-config-box">
                         <el-form-item :label="t('behaviorPlatform')">
                           <!-- 关键改动：增加 multiple 属性，绑定到 platforms -->
-                          <el-select 
+                          <el-select :persistent="false" 
                             v-model="tempBehavior.platforms" 
                             multiple 
                             class="full-width-input"
@@ -2497,7 +2497,7 @@
                         </el-form-item>
                         <!-- S73：事件级工具策略（自主事件默认无工具，防 shell/edit 失控） -->
                         <el-form-item :label="t('behaviorToolsPolicy')">
-                          <el-select v-model="tempBehavior.tools_mode" class="full-width-input">
+                          <el-select :persistent="false" v-model="tempBehavior.tools_mode" class="full-width-input">
                             <el-option :label="t('behaviorToolsNone')" value="none"></el-option>
                             <el-option :label="t('behaviorToolsInherit')" value="inherit"></el-option>
                             <el-option :label="t('behaviorToolsWhitelist')" value="whitelist"></el-option>
@@ -2506,7 +2506,7 @@
                         </el-form-item>
                         <el-form-item v-if="tempBehavior.tools_mode === 'whitelist' || tempBehavior.tools_mode === 'blacklist'"
                                       :label="t('behaviorToolsList')">
-                          <el-select v-model="tempBehavior.tools_list" multiple filterable allow-create
+                          <el-select :persistent="false" v-model="tempBehavior.tools_list" multiple filterable allow-create
                                      default-first-option class="full-width-input"
                                      :placeholder="t('behaviorToolsListHint')">
                           </el-select>
@@ -2735,7 +2735,7 @@
               </div>
 
               <!-- 新增/编辑用户数据对话框 (放在 tabs 外面) -->
-              <el-dialog append-to-body 
+              <el-dialog destroy-on-close append-to-body 
                 v-model="showAffectionDataDialog" 
                 :title="isEditingAffection ? (t('editData') || '编辑羁绊数据') : (t('addData') || '新增羁绊数据')" 
                 width="400px"
@@ -2864,7 +2864,7 @@
                                            show-input style="flex: 1;" @change="autoSaveSettings"></el-slider>
                               </span>
                               <!-- S74：每动作工具策略（默认 lowpriv=只读低权限白名单） -->
-                              <el-select :model-value="diarySettings.actions[key].tools_mode || 'lowpriv'"
+                              <el-select :persistent="false" :model-value="diarySettings.actions[key].tools_mode || 'lowpriv'"
                                          @change="(v) => onDiaryActionToolsMode(key, v)"
                                          size="small" style="width: 150px; flex-shrink: 0;"
                                          :disabled="!diarySettings.actions[key].enabled"
@@ -2874,7 +2874,7 @@
                                 <el-option :label="t('diaryToolsInherit') || '继承全部工具'" value="inherit"></el-option>
                                 <el-option :label="t('diaryToolsCustom') || '自定义名单'" value="custom"></el-option>
                               </el-select>
-                              <el-select v-if="(diarySettings.actions[key].tools_mode || 'lowpriv') === 'custom'"
+                              <el-select :persistent="false" v-if="(diarySettings.actions[key].tools_mode || 'lowpriv') === 'custom'"
                                          :model-value="diarySettings.actions[key].tools_list || []"
                                          @change="(v) => onDiaryActionToolsList(key, v)"
                                          multiple filterable allow-create default-first-option
@@ -2898,7 +2898,7 @@
                         <div class="tool-content">
                           <div class="sub-config-box">
                             <el-form-item :label="t('diaryImTargets') || '主动发消息的渠道（不选则仅写入日记本）'">
-                              <el-select v-model="diarySettings.imTargets" multiple filterable clearable
+                              <el-select :persistent="false" v-model="diarySettings.imTargets" multiple filterable clearable
                                          class="full-width-input" style="width: 100%;" @change="onDiaryImTargetsChange"
                                          :placeholder="t('diaryImTargetsPlaceholder') || '选择渠道，将发送到对应机器人已配置的会话'">
                                 <el-option :label="t('diaryImTargetChat') || '软件主界面（网页对话）'" value="chat"></el-option>
@@ -2915,7 +2915,7 @@
                             <!-- S71：已选渠道的发送目标（留空 = 触发时自动取当前激活主会话） -->
                             <el-form-item v-for="p in diaryTargetPlatformsList()" :key="'diaryTargets-' + p"
                                           :label="diaryPlatformLabel(p) + ' ' + (t('diaryImTargetPick') || '发送目标（留空=自动）')">
-                              <el-select multiple filterable clearable collapse-tags
+                              <el-select :persistent="false" multiple filterable clearable collapse-tags
                                          :model-value="(diarySettings.imTargetMap || {})[p] || []"
                                          @change="(v) => onDiaryImTargetChange(p, v)"
                                          @visible-change="(v) => v && requestDiaryImTargets()"
@@ -3078,7 +3078,7 @@
                 </el-tabs>
 
                 <!-- 日记详情（markdown 渲染） -->
-                <el-dialog v-model="diaryDetailVisible" class="diary-detail-dialog" width="640px"
+                <el-dialog destroy-on-close v-model="diaryDetailVisible" class="diary-detail-dialog" width="640px"
                            align-center append-to-body @close="closeDiaryDetail">
                   <template #header>
                     <div v-if="diaryDetailEntry" class="diary-detail-header">

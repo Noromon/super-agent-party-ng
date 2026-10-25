@@ -1,4 +1,4 @@
-    <el-dialog append-to-body
+    <el-dialog destroy-on-close append-to-body
       v-model="showLogDialog"
       :title="t('serverLogs') || 'Backend Logs'"
       width="80%"
@@ -18,7 +18,7 @@
       </template>
     </el-dialog>
 
-      <el-dialog append-to-body
+      <el-dialog destroy-on-close append-to-body
         v-model="showModelDialog"
         :title="t('mainModel')"
         width="80%">
@@ -59,7 +59,7 @@
         </div>
       </el-dialog>  
       <!-- 扩展选择对话框 -->
-      <el-dialog append-to-body
+      <el-dialog destroy-on-close append-to-body
         :title="t('switchExtension')"
         v-model="showExtensionsDialog"
         width="80%"

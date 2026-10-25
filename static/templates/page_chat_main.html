@@ -206,7 +206,7 @@
                     </span>
                     <!-- 【修改点2】：操作区强行横向排列，重置按钮原有的 absolute 定位 -->
                     <div class="group-actions" style="display: flex; align-items: center; flex-shrink: 0;" @click.stop>
-                      <el-dropdown trigger="click" placement="bottom-end" @click.stop>
+                      <el-dropdown :persistent="false" trigger="click" placement="bottom-end" @click.stop>
                         <!-- 这个按钮现在对所有组（包括默认组）都可见 -->
                         <el-button class="item-delete-btn" circle style="position: relative; right: auto; top: auto; transform: none; margin-right: 4px; display: flex; align-items: center; justify-content: center;">
                           <i class="fa-solid fa-ellipsis"></i>
@@ -269,7 +269,7 @@
                         
                         <!-- 【修改点4】：外层用绝对定位居中，内部取消按钮自带的绝对定位以修复高度塌陷 -->
                         <div class="item-actions" v-if="!isTyping" @click.stop style="position: absolute; right: 8px; top: 0; bottom: 0; display: flex; align-items: center;">
-                          <el-dropdown trigger="click" placement="bottom-end" @click.stop>
+                          <el-dropdown :persistent="false" trigger="click" placement="bottom-end" @click.stop>
                             <el-button class="item-delete-btn" circle style="position: static; transform: none; display: flex; align-items: center; justify-content: center; margin: 0;">
                               <i class="fa-solid fa-ellipsis"></i>
                             </el-button>
@@ -277,7 +277,7 @@
                               <el-dropdown-menu>
                                 <el-dropdown-item @click="openRenameConversationDialog(conv)">{{ t('rename') }}</el-dropdown-item>
                                 <!-- PR功能：移动到分组 -->
-                                <el-dropdown placement="right-start" trigger="hover">
+                                <el-dropdown :persistent="false" placement="right-start" trigger="hover">
                                   <div class="el-dropdown-menu__item" style="display: flex; justify-content: space-between; align-items: center;">
                                     <span>{{ t('moveToGroup') }}</span>
                                     <i class="fa-solid fa-angle-right" style="margin-left: 8px;"></i>
@@ -840,7 +840,7 @@
                               </div>
 
                             <!-- 4. CLI 权限模式指示器 (仅 CLI 启用时显示) -->
-                            <el-dropdown 
+                            <el-dropdown :persistent="false" 
                               v-if="CLISettings.enabled" 
                               placement="top" 
                               trigger="click"
@@ -1262,7 +1262,7 @@
                     <!-- 推送平台选择：仅显示第三方机器人，网页对话由后台强制静默推送 -->
                     <h2>{{ t('behaviorPlatform') }}</h2>
                     <el-form-item>
-                      <el-select 
+                      <el-select :persistent="false" 
                         v-model="newTaskForm.platforms" 
                         multiple 
                         class="full-width-input"
@@ -1291,7 +1291,7 @@
 
                     <h2>{{ t('triggerSettings') }}</h2>
                     <el-form-item :label="t('triggerType')">
-                      <el-select v-model="newTaskForm.task_type" class="full-width-input">
+                      <el-select :persistent="false" v-model="newTaskForm.task_type" class="full-width-input">
                         <el-option :label="t('modeOnce')" value="once"></el-option>
                         <el-option :label="t('timeName')" value="time"></el-option>
                         <el-option :label="t('cycleName')" value="cycle"></el-option>
@@ -1301,10 +1301,10 @@
                     <!-- 时间模式配置 -->
                     <div v-if="newTaskForm.task_type === 'time'" class="sub-config-box">
                       <el-form-item :label="t('time')">
-                        <el-time-picker v-model="newTaskForm.trigger_config.timeValue" value-format="HH:mm:ss" style="width: 100%"></el-time-picker>
+                        <el-time-picker :persistent="false" v-model="newTaskForm.trigger_config.timeValue" value-format="HH:mm:ss" style="width: 100%"></el-time-picker>
                       </el-form-item>
                       <el-form-item :label="t('repeatDays')">
-                        <el-select v-model="newTaskForm.trigger_config.days" multiple style="width: 100%">
+                        <el-select :persistent="false" v-model="newTaskForm.trigger_config.days" multiple style="width: 100%">
                           <el-option v-for="(label, val) in {1:t('monday'), 2:t('tuesday'), 3:t('wednesday'), 4:t('thursday'), 5:t('friday'), 6:t('saturday'), 0:t('sunday')}" 
                                     :key="val" :label="label" :value="parseInt(val)"></el-option>
                         </el-select>
@@ -1314,7 +1314,7 @@
                     <!-- 周期模式配置 -->
                     <div v-if="newTaskForm.task_type === 'cycle'" class="sub-config-box">
                       <el-form-item :label="t('cycleValue')">
-                        <el-time-picker v-model="newTaskForm.trigger_config.cycleValue" value-format="HH:mm:ss" style="width: 100%"></el-time-picker>
+                        <el-time-picker :persistent="false" v-model="newTaskForm.trigger_config.cycleValue" value-format="HH:mm:ss" style="width: 100%"></el-time-picker>
                       </el-form-item>
                       <el-form-item :label="t('repeatNumber')">
                         <el-slider v-model="newTaskForm.trigger_config.repeatNumber" :min="1" :max="100" show-input></el-slider>
@@ -1338,7 +1338,7 @@
             </div>
           </div>
           <!-- 群聊设置弹窗 -->
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showGroupSettingsDialog"
             :title="t('groupChatSettings')"
             width="80%">
@@ -1356,7 +1356,7 @@
               <div class="group-settings-area" style="margin-top: 20px;">
                 <div style="margin-bottom: 10px; font-weight: bold;">{{ t('selectGroupAgents') }}</div>
                 
-                <el-select 
+                <el-select :persistent="false" 
                     v-model="selectedGroupAgents" 
                     multiple 
                     placeholder="Select"
@@ -1400,7 +1400,7 @@
               </div>
             </div>
           </el-dialog>
-            <el-dialog append-to-body
+            <el-dialog destroy-on-close append-to-body
               v-model="showKnowledgeDialog"
               :title="t('knowledgeBaseSelection')"
               width="80%">
@@ -1419,7 +1419,7 @@
                 </div>
               </div>
             </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showMemoryDialog"
             :title="t('memory')"
             width="80%">
@@ -1441,7 +1441,7 @@
                 />
               </el-form-item>
               <el-form-item :label="t('selectMemory')">
-                <el-select 
+                <el-select :persistent="false" 
                   v-model="memorySettings.selectedMemory" 
                   :placeholder="t('selectMemoryPlaceholder')"
                   class="full-width-input"
@@ -1457,7 +1457,7 @@
               </el-form-item>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showAgentDialog"
             :title="t('agentSettings')"
             width="80%">
@@ -1465,7 +1465,7 @@
               <!-- 主智能体选择 -->
               <div class="agent-section">
                 <h3>{{ t('mainAgent') }}</h3>
-                <el-select 
+                <el-select :persistent="false" 
                   v-model="mainAgent"
                   @change="changeMainAgent">
                   <el-option
@@ -1505,7 +1505,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showMCPServerDialog"
             :title="t('mcpServersManagement')"
             width="80%">
@@ -1530,7 +1530,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showA2AServerDialog"
             :title="t('a2aServersManagement')"
             width="80%">
@@ -1549,7 +1549,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showLLMToolsDialog"
             :title="t('llmToolsManagement')"
             width="80%">
@@ -1571,7 +1571,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showComfyUIDialog"
             :title="t('ComfyUIManagement')"
             width="80%">
@@ -1593,7 +1593,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showStickerPacksDialog"
             :title="t('StickerPackManagement')"
             width="80%">
@@ -1614,7 +1614,7 @@
               </div>
             </div>
           </el-dialog>
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showMoreButtonDialog"
             :title="t('showMoreButton')"
             width="80%">
@@ -1629,12 +1629,12 @@
           </el-dialog>
         </div>
 
-          <el-dialog append-to-body
+          <el-dialog destroy-on-close append-to-body
             v-model="showEditDialog"
             :title="editType === 'system' ? t('editSystemPrompt') : t('editMessage')"
             width="80%">
             <el-form-item v-if="editType === 'system'" :label="t('selectSystemPrompt')" class="form-item-align" label-position="left">
-              <el-select 
+              <el-select :persistent="false" 
                 v-model="selectSystemPromptId" 
                 :placeholder="t('selectSystemPromptPlaceholder')"
                 class="full-width-input"
@@ -1661,7 +1661,7 @@
             </template>
           </el-dialog>
 
-        <el-dialog append-to-body
+        <el-dialog destroy-on-close append-to-body
           v-model="showHistoryDialog"
           :title="t('chatHistory')"
           width="80%">
@@ -1716,7 +1716,7 @@
       </div>
     </el-dialog>
 
-        <el-dialog
+        <el-dialog destroy-on-close
           append-to-body
           v-model="showConversationGroupDialog"
           :title="conversationGroupDialogMode === 'create' ? t('createGroup') : t('renameGroup')"
@@ -1743,7 +1743,7 @@
           </template>
         </el-dialog>
 
-        <el-dialog
+        <el-dialog destroy-on-close
           append-to-body
           v-model="showConversationRenameDialog"
           :title="t('renameConversation')"
@@ -1764,7 +1764,7 @@
           </template>
         </el-dialog>
 
-        <el-dialog
+        <el-dialog destroy-on-close
           append-to-body
           v-model="showDeleteConversationDialog"
           :title="t('delete')"
@@ -1782,7 +1782,7 @@
           </template>
         </el-dialog>
 
-        <el-dialog
+        <el-dialog destroy-on-close
           append-to-body
           v-model="showDeleteGroupDialog"
           :title="t('delete')"
@@ -1797,7 +1797,7 @@
           </template>
         </el-dialog>
 
-      <el-dialog
+      <el-dialog destroy-on-close
         v-model="showLogoDialog"
         :title="t('logoPage')"
         width="90%"> 

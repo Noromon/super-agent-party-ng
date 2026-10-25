@@ -113,7 +113,7 @@
                           <!-- 主智能体选择 -->
                           <div class="agent-section">
                             <h5>{{ t('mainAgent') }}</h5>
-                            <el-select 
+                            <el-select :persistent="false" 
                               v-model="mainAgent"
                               @change="changeMainAgent">
                               <el-option
@@ -210,7 +210,7 @@
                 </el-tabs>
 
                 <!-- 智能体编辑对话框 (保持原样，放在 tabs 外面但在页面内) -->
-                <el-dialog append-to-body v-model="showAgentForm" :title="editingAgent ? t('editAgent') : t('addAgent')" width="80%">
+                <el-dialog destroy-on-close append-to-body v-model="showAgentForm" :title="editingAgent ? t('editAgent') : t('addAgent')" width="80%">
                   <el-form label-position="top">
                     <el-form-item :label="t('agentName')" required>
                       <el-input v-model="newAgent.name" :placeholder="t('agentNamePlaceholder')"/>
@@ -329,7 +329,7 @@
                   </div>
                 </div>
                 <!-- 添加扩展对话框 -->
-                <el-dialog append-to-body
+                <el-dialog destroy-on-close append-to-body
                   v-model="showExtensionForm"
                   :title="t('addNewExtension')"
                   width="80%"
@@ -513,7 +513,7 @@
                       </el-form-item>
                       <!-- 在index.html的API配置区块内添加 -->
                       <el-form-item :label="t('exampleLanguage')" class="form-item-align" label-position="top">
-                        <el-select
+                        <el-select :persistent="false"
                           v-model="selectedCodeLang"
                           @change="autoSaveSettings"
                           class="full-width-input"

@@ -237,10 +237,10 @@
           </div>
 
           <!-- 万能智能体配置弹窗 -->
-          <el-dialog append-to-body v-model="showOmniAgentDialog" :title="t('omniAgentConfig')" width="80%">
+          <el-dialog destroy-on-close append-to-body v-model="showOmniAgentDialog" :title="t('omniAgentConfig')" width="80%">
             <el-form label-position="top">
               <el-form-item :label="t('CLIEngine')">
-                <el-select v-model="CLISettings.engine" class="full-width">
+                <el-select :persistent="false" v-model="CLISettings.engine" class="full-width">
                   <el-option :label="t('localEnvironment')" value="local"></el-option>
                   <el-option :label="t('dockerSandbox')" value="ds"></el-option>
                   <el-option :label="t('ACPProtocol') || 'ACP Protocol'" value="acp" ></el-option>

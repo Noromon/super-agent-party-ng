@@ -126,7 +126,7 @@
                 <div v-if="imageFiles.length === 0" class="no-Images">
                   <el-empty :description="t('noImages')" />
                 </div>
-                <el-dialog append-to-body
+                <el-dialog destroy-on-close append-to-body
                   v-model="previewVisible"
                   :title="t('preview')"
                   class="image-preview-dialog"
