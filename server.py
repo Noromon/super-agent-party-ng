@@ -1131,6 +1131,71 @@ async def auth_guard(request: Request, call_next):
                                 content={"error": {"message": "missing or invalid session token"}})
     return await call_next(request)
 
+# ── S120(上游 e03cedb3) 前端静态资源内容版本号注入 ────────────────────────────
+# 原理：HTML 始终 no-cache（每次重新校验），其中引用的 js/css/图片 统一改写为
+#       "path.ext?v=<内容md5前8位>"。文件没变 → hash 不变 → URL 不变 → 缓存命中秒开；
+#       文件变了 → hash 变 → URL 变 → 旧缓存自动作废 → 必然加载新代码（无需强刷）。
+# 配套前端 static/sw.js（sap-cache-v2）对带 ?v= 的资源采用 cache-first。
+_ASSET_VERSION_CACHE = {}   # 文件绝对路径 -> (mtime_ns, hash)
+_ASSET_VERSION_RE = re.compile(r'(src|href)="([^"]+?\.(?:css|js|png|jpe?g|svg|gif|webp|ico|woff2?|ttf|eot|mp4|webm))([^"]*)"')
+
+
+def _asset_version_hash(base_dir, url):
+    if url.startswith(('http:', 'https:', '//', 'data:')):
+        return ''
+    clean = url.split('?', 1)[0].lstrip('/')
+    if not clean:
+        return ''
+    fp = os.path.normpath(os.path.join(base_dir, clean.replace('/', os.sep)))
+    if not fp.startswith(os.path.normpath(base_dir) + os.sep):
+        return ''
+    try:
+        if not os.path.isfile(fp):
+            return ''
+        st = os.stat(fp)
+    except OSError:
+        return ''
+    cached = _ASSET_VERSION_CACHE.get(fp)
+    if cached and cached[0] == st.st_mtime_ns:
+        return cached[1]
+    try:
+        with open(fp, 'rb') as f:
+            h = hashlib.md5(f.read()).hexdigest()[:8]
+    except OSError:
+        return ''
+    _ASSET_VERSION_CACHE[fp] = (st.st_mtime_ns, h)
+    return h
+
+
+@app.middleware("http")
+async def inject_asset_versions(request: Request, call_next):
+    response = await call_next(request)
+    ctype = response.headers.get("content-type", "")
+    if "text/html" not in ctype:
+        return response
+    # 扩展/上传/临时/模型等挂载点下的 HTML 不做版本化处理
+    if request.url.path.startswith(("/ext", "/uploaded_files", "/tool_temp", "/vrm", "/tha_models")):
+        return response
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+    body_str = body.decode("utf-8")
+    base_dir = os.path.join(base_path, "static")
+
+    def _repl(m):
+        url = m.group(2)
+        h = _asset_version_hash(base_dir, url)
+        if not h:
+            return m.group(0)
+        sep = '&' if '?' in m.group(3) else '?'
+        return f'{m.group(1)}="{url}{sep}v={h}"'
+
+    new_str = _ASSET_VERSION_RE.sub(_repl, body_str)
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    headers["Cache-Control"] = "no-cache"
+    return HTMLResponse(content=new_str, status_code=response.status_code, headers=headers)
+
 @app.get("/session_token")
 async def session_token(request: Request):
     # Same-origin bootstrap: browser pages fetch this once; the Lax cookie then
