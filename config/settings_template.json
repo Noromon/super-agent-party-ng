@@ -24,7 +24,12 @@
       "proxyMode": "system",
       "isChinaProxy": false,
       "enableShortcuts": true,
-    "contentSafety": false
+    "contentSafety": false,
+      "fontScale": 1,
+      "codeFontScale": 1,
+      "customCSS": "",
+      "backgroundURL": "",
+      "bgHistoryList": []
     },
     "mainAgent":"super-model",
     "mcpServers": {},

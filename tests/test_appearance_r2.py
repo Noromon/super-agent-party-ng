@@ -1,0 +1,159 @@
+"""R2-1 外观包（A14）落位守卫：模板/JS/CSS/preload/settings/i18n 锚点。
+
+背景：S122b/S124 教训——渲染层改动必须可自证。外观包涉及
+system 页模板、renderer watch/computed、preload zoom 通道、
+独立 appearance.css（styles.css 棘轮已满），逐项钉桩。
+"""
+import io
+import json
+import os
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _read(*parts):
+    with io.open(os.path.join(ROOT, *parts), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_system_page_has_appearance_sections():
+    tpl = _read("static", "templates", "page_system.html")
+    for needle in (
+        "backgroundImage",
+        'ref="bgImageInput"',
+        "handleBgUpload",
+        "systemSettings.bgHistoryList",
+        "deleteBgHistory",
+        "customCSS",
+        "custom-css-textarea",
+        "fontPxModel",
+        "fontSizeOptions",
+        "resetFontScale",
+        "codeFontPxModel",
+        "codeFontSizeOptions",
+        "resetCodeFontScale",
+        "saveBgDialogVisible",
+        "confirmSaveBg",
+    ):
+        assert needle in tpl, f"page_system.html missing: {needle}"
+
+
+def test_system_page_free_of_v_memo():
+    # S124 红线：system 页历史上虽非套件四页，外观 section 同样禁止引入 v-memo
+    tpl = _read("static", "templates", "page_system.html")
+    assert "v-memo" not in tpl
+
+
+def test_renderer_appearance_watches_and_computed():
+    rjs = _read("static", "js", "renderer.js")
+    for needle in (
+        "'systemSettings.backgroundURL':",
+        "'systemSettings.customCSS':",
+        "'systemSettings.fontScale':",
+        "'systemSettings.codeFontScale':",
+        "has-custom-bg",
+        "custom-css-injection",
+        "setZoomFactor",
+        "--app-zoom",
+        "--code-zoom",
+        "currentFontPx()",
+        "currentCodeFontPx()",
+        "fontPxModel:",
+        "codeFontPxModel:",
+        "fontSizeOptions()",
+        "codeFontSizeOptions()",
+        "build=S125",
+    ):
+        assert needle in rjs, f"renderer.js missing: {needle}"
+
+
+def test_appearance_css_registered_and_core_rules():
+    css = _read("static", "css", "appearance.css")
+    for needle in (
+        "--app-zoom",
+        "--code-zoom",
+        "pre.code-block",
+        "calc(var(--code-zoom, 1) / var(--app-zoom, 1))",
+        "body.has-custom-bg",
+        ".font-size-row",
+        ".custom-css-textarea",
+    ):
+        assert needle in css, f"appearance.css missing: {needle}"
+    idx = _read("static", "index.html")
+    assert 'href="css/appearance.css"' in idx
+    assert 'src="js/data/70_appearance.js"' in idx
+    assert 'src="js/methods/87_appearance.js"' in idx
+
+
+def test_preload_zoom_channel():
+    pre = _read("static", "js", "preload.js")
+    assert "webFrame" in pre
+    assert "setZoomFactor" in pre
+    assert "getZoomFactor" in pre
+
+
+def test_methods_and_data_appearance_shards():
+    mjs = _read("static", "js", "methods", "87_appearance.js")
+    for needle in (
+        "triggerBgUpload",
+        "handleBgUpload",
+        "clearBgImage",
+        "openSaveBgDialog",
+        "confirmSaveBg",
+        "handleBgHistorySelect",
+        "deleteBgHistory",
+        "handleFontScaleChange",
+        "resetFontScale",
+        "handleCodeFontScaleChange",
+        "resetCodeFontScale",
+        "/load_file",
+    ):
+        assert needle in mjs, f"87_appearance.js missing: {needle}"
+    djs = _read("static", "js", "data", "70_appearance.js")
+    assert "saveBgDialogVisible" in djs and "newBgName" in djs
+    b = _read("static", "js", "data", "20_brain_settings.js")
+    for needle in ("fontScale: 1", "codeFontScale: 1", "customCSS: ''", "backgroundURL: ''", "bgHistoryList: []"):
+        assert needle in b, f"20_brain_settings.js missing: {needle}"
+
+
+def test_settings_template_default_keys():
+    st = json.loads(_read("config", "settings_template.json"))
+    ss = st.get("systemSettings", {})
+    assert ss.get("fontScale") == 1
+    assert ss.get("codeFontScale") == 1
+    assert ss.get("customCSS") == ""
+    assert ss.get("backgroundURL") == ""
+    assert ss.get("bgHistoryList") == []
+
+
+APPEARANCE_I18N_KEYS = [
+    "uploadFailed",
+    "backgroundImage",
+    "saveBgImage",
+    "saveBgImageTitle",
+    "clearBgImage",
+    "changeBgImage",
+    "clickToUploadBg",
+    "recommendBgRatio",
+    "selectHistoryBg",
+    "noBackgroundImage",
+    "bgImageNamePlaceholder",
+    "noBgToSave",
+    "pleaseInputBgName",
+    "bgSavedSuccess",
+    "bgRemovedSuccess",
+    "customCSS",
+    "customCSSDesc",
+    "customCSSPlaceholder",
+    "fontSize",
+    "codeFontSize",
+]
+
+
+def test_appearance_i18n_parity():
+    zh = _read("static", "js", "locales", "zh-CN.js")
+    en = _read("static", "js", "locales", "en-US.js")
+    for key in APPEARANCE_I18N_KEYS:
+        quoted = f"'{key}'"
+        assert quoted in zh, f"zh-CN.js missing i18n key: {key}"
+        assert quoted in en, f"en-US.js missing i18n key: {key}"

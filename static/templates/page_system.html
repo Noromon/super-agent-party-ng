@@ -87,6 +87,204 @@
               </div>
             </div>
             
+            <!-- ===== R2-1 外观：对话背景图设置 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-image"></i>
+                  </el-icon>
+                  {{ t('backgroundImage') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <!-- 隐藏的文件输入控件 -->
+                <input
+                  type="file"
+                  ref="bgImageInput"
+                  accept=".png, .jpg, .jpeg, .gif, .webp, .bmp, image/png, image/jpeg, image/gif, image/webp, image/bmp"
+                  style="display: none"
+                  @change="handleBgUpload"
+                />
+
+                <!-- 16:9 宽屏交互区域 -->
+                <div style="width: 100%;">
+
+                  <!-- 状态 A：有图片时的预览 -->
+                  <div
+                    v-if="systemSettings.backgroundURL"
+                    style="width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--el-border-color-lighter); overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); background-color: var(--el-fill-color-light); position: relative;"
+                  >
+                    <img
+                      :src="systemSettings.backgroundURL"
+                      style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                      alt="Background Preview"
+                    />
+
+                    <!-- 悬浮操作按钮组 -->
+                    <div style="position: absolute; top: 10px; right: 10px; display: flex; gap: 8px;">
+                      <div
+                        style="background: rgba(64, 158, 255, 0.85); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; backdrop-filter: blur(4px); display: flex; align-items: center; transition: transform 0.2s;"
+                        @mouseover="$event.currentTarget.style.transform='scale(1.05)'"
+                        @mouseleave="$event.currentTarget.style.transform='scale(1)'"
+                        @click.stop="openSaveBgDialog"
+                      >
+                        <i class="fa-solid fa-bookmark" style="margin-right: 4px;"></i>{{ t('saveBgImage') || '保存' }}
+                      </div>
+
+                      <div
+                        style="background: rgba(245, 108, 108, 0.85); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; backdrop-filter: blur(4px); display: flex; align-items: center; transition: transform 0.2s;"
+                        @mouseover="$event.currentTarget.style.transform='scale(1.05)'"
+                        @mouseleave="$event.currentTarget.style.transform='scale(1)'"
+                        @click.stop="clearBgImage"
+                      >
+                        <i class="fa-solid fa-trash-can" style="margin-right: 4px;"></i>{{ t('clearBgImage') }}
+                      </div>
+
+                      <div
+                        style="background: rgba(0, 0, 0, 0.6); color: white; padding: 6px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; backdrop-filter: blur(4px); display: flex; align-items: center; transition: transform 0.2s;"
+                        @mouseover="$event.currentTarget.style.transform='scale(1.05)'"
+                        @mouseleave="$event.currentTarget.style.transform='scale(1)'"
+                        @click.stop="triggerBgUpload"
+                      >
+                        <i class="fa-solid fa-camera" style="margin-right: 4px;"></i>{{ t('changeBgImage') }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 状态 B：没图片时的虚线占位符 -->
+                  <div
+                    v-else
+                    style="width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 2px dashed var(--el-border-color-light); display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: var(--el-fill-color-lighter); color: var(--el-text-color-placeholder); cursor: pointer; transition: all 0.2s;"
+                    @mouseover="$event.currentTarget.style.borderColor='var(--el-color-primary)'; $event.currentTarget.style.color='var(--el-color-primary)'"
+                    @mouseleave="$event.currentTarget.style.borderColor='var(--el-border-color-light)'; $event.currentTarget.style.color='var(--el-text-color-placeholder)'"
+                    @click="triggerBgUpload"
+                  >
+                    <el-icon style="font-size: 36px; margin-bottom: 12px;"><i class="fa-regular fa-image"></i></el-icon>
+                    <span style="font-size: 14px; font-weight: 500;">{{ t('clickToUploadBg') }}</span>
+                    <span style="font-size: 12px; opacity: 0.7; margin-top: 4px;">{{ t('recommendBgRatio') }}</span>
+                  </div>
+                </div>
+
+                <!-- 历史背景图选择下拉框 -->
+                <el-form-item class="form-item-align" style="margin-top: 16px; margin-bottom: 0;">
+                  <el-select
+                    :persistent="false"
+                    v-model="systemSettings.backgroundURL"
+                    @change="handleBgHistorySelect"
+                    class="full-width-input"
+                    :placeholder="t('selectHistoryBg') || '选择或切换历史背景图'"
+                  >
+                    <el-option :label="t('noBackgroundImage') || '无背景图片'" value=""></el-option>
+                    <el-option
+                      v-for="bg in systemSettings.bgHistoryList"
+                      :key="bg.url"
+                      :label="bg.name"
+                      :value="bg.url">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>{{ bg.name }}</span>
+                        <!-- 阻止冒泡，避免点击删除时触发下拉选项的选中 -->
+                        <i class="fa-solid fa-times" style="color: var(--el-color-danger); cursor: pointer; padding: 4px;" @click.stop="deleteBgHistory(bg.url)"></i>
+                      </div>
+                    </el-option>
+                  </el-select>
+                </el-form-item>
+
+              </div>
+            </div>
+
+            <!-- ===== R2-1 外观：CSS 注入设置 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-code"></i>
+                  </el-icon>
+                  {{ t('customCSS') || 'CSS 注入' }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('customCSSDesc') || '注入自定义 CSS 样式，可覆盖任意界面样式'" class="form-item-align">
+                  <el-input
+                    v-model="systemSettings.customCSS"
+                    type="textarea"
+                    :rows="8"
+                    :placeholder="t('customCSSPlaceholder') || '在此输入 CSS 代码...'"
+                    class="custom-css-textarea"
+                    @change="autoSaveSettings"
+                  ></el-input>
+                </el-form-item>
+              </div>
+            </div>
+
+            <!-- ===== R2-1 外观：全局字号 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-text-height"></i>
+                  </el-icon>
+                  {{ t('fontSize') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <div class="font-size-row">
+                    <el-select :persistent="false"
+                      v-model="fontPxModel"
+                      class="font-size-select">
+                      <el-option
+                        v-for="px in fontSizeOptions"
+                        :key="px"
+                        :label="px + ' px'"
+                        :value="px">
+                      </el-option>
+                    </el-select>
+                    <el-button
+                      class="font-size-reset"
+                      :title="t('reset')"
+                      @click.stop="resetFontScale">
+                      <i class="fa-solid fa-rotate-left"></i>
+                    </el-button>
+                  </div>
+                </el-form-item>
+              </div>
+            </div>
+
+            <!-- ===== R2-1 外观：代码字号 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-code"></i>
+                  </el-icon>
+                  {{ t('codeFontSize') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item class="form-item-align">
+                  <div class="font-size-row">
+                    <el-select :persistent="false"
+                      v-model="codeFontPxModel"
+                      class="font-size-select">
+                      <el-option
+                        v-for="px in codeFontSizeOptions"
+                        :key="px"
+                        :label="px + ' px'"
+                        :value="px">
+                      </el-option>
+                    </el-select>
+                    <el-button
+                      class="font-size-reset"
+                      :title="t('reset')"
+                      @click.stop="resetCodeFontScale">
+                      <i class="fa-solid fa-rotate-left"></i>
+                    </el-button>
+                  </div>
+                </el-form-item>
+              </div>
+            </div>
+
             <div class="tool-item" v-if="isElectron">
               <div class="tool-header">
                 <span>
@@ -251,5 +449,25 @@
                 <div style="font-size:12px; opacity:.65; margin-top:6px;">{{ t('dataGuardRestoreHint') }}</div>
               </div>
             </div>
+            <!-- R2-1 外观：保存背景图命名弹窗 -->
+            <el-dialog
+              v-model="saveBgDialogVisible"
+              :title="t('saveBgImageTitle') || '保存背景图'"
+              width="400px"
+              align-center
+              append-to-body>
+              <el-input
+                v-model="newBgName"
+                :placeholder="t('bgImageNamePlaceholder') || '请输入背景图名称 (如：赛博朋克城市)'"
+                clearable
+                @keyup.enter="confirmSaveBg"
+              ></el-input>
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="saveBgDialogVisible = false">{{ t('cancel') || '取消' }}</el-button>
+                  <el-button type="primary" @click="confirmSaveBg">{{ t('confirm') || '确定保存' }}</el-button>
+                </span>
+              </template>
+            </el-dialog>
           </el-form>
         </div>

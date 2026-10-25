@@ -42,7 +42,7 @@ KNOWN_MISSING_KEYS = {
     "openFolder", "pleaseCompleteForm", "pleaseConfigWorkspace", "readDirError",
     "refreshFailed", "removeFromGlobal", "removeFromProject", "resume",
     "selectVoice", "space", "success", "sync", "syncToGlobal",
-    "transcriptionFailed", "tts_started", "updateFailed", "uploadFailed",
+    "transcriptionFailed", "tts_started", "updateFailed",
     "webSpeechNotSupported",
 }
 

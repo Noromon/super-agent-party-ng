@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S124 loaded');
+console.warn('[Probe] renderer build=S125 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -1396,8 +1396,81 @@ const app = Vue.createApp({
       },
       immediate: true
     },
+    // ===== R2-1 外观包：背景图 / CSS 注入 / 全局与代码字号 =====
+    'systemSettings.backgroundURL': {
+      handler(newUrl) {
+        if (newUrl) {
+          document.body.style.backgroundImage = `url(${newUrl})`;
+          document.body.style.backgroundSize = 'cover';
+          document.body.style.backgroundPosition = 'center center';
+          document.body.style.backgroundAttachment = 'fixed';
+          document.body.classList.add('has-custom-bg');
+        } else {
+          document.body.style.backgroundImage = '';
+          document.body.classList.remove('has-custom-bg');
+        }
+      },
+      immediate: true
+    },
+    'systemSettings.customCSS': {
+      handler(css) {
+        let styleEl = document.getElementById('custom-css-injection');
+        if (css) {
+          if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'custom-css-injection';
+            document.head.appendChild(styleEl);
+          }
+          styleEl.textContent = css;
+        } else if (styleEl) {
+          styleEl.remove();
+        }
+      },
+      immediate: true
+    },
+    'systemSettings.fontScale': {
+      handler(newVal) {
+        const safe = Math.max(0.85, Math.min(1.5, Number(newVal) || 1));
+        if (this.isElectron && window.electronAPI?.setZoomFactor) {
+          try { window.electronAPI.setZoomFactor(safe); } catch (e) { document.documentElement.style.zoom = safe; }
+        } else {
+          document.documentElement.style.zoom = safe;
+        }
+        document.documentElement.style.setProperty('--app-zoom', String(safe));
+      },
+      immediate: true
+    },
+    'systemSettings.codeFontScale': {
+      handler(newVal) {
+        const safe = Math.max(0.83, Math.min(1.67, Number(newVal) || 1));
+        document.documentElement.style.setProperty('--code-zoom', String(safe));
+      },
+      immediate: true
+    },
   },
   computed: {
+
+    // ===== R2-1 外观包：字号 px <-> scale 换算（基准 14px / 12px） =====
+    currentFontPx() {
+      return Math.round((Number(this.systemSettings.fontScale) || 1) * 14);
+    },
+    currentCodeFontPx() {
+      return Math.round((Number(this.systemSettings.codeFontScale) || 1) * 12);
+    },
+    fontPxModel: {
+      get() { return this.currentFontPx; },
+      set(px) { this.handleFontScaleChange(px / 14); }
+    },
+    codeFontPxModel: {
+      get() { return this.currentCodeFontPx; },
+      set(px) { this.handleCodeFontScaleChange(px / 12); }
+    },
+    fontSizeOptions() {
+      return [12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+    },
+    codeFontSizeOptions() {
+      return [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    },
 
     // ✨ 新增：主页面扩展列表过滤逻辑 ✨
     filteredManageExtensions() {

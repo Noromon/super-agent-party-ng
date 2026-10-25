@@ -128,6 +128,11 @@ Object.assign(vue_data, {
       isChinaProxy: false,
     enableShortcuts: true,
       backupIncludeUploads: false,
+      fontScale: 1,
+      codeFontScale: 1,
+      customCSS: '',
+      backgroundURL: '',
+      bgHistoryList: [],
     },
 
     // --- 数据安全网（M4-lite 快照备份 UI）---
