@@ -6,6 +6,7 @@
                 <div 
                   v-for="tile in apiTiles" 
                   :key="tile.id"
+                  v-memo="[subMenu, tile.id === subMenu, currentLanguage]"
                   class="nav-item"
                   :class="{ active: subMenu === tile.id }"
                   @click="subMenu = tile.id">
@@ -162,7 +163,8 @@
                     <!-- 磁贴网格 -->
                     <div class="provider-grid">
                       <!-- 已有智能体 -->
-                      <div class="provider-card agent-card" v-for="agent in agents" :key="agent.id">
+                      <div class="provider-card agent-card" v-for="agent in agents" :key="agent.id"
+                           v-memo="[agent.id, agent.name, agent.system_prompt, currentLanguage]">
                         <div class="card-header">
                           <span></span>
                           <div class="card-actions">
@@ -294,7 +296,8 @@
 
                 <!-- 磁贴网格 -->
                 <div class="provider-grid">
-                  <div class="provider-card" v-for="extension in filteredManageExtensions" :key="extension.id">
+                  <div class="provider-card" v-for="extension in filteredManageExtensions" :key="extension.id"
+                       v-memo="[extension.id, extension.name, extension.author, extension.description, extension.version, extension.hasUpdate, currentLanguage]">
                     <div class="card-header">
                         <el-button type="primary" @click="switchExtension(extension);this.activeMenu = 'home';" circle :title="t('useExtension')">
                           <i class="fa-solid fa-play"></i>

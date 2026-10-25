@@ -446,3 +446,18 @@ def test_s121_raf_frame_probe():
     assert "raf frames=" in rd
     assert "__rafHandle" in rd
     assert "requestAnimationFrame(tick)" in rd
+
+
+# ===== S122: 设置页族风暴刀（tile-nav + provider-card 卡行 v-memo） =====
+
+def test_s122_suite_memos():
+    for f in ("page_api-group.html", "page_deploy-bot.html",
+              "page_model-config.html", "page_role.html"):
+        assert "v-memo=\"[subMenu, tile.id === subMenu, currentLanguage]\"" in _read("static/templates/" + f), f
+    mc = _read("static/templates/page_model-config.html")
+    assert "provider.models, index, currentLanguage]" in mc
+    ag = _read("static/templates/page_api-group.html")
+    assert "agent.system_prompt, currentLanguage]" in ag
+    assert "extension.hasUpdate, currentLanguage]" in ag
+    assert "memory.avatar, memory.providerId, currentLanguage]" in _read("static/templates/page_role.html")
+    assert "renderer build=S122" in _read("static/js/renderer.js")

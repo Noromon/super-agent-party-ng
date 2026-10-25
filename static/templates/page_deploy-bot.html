@@ -5,6 +5,8 @@
                     <div class="tile-nav">
                         <div 
                             v-for="tile in deployTiles" 
+                            :key="tile.id"
+                            v-memo="[subMenu, tile.id === subMenu, currentLanguage]"
                             class="nav-item"
                             :class="{ active: subMenu === tile.id }"
                             @click="subMenu = tile.id">
