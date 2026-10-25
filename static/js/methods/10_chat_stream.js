@@ -564,6 +564,11 @@ Object.assign(vue_methods, {
             this._markReasoningDone(currentMsg); // S93(F2)
             currentMsg.generationFinished = true;
 
+            // R2-5：生成完毕系统通知（Electron 且窗口未聚焦且开关开启）
+            if (this.isElectron && this.systemSettings.enableNotifications && !document.hasFocus()) {
+              window.electronAPI?.showNotification('Super Agent Party', this.t('aiGenerationComplete'));
+            }
+
             // S81(A8)：流式收尾不再手动 MathJax typeset——KaTeX/texmath 已在渲染管线内排版
 
             if (this.ttsSettings.enabled) {

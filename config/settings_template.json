@@ -30,7 +30,8 @@
       "customCSS": "",
       "backgroundURL": "",
       "bgHistoryList": [],
-      "autoCollapseInput": false
+      "autoCollapseInput": false,
+      "enableNotifications": false
     },
     "mainAgent":"super-model",
     "mcpServers": {},

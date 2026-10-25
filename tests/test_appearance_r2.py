@@ -193,6 +193,28 @@ def test_auto_collapse_support_assets():
     assert re.search(r"build=S12[6-9]|build=S1[3-9]\d|build=S[2-9]\d\d", rjs)
 
 
+def test_completion_notification_r25():
+    # R2-5：生成完毕系统通知（Electron IPC 链 + 流尾挂点 + 开关 + 默认关）
+    mjs = _read("main.js")
+    assert "ipcMain.handle('show-notification'" in mjs
+    assert "new Notification({ title, body }).show()" in mjs
+    pre = _read("static", "js", "preload.js")
+    assert "invoke('show-notification'" in pre
+    st = _read("static", "js", "methods", "10_chat_stream.js")
+    assert "enableNotifications && !document.hasFocus()" in st
+    assert "electronAPI?.showNotification" in st
+    tpl = _read("static", "templates", "page_system.html")
+    assert "enableNotifications" in tpl and "enableNotificationsDesc" in tpl
+    b = _read("static", "js", "data", "20_brain_settings.js")
+    assert "enableNotifications: false" in b
+    stj = json.loads(_read("config", "settings_template.json"))
+    assert stj["systemSettings"].get("enableNotifications") is False
+    zh = _read("static", "js", "locales", "zh-CN.js")
+    en = _read("static", "js", "locales", "en-US.js")
+    for key in ("enableNotifications", "enableNotificationsDesc", "aiGenerationComplete"):
+        assert f"'{key}'" in zh and f"'{key}'" in en, key
+
+
 def test_appearance_i18n_parity():
     zh = _read("static", "js", "locales", "zh-CN.js")
     en = _read("static", "js", "locales", "en-US.js")

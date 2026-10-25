@@ -825,6 +825,12 @@ function setupDownloadListener(win) {
 
 
 // 处理前端发来的控制指令 (暂停/继续/取消)
+// R2-5：AI 生成完毕系统通知（Electron 后台提醒，与上游同名通道）
+ipcMain.handle('show-notification', (e, title, body) => {
+  const { Notification } = require('electron');
+  new Notification({ title, body }).show();
+});
+
 ipcMain.handle('download-control', (event, { id, action }) => {
   // ★ 同样使用顶部的 activeDownloads
   const item = activeDownloads.get(id);

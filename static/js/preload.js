@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     try { return webFrame.getZoomFactor(); } catch (e) { return 1; }
   },
 
+  // 生成完毕系统通知（R2-5，与上游同名通道；勿与页内全局 showNotification 混淆）
+  showNotification: (title, body) => ipcRenderer.invoke('show-notification', title, body),
+
   // 环境检测
   isElectron: true,
 

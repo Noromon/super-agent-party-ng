@@ -305,6 +305,26 @@
               </div>
             </div>
 
+            <!-- ===== R2-5 生成完毕系统通知 ===== -->
+            <div class="tool-item" v-if="isElectron">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-bell"></i>
+                  </el-icon>
+                  {{ t('enableNotifications') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('enableNotificationsDesc')" class="form-item-align" label-position="left">
+                  <el-switch
+                    v-model="systemSettings.enableNotifications"
+                    @change="autoSaveSettings">
+                  </el-switch>
+                </el-form-item>
+              </div>
+            </div>
+
             <div class="tool-item" v-if="isElectron">
               <div class="tool-header">
                 <span>
