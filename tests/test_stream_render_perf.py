@@ -284,10 +284,21 @@ def test_s109_native_title_and_backlog_mode():
         assert not _re.search(r"<el-tooltip[^>]*>\s*<el-button", s), tpl
     assert ':title="t(\'copy\')"' in _read("static/templates/page_chat_main.html")
     rd = _read("static/js/renderer.js")
-    assert "loop-suspect" in rd and "renderer build=S109" in rd
+    assert "loop-suspect" in rd and "renderer build=S1" in rd
     cs = _read("static/js/methods/10_chat_stream.js")
     assert "streamBacklog()" in cs and "return 240" in cs
     assert "_streamRecvChars = (this._streamRecvChars || 0) + delta.content.length" in cs
     rs = _read("static/js/methods/13_resume_stream.js")
     assert "? 300 : 120" in rs and "? 240 : 80" in rs
     assert "this.streamFlushWait()" in rs and "this.streamFlushWait()" in cs
+
+
+# ===== S110: storage 页根 v-if 销毁（隐藏页风暴宿主）+ profile hold 120s =====
+
+def test_s110_storage_page_destroy_when_hidden():
+    st = _read("static/templates/page_storage.html")
+    assert "<div v-if=\"activeMenu === 'storage'\" class=\"page storage-container\">" in st
+    assert "v-show=\"activeMenu === 'storage'\"" not in st
+    mj = _read("main.js")
+    assert "startProfile({ hold: 120000 })" in mj
+    assert "renderer build=S110" in _read("static/js/renderer.js")

@@ -473,7 +473,7 @@ function attachFreezeProbe(win) {
   const startStreamProfile = () => {
     if (streamStopTimer) { clearTimeout(streamStopTimer); streamStopTimer = null }
     if (profFile) return
-    startProfile({ hold: 180000 })
+    startProfile({ hold: 120000 })
   }
   const scheduleStreamProfileStop = () => {
     if (streamStopTimer) clearTimeout(streamStopTimer)
