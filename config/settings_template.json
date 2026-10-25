@@ -29,7 +29,8 @@
       "codeFontScale": 1,
       "customCSS": "",
       "backgroundURL": "",
-      "bgHistoryList": []
+      "bgHistoryList": [],
+      "autoCollapseInput": false
     },
     "mainAgent":"super-model",
     "mcpServers": {},

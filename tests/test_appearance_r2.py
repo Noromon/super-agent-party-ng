@@ -62,7 +62,7 @@ def test_renderer_appearance_watches_and_computed():
         "codeFontPxModel:",
         "fontSizeOptions()",
         "codeFontSizeOptions()",
-        "build=S125",
+        "build=S12",
     ):
         assert needle in rjs, f"renderer.js missing: {needle}"
 
@@ -147,7 +147,50 @@ APPEARANCE_I18N_KEYS = [
     "customCSSPlaceholder",
     "fontSize",
     "codeFontSize",
+    "autoCollapseInput",
+    "autoCollapseInputDesc",
 ]
+
+
+def test_auto_collapse_composer_sites():
+    # R2-4：三页 composer 折叠消费端 + memo 键扩展（扩键预批、禁加 memo）
+    for page in ("page_home.html", "page_chat_main.html"):
+        tpl = _read("static", "templates", page)
+        assert "systemSettings.autoCollapseInput, isChatInputActive]" in tpl, page
+        assert "!isChatInputActive && !isAssistantMode && !isMobile) ? 1 :" in tpl, page
+        assert '@focus="onChatInputFocus"' in tpl and '@blur="onChatInputBlur"' in tpl, page
+        assert 'v-show="!systemSettings.autoCollapseInput || isChatInputActive || isAssistantMode || isMobile"' in tpl, page
+        assert "compact-status-pill" in tpl, page
+    ab = _read("static", "templates", "page_ai-browser.html")
+    assert "systemSettings.autoCollapseInput, isChatInputActive]" in ab
+    assert 'v-show="!systemSettings.autoCollapseInput || isChatInputActive"' in ab
+    assert '@focus="onChatInputFocus"' in ab
+    assert "compact-status-pill" in ab
+    # 老 memo 站点必须仍是原站点数：三页各只有一处 composer memo 键扩展
+    for page in ("page_home.html", "page_chat_main.html", "page_ai-browser.html"):
+        tpl = _read("static", "templates", page)
+        assert tpl.count("systemSettings.autoCollapseInput, isChatInputActive]") == 1, page
+
+
+def test_auto_collapse_support_assets():
+    sysp = _read("static", "templates", "page_system.html")
+    assert "autoCollapseInput" in sysp and "autoCollapseInputDesc" in sysp
+    d = _read("static", "js", "data", "70_appearance.js")
+    assert "isChatInputActive: false" in d
+    b = _read("static", "js", "data", "20_brain_settings.js")
+    assert "autoCollapseInput: false" in b
+    m = _read("static", "js", "methods", "87_appearance.js")
+    assert "onChatInputFocus()" in m and "onChatInputBlur()" in m
+    assert "unified-input-wrapper" in m  # blur 延迟判定的容器守卫
+    css = _read("static", "css", "appearance.css")
+    assert ".compact-status-pill" in css
+    assert "min-height 0.25s" in css
+    st = json.loads(_read("config", "settings_template.json"))
+    assert st["systemSettings"].get("autoCollapseInput") is False
+    rjs = _read("static", "js", "renderer.js")
+    # 戳必须 ≥S126（每轮 UI 改动升戳纪律；前缀断言避免下轮升戳即红）
+    import re
+    assert re.search(r"build=S12[6-9]|build=S1[3-9]\d|build=S[2-9]\d\d", rjs)
 
 
 def test_appearance_i18n_parity():

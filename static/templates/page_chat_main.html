@@ -776,12 +776,14 @@
                       <!-- 键盘输入区 -->
                       <el-input
                         v-show="!isPttMode"
-                        v-memo="[isPttMode, userInput, isMobile, isInputExpanded, uiRev]"
+                        v-memo="[isPttMode, userInput, isMobile, isInputExpanded, uiRev, systemSettings.autoCollapseInput, isChatInputActive]"
                         v-model="userInput"
                         type="textarea"
-                        :rows="isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4)"
+                        :rows="(systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile) ? 1 : (isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4))"
                         :placeholder="t('inputMessage')"
                         resize="none"
+                        @focus="onChatInputFocus"
+                        @blur="onChatInputBlur"
                         @keydown="isInputting=true;handleKeyDown($event)" 
                         @keyup="isInputting=false"
                         @paste.native="handleInputPaste"
@@ -813,7 +815,7 @@
                           </div>
                         </div>
 
-                      <div class="input-status-bar">
+                      <div class="input-status-bar" v-show="!systemSettings.autoCollapseInput || isChatInputActive || isAssistantMode || isMobile">
                         
                         <!-- ✨ 2. 语音/键盘切换按钮：始终显示（或者你可以加 v-if="isMobile" 只让手机显示） -->
                         <div class="voice-toggle-btn" @click="isPttMode = !isPttMode" v-if="isMobile">
@@ -894,6 +896,18 @@
                             </el-dropdown>
                         </template>
 
+                      </div>
+
+                      <!-- R2-4 折叠态：折叠时在原状态栏位置显示紧凑入口 -->
+                      <div class="input-status-bar" v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile">
+                        <div class="status-pill compact-status-pill" @click.stop="showModelDialog = true" :title="t('clickToSwitchModel')">
+                          <i class="fa-solid fa-microchip"></i>
+                          <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                        </div>
+                        <div class="status-pill compact-status-pill" v-if="currentViewName" @click.stop="openExtensionsDialog" :title="t('clickToSwitchExtensions')">
+                          <i class="fa-solid fa-puzzle-piece"></i>
+                          <span class="pill-text">{{ currentViewName }}</span>
+                        </div>
                       </div>
 
                       <!-- 拖拽时的遮罩提示（可选，提升体验） -->

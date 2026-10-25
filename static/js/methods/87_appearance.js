@@ -159,4 +159,20 @@ Object.assign(vue_methods, {
     resetCodeFontScale() {
       this.handleCodeFontScaleChange(1);
     },
+
+    // R2-4 输入框焦点状态（自动折叠判定源）
+    onChatInputFocus() {
+      this.isChatInputActive = true;
+    },
+    // textarea 失焦后延迟判定，给 pill / dialog 的 click 留出落点时间
+    onChatInputBlur() {
+      setTimeout(() => {
+        const active = document.activeElement;
+        const wrappers = document.querySelectorAll('.unified-input-wrapper');
+        for (const w of wrappers) {
+          if (w.contains(active)) return;
+        }
+        this.isChatInputActive = false;
+      }, 200);
+    },
 });

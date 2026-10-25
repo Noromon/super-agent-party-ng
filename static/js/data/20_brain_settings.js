@@ -133,6 +133,7 @@ Object.assign(vue_data, {
       customCSS: '',
       backgroundURL: '',
       bgHistoryList: [],
+      autoCollapseInput: false,
     },
 
     // --- 数据安全网（M4-lite 快照备份 UI）---

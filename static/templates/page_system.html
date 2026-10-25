@@ -285,6 +285,26 @@
               </div>
             </div>
 
+            <!-- ===== R2-4 外观：自动折叠输入框 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-compress"></i>
+                  </el-icon>
+                  {{ t('autoCollapseInput') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('autoCollapseInputDesc')" class="form-item-align" label-position="left">
+                  <el-switch
+                    v-model="systemSettings.autoCollapseInput"
+                    @change="autoSaveSettings">
+                  </el-switch>
+                </el-form-item>
+              </div>
+            </div>
+
             <div class="tool-item" v-if="isElectron">
               <div class="tool-header">
                 <span>

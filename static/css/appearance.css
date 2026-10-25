@@ -332,3 +332,24 @@ body.has-custom-bg #app {
   position: relative;
   z-index: 1;
 }
+
+/* ===== R2-4 自动折叠输入框 ===== */
+.unified-input-wrapper .input-status-bar .compact-status-pill {
+  height: 32px;
+  max-width: 200px;
+  font-size: 12px;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.unified-input-wrapper .input-status-bar .compact-status-pill .pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* textarea 高度（1↔多行）切换的平滑过渡 */
+.unified-input-wrapper .input-box-transparent .el-textarea__inner {
+  transition:
+    min-height 0.25s var(--ease-out-smooth),
+    height 0.25s var(--ease-out-smooth);
+}

@@ -3,4 +3,5 @@
 Object.assign(vue_data, {
     saveBgDialogVisible: false,
     newBgName: '',
+    isChatInputActive: false,
 });

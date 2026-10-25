@@ -499,19 +499,21 @@
                           @drop.prevent="handleInputDrop"
                         >
                           <el-input
-                            v-memo="[userInput, isMobile, isInputExpanded, uiRev]"
+                            v-memo="[userInput, isMobile, isInputExpanded, uiRev, systemSettings.autoCollapseInput, isChatInputActive]"
                             v-model="userInput"
                             type="textarea"
-                            :rows="isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4)"
+                            :rows="(systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile) ? 1 : (isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4))"
                             :placeholder="t('inputMessage')"
                             resize="none"
+                            @focus="onChatInputFocus"
+                            @blur="onChatInputBlur"
                             @keydown="isInputting=true;handleKeyDown($event)" 
                             @keyup="isInputting=false"
                             @paste.native="handleInputPaste"
                             class="input-box-transparent">
                           </el-input>
                           
-                          <div class="input-status-bar" v-if="!isAssistantMode && !isMobile">
+                          <div class="input-status-bar" v-if="!isAssistantMode && !isMobile" v-show="!systemSettings.autoCollapseInput || isChatInputActive">
                             
                             <!-- 模型指示器 -->
                               <div class="status-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
@@ -519,6 +521,14 @@
                                 <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
                               </div>
 
+                          </div>
+
+                          <!-- R2-4 折叠态：折叠时在原状态栏位置显示紧凑入口 -->
+                          <div class="input-status-bar" v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile">
+                            <div class="status-pill compact-status-pill" @click.stop="showModelDialog = true" :title="t('clickToSwitchModel')">
+                              <i class="fa-solid fa-microchip"></i>
+                              <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                            </div>
                           </div>
 
                           <!-- 拖拽时的遮罩提示（可选，提升体验） -->
