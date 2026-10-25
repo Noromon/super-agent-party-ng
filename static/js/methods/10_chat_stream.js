@@ -722,7 +722,7 @@ Object.assign(vue_methods, {
             if (targetBlock) {
                 targetBlock.type = 'tool_result';
                 targetBlock.name = action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`;
-                targetBlock.content = ''; 
+                this._setResultDisplay(targetBlock, '');
             }
         }
 
@@ -750,7 +750,7 @@ Object.assign(vue_methods, {
                 if (targetBlock) {
                     targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
                     targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
-                    targetBlock.content = this.smartMergeTerminal('', resultText); 
+                    this._setResultDisplay(targetBlock, this.smartMergeTerminal('', resultText)); 
                 }
 
                 // 2. AI 历史：直接存入清理后的版本
@@ -771,7 +771,7 @@ Object.assign(vue_methods, {
             if (targetBlock) {
                 targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
                 targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
-                targetBlock.content = resultText;
+                this._setResultDisplay(targetBlock, resultText);
             }
 
             const blockClass = action === 'deny' ? 'type-error' : 'type-result';

@@ -10,6 +10,11 @@
 //                      （翻译/quick-gen/browser-TTS/dashboard；stripDataPrefix 开关）
 "use strict";
 
+// S101：宏任务泵让位。工具执行期积压的 SSE 会在一次 reader.read() 里作为巨型
+// chunk 返回，逐帧处理全程微任务链不归还泵 → 输入/绘制饿死数十秒
+// （stucked-log 实锤 38.5s LongFrame=read.then）。每 24 帧让位一次。
+const yieldToPump = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 /**
  * 标准 SSE 帧迭代。
  * @param {Response} response fetch 响应
@@ -24,6 +29,7 @@ async function iterateSse(response, onFrame, opts = {}) {
   let serverDone = false;
 
   const flushEvents = async () => {
+    let framesSinceYield = 0;
     while (buffer.includes("\n\n")) {
       const idx = buffer.indexOf("\n\n");
       const eventData = buffer.slice(0, idx);
@@ -39,6 +45,7 @@ async function iterateSse(response, onFrame, opts = {}) {
         continue; // 拉平：解析失败吞掉继续
       }
       await onFrame(parsed);
+      if (++framesSinceYield >= 24) { framesSinceYield = 0; await yieldToPump(); }
     }
     return false;
   };
@@ -105,7 +112,11 @@ async function iterateNdjsonLines(response, onFrame, opts = {}) {
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop(); // 末行可能半截，留到下轮
-    for (const ln of lines) await handleLine(ln);
+    let framesSinceYield = 0;
+    for (const ln of lines) {
+      await handleLine(ln);
+      if (++framesSinceYield >= 24) { framesSinceYield = 0; await yieldToPump(); }
+    }
   }
   decoder.decode();
   // 拉平：done 后冲刷残行（原 quick-gen 有、翻译类没有 → 全员补齐）

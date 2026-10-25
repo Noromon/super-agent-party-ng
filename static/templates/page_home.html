@@ -303,7 +303,7 @@
                                         <!-- 工具结果 -->
                                         <div v-else-if="block.type === 'tool_result'" class="sap-process-block type-result">
                                             <div class="sp-header"><i class="fa-solid fa-check"></i> {{ block.name }}</div>
-                                            <pre class="sp-content sp-code">{{ block.content ? (typeof block.content === 'string' ? block.content.replace(/\\n/g, '\n').replace(/\\"/g, '"') : block.content) : '' }}</pre>
+                                            <pre class="sp-content sp-code">{{ block.displayContent ?? block.content ?? '' }}</pre>
                                         </div>
 
                                         <!-- 审批 -->
@@ -323,7 +323,7 @@
                                         <!-- 错误 -->
                                         <div v-else-if="block.type === 'error'" class="sap-process-block type-error" :id="'tool-error-'+block.id">
                                             <div class="sp-header"><i class="fa-solid fa-xmark"></i> {{ block.name }}</div>
-                                            <pre class="sp-content sp-code">{{ block.content ? (typeof block.content === 'string' ? block.content.replace(/\\n/g, '\n').replace(/\\"/g, '"') : block.content) : '' }}</pre>
+                                            <pre class="sp-content sp-code">{{ block.displayContent ?? block.content ?? '' }}</pre>
                                         </div>
                                     </template>
 

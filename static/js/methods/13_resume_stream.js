@@ -251,7 +251,7 @@ Object.assign(vue_methods, {
             if (tool.type === 'call') {
                 targetBlock.args = this.truncateDisplayContent(tool.content);
             } else {
-                targetBlock.content = this.truncateDisplayContent(tool.content);
+                this._setResultDisplay(targetBlock, this.truncateDisplayContent(tool.content));
             }
             let rawContent = tool.content || '';
             if (tool.type === 'call') {
@@ -295,7 +295,7 @@ Object.assign(vue_methods, {
         if (!p) return;
         const block = this.getBlockForMsg(p.msg, 'tool_result', p.id, p.name);
         if ((block.content || '').length >= 50000) return;
-        block.content = this.truncateDisplayContent(this.smartMergeTerminal(block.content || '', p.chunk));
+        this._setResultDisplay(block, this.truncateDisplayContent(this.smartMergeTerminal(block.content || '', p.chunk)));
         this.requestScrollToBottom();
     },
 

@@ -199,6 +199,7 @@
   "_persistSystemPrompt",
   "_resumeStream",
   "_sanitizeCardText",
+  "_setResultDisplay",
   "_syncAssistantBody",
   "_toggleHighlight",
   "abortTranslate",

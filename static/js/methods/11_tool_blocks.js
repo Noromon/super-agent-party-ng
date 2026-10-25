@@ -72,6 +72,17 @@ Object.assign(vue_methods, {
     },
 
     // 获取消息的指定类型 block（复用原逻辑，但独立出来）
+    // S101: 工具结果/错误的显示文本在 ingest 时一次性预计算（unquote 写时做）。
+    // 此前模板表达式每次整页重渲都对最高 130K 内容现场跑正则=每帧 O(内容长度)
+    // 的税（stucked-log 实锤与微任务洪峰叠加成数十秒长帧）。渲染期零写入纪律不破：
+    // 本函数只在流回调里调用。
+    _setResultDisplay(block, content) {
+      block.content = content;
+      block.displayContent = (typeof content === 'string')
+        ? content.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+        : content;
+    },
+
     getBlockForMsg(msg, type, id = null, name = null) {
         if (!msg.displayBlocks) msg.displayBlocks = [];
         if (id) {
