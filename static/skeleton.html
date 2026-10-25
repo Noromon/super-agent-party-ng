@@ -178,8 +178,6 @@
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-12px); }
     }
-
-    #preload-frame { display: none; }
   </style>
 </head>
 <body>
@@ -205,7 +203,7 @@
       <div class="loading-label" id="status-text">Initializing</div>
     </div>
     
-    <iframe id="preload-frame"></iframe>
+
   </div>
 
   <script>
@@ -258,22 +256,27 @@
         statusText.innerText = "Ready";
         statusText.style.color = "#000";
 
-        // 开始加载主页面
-        const { host, port } = window.electron.server;
-        const mainPageUrl = `http://${host}:${port}`;
-        
-        const preloadFrame = document.getElementById('preload-frame');
-        preloadFrame.src = mainPageUrl;
-        
-        preloadFrame.onload = function() {
-          // 稍微延迟一下，让用户看清 100% 和 Ready
-          setTimeout(() => {
-            document.getElementById('app').classList.add('fade-out');
-            setTimeout(() => {
-              window.location.href = mainPageUrl;
-            }, 600);
-          }, 400);
-        };
+        // S120(上游 03372518)：整页 iframe 预热废弃（重复执行 Vue 等重型库），
+        // 改为仅 fetch 预热关键 CSS 进 HTTP 缓存；导航单通道=主进程 loadURL。
+        const base = `http://${window.electron.server.host}:${window.electron.server.port}`;
+        const warmUrls = [
+          '/css/styles.css',
+          '/css/transition.css',
+          '/css/github-markdown.min.css',
+          '/css/github.min.css',
+          '/libs/element-plus.css',
+          '/fontawesome/css/all.min.css',
+          '/libs/driver.css',
+          '/libs/katex.min.css',
+        ];
+        warmUrls.forEach(url => {
+          fetch(base + url, { cache: 'force-cache' }).catch(() => {});
+        });
+
+        // 稍微延迟让用户看清 100%/Ready，fade-out 覆盖 loadURL 的短暂空窗
+        setTimeout(() => {
+          document.getElementById('app').classList.add('fade-out');
+        }, 400);
       });
     }
   </script>
