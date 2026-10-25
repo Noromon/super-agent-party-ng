@@ -499,6 +499,7 @@
                           @drop.prevent="handleInputDrop"
                         >
                           <el-input
+                            v-memo="[userInput, isMobile, isInputExpanded, uiRev]"
                             v-model="userInput"
                             type="textarea"
                             :rows="isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4)"

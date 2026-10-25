@@ -718,6 +718,7 @@
                       <!-- 键盘输入区 -->
                       <el-input
                         v-show="!isPttMode"
+                        v-memo="[isPttMode, userInput, isMobile, isInputExpanded, uiRev]"
                         v-model="userInput"
                         type="textarea"
                         :rows="isMobile?(isInputExpanded ? 8 : 3):(isInputExpanded ? 16 : 4)"

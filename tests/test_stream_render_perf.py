@@ -392,4 +392,19 @@ def test_s117_group_dropdown_typing_gate_and_composer_native():
     assert home.count('class="el-button is-circle icon-btn send-btn"') >= 1
     assert "el-button--' + (isSending" in ab
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S117" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S118: 三页 composer textarea v-memo + dashboard 页根 v-if =====
+
+def test_s118_textarea_memo_and_dashboard_vif():
+    for tpl in ("page_home.html", "page_chat_main.html"):
+        html = _read("static/templates/" + tpl)
+        assert 'v-memo="[isPttMode, userInput, isMobile, isInputExpanded, uiRev]"' in html
+    ab = _read("static/templates/page_ai-browser.html")
+    assert 'v-memo="[userInput, isMobile, isInputExpanded, uiRev]"' in ab
+    dash = _read("static/templates/page_dashboard.html")
+    assert 'v-if="activeMenu === \'dashboard\'"' in dash
+    assert 'v-show="activeMenu === \'dashboard\'"' not in dash
+    rd = _read("static/js/renderer.js")
+    assert "renderer build=S118" in rd
