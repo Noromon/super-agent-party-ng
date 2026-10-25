@@ -421,6 +421,8 @@ window.lang_zhCN = {
         'gotoAPI': '获取API密钥或相关文档',
         'enableShortcutsGlobal': '启用快捷指令',
         'shortcutGlobalNotice': '统一快捷指令总开关，对聊天界面和所有 IM 平台（飞书、QQ、Telegram 等）生效。',
+    'contentSafety': '内容安全过滤',
+    'contentSafetyNotice': '启用后将自动拦截AI对话中的敏感内容。本功能使用本地关键词列表，无需联网，不会上传任何数据。',
     'DiarySystem': '日记系统',
     'diaryConfig': '系统配置',
     'diaryBook': '日记本',

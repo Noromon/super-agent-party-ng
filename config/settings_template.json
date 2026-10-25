@@ -23,7 +23,8 @@
       "proxy": "http://127.0.0.1:7890",
       "proxyMode": "system",
       "isChinaProxy": false,
-      "enableShortcuts": true
+      "enableShortcuts": true,
+    "contentSafety": false
     },
     "mainAgent":"super-model",
     "mcpServers": {},

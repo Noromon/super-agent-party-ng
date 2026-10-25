@@ -12,9 +12,13 @@ from py.cli_tool import read_file_tool_local
 from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
 from py.defaults import DEFAULT_SERVER_PORT, GSV_TTS_URL
+from py.guard import load_safety_words, check_content_safety
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 
 from py.tool_assembly import build_llm_tools
+
+# S120(上游 e03cedb3 同批 guard 族)：内容安全词表装载（无词表文件=自动禁用）
+load_safety_words()
 
 
 def _assemble_toolkit():
@@ -5773,6 +5777,34 @@ def _drs_round_cap(loop_count, max_iters, search_not_done, tool_calls, tag):
     return False
 
 
+SAFETY_REPLACEMENT_TEXT = "[该回复已被内容安全策略自动替换]"
+
+
+async def _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
+    """S120(上游 guard 族)：流式终态前置——残留 buffer flush + 内容安全整体替换
+    （S68 双 pass 共用；产出 SSE 帧，_st["fc"] 回写最终 full_content）。"""
+    full_content = _st["fc"]
+    if content_buffer or reasoning_buffer:
+        final_chunk = {
+            "choices": [{
+                "delta": {
+                    "content": "".join(content_buffer),
+                    "reasoning_content": "".join(reasoning_buffer)
+                }
+            }]
+        }
+        yield f"data: {json.dumps(final_chunk)}\n\n"
+        full_content += final_chunk["choices"][0]["delta"].get("content", "")
+    if settings.get("systemSettings", {}).get("contentSafety", False) and full_content:
+        is_safe, matched = await check_content_safety(full_content, min_cjk_chars=3)
+        if not is_safe:
+            logging.getLogger("app").warning(f"[content_safety] output blocked words: {matched}")
+            correction = {"choices": [{"delta": {"content": SAFETY_REPLACEMENT_TEXT, "_safety_filtered": True}}]}
+            yield f"data: {json.dumps(correction)}\n\n"
+            full_content = SAFETY_REPLACEMENT_TEXT
+    _st["fc"] = full_content
+
+
 async def stream_generator(client, reasoner_client, request, settings, fastapi_base_url,
                      enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
                      user_prompt, DRS_STAGE, tools, images,
@@ -5930,18 +5962,10 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         content_buffer = _st["content_buffer"]
         reasoning_buffer = _st["reasoning_buffer"]
         _chunk_count = _st["_chunk_count"]
-        # 最终flush未完成内容
-        if content_buffer or reasoning_buffer:
-            final_chunk = {
-                "choices": [{
-                    "delta": {
-                        "content": "".join(content_buffer),
-                        "reasoning_content": "".join(reasoning_buffer)
-                    }
-                }]
-            }
-            yield f"data: {json.dumps(final_chunk)}\n\n"
-            full_content += final_chunk["choices"][0]["delta"].get("content", "")
+        _st["fc"] = full_content
+        async for _c in _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
+            yield _c
+        full_content = _st["fc"]
         if not tool_calls:
             # 将响应添加到消息列表
             content_append(request.messages, 'assistant', full_content)
@@ -6021,18 +6045,10 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             content_buffer = _st["content_buffer"]
             reasoning_buffer = _st["reasoning_buffer"]
             _chunk_count2 = _st["_chunk_count2"]
-            # 最终flush未完成内容
-            if content_buffer or reasoning_buffer:
-                final_chunk = {
-                    "choices": [{
-                        "delta": {
-                            "content": "".join(content_buffer),
-                            "reasoning_content": "".join(reasoning_buffer)
-                        }
-                    }]
-                }
-                yield f"data: {json.dumps(final_chunk)}\n\n"
-                full_content += final_chunk["choices"][0]["delta"].get("content", "")
+            _st["fc"] = full_content
+            async for _c in _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
+                yield _c
+            full_content = _st["fc"]
             if not tool_calls and full_content:
                 # 将响应添加到消息列表（S68：空生成不写历史，防 assistant 空串污染上下文）
                 content_append(request.messages, 'assistant', full_content)
@@ -7596,6 +7612,23 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     if model == 'super-model':
         current_settings = await load_settings()
         
+        # S120(上游 guard 族)：内容安全——入站全量文本 403 拦截
+        if current_settings.get("systemSettings", {}).get("contentSafety", False):
+            all_text = ""
+            for msg in request.messages:
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    all_text += " " + content
+                elif isinstance(content, list):
+                    all_text += " " + " ".join(item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text")
+            is_safe, matched = await check_content_safety(all_text)
+            if not is_safe:
+                logging.getLogger("app").warning(f"[content_safety] input blocked words: {matched}")
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": {"message": "您的输入包含敏感内容，已被安全策略拦截。", "type": "content_safety", "code": 403}}
+                )
+        
         # 【修改点1】创建当前请求的专属配置，避免污染全局
         request_settings = current_settings.copy()
         active_client = client  # 默认使用主模型
@@ -7816,6 +7849,19 @@ async def simple_chat_endpoint(request: ChatRequest):
     global fast_client, settings
 
     current_settings = await load_settings()
+    # S120(上游 guard 族)：内容安全——simple_chat 入站拦截（含 system prompt）
+    if current_settings.get("systemSettings", {}).get("contentSafety", False):
+        all_text = ""
+        for msg in request.messages:
+            all_text += " " + _extract_text_content(msg.get("content", ""))
+        is_safe, matched = await check_content_safety(all_text)
+        if not is_safe:
+            logging.getLogger("app").warning(f"[content_safety] blocked words: {matched}")
+            return JSONResponse(
+                status_code=403,
+                content={"error": {"message": "您的输入包含敏感内容，已被安全策略拦截。",
+                                   "type": "content_safety", "code": 403}}
+            )
     if len(current_settings['modelProviders']) <= 0:
         return JSONResponse(
             status_code=500,
@@ -8221,12 +8267,97 @@ def _apply_proxy_env_safe(settings):
         logger.info(f"代理环境同步异常: {e}")
 
 
+async def _sanitize_conversations_safety(covs: list) -> None:
+    """S120(上游 guard 族)：ws 会话落库前 assistant 命中敏感词即写时替换
+    （save_conversations 与 _delta 共用；开关关=零开销直通）。"""
+    cur = await load_settings()
+    if not cur.get("systemSettings", {}).get("contentSafety", False):
+        return
+    for conv in covs:
+        for msg in conv.get("messages", []):
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(item.get("text", "") for item in content if isinstance(item, dict))
+            else:
+                continue
+            if not text:
+                continue
+            is_safe, matched = await check_content_safety(text, min_cjk_chars=3)
+            if not is_safe:
+                logger.warning(f"[content_safety] ws save_conversations blocked words: {matched}")
+                msg["content"] = "[该回复已被内容安全策略自动替换]"
+                msg["_safety_filtered"] = True
+
+
+async def _ws_save_conversations(websocket: WebSocket, data: dict):
+    """S120(上游 guard 族)：ws save_conversations 单点（B8 出壳惯例），
+    落库前敏感词净化；失败必须回 save_error（C-15）。"""
+    try:
+        cov_data = data.get("data", {})
+        await _sanitize_conversations_safety(cov_data.get("conversations") or [])
+        await save_covs(cov_data)
+    except Exception as _save_e:
+        logger.error(f"[WS] save_conversations 失败: {_save_e}")
+        await ws_manager.send_json({
+            "type": "save_error",
+            "correlationId": data.get("correlationId"),
+            "success": False,
+            "error": str(_save_e),
+        }, websocket)
+        return
+    await ws_manager.send_json({
+        "type": "conversations_saved",
+        "correlationId": data.get("correlationId"),
+        "success": True
+    }, websocket)
+
+
+async def _ws_save_conversations_delta(websocket: WebSocket, data: dict):
+    """S120(上游 guard 族)：增量保存单点——仅 upsert dirty 会话 + 同款净化。"""
+    payload = data.get("data", {}) or {}
+    incoming = [c for c in (payload.get("conversations") or []) if isinstance(c, dict) and c.get("id") is not None]
+    await _sanitize_conversations_safety(incoming)
+    covs = await load_covs()
+    existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
+    by_id = {str(c.get("id")): c for c in existing}
+    fresh = [c for c in incoming if str(c.get("id")) not in by_id]
+    for c in incoming:
+        by_id[str(c.get("id"))] = c
+    covs["conversations"] = fresh + list(by_id.values())
+    if payload.get("conversationGroups") is not None:
+        covs["conversationGroups"] = payload["conversationGroups"]
+    await save_covs(covs)
+    await ws_manager.send_json({
+        "type": "conversations_delta_saved",
+        "correlationId": data.get("correlationId"),
+        "success": True
+    }, websocket)
+
+
 async def _ws_save_settings(websocket: WebSocket, data: dict):
     """B8(b03e7c0e): ws save_settings 单点——读现库深合并后落盘，部分载荷
     不再整库覆盖。C-15: 失败必须回 save_error（此前异常被外层吞=前端白等超时）。"""
     settings_dict = data.get("data", {})
     try:
         current = await load_settings()
+        # S120(上游 guard 族)：内容安全——系统提示词含敏感词则拒绝保存
+        if current.get("systemSettings", {}).get("contentSafety", False):
+            sys_prompt = settings_dict.get("system_prompt", "")
+            if sys_prompt:
+                is_safe, matched = await check_content_safety(sys_prompt)
+                if not is_safe:
+                    logger.warning(f"[content_safety] ws save_settings blocked words: {matched}")
+                    await ws_manager.send_json({
+                        "type": "save_error",
+                        "correlationId": data.get("correlationId"),
+                        "success": False,
+                        "error": "系统提示词包含敏感内容，设置未保存。",
+                    }, websocket)
+                    return
         deep_update(current, settings_dict)
         await save_settings(current)
         _apply_proxy_env_safe(current)
@@ -8395,42 +8526,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 await _ws_save_settings(websocket, data)
 
             elif msg_type == "save_conversations":
-                try:
-                    await save_covs(data.get("data", {}))
-                except Exception as _save_e:
-                    logger.error(f"[WS] save_conversations 失败: {_save_e}")
-                    await ws_manager.send_json({
-                        "type": "save_error",
-                        "correlationId": data.get("correlationId"),
-                        "success": False,
-                        "error": str(_save_e),
-                    }, websocket)
-                    continue
-                await ws_manager.send_json({
-                    "type": "conversations_saved",
-                    "correlationId": data.get("correlationId"),
-                    "success": True
-                }, websocket)
+                # S120: 重活出循环壳（B8 同款），含敏感词净化
+                await _ws_save_conversations(websocket, data)
 
             elif msg_type == "save_conversations_delta":
                 # 增量保存：仅 upsert 前端 dirty 的会话，避免每次全量搬运整棵会话树
-                payload = data.get("data", {}) or {}
-                incoming = [c for c in (payload.get("conversations") or []) if isinstance(c, dict) and c.get("id") is not None]
-                covs = await load_covs()
-                existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
-                by_id = {str(c.get("id")): c for c in existing}
-                fresh = [c for c in incoming if str(c.get("id")) not in by_id]
-                for c in incoming:
-                    by_id[str(c.get("id"))] = c
-                covs["conversations"] = fresh + list(by_id.values())
-                if payload.get("conversationGroups") is not None:
-                    covs["conversationGroups"] = payload["conversationGroups"]
-                await save_covs(covs)
-                await ws_manager.send_json({
-                    "type": "conversations_delta_saved",
-                    "correlationId": data.get("correlationId"),
-                    "success": True
-                }, websocket)
+                await _ws_save_conversations_delta(websocket, data)
 
             elif msg_type == "get_settings":
                 settings = await load_settings()
@@ -8477,6 +8578,17 @@ async def websocket_endpoint(websocket: WebSocket):
             elif msg_type == "set_system_prompt":
                 has_sent_prompt = True # 标记该连接发送过 Prompt
                 extension_system_prompt = data.get("data", {}).get("text", "")
+                # S120(上游 guard 族)：内容安全——扩展系统提示词入站拦截
+                cur_settings = await load_settings()
+                if cur_settings.get("systemSettings", {}).get("contentSafety", False):
+                    is_safe, matched = await check_content_safety(extension_system_prompt)
+                    if not is_safe:
+                        logger.warning(f"[content_safety] ws set_system_prompt blocked words: {matched}")
+                        await ws_manager.send_json({
+                            "type": "error",
+                            "message": "系统提示词包含敏感内容，已被安全策略拦截。",
+                        }, websocket)
+                        continue
                 await ws_manager.broadcast({
                     "type": "update_system_prompt",
                     "data": {
