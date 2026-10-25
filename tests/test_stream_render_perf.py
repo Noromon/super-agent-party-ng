@@ -135,3 +135,23 @@ def test_s97_split_runtime(tmp_path):
     )
     out = subprocess.run(["node", str(harness)], capture_output=True, text=True, timeout=60)
     assert "SEG_OK" in out.stdout, out.stderr
+# ===== S102: 流式期纯文本直出 + args 写时预计算 + 日志自动落盘 =====
+
+def test_s102_streaming_plain_and_args_precompute():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        src = _read(f"static/templates/{tpl}.html")
+        # reasoning(S93, 带 !block.done 前缀) + text(S102) 两处流式纯文本分支
+        assert src.count("isTyping && index === messages.length - 1") >= 2, tpl
+        assert "block.displayArgs ?? block.args" in src, tpl
+        assert "block.args.replace(/\\\\n" not in src, tpl
+    tb = _read("static/js/methods/11_tool_blocks.js")
+    assert "_setToolArgs(block, args)" in tb
+    rs = _read("static/js/methods/13_resume_stream.js")
+    assert rs.count("this._setToolArgs(") >= 2
+
+
+def test_s102_logs_auto_land():
+    assert "SAP_LOG_DIR" in _read("py/log_setup.py")
+    assert "SAP_LOG_DIR" in _read("一键启动(start).bat")
+    src = _read("main.js")
+    assert "frontend-evidence.log" in src

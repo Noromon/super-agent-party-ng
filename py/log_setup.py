@@ -25,7 +25,12 @@ def setup_logger(log_dir):
 
     Idempotent: repeated calls (server restart in-process, tests) never
     duplicate handlers.
+
+    S102: SAP_LOG_DIR env overrides log_dir -- Roaming logs were externally
+    deleted mid-run (Defender quarantine suspect); the launcher bat points
+    the file log at the repo dir so it is user-visible and machine-readable.
     """
+    log_dir = os.environ.get("SAP_LOG_DIR") or log_dir
     logger = logging.getLogger("app")
     if not logger.handlers:
         logger.setLevel(logging.INFO)

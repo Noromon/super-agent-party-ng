@@ -83,6 +83,15 @@ Object.assign(vue_methods, {
         : content;
     },
 
+    // S102: tool_call args 显示文本同样写时预计算（progress 每帧重写增长串，
+    // 模板 live-replace=每帧全文正则；本函数只在流回调里调用）。
+    _setToolArgs(block, args) {
+      block.args = args;
+      block.displayArgs = (typeof args === 'string')
+        ? args.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+        : args;
+    },
+
     getBlockForMsg(msg, type, id = null, name = null) {
         if (!msg.displayBlocks) msg.displayBlocks = [];
         if (id) {

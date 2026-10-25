@@ -32,6 +32,7 @@ function makeStub() {
         requestScrollToBottom() {},
         _markReasoningDone() {},
         _setResultDisplay(b, c) { b.content = c; b.displayContent = c; },
+        _setToolArgs(b, a) { b.args = a; b.displayArgs = a; },
     };
     o.getBlock = (t, id, name) => {
         const k = t + ':' + id;

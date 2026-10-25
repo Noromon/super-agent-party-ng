@@ -548,7 +548,19 @@ function attachFreezeProbe(win) {
     const msg = (typeof levelOrDetails === 'object' && levelOrDetails !== null)
       ? String(levelOrDetails.message || '')
       : String(maybeMessage || '')
-    if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag)\]/.test(msg)) console.log('[JS]', msg)
+    if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag)\]/.test(msg)) {
+      console.log('[JS]', msg)
+      // S102: 证据行同步落盘（frontend-evidence.log，5MB 轮转一次）——
+      // 渲染证据不再依赖用户手动截贴控制台
+      try {
+        const logDir = process.env.SAP_LOG_DIR || path.join(app.getPath('userData'), 'logs')
+        const fsx = require('fs')
+        fsx.mkdirSync(logDir, { recursive: true })
+        const f = path.join(logDir, 'frontend-evidence.log')
+        try { if (fsx.statSync(f).size > 5 * 1024 * 1024) fsx.renameSync(f, f + '.1') } catch (_) {}
+        fsx.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n')
+      } catch (_) {}
+    }
   })
 }
 

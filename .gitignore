@@ -214,3 +214,5 @@ tiktoken_cache/
 browsers/
 一键启动(start).bat
 一键更新(update).bat
+# S102: 自动日志（SAP_LOG_DIR=仓库\logs 与主进程证据行）
+logs/

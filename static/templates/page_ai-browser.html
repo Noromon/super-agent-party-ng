@@ -290,16 +290,20 @@
 
                                         <!-- 文本块 -->
                                         <div v-else-if="block.type === 'text'" class="a2ui-text-wrapper">
+                                            <!-- S102: 流式期纯文本直出，完成后再段循环全渲一次（跑步机根治，同 chat_main） -->
+                                            <div v-if="isTyping && index === messages.length - 1" class="sp-content" style="white-space: pre-wrap; word-break: break-word; margin: 0; font-family: inherit; font-size: inherit; line-height: inherit;">{{ block.content }}</div>
+                                            <template v-else>
                                             <template v-for="(segment, sIdx) in splitMessageContent(block.content)" :key="sIdx">
                                                 <div v-if="segment.type === 'text'" v-morph:format="segment.content" style="display: inline-block; width: 100%;"></div>
                                                 <a2-u-i-renderer v-else-if="segment.type === 'ui'" :config="segment.content" @action="handleA2UIAction"></a2-u-i-renderer>
+                                            </template>
                                             </template>
                                         </div>
 
                                         <!-- 工具调用 -->
                                         <div v-else-if="block.type === 'tool_call'" class="sap-process-block type-call" :id="'tool-call-'+block.id">
                                             <div class="sp-header"><i class="fa-solid fa-wrench"></i> {{ t('call') }} <span>{{ block.name }}</span></div>
-                                            <pre class="sp-content sp-code">{{ block.args ? block.args.replace(/\\n/g, '\n').replace(/\\"/g, '"') : '' }}</pre>
+                                            <pre class="sp-content sp-code">{{ block.displayArgs ?? block.args ?? '' }}</pre>
                                         </div>
 
                                         <!-- 工具结果 -->

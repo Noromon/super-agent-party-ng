@@ -200,6 +200,7 @@
   "_resumeStream",
   "_sanitizeCardText",
   "_setResultDisplay",
+  "_setToolArgs",
   "_syncAssistantBody",
   "_toggleHighlight",
   "abortTranslate",

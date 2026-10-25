@@ -170,7 +170,7 @@ Object.assign(vue_methods, {
             this.toolArgsAccumulator[toolCallId] = accArgs;
         }
         const b = getBlock('tool_call', toolCallId, progress.name);
-        b.args = this.truncateDisplayContent(accArgs);
+        this._setToolArgs(b, this.truncateDisplayContent(accArgs));
         this.requestScrollToBottom();
     },
 
@@ -249,7 +249,7 @@ Object.assign(vue_methods, {
             else if (tool.type === 'call') bType = 'tool_call';
             const targetBlock = getBlock(bType, toolCallId, toolName);
             if (tool.type === 'call') {
-                targetBlock.args = this.truncateDisplayContent(tool.content);
+                this._setToolArgs(targetBlock, this.truncateDisplayContent(tool.content));
             } else {
                 this._setResultDisplay(targetBlock, this.truncateDisplayContent(tool.content));
             }
