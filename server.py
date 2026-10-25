@@ -1076,8 +1076,8 @@ from py.voice import router as voice_router
 from py.bot_container import (BOT_AUTOSTART_TABLE, BotContainer,
                                   _bot_autostart_plan, sync_all_bots_behavior)
 from py.stream_relay import (
-    _active_streams, _active_streams_lock, _current_stream_entry, _stream_cancelled,
-    _stream_producer_wrapper, _stream_consumer_generator,
+    _active_streams, _active_streams_lock, _current_stream_entry,
+    _st_cancelled, _stream_producer_wrapper, _stream_consumer_generator,
     _stream_ttl_loop, _cleanup_stream,
 )
 from py.routers import (media, bots, memories, system, files,
@@ -4620,6 +4620,12 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
 async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
     """First LLM stream: tool_call slot merging + think-tag splitting + SSE."""
     async for chunk in response:
+        # S131/F1: 流内 chunk 围栏——在途 LLM 流取消后 ≤5 chunk 内终止，
+        # 不依赖 task.cancel() 对 SDK 内部 await 的可达性
+        if _chunk_count % 5 == 0 and _st_cancelled(_st):
+            logging.getLogger("app").info("[Cancel] 流式输出中被用户取消，终止 LLM 流")
+            _st["w1_cancel"] = True
+            return
         if not chunk.choices:
             if getattr(chunk, "usage", None):
                 usage_info = chunk.usage.model_dump() if hasattr(chunk.usage, "model_dump") else dict(chunk.usage)
@@ -5055,7 +5061,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
                 }
             results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
         else:
-            if _stream_cancelled():
+            if _st_cancelled(_st):
                 logging.getLogger("app").info(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
                 _st["w1_cancel"] = True
                 yield "data: [DONE]\n\n"
@@ -5832,7 +5838,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                      enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
                      user_prompt, DRS_STAGE, tools, images,
                      chat_vendor, reasoner_vendor, model, extra_params,
-                     open_tag, close_tag, source_prompt, m0, memoryId, cur_memory):
+                      open_tag, close_tag, source_prompt, m0, memoryId, cur_memory,
+                      stream_entry=None):
     from py.know_base import kb_tool
     from py.task_tools import (
         create_subtask_tool,
@@ -5854,6 +5861,10 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
     try:
         llm_gate.enter()
         _st = {}
+        # S131: 显式注入流 entry，取消围栏不再依赖 ContextVar 传播
+        _st["_entry"] = stream_entry or _current_stream_entry.get()
+        if _st["_entry"] is None and settings.get('enableStreamResume', True):
+            logging.getLogger("app").warning("[Cancel-Miss] stream_generator 无法获取流 entry，取消围栏将失效")
         usage_info = None
         _ctx_peak = 0
         extra = {}
@@ -5955,7 +5966,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         if tools:
             extra['tools'] = tools
 
-        if _stream_cancelled():
+        if _st_cancelled(_st):
             logging.getLogger("app").info("[Cancel] 流已被用户取消，发起 LLM 调用前终止")
             yield "data: [DONE]\n\n"
             return
@@ -5986,6 +5997,9 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         reasoning_buffer = _st["reasoning_buffer"]
         _chunk_count = _st["_chunk_count"]
         _st["fc"] = full_content
+        if _st.pop("w1_cancel", False):
+            yield "data: [DONE]\n\n"
+            return
         async for _c in _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
             yield _c
         full_content = _st["fc"]
@@ -6045,7 +6059,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             full_content = ""
             if tools and not force_no_tools:
                 extra['tools'] = tools
-            if _stream_cancelled():
+            if _st_cancelled(_st):
                 logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
                 yield "data: [DONE]\n\n"
                 return
@@ -6334,7 +6348,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         enable_thinking, enable_deep_research, enable_web_search, async_tools_id,
                         user_prompt, DRS_STAGE, tools, images,
                         chat_vendor, reasoner_vendor, model, extra_params,
-                        open_tag, close_tag, source_prompt, m0, memoryId, cur_memory)
+                        open_tag, close_tag, source_prompt, m0, memoryId, cur_memory,
+                        stream_entry=_active_streams[stream_id])
                 )
             )
 

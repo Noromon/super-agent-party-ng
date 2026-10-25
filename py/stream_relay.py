@@ -32,6 +32,16 @@ def _stream_cancelled() -> bool:
     return bool(entry and entry.get("cancelled"))
 
 
+def _st_cancelled(_st) -> bool:
+    """S131: 围栏判定优先用 _st 显式注入的 entry（端点直传对象，
+    不依赖 ContextVar 跨任务传播——2026-10-25 23:03 事故中围栏经
+    contextvar 判定从未生效）；entry 缺失时回退 contextvar。"""
+    entry = (_st or {}).get("_entry")
+    if entry is None:
+        entry = _current_stream_entry.get()
+    return bool(entry and entry.get("cancelled"))
+
+
 async def _stream_producer_wrapper(stream_id: str, gen):
     """
     包装原始 stream_generator，作为生产者：
@@ -43,7 +53,9 @@ async def _stream_producer_wrapper(stream_id: str, gen):
     _current_stream_entry.set(entry)
     try:
         async for sse_chunk in gen:
-            entry["buffer"].append(sse_chunk)
+            # S131/F2: 取消后停止写入 buffer（消费者已退，写入只会无界堆积）
+            if not entry.get("cancelled"):
+                entry["buffer"].append(sse_chunk)
             await asyncio.sleep(0)
         entry["done"] = True
     except GeneratorExit:

@@ -131,7 +131,7 @@ class TestDriftRadar:
     def test_stream_side_has_gate_and_fence(self):
         # positive control: the stream engine already carries both
         assert "llm_gate.enter()" in _func_src("stream_generator")
-        assert "_stream_cancelled" in _func_src("stream_generator")
+        assert "_st_cancelled" in _func_src("stream_generator")  # S131: explicit-entry fence
 
     def test_t4_consumer_release_wired(self):
         assert "_release_consumer(stream_id)" in _func_src("_stream_consumer_generator")

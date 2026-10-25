@@ -345,8 +345,9 @@ Object.assign(vue_methods, {
 
     stopGenerate() {
       // 安全围栏：先取消后端生产者流（阻止取消后继续工具调度/后续轮次），再断开本地读取
+      let _cancelPromise = null;
       if (this._currentStreamId) {
-        try { fetch(`/v1/streams/cancel/${this._currentStreamId}`, { method: 'POST' }).catch(() => {}); } catch (e) {}
+        try { _cancelPromise = fetch(`/v1/streams/cancel/${this._currentStreamId}`, { method: 'POST' }).catch(() => {}); } catch (e) {}
         this._currentStreamId = null;
       }
       if (this.abortController) {
@@ -391,5 +392,7 @@ Object.assign(vue_methods, {
         this.audioStartTime = 0; 
         this.stopAllAudioPlayback();
       }
+      // S131/F4: 返回后端取消 promise，供编辑重发等场景 await 生产者真正退出
+      return _cancelPromise;
     }
 });

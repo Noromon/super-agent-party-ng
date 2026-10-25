@@ -55,10 +55,17 @@ async def cancel_stream_endpoint(stream_id: str):
     task = entry.get("task")
     if task and not task.done():
         task.cancel()
+        # S131/F4: 有界等待生产者退出（chunk 围栏通常 <100ms 内自终止），
+        # 消除「编辑重发双并行作业」窗口；shield 防 wait_for 超时二次 cancel 语义混淆
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=1.5)
+        except (asyncio.CancelledError, Exception):
+            pass
+    stopped = bool(task.done()) if task else True
     # T-4: cancel 后必须排程清理（count 门槛保护活跃消费者；未清者由 TTL sweeper 兜底）
     asyncio.create_task(_cleanup_stream(stream_id, delay=5.0))
-    logger.info(f"Stream {stream_id} cancelled by user")
-    return {"cancelled": True, "stream_id": stream_id}
+    logger.info(f"Stream {stream_id} cancelled by user (producer_stopped={stopped})")
+    return {"cancelled": True, "stopped": stopped, "stream_id": stream_id}
 
 
 @router.post("/v1/chat/resume")

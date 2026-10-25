@@ -71,7 +71,12 @@ Object.assign(vue_methods, {
       // 移除this.editIndex之后的所有消息
       this.messages.splice(this.editIndex);
       this.userInput = this.editContent;
-      this.stopGenerate();
+      const _stopP = this.stopGenerate();
+      if (_stopP && typeof _stopP.then === 'function') {
+        // S131/F4: 等后端生产者取消（服务端 1.5s 有界等待 + 2.5s 前端兜底）再起新流，
+        // 消除「笔误点停止→编辑重发」双并行作业窗口
+        await Promise.race([_stopP, new Promise(r => setTimeout(r, 2500))]);
+      }
       await this.sendMessage();
     }else{
       this.messages[this.editIndex].content = this.editContent; // 更新this.editIndex对应的消息内容
