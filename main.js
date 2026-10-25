@@ -446,6 +446,27 @@ function attachFreezeProbe(win) {
   // S104: 幂等——历史上两条建窗路径都会 attach，导致每个证据行双份回显
   if (win.__freezeProbeOn) return
   win.__freezeProbeOn = true
+  // S105: 证据落盘——渲染侧白名单行与主进程自身 [FreezeDiag]/[Win*] 行进同一
+  // frontend-evidence.log。S104 抓取通道全灭却无从知晓，正因主进程诊断行只写
+  // 开发者终端（不可见即不存在）。
+  const evidenceAppend = (msg) => {
+    try {
+      const logDir = process.env.SAP_LOG_DIR || path.join(app.getPath('userData'), 'logs')
+      const fsx = require('fs')
+      fsx.mkdirSync(logDir, { recursive: true })
+      const f = path.join(logDir, 'frontend-evidence.log')
+      try { if (fsx.statSync(f).size > 5 * 1024 * 1024) fsx.renameSync(f, f + '.1') } catch (_) {}
+      fsx.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n')
+    } catch (_) {}
+  }
+  const fdiag = (msg) => { console.log('[FreezeDiag]', msg); evidenceAppend('[FreezeDiag] ' + msg) }
+  const requestCapture = (why) => {
+    if (win.__freezeCaptureBusy) return
+    win.__freezeCaptureBusy = true
+    setTimeout(() => { win.__freezeCaptureBusy = false }, 20000)
+    fdiag('渲染饥饿自报（' + why + '），当场抓栈（断点+采样）…')
+    tryPauseThenProfile()
+  }
   let profFile = null
   const startProfile = async () => {
     if (profFile) return
@@ -453,7 +474,7 @@ function attachFreezeProbe(win) {
     try {
       if (!dbg.isAttached()) dbg.attach('1.3')
     } catch (e) {
-      console.log('[FreezeDiag] debugger attach 失败（可能被其它调试会话占用）:', e.message)
+      fdiag('debugger attach 失败（可能被其它调试会话占用）: ' + e.message)
       return
     }
     try {
@@ -461,10 +482,10 @@ function attachFreezeProbe(win) {
       await dbg.sendCommand('Profiler.setSamplingInterval', { interval: 1000 })
       await dbg.sendCommand('Profiler.start')
       profFile = path.join(app.getPath('temp'), `sap-freeze-profile-${Date.now()}.json`)
-      console.log('[FreezeDiag] 冻结 CPU 采样已开始（10 秒）…')
+      fdiag('冻结 CPU 采样已开始（10 秒）…')
       setTimeout(stopProfile, 10000)
     } catch (e) {
-      console.log('[FreezeDiag] Profiler 启动失败:', e.message)
+      fdiag('Profiler 启动失败: ' + e.message)
       try { dbg.detach() } catch (_) {}
     }
   }
@@ -475,9 +496,9 @@ function attachFreezeProbe(win) {
     try {
       const { profile } = await win.webContents.debugger.sendCommand('Profiler.stop')
       require('fs').writeFileSync(file, JSON.stringify(profile))
-      console.log('[FreezeDiag] CPU profile 已保存:', file)
+      fdiag('CPU profile 已保存: ' + file)
     } catch (e) {
-      console.log('[FreezeDiag] Profiler 停止失败:', e.message)
+      fdiag('Profiler 停止失败: ' + e.message)
     } finally {
       try { win.webContents.debugger.detach() } catch (_) {}
     }
@@ -501,9 +522,9 @@ function attachFreezeProbe(win) {
         }))
         const file = path.join(app.getPath('temp'), `sap-freeze-pause-${Date.now()}.json`)
         require('fs').writeFileSync(file, JSON.stringify({ reason: params.reason, frames }, null, 1))
-        console.log('[FreezeDiag] 当场断点栈已保存:', file)
+        fdiag('当场断点栈已保存: ' + file)
       } catch (e) {
-        console.log('[FreezeDiag] 断点栈落盘失败:', e.message)
+        fdiag('断点栈落盘失败: ' + e.message)
       }
       dbg.sendCommand('Debugger.resume').catch(() => {})
       dbg.sendCommand('Debugger.disable').catch(() => {})
@@ -522,38 +543,37 @@ function attachFreezeProbe(win) {
         if (!dbg.isAttached()) dbg.attach('1.3')
         await dbg.sendCommand('Debugger.enable')
         await dbg.sendCommand('Debugger.pause')
-        console.log('[FreezeDiag] 断点已下，等待命中（5 秒）…')
+        fdiag('断点已下，等待命中（5 秒）…')
         timer = setTimeout(() => {
-          console.log('[FreezeDiag] 断点 5 秒未命中（主线程可能不在可中断点）')
+          fdiag('断点 5 秒未命中（主线程可能不在可中断点）')
           dbg.sendCommand('Debugger.disable').catch(() => {})
           finish()
         }, 5000)
       } catch (e) {
-        console.log('[FreezeDiag] 断点通道不可用:', e.message)
+        fdiag('断点通道不可用: ' + e.message)
         finish()
       }
     })()
   }
   win.on('unresponsive', () => {
-    console.log('[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…')
+    const m = '[WinUnresponsive] 主窗口渲染进程无响应（主线程长时间阻塞），等待恢复…'
+    console.log(m); evidenceAppend(m)
     tryPauseThenProfile()
   })
-  // S104: 渲染侧饥饿心跳(gap>2.5s)主动请抓——不等挂死看门狗（其阈值更高，
-  // 4~8s 级卡顿恰好躲过）。20s 冷却防抓取风暴。
+  // S104/S105: 渲染侧饥饿心跳主动请抓。双通道：ipc(preload) + console 魔法行
+  //（白名单通道已被证明通）——S104 抓取全灭正是单通道静默断裂不可见所致。
   ipcMain.on('sap-freeze-capture', (event) => {
     if (event.sender !== win.webContents) return
-    if (win.__freezeCaptureBusy) return
-    win.__freezeCaptureBusy = true
-    setTimeout(() => { win.__freezeCaptureBusy = false }, 20000)
-    console.log('[FreezeDiag] 渲染饥饿自报，当场抓栈（断点+采样）…')
-    tryPauseThenProfile()
+    requestCapture('ipc')
   })
   win.on('responsive', () => {
-    console.log('[WinResponsive] 主窗口渲染进程已恢复响应')
+    const m = '[WinResponsive] 主窗口渲染进程已恢复响应'
+    console.log(m); evidenceAppend(m)
     stopProfile()
   })
   win.webContents.on('render-process-gone', (e, details) => {
-    console.log('[WinRendererGone] 主窗口渲染进程退出:', details.reason, details.exitCode)
+    const m = '[WinRendererGone] 主窗口渲染进程退出: ' + details.reason + ' ' + details.exitCode
+    console.log(m); evidenceAppend(m)
   })
   // S100: 渲染侧证据通道转发——渲染进程 console 原本到不了 SAP 控制台，
   // [LongFrame]/[Starve] 等一直"没看到"其实是通道不可见。仅白名单前缀，无噪音。
@@ -563,16 +583,9 @@ function attachFreezeProbe(win) {
       : String(maybeMessage || '')
     if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag)\]/.test(msg)) {
       console.log('[JS]', msg)
-      // S102: 证据行同步落盘（frontend-evidence.log，5MB 轮转一次）——
-      // 渲染证据不再依赖用户手动截贴控制台
-      try {
-        const logDir = process.env.SAP_LOG_DIR || path.join(app.getPath('userData'), 'logs')
-        const fsx = require('fs')
-        fsx.mkdirSync(logDir, { recursive: true })
-        const f = path.join(logDir, 'frontend-evidence.log')
-        try { if (fsx.statSync(f).size > 5 * 1024 * 1024) fsx.renameSync(f, f + '.1') } catch (_) {}
-        fsx.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n')
-      } catch (_) {}
+      evidenceAppend(msg)
+      // S105 魔法行：[FreezeDiag] capture-requested → 当场抓栈
+      if (msg.indexOf('capture-requested') !== -1) requestCapture('console')
     }
   })
 }

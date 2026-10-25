@@ -12,7 +12,8 @@ def _read(rel: str) -> str:
 def test_s101_yield_pins():
     src = _read("static/js/stream_client.js")
     assert "const yieldToPump" in src
-    assert src.count("framesSinceYield >= 24") == 2  # SSE 与 NDJSON 两个迭代器
+    assert src.count("framesSinceYield >= 4") == 2  # SSE 与 NDJSON 两个迭代器（S105: 24→4+200ms 双闸）
+    assert src.count("Date.now() - batchT0 > 200") == 2
     # 写入点全部改走 _setResultDisplay，且旧模板 live-replace 已摘除
     tb = _read("static/js/methods/11_tool_blocks.js")
     assert "_setResultDisplay(block, content)" in tb
@@ -27,7 +28,7 @@ def test_s101_yield_pins():
 
 
 def test_s101_yield_runtime(tmp_path):
-    # node 真跑：单次 read 返回 600 帧巨型 chunk，必须至少让位 floor(600/24) 次
+    # node 真跑：单次 read 返回 600 帧巨型 chunk，必须至少让位 floor(600/4) 次
     src = _read("static/js/stream_client.js")
     harness = tmp_path / "yield_harness.js"
     harness.write_text(
@@ -47,7 +48,7 @@ def test_s101_yield_runtime(tmp_path):
         "iterateSse(response, (p) => { frames += 1; }).then((r) => {\n"
         "  if (frames !== N) throw new Error('frame loss: ' + frames);\n"
         "  if (!r.serverDone) throw new Error('no done handling path exercised');\n"
-        "  const min = Math.floor(N / 24);\n"
+        "  const min = Math.floor(N / 4);\n"
         "  if (yieldCalls < min) throw new Error('yields=' + yieldCalls + ' < ' + min);\n"
         "  console.log('YIELD_OK frames=' + frames + ' yields=' + yieldCalls);\n"
         "}).catch((e) => { console.error('FAIL', e.message); process.exit(1); });\n",

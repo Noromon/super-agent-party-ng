@@ -913,11 +913,12 @@ const app = Vue.createApp({
         const loafObs = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
             if ((e.duration || 0) < 500) continue;
-            const scripts = (e.scripts || []).slice(0, 3).map((s) => {
-              const loc = s.sourceLocation || {};
-              const f = (loc.url || '').split('/').pop();
-              return (s.invoker || '?') + '@' + f + ':' + (loc.lineNumber || '?') + ':' + (loc.columnNumber || '?');
-            }).join(' | ');
+            const scripts = (e.scripts || []).slice()
+              .sort((a, b) => (b.duration || 0) - (a.duration || 0)).slice(0, 5).map((s) => {
+                const loc = s.sourceLocation || {};
+                const f = (loc.url || '').split('/').pop();
+                return (s.invoker || '?') + '@' + f + ':' + (loc.lineNumber || '?') + '=' + Math.round(s.duration || 0) + 'ms';
+              }).join(' | ');
             // S104 探针 v2: 帧相位分解（renderStart 前=脚本+微任务，后=渲染），
             // forcedSL=脚本强制同步布局合计；每 10 报带一次规模读数 dom/msgs 验证
             // 巨型 DOM/大列表假设。
@@ -926,7 +927,9 @@ const app = Vue.createApp({
             const forced = Math.round((e.scripts || []).reduce((a, s) => a + (s.forcedStyleAndLayoutDuration || 0), 0));
             let size = '';
             if (++loafCount % 10 === 1) {
-              size = ' dom=' + document.getElementsByTagName('*').length + ' msgs=' + (this.messages ? this.messages.length : -1);
+              size = ' dom=' + document.getElementsByTagName('*').length +
+                ' msgsDom=' + document.querySelectorAll('.message *').length +
+                ' msgs=' + (this.messages ? this.messages.length : -1);
             }
             console.warn('[LongFrame] duration=' + Math.round(e.duration) + 'ms blocking=' + Math.round(e.blockingDuration || 0) +
               'ms phases[script=' + pre + 'ms render=' + ren + 'ms forcedSL=' + forced + 'ms]' + size +
@@ -951,6 +954,9 @@ const app = Vue.createApp({
         // 限制）。30s 冷却，暂停命令会打断当前 4s 任务——抓的就是正在卡的那口。
         if (gap > 2500 && now - hbLastCapture > 30000) {
           hbLastCapture = now;
+          // S105: 双通道请抓——console 魔法行走已被证明能通的白名单转发；
+          // preload/ipc 通道保留作第二腿（S104 单通道静默断裂全灭的教训）
+          console.warn('[FreezeDiag] capture-requested');
           try { window.electron.requestFreezeCapture(); } catch (_) {}
         }
         hbPrev = now;
@@ -959,6 +965,9 @@ const app = Vue.createApp({
       setTimeout(hbTick, 100);
       window.addEventListener('keydown', hbCheck, { passive: true });
       window.addEventListener('mousemove', hbCheck, { passive: true, capture: true });
+      // S105: 抓取通道能力自检（进证据文件）——哪条腿断了当场可见
+      console.warn('[Probe] capture-channels preload=' +
+        (window.electron && typeof window.electron.requestFreezeCapture));
     } catch (_) {}
     // S104: 消息容器上翻到顶 → 显示窗口再放 30 条（capture 收所有滚动源，
     // 只对当前活跃页的 messagesContainer 生效）

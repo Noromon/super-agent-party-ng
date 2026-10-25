@@ -29,7 +29,10 @@ async function iterateSse(response, onFrame, opts = {}) {
   let serverDone = false;
 
   const flushEvents = async () => {
+    // S105: 让位策略=帧数帽+耗时帽双闸（S101 的每 24 帧在大 payload 会话下
+    // 单任务实测 4~8s——帧廉价假设不成立）。200ms 后任何帧边界都可让位。
     let framesSinceYield = 0;
+    let batchT0 = Date.now();
     while (buffer.includes("\n\n")) {
       const idx = buffer.indexOf("\n\n");
       const eventData = buffer.slice(0, idx);
@@ -45,7 +48,9 @@ async function iterateSse(response, onFrame, opts = {}) {
         continue; // 拉平：解析失败吞掉继续
       }
       await onFrame(parsed);
-      if (++framesSinceYield >= 24) { framesSinceYield = 0; await yieldToPump(); }
+      if (++framesSinceYield >= 4 || Date.now() - batchT0 > 200) {
+        framesSinceYield = 0; batchT0 = Date.now(); await yieldToPump();
+      }
     }
     return false;
   };
@@ -113,9 +118,12 @@ async function iterateNdjsonLines(response, onFrame, opts = {}) {
     const lines = buffer.split("\n");
     buffer = lines.pop(); // 末行可能半截，留到下轮
     let framesSinceYield = 0;
+    let batchT0 = Date.now(); // S105: 帧数帽+耗时帽双闸（同 SSE 路径）
     for (const ln of lines) {
       await handleLine(ln);
-      if (++framesSinceYield >= 24) { framesSinceYield = 0; await yieldToPump(); }
+      if (++framesSinceYield >= 4 || Date.now() - batchT0 > 200) {
+        framesSinceYield = 0; batchT0 = Date.now(); await yieldToPump();
+      }
     }
   }
   decoder.decode();

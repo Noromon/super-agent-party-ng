@@ -205,3 +205,18 @@ def test_s104_probe_v2_phases():
     assert "phases[script=" in rd
     assert "forcedStyleAndLayoutDuration" in rd
     assert "renderer build=S104" in rd
+# ===== S105: 抓取双通道铁证 + 证据全镜像 + 探针 v3 + 泵耗时帽 =====
+
+def test_s105_capture_and_evidence():
+    mj = _read("main.js")
+    assert "capture-requested" in mj and "requestCapture" in mj
+    assert "const fdiag" in mj and "evidenceAppend" in mj
+    rd = _read("static/js/renderer.js")
+    assert "capture-requested" in rd
+    assert "capture-channels preload=" in rd
+    # 探针 v3：scripts top5 带 duration；容器级 DOM 读数
+    assert "Math.round(s.duration || 0)" in rd
+    assert "msgsDom=" in rd
+    # 泵：帧数帽+耗时帽
+    sc = _read("static/js/stream_client.js")
+    assert sc.count("framesSinceYield >= 4") == 2
