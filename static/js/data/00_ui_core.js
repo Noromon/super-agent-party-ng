@@ -155,6 +155,10 @@ Object.assign(vue_data, {
     // 巨型消息列表 = Vue 全屏 patch + 巨型 DOM 的布局风暴（4s 长帧主嫌疑），窗口化封顶。
     msgWindowOffset: null,
 
+    // S106: 全局渲染修订号。$forceUpdate 穿不透 v-memo（memo 按依赖短路），
+    // 语言/主题这类全局变更必须 bump uiRev 才能让 memo 行重评估。
+    uiRev: 0,
+
     currentMessage: '',
 
     conversationId: null, // 当前对话ID,

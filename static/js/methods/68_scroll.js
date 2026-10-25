@@ -23,6 +23,11 @@ Object.assign(vue_methods, {
       this.msgWindowOffset = Math.max(0, cur - 30);
     },
 
+    // S106: 全局 memo 失效开关（配合消息行 v-memo 的 uiRev 依赖）
+    touchUI() {
+      this.uiRev++;
+    },
+
     scrollToBottom() {
       this.$nextTick(() => {
         const container = this.$refs.messagesContainer;

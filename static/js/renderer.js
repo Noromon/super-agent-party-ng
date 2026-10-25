@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S104 loaded');
+console.warn('[Probe] renderer build=S106 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -22,6 +22,26 @@ console.warn('[Probe] renderer build=S104 loaded');
       }
     };
     return origST.call(window, wrapped, ms, ...Array.prototype.slice.call(arguments, 2));
+  };
+})();
+
+// S106: fetch 归因探针——5s 级 Window.fetch.then 长帧只能说明"某 fetch 延续"，
+// 无法点名是哪个调用点。对关键端点记调度栈与 TTFB（低频，一次性取证）。
+(function () {
+  const of = window.fetch;
+  if (!of) return;
+  window.fetch = function (input) {
+    const url = String((input && input.url) || (typeof input === 'string' ? input : ''));
+    if (!/(v1\/chat|execute_tool_manually|api\/compact|v1\/streams|load_file)/.test(url)) return of.apply(window, arguments);
+    const t0 = performance.now();
+    let sc = '?';
+    try { sc = (new Error().stack || '').split('\n')[2] || '?'; } catch (_) {}
+    console.warn('[Perf] fetch-scheduled ' + url.slice(0, 70) + ' @' + String(sc).trim().slice(0, 100));
+    return of.apply(window, arguments).then(function (res) {
+      const dt = performance.now() - t0;
+      if (dt > 1200) console.warn('[Perf] fetch-TTFB ' + Math.round(dt) + 'ms ' + url.slice(0, 70));
+      return res;
+    });
   };
 })();
 
@@ -965,9 +985,10 @@ const app = Vue.createApp({
       setTimeout(hbTick, 100);
       window.addEventListener('keydown', hbCheck, { passive: true });
       window.addEventListener('mousemove', hbCheck, { passive: true, capture: true });
-      // S105: 抓取通道能力自检（进证据文件）——哪条腿断了当场可见
-      console.warn('[Probe] capture-channels preload=' +
-        (window.electron && typeof window.electron.requestFreezeCapture));
+      // S105/S106: 抓取通道能力自检（进证据文件）——electron 整体缺失与
+      // 函数缺失是两种故障，分开回显
+      console.warn('[Probe] capture-channels electron=' + typeof window.electron +
+        ' fn=' + (window.electron && typeof window.electron.requestFreezeCapture));
     } catch (_) {}
     // S104: 消息容器上翻到顶 → 显示窗口再放 30 条（capture 收所有滚动源，
     // 只对当前活跃页的 messagesContainer 生效）
@@ -1156,6 +1177,12 @@ const app = Vue.createApp({
 
   },
   watch: {
+    // S106: 流式期常开 CPU profiler——卡顿中途抓栈结构性不可行（心跳本身被冻），
+    // 改为主进程在流式窗口持续采样（魔法行走已证明能通的 console 通道）
+    isTyping(v) {
+      try { console.warn('[Probe] ' + (v ? 'stream-active' : 'stream-idle')); } catch (_) {}
+    },
+
     'CLISettings.cc_path': {
       handler(newPath) {
         // 单一 watcher：同时负责工作区文件监听与项目技能状态刷新

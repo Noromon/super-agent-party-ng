@@ -65,7 +65,7 @@ Object.assign(vue_methods, {
                     if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                     this._streamUpdateTimer = setTimeout(() => {
                         this.flushStreamTextBuffer();
-                    }, 80);
+                    }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
                 }
 
                 if (delta.content) {
@@ -87,11 +87,11 @@ Object.assign(vue_methods, {
                     if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                     this._streamUpdateTimer = setTimeout(() => {
                         this.flushStreamTextBuffer();
-                    }, 80);
+                    }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
                 }
 
                 if (delta.tool_progress) {
-                    this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
+                    this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack, currentMsg);
                     return;
                 }
 
@@ -141,7 +141,7 @@ Object.assign(vue_methods, {
     },
 
     // C-2: tool_progress 帧摄取单一来源 —— 主循环与 resume 重放共用。
-    _ingestToolProgress(progress, getBlock, toolCallStack) {
+    _ingestToolProgress(progress, getBlock, toolCallStack, msg) {
         this._markReasoningDone(this._streamTargetMsg); // S93(F2): 工具开跑=思考结束
         let toolCallId = progress.tool_call_id || progress.id;
         if (!toolCallId) {
@@ -170,7 +170,14 @@ Object.assign(vue_methods, {
             this.toolArgsAccumulator[toolCallId] = accArgs;
         }
         const b = getBlock('tool_call', toolCallId, progress.name);
-        this._setToolArgs(b, this.truncateDisplayContent(accArgs));
+        // S106: args 显示写节流(≥120ms)+行 rv bump——66KB 级文件参数的 token 流
+        // 曾每帧全文重写+全屏 flush，是排空积压的头号贡献者
+        const nowMs = Date.now();
+        if (!b._lastArgsW || nowMs - b._lastArgsW > 120) {
+            b._lastArgsW = nowMs;
+            this._setToolArgs(b, this.truncateDisplayContent(accArgs));
+            if (msg) msg._rv = (msg._rv || 0) + 1;
+        }
         this.requestScrollToBottom();
     },
 
@@ -178,6 +185,7 @@ Object.assign(vue_methods, {
     // + 审批帧/异步工具 id 摘除。修复前 resume 重放路径整段跳过 backend_content（C-2）
     // 且丢 approval_required/async 帧（C-6=审批按钮不重现、工具链永久卡死）。
     _ingestToolFrame(tool, delta, currentMsg, getBlock, toolCallStack) {
+        currentMsg._rv = (currentMsg._rv || 0) + 1; // S106: v-memo 行修订号
         if (!Array.isArray(currentMsg.backend_content)) currentMsg.backend_content = [];
         this._markReasoningDone(currentMsg); // S93(F2): 工具帧=思考结束
         // S93(F4): 切换到新工具调用时先落挂起的流式块（同 id 帧保持合并，80ms 后统一 flush）
@@ -296,6 +304,7 @@ Object.assign(vue_methods, {
         const block = this.getBlockForMsg(p.msg, 'tool_result', p.id, p.name);
         if ((block.content || '').length >= 50000) return;
         this._setResultDisplay(block, this.truncateDisplayContent(this.smartMergeTerminal(block.content || '', p.chunk)));
+        if (p.msg) p.msg._rv = (p.msg._rv || 0) + 1; // S106: v-memo 行修订号
         this.requestScrollToBottom();
     },
 

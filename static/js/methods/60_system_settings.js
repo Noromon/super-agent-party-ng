@@ -148,6 +148,8 @@ Object.assign(vue_methods, {
       }
       this.currentLanguage = val; // 更新当前语言
       await this.autoSaveSettings();
+      // S106: $forceUpdate 会被消息行 v-memo 依赖比对短路（语言是全局依赖）→ 先 bump uiRev
+      this.touchUI();
       this.$forceUpdate();
     },
 

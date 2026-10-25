@@ -1,6 +1,16 @@
 // 批 3 F2：自 vue_methods.js 搬移的 js/methods/80_webview_agent.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
+
+    // S106: guest 端结果截断网关。MB 级页面内容原样回传宿主时，DOMWebSocket
+    // host handler 实测 1s+ 长任务（LoAF 点名 DOMWebSocket.onmessage=1080ms）。
+    _wvExec(wv, script) {
+      const cap = '(async()=>{const __r=await eval(' + JSON.stringify(script) + ');' +
+        "if(typeof __r==='string'&&__r.length>60000)return __r.slice(0,60000)+'\\n...[S106 truncated '+(__r.length-60000)+' chars]';" +
+        "if(__r&&typeof __r==='object'){try{const __s=JSON.stringify(__r);if(__s.length>60000)return __s.slice(0,60000)+'...[S106 truncated]';}catch(_e){}}" +
+        'return __r;})()';
+      return wv.executeJavaScript(cap);
+    },
     getPagesInfo() {
         const info = this.browserTabs.map((tab, index) => ({
             index: index,
@@ -137,7 +147,7 @@ Object.assign(vue_methods, {
         `;
         
         try {
-            return await wv.executeJavaScript(script);
+            return await this._wvExec(wv, script);
         } catch (e) {
             return "Vue Snapshot Error: " + e.message;
         }
@@ -199,7 +209,7 @@ Object.assign(vue_methods, {
         `;
         
         try {
-            const result = await wv.executeJavaScript(script);
+            const result = await this._wvExec(wv, script);
             // 操作后的大延迟（模拟思考下一步）
             await this._humanDelay();
             return result;
@@ -274,7 +284,7 @@ Object.assign(vue_methods, {
         `;
         
         try {
-            const result = await wv.executeJavaScript(script);
+            const result = await this._wvExec(wv, script);
             // 操作后的大延迟
             await this._humanDelay();
             return result;
@@ -308,7 +318,7 @@ Object.assign(vue_methods, {
         })()
         `;
         
-        const result = await wv.executeJavaScript(script);
+        const result = await this._wvExec(wv, script);
         
         // ★ 批量操作后等待
         await this._humanDelay();
@@ -350,7 +360,7 @@ Object.assign(vue_methods, {
         })()
         `;
         
-        const result = await wv.executeJavaScript(script);
+        const result = await this._wvExec(wv, script);
         
         // ★ 拖拽动作幅度大，等待时间可以稍微长一点（这里复用随机等待）
         await this._humanDelay();
@@ -374,7 +384,7 @@ Object.assign(vue_methods, {
         })()
         `;
         
-        const result = await wv.executeJavaScript(script);
+        const result = await this._wvExec(wv, script);
         
         // ★ 悬停通常是为了看东西，稍微等一下合理
         await this._humanDelay();
@@ -398,7 +408,7 @@ Object.assign(vue_methods, {
             return "Dialog handlers patched";
         })()
         `;
-        return await wv.executeJavaScript(script);
+        return await this._wvExec(wv, script);
     },
 
     // --- 9. 按键 (增加延迟) ---
@@ -426,7 +436,7 @@ Object.assign(vue_methods, {
         `;
 
         try {
-            const rect = await wv.executeJavaScript(rectScript);
+            const rect = await this._wvExec(wv, rectScript);
             if (!rect) return "Element not found: " + uid;
 
             // ★ 关键修复：使用 sendInputEvent 发送真实的鼠标点击
@@ -521,7 +531,7 @@ Object.assign(vue_methods, {
             });
         })()
         `;
-        return await wv.executeJavaScript(script);
+        return await this._wvExec(wv, script);
     },
 
     // --- 11. 截图 (无延迟) ---
@@ -574,7 +584,7 @@ Object.assign(vue_methods, {
         wv.focus();
         try {
             const script = `(${codeStr})(...${JSON.stringify(args || [])})`;
-            const result = await wv.executeJavaScript(script);
+            const result = await this._wvExec(wv, script);
             
             // ★ 自定义脚本执行后也等待，防止 Agent 连续高频调用
             await this._humanDelay();

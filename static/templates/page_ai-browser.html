@@ -179,7 +179,7 @@
               <div class="messages-container" ref="browserMessagesContainer"  v-if="!isCapsuleMode" @click.capture="handleMessageLinkClick">
                 <!-- 添加 is-group-mode 类 -->
                 <template v-for="(message, index) in messages" :key="index">
-                <div v-if="index >= msgWindowStart()" class="message" :class="[message.role, { 'is-group-mode': isGroupMode }]">
+                <div v-if="index >= msgWindowStart()" v-memo="[message._rv || 0, message.content, message.role, message.briefly, message.currentChunk, message.isPlaying, message.isOmni, message.omniCurrentTime, message.omniDuration, (message.displayBlocks || []).length, (message.ttsChunks || []).length, (message.fileLinks || []).length, (message.imageLinks || []).length, isGroupMode, allBriefly, uiRev, index === messages.length - 1 && isTyping]" class="message" :class="[message.role, { 'is-group-mode': isGroupMode }]">
                   
                   <!-- 群聊模式 - AI 头像 (左侧) -->
                   <div v-if="isGroupMode && message.role === 'assistant' && message.agentName" class="im-avatar left">

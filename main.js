@@ -467,8 +467,20 @@ function attachFreezeProbe(win) {
     fdiag('渲染饥饿自报（' + why + '），当场抓栈（断点+采样）…')
     tryPauseThenProfile()
   }
+  // S106: 流式期常开 Profiler。卡顿中途抓栈结构性不可行（心跳自己就被冻住），
+  // 卡顿后 pause 到达时线程已空闲（实测 5 秒不命中）→ 唯一可靠窗口=全程采样。
+  let streamStopTimer = null
+  const startStreamProfile = () => {
+    if (streamStopTimer) { clearTimeout(streamStopTimer); streamStopTimer = null }
+    if (profFile) return
+    startProfile({ hold: 180000 })
+  }
+  const scheduleStreamProfileStop = () => {
+    if (streamStopTimer) clearTimeout(streamStopTimer)
+    streamStopTimer = setTimeout(() => { streamStopTimer = null; stopProfile() }, 1200)
+  }
   let profFile = null
-  const startProfile = async () => {
+  const startProfile = async (opts) => {
     if (profFile) return
     const dbg = win.webContents.debugger
     try {
@@ -482,8 +494,20 @@ function attachFreezeProbe(win) {
       await dbg.sendCommand('Profiler.setSamplingInterval', { interval: 1000 })
       await dbg.sendCommand('Profiler.start')
       profFile = path.join(app.getPath('temp'), `sap-freeze-profile-${Date.now()}.json`)
-      fdiag('冻结 CPU 采样已开始（10 秒）…')
-      setTimeout(stopProfile, 10000)
+      // S106: 清理 3 天前的旧 profile（流式常开采样=每轮一个文件，防 TEMP 膨胀）
+      try {
+        const tmp = app.getPath('temp')
+        const fsx = require('fs')
+        const cut = Date.now() - 3 * 86400000
+        for (const fn of fsx.readdirSync(tmp)) {
+          if (/^sap-freeze-profile-.*\.json$/.test(fn)) {
+            const fp = path.join(tmp, fn)
+            try { if (fsx.statSync(fp).mtimeMs < cut) fsx.unlinkSync(fp) } catch (_) {}
+          }
+        }
+      } catch (_) {}
+      fdiag('冻结 CPU 采样已开始（' + ((opts && opts.hold) || 10000) / 1000 + ' 秒）…')
+      setTimeout(stopProfile, (opts && opts.hold) || 10000)
     } catch (e) {
       fdiag('Profiler 启动失败: ' + e.message)
       try { dbg.detach() } catch (_) {}
@@ -581,11 +605,14 @@ function attachFreezeProbe(win) {
     const msg = (typeof levelOrDetails === 'object' && levelOrDetails !== null)
       ? String(levelOrDetails.message || '')
       : String(maybeMessage || '')
-    if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag)\]/.test(msg)) {
+    if (/^\[(Probe|LongFrame|Starve|StreamError|FreezeDiag|Perf)\]/.test(msg)) {
       console.log('[JS]', msg)
       evidenceAppend(msg)
       // S105 魔法行：[FreezeDiag] capture-requested → 当场抓栈
       if (msg.indexOf('capture-requested') !== -1) requestCapture('console')
+      // S106 魔法行：流式起止 → Profiler 常开/收尾
+      if (msg.indexOf('stream-active') !== -1) startStreamProfile()
+      if (msg.indexOf('stream-idle') !== -1) scheduleStreamProfileStop()
     }
   })
 }

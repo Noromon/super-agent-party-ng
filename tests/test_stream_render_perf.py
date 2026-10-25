@@ -204,7 +204,7 @@ def test_s104_probe_v2_phases():
     rd = _read("static/js/renderer.js")
     assert "phases[script=" in rd
     assert "forcedStyleAndLayoutDuration" in rd
-    assert "renderer build=S104" in rd
+    assert "renderer build=S1" in rd
 # ===== S105: 抓取双通道铁证 + 证据全镜像 + 探针 v3 + 泵耗时帽 =====
 
 def test_s105_capture_and_evidence():
@@ -213,10 +213,43 @@ def test_s105_capture_and_evidence():
     assert "const fdiag" in mj and "evidenceAppend" in mj
     rd = _read("static/js/renderer.js")
     assert "capture-requested" in rd
-    assert "capture-channels preload=" in rd
+    assert "capture-channels electron=" in rd
     # 探针 v3：scripts top5 带 duration；容器级 DOM 读数
     assert "Math.round(s.duration || 0)" in rd
     assert "msgsDom=" in rd
     # 泵：帧数帽+耗时帽
     sc = _read("static/js/stream_client.js")
     assert sc.count("framesSinceYield >= 4") == 2
+# ===== S106: v-memo 行隔离 + 写入节流 + webview 截断网关 + 流式常开 Profiler =====
+
+def test_s106_memo_and_throttle():
+    for tpl in ("page_chat_main", "page_home", "page_ai-browser"):
+        assert 'v-memo="[message._rv || 0' in _read(f"static/templates/{tpl}.html"), tpl
+    assert "uiRev: 0" in _read("static/js/data/00_ui_core.js")
+    assert "touchUI()" in _read("static/js/methods/68_scroll.js")
+    assert "this.touchUI();\n      this.$forceUpdate();" in _read("static/js/methods/60_system_settings.js")
+    cs = _read("static/js/methods/10_chat_stream.js")
+    assert "_streamLastFlushTs = Date.now()" in cs
+    assert "if (__m) __m._rv = (__m._rv || 0) + 1;" in cs
+    assert "toolCallStack, currentMsg)" in cs
+    assert cs.count("> 150 ? 0 : 80)") >= 2  # 防抖饥饿守卫
+    rs = _read("static/js/methods/13_resume_stream.js")
+    assert "_lastArgsW" in rs and "nowMs - b._lastArgsW > 120" in rs
+    assert "currentMsg._rv = (currentMsg._rv || 0) + 1; // S106" in rs
+    assert "p.msg._rv = (p.msg._rv || 0) + 1" in rs
+
+
+def test_s106_wvexec_guest_cap():
+    wa = _read("static/js/methods/80_webview_agent.js")
+    assert "_wvExec(wv, script)" in wa
+    assert "await eval(" in wa and "60000" in wa
+    assert wa.count("this._wvExec(wv, ") >= 10
+
+
+def test_s106_stream_profiler_and_fetch_probe():
+    rd = _read("static/js/renderer.js")
+    assert "stream-active" in rd and "stream-idle" in rd
+    assert "fetch-scheduled" in rd
+    mj = _read("main.js")
+    assert "startStreamProfile" in mj and "scheduleStreamProfileStop" in mj
+    assert "Perf" in mj and "sap-freeze-profile-" in mj

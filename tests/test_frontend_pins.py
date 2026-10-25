@@ -23,7 +23,7 @@ def _slice(name, src=SRC):
 
 class TestToolFrameSingleSource:
     def test_helpers_defined(self):
-        assert "_ingestToolProgress(progress, getBlock, toolCallStack)" in SRC
+        assert "_ingestToolProgress(progress, getBlock, toolCallStack, msg)" in SRC
         assert "_ingestToolFrame(tool, delta, currentMsg, getBlock, toolCallStack)" in SRC
 
     def test_both_paths_call_helpers(self):

@@ -490,7 +490,7 @@ Object.assign(vue_methods, {
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this._streamUpdateTimer = setTimeout(() => {
                             this.flushStreamTextBuffer();
-                        }, 80);
+                        }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
                     }
 
                     // B. 处理文本 (Content) —— 流式防抖更新
@@ -516,12 +516,12 @@ Object.assign(vue_methods, {
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this._streamUpdateTimer = setTimeout(() => {
                             this.flushStreamTextBuffer();
-                        }, 80);
+                        }, Date.now() - (this._streamLastFlushTs || 0) > 150 ? 0 : 80);
                     }
 
                     // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
                     if (delta.tool_progress) {
-                        this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack);
+                        this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack, currentMsg);
                         return;
                     }
 
@@ -723,6 +723,7 @@ Object.assign(vue_methods, {
                 targetBlock.type = 'tool_result';
                 targetBlock.name = action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`;
                 this._setResultDisplay(targetBlock, '');
+                currentMsg._rv = (currentMsg._rv || 0) + 1;
             }
         }
 
@@ -751,6 +752,7 @@ Object.assign(vue_methods, {
                     targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
                     targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
                     this._setResultDisplay(targetBlock, this.smartMergeTerminal('', resultText)); 
+                    currentMsg._rv = (currentMsg._rv || 0) + 1;
                 }
 
                 // 2. AI 历史：直接存入清理后的版本
@@ -772,6 +774,7 @@ Object.assign(vue_methods, {
                 targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
                 targetBlock.name = action === 'deny' ? this.t('tool_deny') : `${toolName} ${this.t('tool_result')}`;
                 this._setResultDisplay(targetBlock, resultText);
+                currentMsg._rv = (currentMsg._rv || 0) + 1;
             }
 
             const blockClass = action === 'deny' ? 'type-error' : 'type-result';
@@ -889,6 +892,9 @@ Object.assign(vue_methods, {
 
     // 3. 流式文本批量更新（防抖 80ms；S92: 含 reasoning 缓冲）
     flushStreamTextBuffer() {
+        // S106: flush 时间戳（防抖饥饿守卫用）+ 行修订号 bump（v-memo 依赖）
+        this._streamLastFlushTs = Date.now();
+        const __m = this._streamTargetMsg;
         if (this._streamTargetMsg && this._streamReasoningBuffer) {
             const rBlock = this.getBlockForMsg(this._streamTargetMsg, 'reasoning');
             if (rBlock) rBlock.content += this._streamReasoningBuffer;
@@ -908,6 +914,7 @@ Object.assign(vue_methods, {
             // 触发滚动（节流版）
             this.requestScrollToBottom();
         }
+        if (__m) __m._rv = (__m._rv || 0) + 1;
     },
 
     async translateMessage(index) {
