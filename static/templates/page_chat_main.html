@@ -280,7 +280,7 @@
                   <!-- 组内对话列表 -->
                   <transition name="el-zoom-in-top">
                     <div v-show="!isConversationGroupCollapsed(group.id)" class="group-conversations-list">
-                      <div v-for="conv in group.conversations" :key="conv.id" 
+                      <div v-for="conv in group.conversations" v-memo="[currentConversationId === conv.id || conversationId === conv.id, conv.title, conv.timestamp, uiRev]" :key="conv.id" 
                           class="history-item-row" 
                           :class="{ active: currentConversationId === conv.id || conversationId === conv.id }" 
                           @click="loadConversation(conv.id)"

@@ -550,6 +550,7 @@ Object.assign(vue_methods, {
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
             this.flushStreamTextBuffer();
             this._flushToolStream(); // S93(F4)
+            if (currentMsg) currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
 
             if (tts_buffer.trim() && this.ttsSettings.enabled) {
                 currentMsg.chunks_voice.push(this.cur_voice);

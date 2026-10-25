@@ -115,6 +115,7 @@ Object.assign(vue_methods, {
                 // 恢复成功，flush 剩余文本
                 if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                 this.flushStreamTextBuffer();
+                currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
                 this._flushToolStream(); // S93(F4)
 
                 if (tts_buffer.trim() && this.ttsSettings.enabled) {
@@ -185,7 +186,13 @@ Object.assign(vue_methods, {
     // + 审批帧/异步工具 id 摘除。修复前 resume 重放路径整段跳过 backend_content（C-2）
     // 且丢 approval_required/async 帧（C-6=审批按钮不重现、工具链永久卡死）。
     _ingestToolFrame(tool, delta, currentMsg, getBlock, toolCallStack) {
-        currentMsg._rv = (currentMsg._rv || 0) + 1; // S106: v-memo 行修订号
+        // S107: bump 节流(≥80ms)——tool 帧 token 流曾每帧一次全屏 flush（profile
+        // 实锤 Vue 管线 65.5%）；终态兜底=流尾 bump+审批/result 直写 bump
+        const nowMsRv = Date.now();
+        if (!this._lastRvBump || nowMsRv - this._lastRvBump > 80) {
+            this._lastRvBump = nowMsRv;
+            currentMsg._rv = (currentMsg._rv || 0) + 1;
+        }
         if (!Array.isArray(currentMsg.backend_content)) currentMsg.backend_content = [];
         this._markReasoningDone(currentMsg); // S93(F2): 工具帧=思考结束
         // S93(F4): 切换到新工具调用时先落挂起的流式块（同 id 帧保持合并，80ms 后统一 flush）

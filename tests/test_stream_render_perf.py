@@ -235,7 +235,7 @@ def test_s106_memo_and_throttle():
     assert cs.count("> 150 ? 0 : 80)") >= 2  # 防抖饥饿守卫
     rs = _read("static/js/methods/13_resume_stream.js")
     assert "_lastArgsW" in rs and "nowMs - b._lastArgsW > 120" in rs
-    assert "currentMsg._rv = (currentMsg._rv || 0) + 1; // S106" in rs
+    assert "currentMsg._rv = (currentMsg._rv || 0) + 1;" in rs  # S107 起带节流包裹
     assert "p.msg._rv = (p.msg._rv || 0) + 1" in rs
 
 
@@ -253,3 +253,15 @@ def test_s106_stream_profiler_and_fetch_probe():
     mj = _read("main.js")
     assert "startStreamProfile" in mj and "scheduleStreamProfileStop" in mj
     assert "Perf" in mj and "sap-freeze-profile-" in mj
+# ===== S107: 侧边栏行 v-memo + tool 帧 bump 节流 + flush 频率普查 =====
+
+def test_s107_sidebar_memo_and_bump_throttle():
+    for tpl in ("page_chat_main", "page_home"):
+        assert 'v-for="conv in group.conversations" v-memo=' in _read(f"static/templates/{tpl}.html"), tpl
+    rs = _read("static/js/methods/13_resume_stream.js")
+    assert "_lastRvBump" in rs and "nowMsRv - this._lastRvBump > 80" in rs
+    assert "S107: 流尾终态兜底 bump" in rs
+    assert "S107: 流尾终态兜底 bump" in _read("static/js/methods/10_chat_stream.js")
+    rd = _read("static/js/renderer.js")
+    assert "updates/5s=" in rd
+    assert "renderer build=S107" in rd
