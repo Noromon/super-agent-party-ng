@@ -193,6 +193,49 @@ def test_auto_collapse_support_assets():
     assert re.search(r"build=S12[6-9]|build=S1[3-9]\d|build=S[2-9]\d\d", rjs)
 
 
+def test_vendor_params_r25():
+    # R2-5 vendor_params 簇：推荐参数字典 + 计算属性 + 一键添加 + 双 UI 区块
+    vp = _read("static", "js", "vendor_params.js")
+    assert "window.vendorSuggestedParams" in vp and "'Gemini'" in vp and "'siliconflow'" in vp
+    idx = _read("static", "index.html")
+    assert 'src="js/vendor_params.js"' in idx
+    assert 'src="js/methods/89_vendor_params.js"' in idx
+    rjs = _read("static", "js", "renderer.js")
+    for needle in (
+        "mainVendorName()",
+        "fastVendorName()",
+        "mainSuggestedParams()",
+        "fastSuggestedParams()",
+        "window.vendorSuggestedParams",
+    ):
+        assert needle in rjs, needle
+    m = _read("static", "js", "methods", "89_vendor_params.js")
+    for needle in (
+        "addMainSuggestedParam",
+        "addFastSuggestedParam",
+        "paramExistsInMain",
+        "paramExistsInFast",
+        "formatVendorName",
+    ):
+        assert needle in m, needle
+    mc = _read("static", "templates", "page_model-config.html")
+    assert "mainSuggestedParams.length > 0" in mc
+    assert "fastSuggestedParams.length > 0" in mc
+    assert "addMainSuggestedParam(param)" in mc
+    assert "addFastSuggestedParam(param)" in mc
+    css = _read("static", "css", "appearance.css")
+    assert ".suggested-params" in css and ".suggested-card" in css
+    # 字典内全部 desc 键必须 zh/en 成对存在
+    import re
+
+    descs = sorted(set(re.findall(r"desc: '([a-zA-Z0-9_]+)'", vp)))
+    assert len(descs) >= 30
+    zh = _read("static", "js", "locales", "zh-CN.js")
+    en = _read("static", "js", "locales", "en-US.js")
+    for key in descs + ["suggestedParams"]:
+        assert f"'{key}'" in zh and f"'{key}'" in en, key
+
+
 def test_completion_notification_r25():
     # R2-5：生成完毕系统通知（Electron IPC 链 + 流尾挂点 + 开关 + 默认关）
     mjs = _read("main.js")

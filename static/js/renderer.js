@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S127 loaded');
+console.warn('[Probe] renderer build=S128 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -1470,6 +1470,31 @@ const app = Vue.createApp({
     },
     codeFontSizeOptions() {
       return [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    },
+
+    // ===== R2-5 vendor_params：供应商推荐参数 =====
+    // 数据源=vendor_params.js 的 window.vendorSuggestedParams（静态字典，直读免挂载 data）
+    mainVendorName() {
+      if (!this.settings.selectedProvider) return null;
+      const provider = this.modelProviders.find(p => p.id === this.settings.selectedProvider);
+      return provider ? provider.vendor : null;
+    },
+    fastVendorName() {
+      if (!this.fastSettings.selectedProvider) return null;
+      const provider = this.modelProviders.find(p => p.id === this.fastSettings.selectedProvider);
+      return provider ? provider.vendor : null;
+    },
+    mainSuggestedParams() {
+      const vendor = this.mainVendorName;
+      const dict = window.vendorSuggestedParams || {};
+      if (!vendor || !dict[vendor]) return [];
+      return dict[vendor].filter(p => !this.paramExistsInMain(p.name));
+    },
+    fastSuggestedParams() {
+      const vendor = this.fastVendorName;
+      const dict = window.vendorSuggestedParams || {};
+      if (!vendor || !dict[vendor]) return [];
+      return dict[vendor].filter(p => !this.paramExistsInFast(p.name));
     },
 
     // ✨ 新增：主页面扩展列表过滤逻辑 ✨
