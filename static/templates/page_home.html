@@ -1099,15 +1099,21 @@
 
                       <!-- 1.4 扩展列表视图 (严格还原卡片及收藏逻辑) -->
                       <div v-else class="extensions-list" style="margin: 10px; height: 100%; overflow-y: auto;">
-                        <el-card class="extension-card default-view-card" :class="{ active: currentExtension === null && activeSideView === 'list' }" @click="resetToDefaultView();expandChatArea();collapseSidePanel();">
+                        <div class="el-card is-always-shadow extension-card default-view-card" :class="{ active: currentExtension === null && activeSideView === 'list' }" @click="resetToDefaultView();expandChatArea();collapseSidePanel();">
+                          <div class="el-card__body">
                           <div class="extension-info"><h3>{{ t('defaultView') }}</h3><p>{{ t('defaultViewDescription') }}</p></div>
-                        </el-card>
-                        <el-card class="extension-card task-center-card" @click="openTaskCenter()">
+                          </div>
+                        </div>
+                        <div class="el-card is-always-shadow extension-card task-center-card" @click="openTaskCenter()">
+                          <div class="el-card__body">
                           <div class="extension-info"><h3>{{ t('taskCenter') }}</h3><p>{{ t('taskCenterDescription') }}</p></div>
-                        </el-card>
-                        <el-card class="extension-card workspace-card" @click="openWorkspace()" v-show="isElectron">
+                          </div>
+                        </div>
+                        <div class="el-card is-always-shadow extension-card workspace-card" @click="openWorkspace()" v-show="isElectron">
+                          <div class="el-card__body">
                           <div class="extension-info"><h3>{{ t('workspace') || '工作区文件' }}</h3><p>{{ t('workspaceDescription') || '管理与查看本地工作区文件树' }}</p></div>
-                        </el-card>
+                          </div>
+                        </div>
                         <!-- 分隔线 -->
                         <div class="extensions-divider" style="margin-bottom: 12px;">
                           <span>
@@ -1140,7 +1146,8 @@
 
                         <!-- 扩展列表 -->
                         <el-empty v-if="filteredExtensions.length === 0" :description="t('noExtensionsFound')" ></el-empty>
-                        <el-card v-for="ext in filteredExtensions" :key="ext.id" class="extension-card" :class="{ active: currentExtension && currentExtension.id === ext.id }" @click="switchExtension(ext)">
+                        <div class="el-card is-always-shadow extension-card" v-for="ext in filteredExtensions" :key="ext.id" :class="{ active: currentExtension && currentExtension.id === ext.id }" @click="switchExtension(ext)">
+                          <div class="el-card__body">
                             <div class="btn-top-right" @click.stop>
                               <button type="button" class="el-button is-circle el-button--small" :title="favoriteExtensionIds.includes(ext.id) ? t('unfavorite') : t('favorite')" @click.stop.prevent="toggleFavoriteExtension(ext)">
                                   <i :class="favoriteExtensionIds.includes(ext.id) ? 'fa-solid fa-star star-active' : 'fa-regular fa-star'"></i>
@@ -1149,7 +1156,8 @@
                               <button type="button" class="el-button el-button--primary is-circle el-button--small" v-if="isElectron" :title="t('openExtensionInWindow')" @click.stop.prevent="openExtensionInWindow(ext)" style="margin-left: 8px;"><i class="fa-solid fa-window-restore"></i></button>
                             </div>
                             <div class="extension-info"><h3>{{ ext.name }}</h3><p>{{ ext.description }}</p><div class="extension-meta"><span>v{{ ext.version }}</span><span>{{ ext.author }}</span></div></div>
-                        </el-card>
+                          </div>
+                        </div>
                       </div>
                     </div> 
 

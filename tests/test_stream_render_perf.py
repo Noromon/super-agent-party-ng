@@ -347,4 +347,21 @@ def test_s114_native_buttons_and_pending_meter():
     assert home.count('<button type="button" class="el-button') >= 16
     rd = _read("static/js/renderer.js")
     assert "pending=" in rd and "_streamRecvChars || 0) - (this.$root._streamFlushChars" in rd
-    assert "renderer build=S114" in rd
+    assert "renderer build=S1" in rd
+
+
+# ===== S115: chat_main 原生刀镜像 + 扩展卡 el-card→原生 div + LoAF 400ms =====
+
+def test_s115_chat_main_native_hotzone_and_card_div():
+    cm = _read("static/templates/page_chat_main.html")
+    assert "<el-button :title=\"t('copy')\"" not in cm
+    assert "<el-button :title=\"t('unfavorite')\"" not in cm
+    for html in (cm, _read("static/templates/page_home.html")):
+        assert 'class="el-card is-always-shadow extension-card' in html
+        assert html.count('<div class="el-card__body">') >= 4
+        assert '<el-card class="extension-card' not in html
+        assert '<el-card v-for="ext in' not in html
+    rd = _read("static/js/renderer.js")
+    assert "durationThreshold: 400" in rd
+    assert "typing=" in rd
+    assert "renderer build=S115" in rd

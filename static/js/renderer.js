@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S114 loaded');
+console.warn('[Probe] renderer build=S115 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -932,7 +932,8 @@ const app = Vue.createApp({
         let loafCount = 0;
         const loafObs = new PerformanceObserver((list) => {
           for (const e of list.getEntries()) {
-            if ((e.duration || 0) < 500) continue;
+            // S115: 阈值 500→400ms，流式期掉帧任务从此有名有姓。
+            if ((e.duration || 0) < 400) continue;
             const scripts = (e.scripts || []).slice()
               .sort((a, b) => (b.duration || 0) - (a.duration || 0)).slice(0, 5).map((s) => {
                 const loc = s.sourceLocation || {};
@@ -954,10 +955,11 @@ const app = Vue.createApp({
             console.warn('[LongFrame] duration=' + Math.round(e.duration) + 'ms blocking=' + Math.round(e.blockingDuration || 0) +
               'ms phases[script=' + pre + 'ms render=' + ren + 'ms forcedSL=' + forced + 'ms]' + size +
               ' scripts=' + (scripts || '(无脚本归因，疑似原生/样式回归)') +
+              ' typing=' + (this.isTyping ? 1 : 0) +
               ((window.__lateTimers && window.__lateTimers.length) ? ' timers[' + window.__lateTimers.slice(-2).join(' || ') + ']' : ''));
           }
         });
-        loafObs.observe({ type: 'long-animation-frame', durationThreshold: 500 });
+        loafObs.observe({ type: 'long-animation-frame', durationThreshold: 400 });
       }
     } catch (e) { console.warn('[LongFrame] observer 注册失败:', e && e.message); }
     // S99/S100: 饥饿心跳。除定时器外，keydown/mousemove 活动戳互补——泵外阻塞
