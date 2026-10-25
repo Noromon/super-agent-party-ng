@@ -101,6 +101,19 @@ Object.assign(vue_methods, {
                 return existing;
             }
         }
+        // S113: 思考被工具穿插不再拆块——反向扫描最近的 reasoning 块；
+        // 其后仅隔 tool_call（结果未回=同段思考续写）→ 复用并复活 live 态；
+        // 一旦出现 text 或 tool_result/error（结果已见=真·新一轮）→ 另起新块
+        if (type === 'reasoning') {
+            for (let i = msg.displayBlocks.length - 1; i >= 0; i--) {
+                const b = msg.displayBlocks[i];
+                if (b.type === 'reasoning') { b.done = false; return b; }
+                if (b.type === 'text' || b.type === 'tool_result' || b.type === 'error') break;
+            }
+            const nb = { type, id, name, content: '', args: '', data: null };
+            msg.displayBlocks.push(nb);
+            return nb;
+        }
         let last = msg.displayBlocks[msg.displayBlocks.length - 1];
         const canReuse = last && last.type === type && (!id || last.id === id);
         if (canReuse) {

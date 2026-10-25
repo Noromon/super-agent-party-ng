@@ -325,3 +325,15 @@ def test_s112_persistent_off_and_dialog_destroy():
     assert tp >= 203 and td >= 66
     rd = _read("static/js/renderer.js")
     assert "compChain(this) + ' @ ' + ctxOf(this.$el)" in rd
+# ===== S113: 七设置页 v-if + outerHTML 点名 + reasoning 因果续写不拆块 =====
+
+def test_s113_pages_vif_and_reasoning_causal():
+    for p in ('role', 'model-config', 'toolkit', 'system', 'logo', 'deploy-bot', 'api-group'):
+        s = _read(f"static/templates/page_{p}.html").split("\n")[0]
+        assert f"v-if=\"activeMenu === '{p}'\"" in s, p
+        assert "v-show" not in s, p
+    rd = _read("static/js/renderer.js")
+    assert "outerHTML" in rd and "renderer build=S113" in rd
+    tb = _read("static/js/methods/11_tool_blocks.js")
+    assert "b.done = false; return b;" in tb
+    assert "b.type === 'text' || b.type === 'tool_result' || b.type === 'error'" in tb

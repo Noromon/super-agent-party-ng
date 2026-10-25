@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S112 loaded');
+console.warn('[Probe] renderer build=S113 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -2277,8 +2277,9 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
       if (buckets[n] > 300) {
         if (!suspects[n]) suspects[n] = [];
         if (suspects[n].length < 3) {
-          // S111/S112: 组件名链点名 + DOM 链定位功能区；弹层实例附内容文本=功能名
+          // S111-S113: 组件链 @ DOM 链 @ outerHTML 原形；弹层实例附内容文本=功能名
           let tag = compChain(this) + ' @ ' + ctxOf(this.$el);
+          try { tag += ' # ' + (this.$el && this.$el.outerHTML || '').replace(/\s+/g, ' ').slice(0, 90); } catch (_) {}
           if (n.indexOf('Popper') >= 0 || n.indexOf('Tooltip') >= 0 || n.indexOf('Dropdown') >= 0) {
             try { tag += ' "' + (this.$el && this.$el.textContent || '').trim().slice(0, 20) + '"'; } catch (_) {}
           }

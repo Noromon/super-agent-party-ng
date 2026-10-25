@@ -1,4 +1,4 @@
-        <div v-show="activeMenu === 'system'" class="page tools-container">
+        <div v-if="activeMenu === 'system'" class="page tools-container">
           <el-form :model="systemSettings" class="settings-form" label-position="top">
             <div class="tool-item">
               <div class="tool-header">
