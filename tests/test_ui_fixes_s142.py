@@ -34,10 +34,33 @@ class TestTabsOverflowS143:
         css = _read("static", "css", "styles.css")
         i = css.find("@media (max-width: 880px)")
         assert i > 0
-        blk = css[i:i + 420]
-        assert ".settings-form { padding: 16px" in blk
-        assert "flex-wrap: wrap" in blk
-        assert "white-space: normal" in blk
+        assert ".settings-form { padding: 16px" in css[i:i + 200]
+
+
+class TestNarrowLayoutS144:
+    def test_min_width_chain(self):
+        # 撑宽 el-main 被裁的盲区=flex min-width:auto；三层归零让约束传导进页面
+        css = _read("static", "css", "styles.css")
+        assert ".main-container .content { min-width: 0; }" in css
+        assert ".page { min-width: 0; }" in css
+        assert ".settings-form { min-width: 0; }" in css
+
+    def test_fluid_settings_rows_unconditional(self):
+        css = _read("static", "css", "styles.css")
+        assert ".settings-form .form-item-align { flex-wrap: wrap; row-gap: 4px; }" in css
+        assert ".settings-form .el-form-item__label { white-space: normal; min-width: 0; }" in css
+        assert ".settings-form .el-form-item__content { min-width: 0; flex-wrap: wrap; column-gap: 8px; }" in css
+        assert ".settings-form .el-select { max-width: 100%; }" in css
+
+    def test_narrow_visible_scrollbar(self):
+        css = _read("static", "css", "styles.css")
+        i = css.find("@media (max-width: 1024px)")
+        assert i > 0
+        blk = css[i:i + 460]
+        assert "scrollbar-width: thin" in blk
+        assert ".content::-webkit-scrollbar { display: block" in blk
+        # 必须排在 .content 基础规则（scrollbar-width:none）之后，媒体查询同特异性靠层叠取胜
+        assert css.find("scrollbar-width: none") < i
 
 
 class TestWindowSizeMemoryS142:

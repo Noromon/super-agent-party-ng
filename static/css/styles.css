@@ -12792,10 +12792,31 @@ pre.sp-content.sp-code {
   border-radius: 3px;
 }
 
-/* S143：窄屏设置页收紧（留白/换行/长标签） */
+/* S143：窄屏设置页留白收紧（换行类规则 S144 已上移为无条件流体规则） */
 @media (max-width: 880px) {
   .settings-form { padding: 16px; margin: 16px 10px; }
-  .settings-form .form-item-align,
-  .settings-form .tool-header { flex-wrap: wrap; row-gap: 4px; }
-  .settings-form .el-form-item__label { white-space: normal; min-width: 0; }
+}
+
+/* S144：终结「内容撑宽 el-main→被 .main-container(overflow:hidden) 裁死」盲区——
+   flex 子项 min-width:auto 必须归零，约束才能传导进页面内部：标签条溢出即激活
+   S143 滚动条+滚轮横滚，行内元素优先收缩/换行而非外溢不可触及 */
+.main-container .content { min-width: 0; }
+.page { min-width: 0; }
+.settings-form { min-width: 0; }
+
+/* S144：设置页行内流体化（无条件生效：宽度够保持左右同行，挤不下自动换行，
+   杜绝「要么触发窄屏模式要么宽到装下全内容」的二极管） */
+.settings-form .form-item-align { flex-wrap: wrap; row-gap: 4px; }
+.settings-form .tool-header { flex-wrap: wrap; }
+.settings-form .el-form-item__label { white-space: normal; min-width: 0; }
+.settings-form .el-form-item__content { min-width: 0; flex-wrap: wrap; column-gap: 8px; }
+.settings-form .el-select { max-width: 100%; }
+
+/* S144：窄态显形内容区滚动条（最后防线——极端不可缩内容如 ai-browser 450px
+   聊天区溢出时可见可滚；宽屏维持无滚动条观感）。须排在 .content 基础规则之后 */
+@media (max-width: 1024px) {
+  .content { scrollbar-width: thin; }
+  .content::-webkit-scrollbar { display: block; width: 6px; height: 6px; }
+  .content::-webkit-scrollbar-thumb { background: var(--el-border-color-darker); border-radius: 3px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
 }
