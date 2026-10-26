@@ -325,7 +325,10 @@ def get_mem0_instance(memory_id, cur_memory, settings):
     执行（聊天两路与 CRUD 端点全走此处，优于上游三份拷贝）。
     """
     from mem0 import Memory
+    import re
 
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(memory_id)):
+        raise ValueError(f"invalid memory_id: {memory_id!r}")
     sanitize_card_strings(cur_memory)
     eff_dims = effective_dims(memory_id, cur_memory.get("embedding_dims", 1024))
     key = (

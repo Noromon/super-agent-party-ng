@@ -84,7 +84,8 @@ def test_b2_2_cap_helpers_behavior():
 def test_b8_ws_save_merged_and_storage_safe():
     src = _read("server.py")
     assert "deep_update(current, settings_dict)" in src
-    assert "await save_settings(current)" in src
+    # S146（M5 期）：save 移入 RMW 锁内，签名加 _rmw_held（合并写语义不变）
+    assert "await save_settings(current, _rmw_held=True)" in src
     gs = _read("py/get_setting.py")
     assert "asyncio.create_task(save_settings(user_settings))" not in gs
     sysr = _read("py/routers/system.py")

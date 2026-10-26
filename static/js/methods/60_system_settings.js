@@ -11,6 +11,10 @@ Object.assign(vue_methods, {
       this.syncWindowSizeMemory();
       this.autoSaveSettings();
     },
+    // M5：外联 API（/v1 /mcp）免 token 开关——后端随 save_settings 热更新
+    onExternalApiTokenChange() {
+      this.autoSaveSettings();
+    },
     async autoSaveSettings() {
       if (this.isElectron) {
         await window.electronAPI.saveChromeSettings(JSON.parse(JSON.stringify(this.chromeMCPSettings)));

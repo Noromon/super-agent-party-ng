@@ -4,6 +4,8 @@ import sys
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 
+from py import auth as sap_auth
+
 def get_base_path():
     if getattr(sys, 'frozen', False):
         return sys._MEIPASS
@@ -40,6 +42,9 @@ overlay_manager = DanmakuOverlayManager()
 
 @router.websocket("/ws/overlay")
 async def websocket_overlay_endpoint(websocket: WebSocket):
+    if not sap_auth.ws_auth_ok(websocket):
+        await websocket.close(code=4401)
+        return
     await overlay_manager.connect(websocket)
     try:
         while True:

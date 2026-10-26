@@ -374,6 +374,25 @@
               <div class="tool-header">
                 <span>
                   <el-icon>
+                    <i class="fa-solid fa-key"></i>
+                  </el-icon>
+                  {{ t('externalApiToken') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('externalApiTokenDesc')" class="form-item-align" label-position="left">
+                  <el-switch
+                    v-model="systemSettings.externalApiRequireToken"
+                    @change="onExternalApiTokenChange">
+                  </el-switch>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
                     <i class="fa-solid fa-wifi"></i>
                   </el-icon>
                   {{ t('proxySettings') }}

@@ -26,6 +26,12 @@ SESSION_TOKEN = os.environ.get("SAP_SESSION_TOKEN") or secrets.token_urlsafe(24)
 MACHINE_TOKEN = os.environ.get("SAP_MACHINE_TOKEN") or ""
 DISABLED = os.environ.get("SAP_DISABLE_TOKEN", "") == "1"
 
+# M5：外联 API（/v1 OpenAI 兼容面、/mcp）免 token 开关。默认免鉴权以兼容既有
+# LAN/脚本用法；settings.externalApiRequireToken=true（或环境变量
+# SAP_EXTERNAL_API_REQUIRE_TOKEN=1）后要求 Authorization: Bearer <MACHINE_TOKEN>。
+EXTERNAL_TOKEN_FREE = os.environ.get("SAP_EXTERNAL_API_REQUIRE_TOKEN", "") != "1"
+_TOKENFREE_PREFIXES = ("/v1", "/mcp")
+
 EXEMPT_PREFIXES = (
     "/v1",          # OpenAI-compatible external API (kept token-free by design)
     "/mcp",         # MCP mount (external clients)
@@ -47,6 +53,11 @@ def _token_match(got: str) -> bool:
 
 def token_ok(request) -> bool:
     got = request.headers.get(HEADER) or ""
+    if not got:
+        authz = request.headers.get("authorization") or ""
+        if authz.lower().startswith("bearer "):
+            # OpenAI 兼容客户端惯例；token-free 关闭后 /v1 /mcp 走此路
+            got = authz[7:].strip()
     if not got:
         got = request.cookies.get(COOKIE, "")
     return _token_match(got)
@@ -108,10 +119,19 @@ def ws_auth_ok(websocket) -> bool:
 def is_exempt(path: str) -> bool:
     if DISABLED:
         return True
-    if path == "/" or "." in path.rsplit("/", 1)[-1]:
-        return True  # static assets
+    # 静态资源（StaticFiles 挂载面）按“最后一段含扩展名”豁免。
+    # 约定：动态 API 路由的最后一段禁止含点号；唯一例外是 /ext 子树内的
+    # node 代理（/ext/{id}/node/...），它虽带扩展名也必须走鉴权，单独排除。
+    if path == "/":
+        return True
+    if path.startswith("/ext/") and "/node/" in path:
+        return False
+    if "." in path.rsplit("/", 1)[-1]:
+        return True
     for p in EXEMPT_PREFIXES:
         if path == p or path.startswith(p + "/"):
+            if p in _TOKENFREE_PREFIXES and not EXTERNAL_TOKEN_FREE:
+                return False
             return True
     return False
 

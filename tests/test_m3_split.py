@@ -16,7 +16,8 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 # whitelist retired 2026-10-20: server.py has no module-level function >=300
 GIANT_WHITELIST = {
     # S65-P3（A5 日记）：lifespan +19 行（引擎启动/停止钩子）、ws +5 行（save_settings 热更）越过 300 线，冻结现值，后续拆分时下调
-    "lifespan": 307,
+    # S146（M5）：lifespan +2 行（外联 API 免 token 开关同步钩子），冻结现值
+    "lifespan": 309,
     # S71：ws +4 行（get_diary_im_targets 两行分支，重活已抽 _ws_diary_im_targets 模块级 helper），重冻结 302->306
     "websocket_endpoint": 306,
     # S132（A13 WSL 引擎）：execute_tool_manually +3 行（wsl hooks/import）越过 300 线，冻结现值，后续拆分时下调

@@ -1350,7 +1350,7 @@ const app = Vue.createApp({
         // 更新 mermaid 主题
         mermaid.initialize({
           startOnLoad: false,
-          securityLevel: 'loose',
+          securityLevel: 'strict',
           theme : ['dark','midnight','neon'].includes(newVal) ? 'dark' : 'default'
         });
 

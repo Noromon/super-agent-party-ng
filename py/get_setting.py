@@ -485,6 +485,8 @@ def _wrap_pcm_to_wav(pcm_data):
 # ----------------- 7. 配置读写 -----------------
 # D-1/D-8: 单写者锁；D-3: 读败隔离+拒存；D-2: 主配置 conversations 护栏
 _SETTINGS_LOCK = asyncio.Lock()
+# D-1 补全：load→merge→save 全程事务锁（锁序 RMW→SETTINGS，所有路径一致，无死锁）
+_SETTINGS_RMW_LOCK = asyncio.Lock()
 _COVS_LOCK = asyncio.Lock()
 _COVS_DEGRADED = False
 
@@ -556,17 +558,18 @@ async def load_settings():
                 if _migrate_legacy_keys(user_settings):
                     has_changes[0] = True
                 if has_changes[0] and parse_ok:
-                    await save_settings(user_settings)  # B8(b03e7c0e): 火忘任务改 await，防与后续保存竞态
+                    # 引导/迁移回写：走行写不取 RMW（load 可能被持 RMW 的事务调用，避免自锁）
+                    await _write_settings_row(user_settings)  # B8(b03e7c0e): 火忘任务改 await，防与后续保存竞态
                 if not parse_ok:
                     return defaults if not IS_DOCKER else {**defaults, "isdocker": True}
                 return secret_box.decrypt_settings(user_settings)
             else:
                 if IS_DOCKER:
                     defaults["isdocker"] = True
-                await save_settings(defaults)
+                await _write_settings_row(defaults)
                 return defaults
 
-async def save_settings(settings):
+async def _write_settings_row(settings):
     # D-2 护栏：会话不属于主配置；用副本 pop，不改动调用方内存对象
     if "conversations" in settings:
         settings = {k: v for k, v in settings.items() if k != "conversations"}
@@ -576,6 +579,16 @@ async def save_settings(settings):
         async with aiosqlite.connect(DATABASE_PATH) as db:
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
             await db.commit()
+
+
+async def save_settings(settings, _rmw_held: bool = False):
+    """写主配置。跨读写事务（load→merge→save）须先持 _SETTINGS_RMW_LOCK 并传
+    _rmw_held=True，使整个事务与其他 RMW/单点写互斥，消除 lost-update。"""
+    if _rmw_held:
+        await _write_settings_row(settings)
+    else:
+        async with _SETTINGS_RMW_LOCK:
+            await _write_settings_row(settings)
 
 async def _rescue_from_rows():
     """M4-B2'：blob 损坏时从行级影子表救援全部会话（每次 save_covs 确定性同步，

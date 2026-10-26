@@ -17,6 +17,17 @@ from py.load_files import get_files_json
 from py.get_setting import load_settings, base_path, KB_DIR
     
 # --- Tiktoken 缓存设置（保留）---
+# BM25 索引并发保护：按 kb_id 串行化写盘/清理；写用 tmp+os.replace 原子落盘
+_bm25_locks: dict = {}
+
+
+def _atomic_dump_json(path, obj):
+    tmp = str(path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8", errors="ignore") as f:
+        json.dump(obj, f, ensure_ascii=False)
+    os.replace(tmp, str(path))
+
+
 def get_tiktoken_cache_path():
     cache_path = os.path.join(base_path, "tiktoken_cache")
     os.makedirs(cache_path, exist_ok=True)
@@ -145,24 +156,23 @@ async def build_vector_store(docs: List[Document], kb_id, cur_kb: Dict, cur_vend
                     "metadata": clean_metadata
                 })
 
-            # 2. 保存 (使用 clean_docs_data)
-            await asyncio.to_thread(
-                lambda: json.dump(
-                    {"docs": clean_docs_data}, 
-                    open(bm25_path, "w", encoding="utf-8", errors="ignore"), 
-                    ensure_ascii=False
-                )
-            )
+            # 2. 保存 (使用 clean_docs_data)：kb 锁内原子写（tmp+rename），杜绝半截文件与句柄泄漏
+            _lock = _bm25_locks.setdefault(str(kb_id), asyncio.Lock())
+            async with _lock:
+                await asyncio.to_thread(_atomic_dump_json, bm25_path, {"docs": clean_docs_data})
             logging.getLogger("app").info(f"BM25 index saved successfully for KB {kb_id}")
 
     except Exception as e:
         # 即使 BM25 失败，也只打印警告，不中断程序
         logging.getLogger("app").info(f"⚠️ BM25 Index failed (Skipping): {str(e)}")
-        # 尝试清理可能损坏的文件
+        # 尝试清理可能损坏的文件（同一把锁，避免误删并发重建刚写好的索引）
         if 'bm25_path' in locals() and bm25_path.exists():
             try:
-                os.remove(bm25_path)
-            except:
+                _lock = _bm25_locks.setdefault(str(kb_id), asyncio.Lock())
+                async with _lock:
+                    if bm25_path.exists():
+                        os.remove(bm25_path)
+            except Exception:
                 pass
 
     # ========== 向量索引构建 (使用异步客户端) ==========

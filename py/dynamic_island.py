@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import logging
 from typing import Dict, List
 
 
@@ -192,7 +193,7 @@ def _media_key(key_name: str):
         pyautogui.FAILSAFE = False
         pyautogui.press(key_name)
     except Exception as e:
-        print(f"[DynamicIsland] pyautogui press {key_name} failed: {e}")
+        logging.getLogger("app").warning(f"[DynamicIsland] pyautogui press {key_name} failed: {e}")
 
 
 def _macos_media_command(command: str, player: str = ""):
@@ -220,11 +221,11 @@ def _macos_media_command(command: str, player: str = ""):
                     ["osascript", "-e", script],
                     capture_output=True, timeout=5
                 )
-                print(f"[DynamicIsland] AppleScript sent to {app}: {cmd}")
+                logging.getLogger("app").info(f"[DynamicIsland] AppleScript sent to {app}: {cmd}")
             except Exception as e:
-                print(f"[DynamicIsland] AppleScript {app} {cmd} failed: {e}")
+                logging.getLogger("app").warning(f"[DynamicIsland] AppleScript {app} {cmd} failed: {e}")
     except Exception as e:
-        print(f"[DynamicIsland] _macos_media_command error: {e}")
+        logging.getLogger("app").warning(f"[DynamicIsland] _macos_media_command error: {e}")
 
 
 def island_music_play():
@@ -305,7 +306,7 @@ def island_music_set_volume(level: int):
             )
             return f"音量已设置为 {level}%"
         except Exception as e:
-            print(f"[DynamicIsland] macOS volume error: {e}")
+            logging.getLogger("app").warning(f"[DynamicIsland] macOS volume error: {e}")
 
     # Linux: 使用 pactl 直接设定
     if system == "Linux":
@@ -316,7 +317,7 @@ def island_music_set_volume(level: int):
             )
             return f"音量已设置为 {level}%"
         except Exception as e:
-            print(f"[DynamicIsland] Linux volume error: {e}")
+            logging.getLogger("app").warning(f"[DynamicIsland] Linux volume error: {e}")
 
     # Windows: 使用 pycaw 直接设定
     if system == "Windows":
@@ -328,7 +329,7 @@ def island_music_set_volume(level: int):
             ep.SetMasterVolumeLevelScalar(level / 100.0, None)
             return f"音量已设置为 {level}%"
         except Exception as e:
-            print(f"[DynamicIsland] pycaw volume error: {e}")
+            logging.getLogger("app").warning(f"[DynamicIsland] pycaw volume error: {e}")
 
     return f"无法调整音量。"
 
@@ -353,7 +354,7 @@ def island_enable() -> dict:
         for t in ISLAND_TOOLS_SCHEMA
     ]
     node_ext_mcp_tools[ext_id] = tools_simplified
-    print(f"[DynamicIsland] 已启用，注册 {len(tools_simplified)} 个工具")
+    logging.getLogger("app").info(f"[DynamicIsland] 已启用，注册 {len(tools_simplified)} 个工具")
     return {"enabled": True, "tools": tools_simplified}
 
 
@@ -365,7 +366,7 @@ def island_disable() -> dict:
 
     ext_id = "dynamic_island"
     node_ext_mcp_tools.pop(ext_id, None)
-    print(f"[DynamicIsland] 已禁用")
+    logging.getLogger("app").info(f"[DynamicIsland] 已禁用")
     return {"enabled": False}
 
 
@@ -387,7 +388,7 @@ def _query_smtc_windows():
             GlobalSystemMediaTransportControlsSessionManager as SMTCManager,
         )
     except ImportError:
-        print("[DynamicIsland] winrt not installed, SMTC unavailable")
+        logging.getLogger("app").warning("[DynamicIsland] winrt not installed, SMTC unavailable")
         return None
 
     async def _query():
@@ -407,7 +408,7 @@ def _query_smtc_windows():
                         pos = tl.position.total_seconds()
                         timeline_ok = True
                 except Exception as e:
-                    print(f"[DynamicIsland] SMTC timeline query error: {e}")
+                    logging.getLogger("app").warning(f"[DynamicIsland] SMTC timeline query error: {e}")
                 all_sessions.append({
                     "title": info.title or "",
                     "artist": info.artist or "",
@@ -417,7 +418,7 @@ def _query_smtc_windows():
                     "timelineSupported": timeline_ok,
                 })
             except Exception as e:
-                print(f"[DynamicIsland] SMTC session query error: {e}")
+                logging.getLogger("app").warning(f"[DynamicIsland] SMTC session query error: {e}")
                 pass
         if not all_sessions:
             return None
@@ -431,7 +432,7 @@ def _query_smtc_windows():
     try:
         return _run_async_in_thread(_query())
     except Exception as e:
-        print(f"[DynamicIsland] SMTC query error: {e}")
+        logging.getLogger("app").warning(f"[DynamicIsland] SMTC query error: {e}")
         return None
 
 
@@ -452,7 +453,7 @@ def _run_async_in_thread(coro):
     t.start()
     t.join()
     if result_container["error"]:
-        print(f"[DynamicIsland] SMTC thread error: {result_container['error']}")
+        logging.getLogger("app").warning(f"[DynamicIsland] SMTC thread error: {result_container['error']}")
     return result_container["data"]
 
 
@@ -525,7 +526,7 @@ return ""
                         "artist": parts[2] if len(parts) > 2 else ""
                     }
             except Exception as e:
-                print(f"[DynamicIsland] _query_app {app_name} error: {e}")
+                logging.getLogger("app").warning(f"[DynamicIsland] _query_app {app_name} error: {e}")
             return None
 
         def _query_macos():
@@ -558,7 +559,6 @@ return ""
 
     elif platform.system() == "Linux":
         import asyncio
-
         linux_data = await asyncio.to_thread(_mpris_get_metadata)
         if linux_data:
             result.update(linux_data)

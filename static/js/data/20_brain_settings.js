@@ -136,6 +136,7 @@ Object.assign(vue_data, {
       autoCollapseInput: false,
       enableNotifications: false,
       rememberWindowSize: true,
+      externalApiRequireToken: false,
     },
 
     // --- 数据安全网（M4-lite 快照备份 UI）---

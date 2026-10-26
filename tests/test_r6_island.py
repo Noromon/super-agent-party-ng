@@ -5,8 +5,8 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 上游 origin/main@3eb32bb2 终态哈希（dynamic_island.py / island.css 逐字节）
-SHA_DYNAMIC_ISLAND = "0728ca9a843925e8e210a6c217bf272dd07fea482f2249598787964cb1647c46"
+# dynamic_island.py：上游 origin/main@3eb32bb2 逐字节 + fork 补丁（S145：print→logging，白名单改动）
+SHA_DYNAMIC_ISLAND = "a0a52cc8168b877219458341b64aaf4f3a335182c44aa9c45140538eee4426ed"
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
 # fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S141 纯图标刷新徽章，白名单改动）
 SHA_ISLAND_APP = "4445e7df71f3899ac9ab8efec1ad619881cb373016ea596f2f96a808341ea450"
@@ -24,7 +24,7 @@ def _sha(*p):
 class TestIslandAssetsS139:
     def test_dynamic_island_verbatim(self):
         assert _sha("py", "dynamic_island.py") == SHA_DYNAMIC_ISLAND
-        assert os.path.getsize(os.path.join(ROOT, "py", "dynamic_island.py")) == 19287
+        assert os.path.getsize(os.path.join(ROOT, "py", "dynamic_island.py")) == 19697
 
     def test_island_css_verbatim(self):
         assert _sha("static", "css", "island.css") == SHA_ISLAND_CSS

@@ -461,7 +461,7 @@ from py.diary_query_tool import diary_query_tool, diary_books_tool, handle_query
 from py.diary_chat_integration import append_to_chat_buffer, update_buffer_identity, get_chat_buffer
 from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK
 
-from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH,DEFAULT_THA_DIR,DEFAULT_SOULX_IMAGES_DIR
+from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH,DEFAULT_THA_DIR,DEFAULT_SOULX_IMAGES_DIR,_SETTINGS_RMW_LOCK
 from py.llm_tool import get_image_base64,get_image_media_type
 from py.tool_dispatch import (_APPROVAL_PREFIX, _approval_payload,
                               _is_approval_result)
@@ -760,6 +760,8 @@ async def _temp_sweep_loop():
 async def lifespan(app: FastAPI):
     sap_auth.write_token_file(USER_DATA_DIR)
     sap_auth.ensure_machine_token(USER_DATA_DIR)
+    # M5：外联 API（/v1 /mcp）免 token 开关初始态；后续随 save_settings 刷新
+    await _sync_external_api_token_flag()
     # --- [核心防御] 立即清理系统环境变量中的 SOCKS 代理，防止 httpx 崩溃 ---
     for env_key in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
         val = os.environ.get(env_key, "")
@@ -1866,7 +1868,7 @@ def _sensitive_approval(tool_name, tool_params, settings):
 
 async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
     global _TOOL_HOOKS, node_ext_mcp_clients, node_ext_mcp_tools
-    print("dispatch_tool",tool_name,tool_params)
+    logging.getLogger("app").debug(f"[dispatch] {tool_name} {str(tool_params)[:500]}")
     
     # ==================== 1. 工具映射表（首次使用时构建一次，M-3 拆分） ====================
     if not _TOOL_HOOKS:
@@ -2827,7 +2829,7 @@ def _append_tts_voice_prompts(request, settings, selectedMemoryName):
                     Narrator_label = "旁白"
 
                 finalttsList = json.dumps(finalttsList, ensure_ascii=False, indent=4)
-                print("可用音色：",finalttsList)
+                logging.getLogger("app").debug(f"可用音色：{finalttsList}")
                 
                 # 修复：示例中的角色名也用 selectedMemoryName
                 newtts_messages = f"""
@@ -4163,7 +4165,7 @@ async def _stream_character_context(request, settings, user_prompt, cur_memory, 
             )
             relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
         except Exception as e:
-            print("m0.search error:",e)
+            logging.getLogger("app").warning(f"m0.search error: {e}")
             relevant_memories = ""
         logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
         content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")                   
@@ -6042,7 +6044,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             content_append(request.messages, 'assistant', full_content)
         # 工具和深度搜索
         if tool_calls:
-            print("tool_calls",tool_calls)
+            logging.getLogger("app").debug(f"tool_calls: {tool_calls}")
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             async for _c in _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
@@ -6272,7 +6274,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         
         source_prompt = ""
         if request.fileLinks:
-            print("fileLinks",request.fileLinks)
+            logging.getLogger("app").debug(f"fileLinks: {request.fileLinks}")
             # 异步获取文件内容
             files_content = await get_files_content(request.fileLinks)
             fileLinks_message = f"\n\n相关文件内容：{files_content}"
@@ -6345,7 +6347,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                         if request.messages[0]['role'] == 'system':
                             request.messages[1]['content'] = "系统提示：\n" +request.messages[0]['content'] + "\n系统提示结束\n\n用户：" + request.messages[1]['content']
             except Exception as e:
-                print("Dify error:",e)
+                logging.getLogger("app").warning(f"Dify error: {e}")
         model = settings['model']
         extra_params = settings['extra_params']
         # 移除extra_params这个list中"name"不包含非空白符的键值对
@@ -6657,7 +6659,7 @@ async def _complete_character_context(request, settings, user_prompt, cur_memory
                     relevant_memories = _diary_recall_sample(relevant_memories, memoryLimit)
                 relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
             except Exception as e:
-                print("m0.search error:",e)
+                logging.getLogger("app").warning(f"m0.search error: {e}")
                 relevant_memories = ""
             logging.getLogger("app").info("添加相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n")
             content_append(request.messages, 'system', "之前的相关记忆：\n\n" + relevant_memories + "\n\n相关结束\n\n") 
@@ -7235,7 +7237,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                         if request.messages[0]['role'] == 'system':
                             request.messages[1]['content'] = "系统提示：\n" +request.messages[0]['content'] + "\n系统提示结束\n\n用户：" + request.messages[1]['content']
             except Exception as e:
-                print("Dify error:",e)
+                logging.getLogger("app").warning(f"Dify error: {e}")
         await _complete_web_search_setup(request, settings, user_prompt, tools, enable_web_search)
         if kb_list:
             tools.append(kb_tool)
@@ -7673,6 +7675,8 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     if raw_model.startswith("memory/"):
         parts = raw_model.split('/', 2) 
         if len(parts) >= 2:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", parts[1] or ""):
+                raise HTTPException(status_code=400, detail="invalid memory id in model")
             override_memory_id = parts[1]
             request.model = parts[2] if len(parts) > 2 else 'super-model'
             logging.getLogger("app").info(f"检测到动态 Memory ID: {override_memory_id}, 目标模型更新为: {request.model}")
@@ -7809,7 +7813,7 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
                 base_url=current_settings['reasoner']['base_url'] or "https://api.openai.com/v1",
             )
 
-        print('model:', request_settings['model'])
+        logging.getLogger("app").debug(f"model: {request_settings.get('model')}")
         
         # 将"system_prompt"插入到request.messages[0].content中 (注意这里使用的是 request_settings)
         if request_settings['system_prompt']:
@@ -8341,6 +8345,22 @@ app.include_router(overlay_router)
 settings_lock = asyncio.Lock()
 
 
+async def _sync_external_api_token_flag():
+    """M5：把 systemSettings.externalApiRequireToken 同步进 auth 模块；
+    免 token 模式启动时打一条 warning 提醒配额暴露面。"""
+    try:
+        from py import get_setting as _gs
+        settings = await _gs.load_settings()
+        sap_auth.EXTERNAL_TOKEN_FREE = not bool(
+            settings.get("systemSettings", {}).get("externalApiRequireToken", False))
+    except Exception:
+        return
+    if sap_auth.EXTERNAL_TOKEN_FREE:
+        logging.getLogger("app").warning(
+            "[Auth] /v1 /mcp 外联 API 当前免 token（本机其他程序/局域网可直调，消耗模型配额）。"
+            "可在设置开启「外联 API 需要令牌」改用 Authorization: Bearer <MACHINE_TOKEN>。")
+
+
 def _apply_proxy_env_safe(settings):
     """S85-D：代理设置保存后即时同步进程 env（manual=注入/system=探测/none=清除）。"""
     try:
@@ -8426,24 +8446,29 @@ async def _ws_save_settings(websocket: WebSocket, data: dict):
     不再整库覆盖。C-15: 失败必须回 save_error（此前异常被外层吞=前端白等超时）。"""
     settings_dict = data.get("data", {})
     try:
-        current = await load_settings()
-        # S120(上游 guard 族)：内容安全——系统提示词含敏感词则拒绝保存
-        if current.get("systemSettings", {}).get("contentSafety", False):
-            sys_prompt = settings_dict.get("system_prompt", "")
-            if sys_prompt:
-                is_safe, matched = await check_content_safety(sys_prompt)
-                if not is_safe:
-                    logger.warning(f"[content_safety] ws save_settings blocked words: {matched}")
-                    await ws_manager.send_json({
-                        "type": "save_error",
-                        "correlationId": data.get("correlationId"),
-                        "success": False,
-                        "error": "系统提示词包含敏感内容，设置未保存。",
-                    }, websocket)
-                    return
-        deep_update(current, settings_dict)
-        await save_settings(current)
+        # D-1：load→merge→save 全程持事务锁，堵死并发保存的 lost-update 窗口
+        async with _SETTINGS_RMW_LOCK:
+            current = await load_settings()
+            # S120(上游 guard 族)：内容安全——系统提示词含敏感词则拒绝保存
+            if current.get("systemSettings", {}).get("contentSafety", False):
+                sys_prompt = settings_dict.get("system_prompt", "")
+                if sys_prompt:
+                    is_safe, matched = await check_content_safety(sys_prompt)
+                    if not is_safe:
+                        logger.warning(f"[content_safety] ws save_settings blocked words: {matched}")
+                        await ws_manager.send_json({
+                            "type": "save_error",
+                            "correlationId": data.get("correlationId"),
+                            "success": False,
+                            "error": "系统提示词包含敏感内容，设置未保存。",
+                        }, websocket)
+                        return
+            deep_update(current, settings_dict)
+            await save_settings(current, _rmw_held=True)
         _apply_proxy_env_safe(current)
+        # M5：外联 API 免 token 开关随设置热更新
+        sap_auth.EXTERNAL_TOKEN_FREE = not bool(
+            current.get("systemSettings", {}).get("externalApiRequireToken", False))
         await sync_all_bots_behavior(current)
         try:
             from py.diary_engine import global_diary_engine

@@ -13,6 +13,7 @@ import sys as _sys
 import threading
 
 from py import app_state
+from py import auth as sap_auth
 from py.memory_store import fmt_iso8605_to_local
 import asyncio
 import json
@@ -161,8 +162,10 @@ async def remove_memory_endpoint(request: Request):
     memory_id = data.get("memoryId")
     if memory_id:
         try:
-            # 删除MEMORY_CACHE_DIR目录下的memory_id文件夹
-            memory_dir = os.path.join(MEMORY_CACHE_DIR, memory_id)
+            # 删除MEMORY_CACHE_DIR目录下的memory_id文件夹（限定在缓存根内，防 ../ 穿越）
+            memory_dir = os.path.join(MEMORY_CACHE_DIR, str(memory_id))
+            if not sap_auth.path_under(memory_dir, [MEMORY_CACHE_DIR]):
+                return JSONResponse({"success": False, "message": "invalid memoryId"}, status_code=400)
             shutil.rmtree(memory_dir)
             return JSONResponse({"success": True, "message": "Memory removed"})
         except Exception as e:

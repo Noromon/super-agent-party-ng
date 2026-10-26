@@ -714,6 +714,7 @@
   "onDidStartLoading",
   "onDidStopLoading",
   "onDomReady",
+  "onExternalApiTokenChange",
   "onNewWindow",
   "onPageFaviconUpdated",
   "onPageTitleUpdated",
