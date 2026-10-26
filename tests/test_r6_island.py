@@ -8,9 +8,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 上游 origin/main@3eb32bb2 终态哈希（dynamic_island.py / island.css 逐字节）
 SHA_DYNAMIC_ISLAND = "0728ca9a843925e8e210a6c217bf272dd07fea482f2249598787964cb1647c46"
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
-# fork 补丁后资产哈希（上游 + S139 M2 token 补丁，白名单改动）
-SHA_ISLAND_APP = "d223d10077a137635ed46d54e7712c0383436e2a91c929b356df17a3c8118a0a"
-SHA_ISLAND_HTML = "a61461132425e9ccab40cf428dc04d7752af7ed1f076a7b0c38464d0bc316654"
+# fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S140 刷新钮，白名单改动）
+SHA_ISLAND_APP = "324c0ec422df3f7ab7a741a69bf46360036688f82b45af5f1667b56851ef83e2"
+SHA_ISLAND_HTML = "014a1e240b98754d557651d213d043b43545003b6800ea6f890b6db7fdf77af8"
 
 
 def _read(*p):
@@ -50,6 +50,15 @@ class TestIslandAssetsS139:
         assert "session_token" in h
         assert h.find("__SAP_READY") < h.find('js/island-app.js')
         assert "css/island.css" in h
+
+    def test_weather_manual_refresh_s140(self):
+        # S140：手动刷新钮（自动轮询 600s 太长）；样式内联以保 island.css 逐字节
+        h = _read("static", "island.html")
+        assert "weather-refresh-btn" in h and "refreshWeather" in h
+        a = _read("static", "js", "island-app.js")
+        assert "refreshWeather()" in a
+        assert a.count("weatherRefresh") == 2  # zh 字典 + en 字典（模板引用在 island.html）
+        assert _sha("static", "css", "island.css") == SHA_ISLAND_CSS
 
 
 class TestIslandBackendS139:
@@ -127,4 +136,47 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S139" in _read("static", "js", "renderer.js")
+        assert "build=S140" in _read("static", "js", "renderer.js")
+
+
+class TestIslandProxyFallbackS140:
+    """S140：本机 DNS 挂起/IPv6 黑洞环境下，外联走 直连(trust_env)→本机代理 回退。"""
+
+    def test_router_has_fallback_helper(self):
+        s = _read("py", "routers", "island.py")
+        assert "_external_get_json" in s
+        assert "trust_env=True" in s
+        assert "SAP_PROXY" in s and "127.0.0.1:1080" in s and "127.0.0.1:7890" in s
+        # 三个外联端点统一走回退出口
+        for url in ("http://ip-api.com/json/", "api.open-meteo.com/v1/forecast",
+                    "geocoding-api.open-meteo.com/v1/search"):
+            assert url in s
+        assert "total=5" not in s  # 上游 5s 超时全部移除
+
+    def test_attempt_order_direct_then_proxy(self, monkeypatch):
+        import importlib
+
+        m = importlib.import_module("py.routers.island")
+        monkeypatch.delenv("SAP_PROXY", raising=False)
+        m._proxy_state["sticky"] = None
+        order = m._attempt_order()
+        assert order[0] is None and "http://127.0.0.1:7890" in order and "http://127.0.0.1:1080" in order
+        # 粘滞：代理成功后优先该代理，直连降为次选
+        m._proxy_state["sticky"] = "http://127.0.0.1:7890"
+        order = m._attempt_order()
+        assert order[0] == "http://127.0.0.1:7890" and order[1] is None
+        # SAP_PROXY 显式指定时只用它（不外探默认口）
+        monkeypatch.setenv("SAP_PROXY", "http://127.0.0.1:9999")
+        m._proxy_state["sticky"] = None
+        order = m._attempt_order()
+        assert order == [None, "http://127.0.0.1:9999"]
+        m._proxy_state["sticky"] = None
+
+    def test_proxy_exit_disables_ip_city(self):
+        # 代理出口下 IP 定位=代理城市，禁用兜底（前端保留默认/手选城市）
+        s = _read("py", "routers", "island.py")
+        i = s.find('async def get_ip_city')
+        block = s[i:i + 900]
+        j_sticky = block.find('_proxy_state.get("sticky")')
+        j_ext = block.find("_external_get_json")
+        assert j_sticky != -1 and j_sticky < j_ext

@@ -7,6 +7,7 @@ const I18N = {
     weatherUnknown: '未知',
     weatherCityNotFound: '未找到城市',
     weatherFetchError: '获取失败',
+    weatherRefresh: '刷新天气',
     weatherCodes: {
       0: '晴', 1: '多云', 2: '少云', 3: '晴间多云',
       45: '雾', 48: '雾凇',
@@ -142,6 +143,7 @@ const I18N = {
     weatherUnknown: 'Unknown',
     weatherCityNotFound: 'City not found',
     weatherFetchError: 'Failed to fetch',
+    weatherRefresh: 'Refresh weather',
     weatherCodes: {
       0: 'Clear', 1: 'Cloudy', 2: 'Partly Cloudy', 3: 'Mostly Cloudy',
       45: 'Fog', 48: 'Rime Fog',
@@ -1128,6 +1130,12 @@ function createIslandApp() {
         } catch (e) {
           console.error('[IP City] fetch failed:', e);
         }
+      },
+      // S140(fork)增强：手动天气刷新
+      refreshWeather() {
+        this.weatherLoading = false;
+        this.weatherError = null;
+        this.fetchWeather();
       },
       async fetchWeather() {
         if (this.weatherLoading) return;

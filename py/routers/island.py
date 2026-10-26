@@ -34,6 +34,48 @@ from py.ws_manager import ws_manager
 router = APIRouter()
 _logger = logging.getLogger("app")
 
+# S140：本机网络环境（本地 DNS 挂起 / IPv6 黑洞）下 aiohttp 直连 open-meteo/ip-api 必挂，
+# 且 aiohttp 不读系统代理。外联统一走 _external_get_json：直连（trust_env 尊重标准
+# 代理环境变量）→ 本机混合代理回退（SAP_PROXY 可覆盖默认 1080/7890），成功后粘滞。
+_PROXY_TIMEOUT = 8
+_FALLBACK_PROXIES = ("http://127.0.0.1:1080", "http://127.0.0.1:7890")
+_proxy_state = {"sticky": None}
+
+
+def _attempt_order():
+    env = os.environ.get("SAP_PROXY")
+    fallbacks = [env] if env else list(_FALLBACK_PROXIES)
+    sticky = _proxy_state.get("sticky")
+    if sticky:
+        return [sticky, None] + [p for p in fallbacks if p != sticky]
+    return [None] + fallbacks
+
+
+def _note_success(proxy):
+    if _proxy_state.get("sticky") != proxy:
+        _proxy_state["sticky"] = proxy
+        _logger.info(f"[IslandProxy] 外联出口切换：{'direct' if not proxy else proxy}")
+
+
+async def _external_get_json(url: str, params: dict = None):
+    """GET 外联 JSON：按 _attempt_order 逐路尝试；成功返回解析 JSON，全败返回 None。"""
+    last_err = None
+    for proxy in _attempt_order():
+        try:
+            async with aiohttp.ClientSession(trust_env=True) as session:
+                kw = {"timeout": aiohttp.ClientTimeout(total=_PROXY_TIMEOUT)}
+                if proxy:
+                    kw["proxy"] = proxy
+                async with session.get(url, params=params, **kw) as resp:
+                    if resp.status == 200:
+                        _note_success(proxy)
+                        return await resp.json()
+                    last_err = f"HTTP {resp.status}"
+        except Exception as e:
+            last_err = type(e).__name__
+    _logger.warning(f"[IslandProxy] 全路径失败 {url}: {last_err}")
+    return None
+
 # 上游 server.py 逐字（12231-12316 域）
 _ip_city_cache = None
 
@@ -91,59 +133,44 @@ async def get_ip_city():
     global _ip_city_cache
     if _ip_city_cache is not None:
         return _ip_city_cache
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("http://ip-api.com/json/", timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("status") == "success":
-                        _ip_city_cache = {
-                            "city": data.get("city", ""),
-                            "regionName": data.get("regionName", ""),
-                            "country": data.get("country", ""),
-                            "lat": data.get("lat"),
-                            "lon": data.get("lon"),
-                        }
-                        return _ip_city_cache
-    except Exception as e:
-        _logger.warning(f"[IP City] Failed to fetch: {e}")
+    # S140：走统一代理回退出口（原实现 5s 直连无回退）。出口为本机代理时 IP 定位=
+    # 代理出口城市（非用户位置），禁用该兜底，让前端保留默认城市/用户手选城市。
+    if _proxy_state.get("sticky"):
+        return {"city": "", "regionName": "", "country": "", "lat": None, "lon": None}
+    data = await _external_get_json("http://ip-api.com/json/")
+    if data and data.get("status") == "success":
+        _ip_city_cache = {
+            "city": data.get("city", ""),
+            "regionName": data.get("regionName", ""),
+            "country": data.get("country", ""),
+            "lat": data.get("lat"),
+            "lon": data.get("lon"),
+        }
+        return _ip_city_cache
     return {"city": "", "regionName": "", "country": "", "lat": None, "lon": None}
 
 
 @router.get("/api/weather")
 async def proxy_weather(lat: float, lon: float, daily: str = None, forecast_days: int = None):
-    try:
-        params = {"latitude": lat, "longitude": lon, "current_weather": "true"}
-        if daily:
-            params["daily"] = daily
-        if forecast_days:
-            params["forecast_days"] = str(forecast_days)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params=params,
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-    except Exception as e:
-        _logger.warning(f"[Weather Proxy] Failed: {e}")
+    params = {"latitude": lat, "longitude": lon, "current_weather": "true"}
+    if daily:
+        params["daily"] = daily
+    if forecast_days:
+        params["forecast_days"] = str(forecast_days)
+    data = await _external_get_json("https://api.open-meteo.com/v1/forecast", params=params)
+    if data is not None:
+        return data
     return {"error": "weather_fetch_failed"}
 
 
 @router.get("/api/geocode")
 async def proxy_geocode(city: str, lang: str = "zh"):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": city, "count": 1, "language": lang},
-                timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-    except Exception as e:
-        _logger.warning(f"[Geocode Proxy] Failed: {e}")
+    data = await _external_get_json(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": city, "count": 1, "language": lang},
+    )
+    if data is not None:
+        return data
     return {"error": "geocode_failed"}
 
 

@@ -138,6 +138,12 @@
             <div class="weather-divider"></div>
             <div class="weather-time">{{ currentTime || '--:--' }}</div>
             <div class="weather-date">{{ currentDate }}</div>
+            <!-- S140(fork)增强：手动刷新钮（自动轮询 600s 一次，失败后可手动重试） -->
+            <button class="weather-refresh-btn" @click.stop="refreshWeather" :disabled="weatherLoading"
+                    :title="t('weatherRefresh')"
+                    style="margin-top:6px;padding:2px 10px;background:transparent;border:1px solid rgba(128,128,128,0.35);border-radius:10px;color:inherit;opacity:0.55;cursor:pointer;font-size:11px;">
+              <i class="fa-solid fa-rotate"></i> {{ t('weatherRefresh') }}
+            </button>
           </div>
 
           <!-- 面板2: 音乐 -->
