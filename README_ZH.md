@@ -1,5 +1,9 @@
 ![image](static/source/cover.png)
 
+> ⚠️ **修改版声明**：本仓库是 [heshengtao/super-agent-party](https://github.com/heshengtao/super-agent-party)
+> 的修改版 fork，依相同的 AGPL-3.0 许可证再分发。本版本包含大量修改（面向 Windows 的修复、安全加固与新特性，
+> 详见提交历史）。上游作者不对这些改动引入的问题负责。上游仍是原始项目。
+
 <div align="center">
   <a href="./README_ZH.md">
     <img src="https://img.shields.io/badge/简体中文-自述文档-00B4AB?style=for-the-badge&logo=markdown"/>
@@ -174,11 +178,11 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
   docker-compose up -d
   ```
 
-- ⭐注意！初始用户名为`root`，初始密码为`pass`，首次登录后请修改密码。
+- ⭐注意！Docker 模式首次启动前必须配置凭据：在 `docker-compose.yml` 同目录创建 `.env` 文件，设置 `JWT_SECRET`（随机长字符串）、`INIT_USER` 与 `INIT_PASS`（初始登录账号）。**没有默认凭据**——缺少以上变量时网关拒绝启动。
 
-- 开箱即用：访问http://localhost:3456/
+- 开箱即用：访问http://localhost:3456/ （用你设置的 `INIT_USER` / `INIT_PASS` 登录）
 
-- API key管理： 访问http://localhost:3456/token.html
+- API key管理：在浏览器打开应用，进入设置中的钥匙箱/模型配置页面管理
 
 ### 与docker版本配套的轻量版客户端，将你的docker版本变成桌面端
 
@@ -237,6 +241,8 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
 - web端或docker端：启动后访问http://localhost:3456/
 
 - API调用：开发者友好，完美兼容openai格式，可以流式输出，完全不影响原有API的反应速度，无需修改调用的代码：
+
+  > ⚠️ 设计上 `/v1` 与 `/mcp` 对能访问端口的任何来源（本机其他程序、局域网设备——会消耗你的模型配额）**免 token** 调用。可在设置中开启「外联 API 需要令牌」要求 `Authorization: Bearer <机器令牌>`（详见 [SECURITY.md](SECURITY.md)）。
 
   ```python
   from openai import OpenAI

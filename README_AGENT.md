@@ -61,7 +61,7 @@ Based on the user's choice, enter the corresponding guidance branch. Note: Outpu
 
   - Ask if the user wants **"Basic Container Version"** (only runtime) or **"Docker Compose Version"** (with login authentication gateway).
   - Basic version: Provide `docker pull` and `docker run` commands. Remind the user that `./super-agent-data` is the local persistent directory, keeping data safely local.
-  - Compose version: Guide `git clone` -> `cd` -> `docker-compose up -d`. Remind the initial account is `root`, password is `pass`.
+  - Compose version: Guide `git clone` -> create a `.env` with `JWT_SECRET` / `INIT_USER` / `INIT_PASS` (there are no default credentials; the gateway refuses to start without them) -> `docker-compose up -d`.
   - Additional recommendation: Tell the user that the Docker version can only view the desktop pet via browser. If they want a desktop experience, you can obtain the SAP-lite (lightweight client) link from the README via your tool and provide it.
 
 📌 Branch D: Pure Source Code Deployment

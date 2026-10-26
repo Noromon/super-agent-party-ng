@@ -1,5 +1,12 @@
 ![image](static/source/cover.png)
 
+> ⚠️ **Modified-version notice**: This repository is a modified fork of
+> [heshengtao/super-agent-party](https://github.com/heshengtao/super-agent-party),
+> redistributed under the same AGPL-3.0 license. It contains substantial
+> modifications (Windows-focused fixes, security hardening and new features;
+> see the commit history). The upstream authors are not responsible for issues
+> introduced by these changes. Upstream remains the original project.
+
 <div align="center">
   <a href="./README_ZH.md">
     <img src="https://img.shields.io/badge/简体中文-自述文档-00B4AB?style=for-the-badge&logo=markdown"/>
@@ -173,11 +180,11 @@ We provide two mainstream Linux installation package formats for your convenienc
   docker-compose up -d
   ```
 
-- ⭐Note! The default username is `root`, and the default password is `pass`. Please change the password after the first login.
+- ⭐Note! Docker mode requires credentials to be configured before first start: create a `.env` file next to `docker-compose.yml` and set `JWT_SECRET` (a long random string), `INIT_USER` and `INIT_PASS` (your initial login). There are **no default credentials** — the gateway refuses to start without them.
 
-- Ready to use: Visit http://localhost:3456/
+- Ready to use: Visit http://localhost:3456/ (log in with the `INIT_USER` / `INIT_PASS` you set above)
 
-- API key management: Visit http://localhost:3456/token.html
+- API key management: open the app in your browser and go to the key-box / model-config page in settings
 
 ### Lite client that matches your Docker version, turning Docker into a desktop app
 
@@ -235,6 +242,8 @@ Added a brand-new extension system. You can check available plugins at [plugins 
 - Web or docker: Access http://localhost:3456/ after startup.
 
 - API call: Developer-friendly, perfectly compatible with OpenAI format, can output in real-time, and does not affect the original API's response speed. No need to modify the calling code:
+
+  > ⚠️ By design, `/v1` and `/mcp` accept calls **without a token** from anything that can reach the port (local processes, LAN peers — consuming your model quota). Turn on "External API Requires Token" in Settings (see [SECURITY.md](SECURITY.md)) to require `Authorization: Bearer <machine token>`.
 
   ```python
   from openai import OpenAI

@@ -1,5 +1,10 @@
 ![image](static/source/cover.png)
 
+> ⚠️ **変更版に関する通知**：本リポジトリは [heshengtao/super-agent-party](https://github.com/heshengtao/super-agent-party)
+> の変更版フォークであり、同じ AGPL-3.0 ライセンスで再配布されています。多数の変更（Windows 向け修正、
+> セキュリティ強化、新機能。コミット履歴を参照）を含みます。本家作者はこれらの変更による問題について
+> 責任を負いません。本家が元のプロジェクトです。
+
 <div align="center">
   <a href="./README_ZH.md">
     <img src="https://img.shields.io/badge/简体中文-自述文档-00B4AB?style=for-the-badge&logo=markdown"/>
@@ -162,11 +167,11 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
   docker-compose up -d
   ```
 
-- ⭐注意！ デフォルトのユーザー名は `root`、デフォルトのパスワードは `pass` です。初回ログイン後にパスワードを変更してください。
+- ⭐注意！ Docker モードの初回起動前に認証情報の設定が必要です：`docker-compose.yml` と同じディレクトリに `.env` を作成し、`JWT_SECRET`（長いランダム文字列）、`INIT_USER`、`INIT_PASS`（初回ログイン用）を設定してください。**デフォルトの認証情報はありません** — 未設定の場合ゲートウェイは起動しません。
 
-- 使用準備完了：http://localhost:3456/ にアクセス
+- 使用準備完了：http://localhost:3456/ にアクセス（設定した `INIT_USER` / `INIT_PASS` でログイン）
 
-- APIキー管理：http://localhost:3456/token.html にアクセス
+- APIキー管理：ブラウザでアプリを開き、設定内のキーボックス／モデル設定ページから管理してください
 
 ### Docker版に対応するLiteクライアント（Dockerをデスクトップアプリに変換）
 
@@ -224,6 +229,8 @@ chmod +x 一键更新(update).sh 一键启动(start).sh
 - WebまたはDocker：起動後に http://localhost:3456/ にアクセスしてください。
 
 - API呼び出し：開発者フレンドリーで、OpenAI形式に完全互換。リアルタイム出力が可能で、元のAPIの応答速度に影響しません。呼び出しコードの変更は不要です：
+
+  > ⚠️ 設計上、`/v1` と `/mcp` はポートに到達できる任意の送信元（ローカルプロセス、LAN 機器 — モデルのクォータを消費します）に対し、**トークンなし**で呼び出しを受け付けます。設定で「外部 API にトークンが必要」を有効にすると `Authorization: Bearer <マシントークン>` が必須になります（詳細は [SECURITY.md](SECURITY.md) 参照）。
 
   ```python
   from openai import OpenAI
