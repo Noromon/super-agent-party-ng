@@ -12,6 +12,13 @@ logger = logging.getLogger("app")
 _QUEUE_MAX = 256
 
 
+async def _safe_close(websocket: WebSocket):
+    try:
+        await websocket.close()
+    except Exception:
+        pass
+
+
 class ConnectionManager:
     def __init__(self):
         # 维护所有活跃的 WebSocket 连接
@@ -44,8 +51,15 @@ class ConnectionManager:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.debug(f"WS sender 失效，移除连接: {e}")
+                # S138：warning 级别可见化 + best-effort 关闭 socket。原版只从池中
+                # 静默移除，客户端 readyState 仍 OPEN = 僵尸连接（上行被 receive 循环
+                # 吞、下行 enqueue 进已死队列），永不自愈。
+                logger.warning(f"WS sender 失效，移除并关闭连接: {e}")
                 self.disconnect(websocket)
+                try:
+                    asyncio.create_task(_safe_close(websocket))
+                except Exception:
+                    pass
                 return
 
     def _enqueue(self, message: dict, websocket: WebSocket) -> bool:

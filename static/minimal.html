@@ -454,6 +454,7 @@
       var _scrollRAFId = null;
 
       var _sapTok = null;
+      var lastMsgAt = Date.now(); // S138：僵尸连接自愈计时（60s 无任何下行→主动重连）
       function withToken(u) {
         return _sapTok ? u + (u.indexOf('?') === -1 ? '?' : '&') + 'sap_token=' + encodeURIComponent(_sapTok) : u;
       }
@@ -471,7 +472,7 @@
           startHB();
           ws.send(JSON.stringify({ type: 'get_messages', data: {} }));
         };
-        ws.onmessage = function(e) { try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
+        ws.onmessage = function(e) { lastMsgAt = Date.now(); try { handleMsg(JSON.parse(e.data)); } catch(_) {} };
         ws.onclose = function() { stopHB(); scheduleReconnect(); };
         ws.onerror = function() { ws.close(); };
       }
@@ -479,7 +480,12 @@
       function startHB() {
         stopHB();
         hbTimer = setInterval(function() {
-          if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }));
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            // S138：服务端 heartbeat/ping 均刷 lastMsgAt；长时间零下行=服务端已把我们
+            // 移出广播池的僵尸连接（客户端侧 readyState 仍 OPEN），主动断开走重连补历史
+            if (Date.now() - lastMsgAt > 60000) { try { ws.close(); } catch(_) {} return; }
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
         }, 10000);
       }
       function stopHB() { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } }
@@ -578,16 +584,21 @@
           return;
         }
 
+        // S138：快照键必须含内容长度+尾部（上游原版只取 content 前 300 字符——
+        // 流式回复超出前缀窗口后快照恒定，渲染被去重跳过=流式半路冻结根因）
         var snapshot = '';
         for (var i = 0; i < recent.length; i++) {
           var m = recent[i];
-          var c = (m.content || '') + '|';
+          var c = m.content || '';
+          var key = c.length + ':' + c.slice(0, 160) + c.slice(-160);
           if (m.backend_content && Array.isArray(m.backend_content)) {
             for (var j = 0; j < m.backend_content.length; j++) {
-              c += (m.backend_content[j].role || '') + ':' + (m.backend_content[j].content || '').substring(0, 200) + '|';
+              var bk = m.backend_content[j];
+              var bc = bk.content || '';
+              key += '|' + (bk.role || '') + ':' + bc.length + ':' + bc.slice(0, 100);
             }
           }
-          snapshot += m.role + ':' + c.substring(0, 300) + '\n';
+          snapshot += m.role + ':' + key + '\n';
         }
         if (snapshot === _lastSnapshot) return;
         _lastSnapshot = snapshot;

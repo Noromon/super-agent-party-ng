@@ -45,7 +45,24 @@ class TestMinimalModeS135:
         assert 'id="minimal-mode-btn"' in h
         assert 'toggleMinimalMode' in h
         assert "fa-feather" in h
-        assert "build=S137" in _read("static", "js", "renderer.js")
+        assert "build=S138" in _read("static", "js", "renderer.js")
+
+    def test_stream_snapshot_full_key(self):
+        # S138：快照键含内容长度+尾部——上游原版只取前 300 字符，
+        # 流式回复超前缀窗口后渲染被去重冻结
+        h = _read("static", "minimal.html")
+        a = h.find("function _doRender")
+        block = h[a:a + 2200]
+        assert "c.slice(-160)" in block and "c.length" in block
+        assert "substring(0, 300)" not in block
+
+    def test_zombie_ws_selfheal(self):
+        h = _read("static", "minimal.html")
+        assert "lastMsgAt = Date.now()" in h
+        assert "Date.now() - lastMsgAt > 60000" in h
+        w = _read("py", "ws_manager.py")
+        assert "WS sender 失效" in w and "logger.warning" in w
+        assert "_safe_close" in w
 
     def test_minimal_ws_auth_bootstrap(self):
         # S137：minimal 是上游无鉴权版移植——补 M2 session token 面
