@@ -119,11 +119,17 @@
         <div class="panels-wrapper" ref="panelsWrapper">
           <!-- 面板1: 天气/时间 -->
           <div class="panel weather-panel" :style="panelStyles.p0">
-            <div class="weather-icon-large" v-if="weatherTemp !== null">
-              <i :class="'fa-solid ' + weatherIcon"></i>
-            </div>
-            <div class="weather-icon-large" v-else>
-              <i class="fa-solid fa-cloud" style="opacity:0.3"></i>
+            <div style="position:relative; display:inline-flex;">
+              <div class="weather-icon-large" v-if="weatherTemp !== null">
+                <i :class="'fa-solid ' + weatherIcon"></i>
+              </div>
+              <div class="weather-icon-large" v-else>
+                <i class="fa-solid fa-cloud" style="opacity:0.3"></i>
+              </div>
+              <!-- S141(fork)增强：天气图标右上角纯图标刷新徽章（S140 文字钮被替换；刷新中 fa-spin 旋转） -->
+              <button class="weather-refresh-btn" @click.stop="refreshWeather" :disabled="weatherLoading"
+                      :title="t('weatherRefresh')" :class="weatherLoading ? 'fa-solid fa-rotate fa-spin' : 'fa-solid fa-rotate'"
+                      style="position:absolute; top:-4px; right:-16px; width:20px; height:20px; padding:0; display:flex; align-items:center; justify-content:center; background:rgba(128,128,128,0.18); border:none; border-radius:50%; color:inherit; opacity:0.6; cursor:pointer; font-size:10px;"></button>
             </div>
             <div class="weather-temp" v-if="weatherTemp !== null">{{ weatherTemp }}°C</div>
             <div class="weather-temp" v-else>--°C</div>
@@ -138,12 +144,6 @@
             <div class="weather-divider"></div>
             <div class="weather-time">{{ currentTime || '--:--' }}</div>
             <div class="weather-date">{{ currentDate }}</div>
-            <!-- S140(fork)增强：手动刷新钮（自动轮询 600s 一次，失败后可手动重试） -->
-            <button class="weather-refresh-btn" @click.stop="refreshWeather" :disabled="weatherLoading"
-                    :title="t('weatherRefresh')"
-                    style="margin-top:6px;padding:2px 10px;background:transparent;border:1px solid rgba(128,128,128,0.35);border-radius:10px;color:inherit;opacity:0.55;cursor:pointer;font-size:11px;">
-              <i class="fa-solid fa-rotate"></i> {{ t('weatherRefresh') }}
-            </button>
           </div>
 
           <!-- 面板2: 音乐 -->

@@ -8,9 +8,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 上游 origin/main@3eb32bb2 终态哈希（dynamic_island.py / island.css 逐字节）
 SHA_DYNAMIC_ISLAND = "0728ca9a843925e8e210a6c217bf272dd07fea482f2249598787964cb1647c46"
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
-# fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S140 刷新钮，白名单改动）
+# fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S141 纯图标刷新徽章，白名单改动）
 SHA_ISLAND_APP = "324c0ec422df3f7ab7a741a69bf46360036688f82b45af5f1667b56851ef83e2"
-SHA_ISLAND_HTML = "014a1e240b98754d557651d213d043b43545003b6800ea6f890b6db7fdf77af8"
+SHA_ISLAND_HTML = "3ee47769a1fa6b912dd094da23a52d42f1db0d321f62c5c11eab156c46061ec8"
 
 
 def _read(*p):
@@ -52,9 +52,14 @@ class TestIslandAssetsS139:
         assert "css/island.css" in h
 
     def test_weather_manual_refresh_s140(self):
-        # S140：手动刷新钮（自动轮询 600s 太长）；样式内联以保 island.css 逐字节
+        # S140 引入、S141 重设计：天气图标右上角纯图标徽章（无文字，刷新中 fa-spin）
         h = _read("static", "island.html")
         assert "weather-refresh-btn" in h and "refreshWeather" in h
+        i = h.find("weather-refresh-btn")
+        badge = h[i - 400:i + 600]
+        assert "position:absolute" in badge and "fa-spin" in badge
+        assert "{{ t('weatherRefresh') }}" not in h  # 纯图标：文字已移除，仅 :title 保留
+        assert h.count("t('weatherRefresh')") == 1
         a = _read("static", "js", "island-app.js")
         assert "refreshWeather()" in a
         assert a.count("weatherRefresh") == 2  # zh 字典 + en 字典（模板引用在 island.html）
@@ -136,7 +141,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S140" in _read("static", "js", "renderer.js")
+        assert "build=S141" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS140:
