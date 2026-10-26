@@ -2543,7 +2543,7 @@ function createTray() {
   const iconPath = path.join(__dirname, 'static/source/icon_tray.png');
   if (!tray) {
     tray = new Tray(iconPath);
-    tray.setToolTip('Super Agent Party');
+    tray.setToolTip('Super Agent Party NG');
     tray.on('click', () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {
