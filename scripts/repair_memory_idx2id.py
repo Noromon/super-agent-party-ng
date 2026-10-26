@@ -57,9 +57,25 @@ def _list_cards():
     return [str(m.get("id")) for m in (json.loads(row[0]).get("memories") or []) if m.get("id")]
 
 
+def _local_sap_token(base_url: str) -> str:
+    """S133：内嵌 /minilm 的后端受 session-token 中间件保护，headless 客户端
+    走持久化机器令牌（py/auth.ensure_machine_token 的 X-SAP-Token 通道）。"""
+    if "127.0.0.1" not in base_url and "localhost" not in base_url:
+        return ""
+    tok = os.environ.get("SAP_MACHINE_TOKEN") or ""
+    if not tok:
+        from py.get_setting import USER_DATA_DIR
+        p = os.path.join(USER_DATA_DIR, ".machine_token")
+        if os.path.exists(p):
+            tok = open(p, encoding="utf-8").read().strip()
+    return tok
+
+
 def _embed_texts(cfg, texts, batch=32):
     from openai import OpenAI
-    client = OpenAI(base_url=cfg.get("base_url"), api_key=cfg.get("api_key") or "none")
+    tok = _local_sap_token(cfg.get("base_url") or "")
+    client = OpenAI(base_url=cfg.get("base_url"), api_key=cfg.get("api_key") or "local",
+                    default_headers=({"X-SAP-Token": tok} if tok else None))
     model = cfg["model"]
     out = []
     for start in range(0, len(texts), batch):
