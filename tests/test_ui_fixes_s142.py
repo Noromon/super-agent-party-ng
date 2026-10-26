@@ -13,13 +13,31 @@ def _read(*p):
     return open(os.path.join(ROOT, *p), encoding="utf-8").read()
 
 
-class TestTabsOverflowS142:
-    def test_css_fallback_rule(self):
+class TestTabsOverflowS143:
+    def test_css_real_scroll_container(self):
         css = _read("static", "css", "styles.css")
-        assert ".el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)" in css
-        i = css.find(".el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)")
-        assert "overflow-x: auto" in css[i:i + 200]
-        assert "scrollbar-width: thin" in css[i:i + 200]
+        i = css.find(".el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) .el-tabs__nav-scroll")
+        assert i > 0
+        assert "overflow-x: auto" in css[i:i + 160]
+        assert ".el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) .el-tabs__nav { float: none; }" in css
+        assert "::-webkit-scrollbar { height: 6px; }" in css
+        # S142 无效版已撤销：wrap 层不再直接挂 overflow-x
+        assert ".el-tabs__nav-wrap:not(.is-scrollable) {" not in css
+
+    def test_wheel_horizontal_delegate(self):
+        s = _read("static", "js", "methods", "58_shortcuts_input.js")
+        assert "el-tabs__nav-scroll" in s
+        assert "scrollLeft += e.deltaY" in s
+        assert "passive: false" in s
+
+    def test_narrow_settings_media(self):
+        css = _read("static", "css", "styles.css")
+        i = css.find("@media (max-width: 880px)")
+        assert i > 0
+        blk = css[i:i + 420]
+        assert ".settings-form { padding: 16px" in blk
+        assert "flex-wrap: wrap" in blk
+        assert "white-space: normal" in blk
 
 
 class TestWindowSizeMemoryS142:

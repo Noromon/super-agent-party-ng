@@ -12777,13 +12777,25 @@ pre.sp-content.sp-code {
 }
 .diary-detail-pushed-label { font-size: 12px; color: var(--el-text-color-secondary); }
 
-/* S142：窗口过窄时标签页被裁切——EP 未激活滚动箭头（无 .is-scrollable）时兜底横向滚动 */
-.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) {
+/* S143：窗口过窄时标签页被裁切——真滚动容器是 nav-scroll（EP 双层裁剪 + nav float:left
+   导致 wrap 层 overflow-x 永不触发，S142 初版因此无效）；去 float 后 flex 子项撑出
+   scrollWidth 滚动条才出现。仅未激活 EP 箭头（无 .is-scrollable）时兜底，互不干扰 */
+.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) .el-tabs__nav-scroll {
   overflow-x: auto;
   scrollbar-width: thin;
 }
-.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)::-webkit-scrollbar { height: 4px; }
-.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)::-webkit-scrollbar-thumb {
+.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) .el-tabs__nav { float: none; }
+.el-tabs--top .el-tabs__nav-scroll::-webkit-scrollbar { height: 6px; }
+.el-tabs--top .el-tabs__nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.el-tabs--top .el-tabs__nav-scroll::-webkit-scrollbar-thumb {
   background: var(--el-border-color-darker);
-  border-radius: 2px;
+  border-radius: 3px;
+}
+
+/* S143：窄屏设置页收紧（留白/换行/长标签） */
+@media (max-width: 880px) {
+  .settings-form { padding: 16px; margin: 16px 10px; }
+  .settings-form .form-item-align,
+  .settings-form .tool-header { flex-wrap: wrap; row-gap: 4px; }
+  .settings-form .el-form-item__label { white-space: normal; min-width: 0; }
 }

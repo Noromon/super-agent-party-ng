@@ -94,3 +94,13 @@ Object.assign(vue_methods, {
       }  
     }
 });
+
+
+// S143：窄窗标签条滚轮横滚委托——仅命中未激活 EP 箭头的溢出标签条时接管，其余零干扰
+document.addEventListener('wheel', (e) => {
+  if (e.deltaX !== 0 || Math.abs(e.deltaY) < 2) return;
+  const el = e.target.closest && e.target.closest('.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) .el-tabs__nav-scroll');
+  if (!el || el.scrollWidth <= el.clientWidth) return;
+  el.scrollLeft += e.deltaY;
+  e.preventDefault();
+}, { passive: false });
