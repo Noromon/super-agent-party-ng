@@ -177,7 +177,7 @@ def test_build_messages_has_weekday_and_today_block(monkeypatch):
                         lambda: asyncio.sleep(0, result=("book-a", None, "")))
     monkeypatch.setattr(de, "get_recent_diary_entries", no_entries)
     monkeypatch.setattr(de, "_fetch_today_new_memories", none_mem)
-    msgs = asyncio.run(eng._build_messages("think"))
+    msgs, _seed = asyncio.run(eng._build_messages("think"))
     assert "星期" in msgs[0]["content"]
     assert "【今日概况】" in msgs[0]["content"] and "10:09 对话摘要" in msgs[0]["content"]
     assert "本次思绪不妨从" in msgs[-1]["content"]

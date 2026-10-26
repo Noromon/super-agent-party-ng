@@ -114,10 +114,11 @@ def test_build_messages_async_with_seed(monkeypatch):
     seq = iter(de.RECALL_SEEDS)
     monkeypatch.setattr(random, "random", lambda: 0.99)   # 恒走词池
     monkeypatch.setattr(random, "choice", lambda pool: next(iter(seq)))
-    msgs = asyncio.run(eng._build_messages("think"))
+    msgs, seed = asyncio.run(eng._build_messages("think"))
     user = msgs[-1]["content"]
     assert "本次思绪不妨从" in user and user.startswith("[system]:")
     assert msgs[0]["role"] == "system"
+    assert seed in user   # S133b：seed 同时作为 recall_query 单独回传
 
 
 def test_two_triggers_query_diversity(monkeypatch):
@@ -129,9 +130,9 @@ def test_two_triggers_query_diversity(monkeypatch):
     pool = list(de.RECALL_SEEDS)
     picked = iter([pool[0], pool[1]])
     monkeypatch.setattr(random, "choice", lambda _p: next(picked))
-    q1 = asyncio.run(eng._build_messages("think"))[-1]["content"]
-    q2 = asyncio.run(eng._build_messages("think"))[-1]["content"]
-    assert q1 != q2                                      # 两次触发 query 不同 → 召回不同
+    m1, s1 = asyncio.run(eng._build_messages("think"))
+    m2, s2 = asyncio.run(eng._build_messages("think"))
+    assert s1 != s2 and m1[-1]["content"] != m2[-1]["content"]  # 种子与 query 都变 → 召回不同
 
 
 if __name__ == "__main__":

@@ -1960,6 +1960,7 @@ class ChatRequest(BaseModel):
     is_app_bot: bool = False
     platform: str = None
     is_sub_agent: bool = False
+    recall_query: str = None
     enable_tools : List[str] = None
     disable_tools: List[str] = None
     conversation_id: Optional[Union[str, int, float]] = None
@@ -4151,7 +4152,7 @@ async def _stream_character_context(request, settings, user_prompt, cur_memory, 
             # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
             relevant_memories = await asyncio.to_thread(
                 m0.search, 
-                query=user_prompt, 
+                query=(getattr(request, "recall_query", None) or user_prompt),
                 user_id=memoryId, 
                 limit=memoryLimit
             )
@@ -6641,7 +6642,7 @@ async def _complete_character_context(request, settings, user_prompt, cur_memory
                 # 这样主线程（Event Loop）会被释放，可以去处理 /minilm/embeddings 请求，从而避免死锁
                 relevant_memories = await asyncio.to_thread(
                     m0.search, 
-                    query=user_prompt, 
+                    query=(getattr(request, "recall_query", None) or user_prompt),
                     user_id=memoryId, 
                     limit=search_limit
                 )

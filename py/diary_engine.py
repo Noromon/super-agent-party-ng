@@ -595,10 +595,13 @@ class DiaryEngine:
         system_prompt = system_prompt + "\n\n" + today_block
         seed = await build_recall_seed(book_id)
         user_prompt = f"{user_prompt}\n\n（本次思绪不妨从以下内容开始：{seed}。）"
-        return [
+        messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"[system]: {user_prompt}"},
         ]
+        # S133b：固定常量提示词会稀释检索 query，记忆召回仍偏向同一批条目；
+        # 把思绪种子单独作为长期记忆检索 query 传给 server（recall_query）
+        return messages, seed
 
     async def _get_enable_tools_for_action(self, action: str):
         """S74：每动作工具策略（diarySettings.actions.<key>.tools_mode）。
@@ -633,13 +636,15 @@ class DiaryEngine:
         port = get_port()
         url = f"http://127.0.0.1:{port}/v1/chat/completions"
         enable_tools = await self._get_enable_tools_for_action(action)
+        messages, recall_seed = await self._build_messages(action)
         payload = {
             "model": "super-model",
-            "messages": await self._build_messages(action),
+            "messages": messages,
             "stream": False,
             "is_app_bot": True,
             "platform": "diary",
             "enable_web_search": action == "webSearch",
+            "recall_query": recall_seed,
         }
         if enable_tools is not None:
             # None 必须整个省略（server 模型 List[str]=None 不接受显式 null）

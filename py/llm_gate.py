@@ -315,6 +315,29 @@ def get_mem0_instance(memory_id, cur_memory, settings):
     }
     ensure_pkl_compatible(memory_id)
     m0 = Memory.from_config(config)
+    _idx2id_guard_warning(m0, memory_id)
     with _m0_lock:
         _m0_cache[memory_id] = (key, m0)
     return m0
+
+
+def _idx2id_guard_warning(m0, memory_id: str):
+    """S133：faiss 索引/docstore/idx2id 一致性自检。
+
+    mem0 faiss provider 检索经 idx2id 反查 uuid，孤儿位置被静默丢弃；
+    delete 不删向量 + insert 以 len(idx2id) 分配 int id，漂移会滚雪球
+    （实测 5338 向量只剩 7 条映射，召回恒为同一条）。发现大偏差即
+    WARNING 指路修复脚本，避免损坏长期无人察觉。
+    """
+    try:
+        vs = getattr(m0, "vector_store", None)
+        if not (vs is not None and hasattr(vs, "index_to_id") and getattr(vs, "index", None) is not None):
+            return
+        from py.memory_store import idx2id_health
+        h = idx2id_health(int(vs.index.ntotal), len(getattr(vs, "docstore", {}) or {}), len(vs.index_to_id or {}))
+        if not h["ok"]:
+            logging.getLogger("app").warning(
+                f"[MemGuard] {memory_id[:8]} 索引/映射漂移 ntotal={h['ntotal']} "
+                f"mapped={h['mapped']} orphan={h['orphan']} → 运行 scripts/repair_memory_idx2id.py --card {memory_id[:8]}")
+    except Exception as e:
+        logging.debug(f"[MemGuard] 自检跳过: {e}")
