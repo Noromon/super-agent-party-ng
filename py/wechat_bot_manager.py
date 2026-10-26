@@ -148,6 +148,13 @@ class WeChatBotManager(BaseBotManager):
             await self.bot_client.handle_message(msg)
         return client
 
+    def apply_live_fields(self, client, config: WeChatBotConfig):
+        # S142：流式读 client 属性，热更必须同步 reasoningVisible（原先缺 override 永不生效）
+        client.reasoningVisible = config.reasoningVisible
+        client.wakeWord = config.wakeWord
+        client.enableTTS = config.enableTTS
+        client.config = config
+
     async def run_client(self):
         from py.behavior_engine import global_behavior_engine
         original_stdout, original_stderr = sys.stdout, sys.stderr

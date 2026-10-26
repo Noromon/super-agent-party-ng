@@ -1,6 +1,16 @@
 // 批 3 F2：自 vue_methods.js 搬移的 methods/60_system_settings.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
+    // S142：「记住窗口大小」开关——同步给主进程（开=下次恢复上次尺寸，关=每次全屏）
+    syncWindowSizeMemory() {
+      if (this.isElectron && window.electronAPI && window.electronAPI.setWindowSizeMemory) {
+        window.electronAPI.setWindowSizeMemory(this.systemSettings.rememberWindowSize !== false);
+      }
+    },
+    onWindowSizeMemoryChange() {
+      this.syncWindowSizeMemory();
+      this.autoSaveSettings();
+    },
     async autoSaveSettings() {
       if (this.isElectron) {
         await window.electronAPI.saveChromeSettings(JSON.parse(JSON.stringify(this.chromeMCPSettings)));

@@ -717,6 +717,7 @@
   "onNewWindow",
   "onPageFaviconUpdated",
   "onPageTitleUpdated",
+  "onWindowSizeMemoryChange",
   "onZipSelected",
   "openAddAppearanceDialog",
   "openAddDialog",
@@ -1025,6 +1026,7 @@
   "syncSystemPromptToMessages",
   "syncToGlobal",
   "syncToProject",
+  "syncWindowSizeMemory",
   "synthSegment",
   "t",
   "throttledUpdate",
@@ -1777,5 +1779,5 @@
   "vrm.js": 41
  },
  "console_log_total": 199,
- "styles_css_lines": 12778
+ "styles_css_lines": 12789
 }

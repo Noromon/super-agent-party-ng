@@ -60,6 +60,11 @@ class QQBotManager(BaseBotManager):
         client.quickRestart = config.quickRestart
         return client
 
+    def apply_live_fields(self, client, config: QQBotConfig):
+        # S142：流式读 client 属性，热更必须同步 reasoningVisible（原先缺 override 永不生效）
+        client.reasoningVisible = config.reasoningVisible
+        client.config = config
+
     def post_client_init(self, config):
         self.bot_client._ready_callback = self._on_bot_ready
 

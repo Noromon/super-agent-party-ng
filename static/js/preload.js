@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 窗口控制
   windowAction: (action) => ipcRenderer.invoke('window-action', action),
   onWindowState: (callback) => ipcRenderer.on('window-state', callback),
+  setWindowSizeMemory: (flag) => ipcRenderer.invoke('set-window-size-memory', flag),
 
   // 文件对话框
   openFileDialog: () => ipcRenderer.invoke('open-file-dialog'),

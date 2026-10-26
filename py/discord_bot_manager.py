@@ -101,6 +101,7 @@ class DiscordBotManager(BaseBotManager):
         client.config.llm_model = config.llm_model
         client.config.enable_tts = config.enable_tts
         client.config.wakeWord = config.wakeWord
+        client.config.reasoning_visible = config.reasoning_visible  # S142：流式读该字段，热更必须同步
 
 
 # ------------------ Discord Client ------------------

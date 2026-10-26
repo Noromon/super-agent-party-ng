@@ -140,6 +140,12 @@
               </button>
               <input v-else ref="cityInput" class="weather-city-input" v-model="editCityText"
                      @keydown.enter="saveEditCity" @blur="saveEditCity" @click.stop />
+              <!-- S142(fork)：手选城市的退出钮——退回 IP 自动定位 -->
+              <button v-if="!editingCity" id="weather-auto-btn" @click.stop="resetCityAuto"
+                      :title="t('weatherAutoCity')"
+                      style="margin-left: 4px; padding: 1px 5px; font-size: 10px; opacity: 0.55; background: transparent; border: none; cursor: pointer; color: inherit;">
+                <i class="fa-solid fa-location-crosshairs"></i>
+              </button>
             </div>
             <div class="weather-divider"></div>
             <div class="weather-time">{{ currentTime || '--:--' }}</div>

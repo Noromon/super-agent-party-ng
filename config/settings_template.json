@@ -31,7 +31,8 @@
       "backgroundURL": "",
       "bgHistoryList": [],
       "autoCollapseInput": false,
-      "enableNotifications": false
+      "enableNotifications": false,
+      "rememberWindowSize": true
     },
     "mainAgent":"super-model",
     "mcpServers": {},

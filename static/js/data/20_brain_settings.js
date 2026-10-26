@@ -135,6 +135,7 @@ Object.assign(vue_data, {
       bgHistoryList: [],
       autoCollapseInput: false,
       enableNotifications: false,
+      rememberWindowSize: true,
     },
 
     // --- 数据安全网（M4-lite 快照备份 UI）---

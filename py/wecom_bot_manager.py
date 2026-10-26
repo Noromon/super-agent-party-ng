@@ -106,6 +106,7 @@ class WeComBotManager(BaseBotManager):
     def apply_live_fields(self, client, config: WeComBotConfig):
         client.WeComAgent = config.WeComAgent
         client.wakeWord = config.wakeWord
+        client.reasoningVisible = config.reasoningVisible  # S142：流式读 client 属性，热更必须同步
         client.config = config
 
 

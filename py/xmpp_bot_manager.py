@@ -81,6 +81,7 @@ class XmppBotManager(BaseBotManager):
     def apply_live_fields(self, client, config: XmppBotConfig):
         client.XmppAgent = config.XmppAgent
         client.wakeWord = config.wakeWord
+        client.reasoningVisible = config.reasoningVisible  # S142：流式读 client 属性，热更必须同步
         client.config = config
 
     def get_status(self):

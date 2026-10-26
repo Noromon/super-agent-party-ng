@@ -301,6 +301,37 @@ function getConfigPath() {
   return path.join(app.getPath('userData'), 'config.json');
 }
 
+// S142：主窗口尺寸记忆（userData/window-bounds.json，独立于设置文件，避免启动顺序依赖）
+const WINDOW_BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json')
+let rememberWindowSize = true
+function loadWindowBounds() {
+  try { return JSON.parse(fs.readFileSync(WINDOW_BOUNDS_FILE, 'utf8')) } catch (e) { return {} }
+}
+function writeWindowBounds(obj) {
+  try { fs.writeFileSync(WINDOW_BOUNDS_FILE, JSON.stringify(obj)) } catch (e) { console.error('save window bounds failed', e) }
+}
+function validBounds(b) {
+  if (!b || !(b.width >= 600) || !(b.height >= 400) || !(b.x >= -32000) || !(b.y >= -32000)) return false
+  return screen.getAllDisplays().some((d) => {
+    const a = d.bounds
+    return b.x < a.x + a.width - 60 && b.x + b.width > a.x + 60 && b.y < a.y + a.height - 60 && b.y + b.height > a.y + 60
+  })
+}
+function saveWindowBounds() {
+  if (!rememberWindowSize || !mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMaximized() || mainWindow.isMinimized()) return
+  const [x, y] = mainWindow.getPosition()
+  const [width, height] = mainWindow.getSize()
+  writeWindowBounds({ x, y, width, height, remember: true, maximized: false })
+}
+function persistMaximized(flag) {
+  if (!rememberWindowSize) return
+  const b = loadWindowBounds()
+  b.remember = true
+  b.maximized = !!flag
+  writeWindowBounds(b)
+}
+
 // 加载环境变量
 function loadEnvVariables() {
   const configPath = getConfigPath();
@@ -377,10 +408,13 @@ function isPortAvailable(port) {
 
 // 创建骨架屏窗口
 function createSkeletonWindow() {
+  // S142：默认恢复上次窗口尺寸/最大化态；关闭记忆则回到全屏创建
+  const saved = loadWindowBounds()
+  rememberWindowSize = saved.remember !== false
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  const sizeOpts = validBounds(saved) ? { x: saved.x, y: saved.y, width: saved.width, height: saved.height } : { width, height }
   mainWindow = new BrowserWindow({
-    width: width,
-    height: height,
+    ...sizeOpts,
     frame: false,
     titleBarStyle: 'hiddenInset', // macOS 特有：隐藏标题栏但仍显示原生按钮
     trafficLightPosition: { x: 10, y: 12 }, // 自定义按钮位置（可选）
@@ -400,7 +434,17 @@ function createSkeletonWindow() {
   })
 
   remoteMain.enable(mainWindow.webContents)
-  
+
+  // S142：尺寸变更防抖持久化（拖拽/缩放高频事件，500ms 落盘一次）
+  let boundsTimer = null
+  const debounceSaveBounds = () => {
+    clearTimeout(boundsTimer)
+    boundsTimer = setTimeout(saveWindowBounds, 500)
+  }
+  mainWindow.on('resize', debounceSaveBounds)
+  mainWindow.on('move', debounceSaveBounds)
+  if (rememberWindowSize && saved.maximized) mainWindow.maximize()
+
   // 加载骨架屏页面
   mainWindow.loadFile(path.join(__dirname, 'static/skeleton.html'))
   
@@ -410,13 +454,16 @@ function createSkeletonWindow() {
   // 窗口状态同步
   mainWindow.on('maximize', () => {
     mainWindow.webContents.send('window-state', 'maximized')
+    persistMaximized(true)
   })
   mainWindow.on('unmaximize', () => {
     mainWindow.webContents.send('window-state', 'normal')
+    persistMaximized(false)
   })
   
   // 窗口关闭事件处理 - 最小化到托盘而不是退出
   mainWindow.on('close', (event) => {
+    saveWindowBounds() // S142：退出/隐藏前兜底落盘，防抖未触发的最后一次变更不丢
     if (!app.isQuitting) {
       event.preventDefault()
       mainWindow.hide()
@@ -928,6 +975,20 @@ if (process.defaultApp) {
 ipcMain.handle('get-window-size', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return win.getSize();
+});
+
+// S142：开关「记住窗口大小」——写盘 remember 标记，关闭时保留尺寸供重新开启后用
+ipcMain.handle('set-window-size-memory', (event, flag) => {
+  rememberWindowSize = !!flag
+  const b = loadWindowBounds()
+  b.remember = !!flag
+  if (flag && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMaximized()) {
+    const [x, y] = mainWindow.getPosition()
+    const [width, height] = mainWindow.getSize()
+    Object.assign(b, { x, y, width, height })
+  }
+  writeWindowBounds(b)
+  return true
 });
 const CHROME_VERSION = '124.0.0.0';
 const CHROME_MAJOR = '124';

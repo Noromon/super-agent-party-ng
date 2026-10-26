@@ -164,6 +164,7 @@ Object.assign(vue_methods, {
           this.loadDefaultMotions();
           this.loadGaussScenes();
           this.loadSoulxImages(); // S136(SoulX)
+          this.syncWindowSizeMemory(); // S142(窗口尺寸记忆)——设置载好后把开关态同步给主进程
           this.checkMobile();
           this.checkQQBotStatus(); 
           this.checkFeishuBotStatus();

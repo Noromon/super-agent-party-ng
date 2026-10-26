@@ -8,6 +8,7 @@ const I18N = {
     weatherCityNotFound: '未找到城市',
     weatherFetchError: '获取失败',
     weatherRefresh: '刷新天气',
+    weatherAutoCity: '恢复自动定位',
     weatherCodes: {
       0: '晴', 1: '多云', 2: '少云', 3: '晴间多云',
       45: '雾', 48: '雾凇',
@@ -144,6 +145,7 @@ const I18N = {
     weatherCityNotFound: 'City not found',
     weatherFetchError: 'Failed to fetch',
     weatherRefresh: 'Refresh weather',
+    weatherAutoCity: 'Use auto location',
     weatherCodes: {
       0: 'Clear', 1: 'Cloudy', 2: 'Partly Cloudy', 3: 'Mostly Cloudy',
       45: 'Fog', 48: 'Rime Fog',
@@ -1116,6 +1118,8 @@ function createIslandApp() {
 
       // ===== Weather =====
       async tryFetchIpCity() {
+        // S142(fork)：用户手选过城市则永不自动覆盖（退出方式见 resetCityAuto）
+        if (localStorage.getItem('island_weather_city_manual')) return;
         try {
           const res = await fetch('/api/ip-city');
           const data = await res.json();
@@ -1187,9 +1191,20 @@ function createIslandApp() {
           this.ipLat = null;
           this.ipLon = null;
           localStorage.setItem('island_weather_city', v);
+          localStorage.setItem('island_weather_city_manual', '1'); // S142(fork)：手选优先，禁 IP 覆盖
           this.fetchWeather();
         }
         this.editingCity = false;
+      },
+
+      // S142(fork)：从手设城市退回自动定位（清手选标记与城市，重走 IP 定位→天气）
+      resetCityAuto() {
+        localStorage.removeItem('island_weather_city_manual');
+        localStorage.removeItem('island_weather_city');
+        this.weatherCity = '北京';
+        this.ipLat = null;
+        this.ipLon = null;
+        this.tryFetchIpCity().then(() => this.fetchWeather());
       },
 
       // ===== WebSocket =====
@@ -1523,6 +1538,7 @@ function createIslandApp() {
             const newCity = tp.city;
             this.weatherCity = newCity;
             localStorage.setItem('island_weather_city', newCity);
+            localStorage.setItem('island_weather_city_manual', '1'); // S142(fork)：LLM 设城同样视为手选
             this.fetchWeather();
             sendResult(this.t('mcpWeatherCitySet') + ' ' + newCity);
             return;

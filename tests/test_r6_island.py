@@ -9,8 +9,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHA_DYNAMIC_ISLAND = "0728ca9a843925e8e210a6c217bf272dd07fea482f2249598787964cb1647c46"
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
 # fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S141 纯图标刷新徽章，白名单改动）
-SHA_ISLAND_APP = "324c0ec422df3f7ab7a741a69bf46360036688f82b45af5f1667b56851ef83e2"
-SHA_ISLAND_HTML = "3ee47769a1fa6b912dd094da23a52d42f1db0d321f62c5c11eab156c46061ec8"
+SHA_ISLAND_APP = "4445e7df71f3899ac9ab8efec1ad619881cb373016ea596f2f96a808341ea450"
+SHA_ISLAND_HTML = "93fab8cd4993f67aa674316165ac9bd748540cc14a6c396cf629c849c6ed506b"
 
 
 def _read(*p):
@@ -64,6 +64,16 @@ class TestIslandAssetsS139:
         assert "refreshWeather()" in a
         assert a.count("weatherRefresh") == 2  # zh 字典 + en 字典（模板引用在 island.html）
         assert _sha("static", "css", "island.css") == SHA_ISLAND_CSS
+
+    def test_weather_city_manual_pin_s142(self):
+        # S142：手选城市持久化（manual 标记 + IP 定位早退）+ 退出钮退回自动
+        a = _read("static", "js", "island-app.js")
+        assert a.count("island_weather_city_manual") == 4  # 早退读 + 手选/工具写 + resetCityAuto 清
+        assert "resetCityAuto()" in a
+        assert a.count("weatherAutoCity") == 2  # zh + en 字典
+        h = _read("static", "island.html")
+        assert "weather-auto-btn" in h and "resetCityAuto" in h
+        assert "fa-location-crosshairs" in h
 
 
 class TestIslandBackendS139:
@@ -141,7 +151,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S141" in _read("static", "js", "renderer.js")
+        assert "build=S142" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS140:

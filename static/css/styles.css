@@ -12776,3 +12776,14 @@ pre.sp-content.sp-code {
   border-top: 1px dashed var(--el-border-color-light);
 }
 .diary-detail-pushed-label { font-size: 12px; color: var(--el-text-color-secondary); }
+
+/* S142：窗口过窄时标签页被裁切——EP 未激活滚动箭头（无 .is-scrollable）时兜底横向滚动 */
+.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable) {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)::-webkit-scrollbar { height: 4px; }
+.el-tabs--top .el-tabs__nav-wrap:not(.is-scrollable)::-webkit-scrollbar-thumb {
+  background: var(--el-border-color-darker);
+  border-radius: 2px;
+}
