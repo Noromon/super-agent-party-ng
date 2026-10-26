@@ -329,6 +329,25 @@
               <div class="tool-header">
                 <span>
                   <el-icon>
+                    <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                  </el-icon>
+                  {{ t('windowSizeMemory') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('windowSizeMemoryDesc')" class="form-item-align" label-position="left">
+                  <el-switch
+                    v-model="systemSettings.rememberWindowSize"
+                    @change="onWindowSizeMemoryChange">
+                  </el-switch>
+                </el-form-item>
+              </div>
+            </div>
+
+            <div class="tool-item" v-if="isElectron">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
                     <i class="fa-solid fa-network-wired"></i>
                   </el-icon>
                   {{ t('networkSettings') }}
