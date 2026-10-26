@@ -2228,7 +2228,7 @@ const app = Vue.createApp({
         el._lastRun = 0;
         el._minInterval = 0;
         el._render = (content) => {
-          // S92(A3): 记录上轮 formatMessage+morph 耗时，超预算则本实例自动降频
+          // S92: 记录上轮 formatMessage+morph 耗时，超预算则本实例自动降频
           const t0 = performance.now();
           const html = vm.formatMessage(content, -1);
           const wrapper = document.createElement('div');
@@ -2258,7 +2258,7 @@ const app = Vue.createApp({
           el._lastRun = now;
           el._render(content);
         };
-        // S92(A2): rAF 合帧——同帧多次 token 变更只渲染最新值
+        // S92: rAF 合帧——同帧多次 token 变更只渲染最新值
         el._schedule = (content) => {
           el._pending = content;
           if (el._timer) return;

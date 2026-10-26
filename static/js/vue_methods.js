@@ -121,7 +121,7 @@ if (window.markdownitContainer) {
 }
 
 
-// S81(A8)：KaTeX 引擎 + markdown-it-texmath（上游终态：md 渲染期同步排版，替代 MathJax 异步 typeset）
+// S81：KaTeX 引擎 + markdown-it-texmath（上游终态：md 渲染期同步排版，替代 MathJax 异步 typeset）
 if (window.texmath) {
     md.use(window.texmath, {
         engine: window.katex, // 指定渲染引擎为 katex

@@ -569,7 +569,7 @@ Object.assign(vue_methods, {
               window.electronAPI?.showNotification('Super Agent Party', this.t('aiGenerationComplete'));
             }
 
-            // S81(A8)：流式收尾不再手动 MathJax typeset——KaTeX/texmath 已在渲染管线内排版
+            // S81：流式收尾不再手动 MathJax typeset——KaTeX/texmath 已在渲染管线内排版
 
             if (this.ttsSettings.enabled) {
                 if (this.audioStartTime > this.audioCtx.currentTime) {

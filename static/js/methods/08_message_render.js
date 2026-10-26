@@ -187,7 +187,7 @@ Object.assign(vue_methods, {
               match.replace('<think>', '<div class="highlight-block-reasoning">')
             );
 
-          // S81(A8)：LaTeX 不再做占位保护——md.use(texmath)+KaTeX 在渲染期同步排版
+          // S81：LaTeX 不再做占位保护——md.use(texmath)+KaTeX 在渲染期同步排版
           return formatted;
         }
       }).join('');

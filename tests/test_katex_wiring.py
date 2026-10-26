@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""S81（A8 KaTeX）接线 pin：libs/引入/插件/旧 MathJax 全退役。"""
+"""S81（KaTeX）接线 pin：libs/引入/插件/旧 MathJax 全退役。"""
 import io
 import os
 import sys

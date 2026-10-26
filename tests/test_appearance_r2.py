@@ -1,4 +1,4 @@
-"""R2-1 外观包（A14）落位守卫：模板/JS/CSS/preload/settings/i18n 锚点。
+"""R2-1 外观包落位守卫：模板/JS/CSS/preload/settings/i18n 锚点。
 
 背景：S122b/S124 教训——渲染层改动必须可自证。外观包涉及
 system 页模板、renderer watch/computed、preload zoom 通道、

@@ -219,7 +219,7 @@ main();`,
 
     renderTimers: {}, // 用于存储每个消息的防抖定时器,
 
-    // S81(A8)：MathJax 串行队列/运行标记两字段已退役（KaTeX/texmath 渲染期同步排版）
+    // S81：MathJax 串行队列/运行标记两字段已退役（KaTeX/texmath 渲染期同步排版）
 
     // --- AI 浏览器数据 ---
     browserTabs: [

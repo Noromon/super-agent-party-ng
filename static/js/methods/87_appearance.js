@@ -1,4 +1,4 @@
-// R2-1 外观包（A14）：背景图上传/历史、CSS 注入、全局与代码字号缩放
+// R2-1 外观包：背景图上传/历史、CSS 注入、全局与代码字号缩放
 // （Object.assign 装配，移植自上游 vue_methods.js）。
 Object.assign(vue_methods, {
     // 触发背景图文件选择框

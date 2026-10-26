@@ -464,7 +464,7 @@ Object.assign(vue_methods, {
       this.inAutoMode = false; // 重置自动模式状态
       this.requestScrollToBottom();
       this.sendMessagesToExtension(); // 发送消息到插件
-      // S81(A8)：切换会话不再手动 MathJax typeset——KaTeX 输出即普通 HTML，morphdom 自然 diff
+      // S81：切换会话不再手动 MathJax typeset——KaTeX 输出即普通 HTML，morphdom 自然 diff
 
       // A2: 恢复结果回写会话副本（自愈旧污染数据），随后才允许全局保存
       if (conversation && conversation.system_prompt !== this.system_prompt) {
