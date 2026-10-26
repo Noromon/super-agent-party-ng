@@ -352,6 +352,17 @@ function updateElement(el, rawMarkdown, formatFn) {
             <i class="fa-solid fa-school"></i>
           </el-icon>
         </el-button>
+        <el-button
+          v-if="!isAssistantMode&&!isMobile"
+          @click="toggleMinimalMode"
+          class="top-bar-btn"
+          text
+          id="minimal-mode-btn"
+          :title="isMinimalMode ? t('minimalModeClose') : t('minimalMode')">
+          <el-icon>
+            <i class="fa-solid fa-feather"></i>
+          </el-icon>
+        </el-button>
       <!-- 添加移动端菜单按钮 -->
       <el-button 
       class="top-bar-btn"

@@ -291,5 +291,22 @@ openAiBrowser(){
         // 清除定时器
         this.renderTimers[index] = null;
       }, 80); // 80ms 延迟，约等于 12fps，人眼感觉流畅且不卡顿
+    },
+    // S135(minimal)：极简模式（上游 A4 终态；零设置面板，纯顶栏开关+独立窗口）
+    toggleMinimalMode() {
+      if (!this.isMinimalMode) {
+        if (!window.electronAPI || !window.electronAPI.openMinimalWindow) return;
+        window.electronAPI.openMinimalWindow();
+        this.isMinimalMode = true;
+        if (window.electronAPI.onMinimalWindowClosed) {
+          window.electronAPI.onMinimalWindowClosed(() => {
+            this.isMinimalMode = false;
+          });
+        }
+      } else {
+        window.electronAPI.closeMinimalWindow();
+        this.isMinimalMode = false;
+      }
+      this.sidePanelOpen = false;
     }
 });

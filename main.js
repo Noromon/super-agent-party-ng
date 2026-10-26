@@ -18,6 +18,7 @@ let vmcUdpPort = null;          // osc.UDPPort 实例
 let vmcReceiverActive = false;  // 接收是否运行
 let vrmWindows = []; 
 let thaWindows = []; // S91(THA)：桌宠窗口列表
+let minimalWindow = null; // S135(minimal)：极简模式窗口（上游 A4；island 联动行不随迁=R6）
 let shotOverlay = null
 let isMac = process.platform === 'darwin';
 const vmcSendSocket = dgram.createSocket('udp4'); // 发送复用同一 socket
@@ -1292,6 +1293,64 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         thaWindows = [];
       }
     });
+    // === S135(minimal)：极简模式窗口（上游 A4 终态；灵动岛通知一行不随迁） ===
+    ipcMain.handle('open-minimal-window', async () => {
+      if (minimalWindow && !minimalWindow.isDestroyed()) {
+        minimalWindow.close();
+        minimalWindow = null;
+      }
+
+      const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
+      const winW = 520;
+      const winH = 420;
+
+      minimalWindow = new BrowserWindow({
+        width: winW,
+        height: winH,
+        x: Math.round((screenW - winW) / 2),
+        y: Math.round(screenH - winH - 40),
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: false,
+        hasShadow: false,
+        resizable: true,
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          webSecurity: false,
+          devTools: isDev,
+          preload: path.join(__dirname, 'static/js/preload.js')
+        }
+      });
+
+      remoteMain.enable(minimalWindow.webContents);
+      await minimalWindow.loadURL(`http://${HOST}:${PORT}/minimal.html`);
+
+      minimalWindow.on('closed', () => {
+        minimalWindow = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('minimal-window-closed');
+        }
+      });
+
+      return true;
+    });
+
+    ipcMain.handle('close-minimal-window', async () => {
+      if (minimalWindow && !minimalWindow.isDestroyed()) {
+        minimalWindow.close();
+        minimalWindow = null;
+      }
+      return true;
+    });
+
+    ipcMain.handle('get-minimal-window-state', async () => {
+      return !!(minimalWindow && !minimalWindow.isDestroyed());
+    });
+
     // 👈 桌面截图
     ipcMain.handle('capture-desktop', async () => {
       const sources = await desktopCapturer.getSources({

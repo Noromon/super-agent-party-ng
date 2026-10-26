@@ -315,6 +315,8 @@ Object.assign(vue_data, {
 
     isMobile: false,
 
+    isMinimalMode: false, // S135(minimal)
+
     searchKeyword: '',
 
     newCustomHttpTool: {
