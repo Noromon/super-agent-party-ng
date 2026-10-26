@@ -98,6 +98,146 @@ def rebuild_idx2id(index_vecs, docstore_keys, query_vecs, tau: float = 0.995):
     return mapping, scores
 
 
+def pad_idx2id(mapping: dict, ntotal: int) -> int:
+    """S134：把 [0, ntotal) 缺失位置填入 docstore 不存在的占位 id，
+    恢复 len(idx2id) == ntotal 不变式（原地修改，返回补齐数）。
+
+    mem0 faiss provider 的 insert 用 starting_idx=len(idx2id) 分配新
+    int id：不变式破坏后每次新写入都落在错误位置——覆盖旧映射（错误
+    归因）且新向量永远隐形（S133 修复后再次复现即此因）。占位 id 在
+    _parse_output 中因 docstore 查不到而被安全丢弃，等价于显式墓碑。
+    """
+    padded = 0
+    for pos in range(ntotal):
+        if pos not in mapping:
+            mapping[pos] = f"s134-orphan-{pos}"
+            padded += 1
+    return padded
+
+
+def repair_loose_json(text: str):
+    """S134：本地小模型产出的坏 JSON 保守修复（纯函数）。
+
+    mem0 更新阶段需要模型输出大 JSON，本地量化模型常见两类坏法：
+    A) 相邻值之间漏逗号（json 报 Expecting ',' delimiter）；
+    B) 中途截断。修复策略：字符串/转义感知的扫描器补逗号；仍失败则
+    截到最后一个完整元素收尾、按开括号栈闭合。返回候选串或 None。
+    """
+    import json as _json
+
+    if not text or not text.strip():
+        return None
+
+    def _insert_missing_commas(s: str) -> str:
+        out = []
+        stack = []
+        instr = False
+        esc = False
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if instr:
+                out.append(ch)
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    instr = False
+                    # 值/键字符串刚结束：若后续既非分隔符也非冒号，补逗号
+                    j = i + 1
+                    while j < n and s[j] in " \t\r\n":
+                        j += 1
+                    if j < n and s[j] not in ",}]:":
+                        if stack and stack[-1] in "{[":
+                            out.append(",")
+                i += 1
+                continue
+            out.append(ch)
+            if ch == '"':
+                instr = True
+            elif ch in "{[":
+                stack.append(ch)
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+                j = i + 1
+                while j < n and s[j] in " \t\r\n":
+                    j += 1
+                if j < n and s[j] not in ",}]:":
+                    if stack and stack[-1] in "{[":
+                        out.append(",")
+            i += 1
+        return "".join(out)
+
+    def _truncate_and_close(s: str):
+        stack = []
+        instr = False
+        esc = False
+        last_good = -1
+        for i, ch in enumerate(s):
+            if instr:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    instr = False
+                continue
+            if ch == '"':
+                instr = True
+            elif ch in "{[":
+                stack.append(ch)
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+                last_good = i
+        if last_good < 0:
+            return None
+        body = s[: last_good + 1]
+        closers = []
+        instr = False
+        esc = False
+        st = []
+        for ch in body:
+            if instr:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    instr = False
+                continue
+            if ch == '"':
+                instr = True
+            elif ch in "{[":
+                st.append(ch)
+            elif ch in "}]":
+                if st:
+                    st.pop()
+        for op in reversed(st):
+            closers.append("}" if op == "{" else "]")
+        return body + "".join(closers)
+
+    cands = []
+    t1 = _insert_missing_commas(text)
+    cands.append(t1)
+    t2 = _truncate_and_close(t1)
+    if t2:
+        cands.append(_insert_missing_commas(t2))
+    t3 = _truncate_and_close(text)
+    if t3:
+        cands.append(t3)
+    for cand in cands:
+        try:
+            _json.loads(cand)
+            return cand
+        except Exception:
+            continue
+    return None
+
+
 def fmt_iso8605_to_local(iso: str) -> str:
     """
     ISO-8601 -> 服务器本地时区 yyyy-MM-dd HH:mm:ss

@@ -12,10 +12,71 @@ This module keeps the backend effectively single-filed:
     no chat request is in flight (bounded wait, stale-job drop)
 """
 
+import json
 import logging
 import threading
 import time
 from contextlib import asynccontextmanager
+
+# S134：本地量化模型在 mem0 提取/更新阶段常产出坏 JSON（漏逗号/截断/
+# markdown 污染），mem0 解析失败即整次 add 静默丢弃。两条防线：
+# ①config 注入紧凑指令自定义提示词（少产出、纯 JSON）；
+# ②monkeypatch extract_json 出口做保守修复，不可修时把原始响应写进
+#   文件日志（mem0 自身 logger 不进 backend.log，频次此前不可测）。
+_MEM0_FACT_PROMPT = (
+    "你是记忆提取器。从对话中提取值得长期记住的稳定个人事实、偏好、约定或事件，"
+    "最多 3 条，每条不超过 40 字，用中文陈述句。"
+    "只输出一个 JSON 对象：第一个字符必须是 { ，最后一个字符必须是 } ，"
+    '结构为 {"facts":["…"]}；没有可提取的事实就输出 {"facts":[]}。'
+    "禁止输出 markdown 代码块、解释、思考过程、额外键。"
+)
+_MEM0_UPDATE_PROMPT = (
+    "你是记忆整理器，负责把新事实与已有记忆合并成 JSON 决策。严格输出规则："
+    "只输出一个可被 json.loads 解析的 JSON 对象，禁止 markdown 代码块、解释或思考过程；"
+    "数组中相邻对象之间必须有逗号，不能截断；"
+    "text 字段用 ASCII 双引号包裹，内部引号用反斜杠转义，不得包含换行。"
+    "为压缩输出：memory 数组只列发生变化的条目（ADD/UPDATE/DELETE），"
+    "与已有记忆相同或无意义的 NONE 条目一律省略；一条都不需改动时输出 {\"memory\":[]}。"
+)
+
+_mem0_json_patch_done = False
+
+
+def patch_mem0_extract_json():
+    """幂等：给 mem0 的 extract_json 出口包一层本地 JSON 修复 + 观测日志。"""
+    global _mem0_json_patch_done
+    if _mem0_json_patch_done:
+        return
+    try:
+        import mem0.memory.main as _mmm
+
+        from py.memory_store import repair_loose_json
+        _orig = _mmm.extract_json
+
+        def robust_extract_json(text):
+            extracted = _orig(text)
+            try:
+                json.loads(extracted)
+                return extracted
+            except Exception:
+                pass
+            repaired = repair_loose_json(extracted)
+            if repaired:
+                try:
+                    json.loads(repaired)
+                    logging.getLogger("app").info(
+                        f"[MemExtract] JSON 已自动修复 (len={len(extracted)})")
+                    return repaired
+                except Exception:
+                    pass
+            logging.getLogger("app").warning(
+                f"[MemExtract] JSON 无法修复，原始响应前600字: {str(text)[:600]!r}")
+            return extracted
+
+        _mmm.extract_json = robust_extract_json
+        _mem0_json_patch_done = True
+    except Exception as e:
+        logging.getLogger("app").debug(f"[MemExtract] patch 跳过: {e}")
 
 _lock = threading.Lock()
 _inflight = 0
@@ -313,6 +374,9 @@ def get_mem0_instance(memory_id, cur_memory, settings):
             },
         },
     }
+    patch_mem0_extract_json()
+    config["custom_fact_extraction_prompt"] = _MEM0_FACT_PROMPT
+    config["custom_update_memory_prompt"] = _MEM0_UPDATE_PROMPT
     ensure_pkl_compatible(memory_id)
     m0 = Memory.from_config(config)
     _idx2id_guard_warning(m0, memory_id)
@@ -322,19 +386,29 @@ def get_mem0_instance(memory_id, cur_memory, settings):
 
 
 def _idx2id_guard_warning(m0, memory_id: str):
-    """S133：faiss 索引/docstore/idx2id 一致性自检。
+    """S133/S134：faiss 索引/docstore/idx2id 一致性自检 + 自动补齐。
 
     mem0 faiss provider 检索经 idx2id 反查 uuid，孤儿位置被静默丢弃；
     delete 不删向量 + insert 以 len(idx2id) 分配 int id，漂移会滚雪球
-    （实测 5338 向量只剩 7 条映射，召回恒为同一条）。发现大偏差即
-    WARNING 指路修复脚本，避免损坏长期无人察觉。
+    （实测 5338 向量只剩 7 条映射，召回恒为同一条；S133 修复后
+    len<ntotal 时新写入仍会覆盖旧映射）。构建时：
+    ①缺失位置自动填占位墓碑恢复 len==ntotal 不变式并落盘；
+    ②真实孤儿（无 docstore 对应）仍偏多则 WARNING 指路修复脚本。
     """
     try:
         vs = getattr(m0, "vector_store", None)
         if not (vs is not None and hasattr(vs, "index_to_id") and getattr(vs, "index", None) is not None):
             return
-        from py.memory_store import idx2id_health
+        from py.memory_store import idx2id_health, pad_idx2id
         h = idx2id_health(int(vs.index.ntotal), len(getattr(vs, "docstore", {}) or {}), len(vs.index_to_id or {}))
+        try:
+            padded = pad_idx2id(vs.index_to_id, h["ntotal"])
+            if padded and hasattr(vs, "_save"):
+                vs._save()
+                logging.getLogger("app").info(
+                    f"[MemGuard] {memory_id[:8]} 自动补齐 idx2id 占位 {padded} 条（恢复 id 计数器不变式）")
+        except Exception as e:
+            logging.getLogger("app").warning(f"[MemGuard] {memory_id[:8]} 自动补齐失败: {e}")
         if not h["ok"]:
             logging.getLogger("app").warning(
                 f"[MemGuard] {memory_id[:8]} 索引/映射漂移 ntotal={h['ntotal']} "

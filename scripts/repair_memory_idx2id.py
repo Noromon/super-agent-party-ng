@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from py.memory_store import idx2id_health, rebuild_idx2id  # noqa: E402
+from py.memory_store import idx2id_health, pad_idx2id, rebuild_idx2id  # noqa: E402
 
 
 def _load_card_cfg(card_prefix: str):
@@ -138,11 +138,14 @@ def repair_card(card_id: str, apply: bool, tau: float, batch: int):
     if lost:
         print(f"[{card_id[:8]}] 未匹配示例: {lost}")
 
+    padded = pad_idx2id(dict(mapping), index.ntotal)  # 预览补齐数（不改 mapping）
+    print(f"[{card_id[:8]}] 将补齐占位墓碑 {padded} 条（len(idx2id)==ntotal，恢复 id 计数器不变式）")
     if not apply:
         print(f"[{card_id[:8]}] dry-run 结束（加 --apply 落盘）")
         return
     if matched < 0.8 * len(keys):
         raise SystemExit(f"[{card_id[:8]}] 匹配率过低（{matched}/{len(keys)}），疑似嵌入服务异常，拒绝落盘")
+    pad_idx2id(mapping, index.ntotal)
 
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     for src in (pkl_path, faiss_path):

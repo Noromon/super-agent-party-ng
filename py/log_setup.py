@@ -32,8 +32,10 @@ def setup_logger(log_dir):
     """
     log_dir = os.environ.get("SAP_LOG_DIR") or log_dir
     logger = logging.getLogger("app")
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
+    # S134：mem0.* 记录（Invalid JSON / Total existing memories 等）此前只进
+    # console，backend.log 里完全不可见；同一对 handler 也挂到 "mem0"。
+    mem0_logger = logging.getLogger("mem0")
+    if not logger.handlers and not mem0_logger.handlers:
         fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         os.makedirs(log_dir, exist_ok=True)
         fh = RotatingFileHandler(os.path.join(log_dir, "backend.log"),
@@ -42,6 +44,8 @@ def setup_logger(log_dir):
         fh.setFormatter(fmt)
         sh = logging.StreamHandler()
         sh.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.addHandler(sh)
+        for lg in (logger, mem0_logger):
+            lg.setLevel(logging.INFO)
+            lg.addHandler(fh)
+            lg.addHandler(sh)
     return logger
