@@ -155,13 +155,13 @@ class TestIslandUiS139:
 
 
 class TestIslandProxyFallbackS140:
-    """S140：本机 DNS 挂起/IPv6 黑洞环境下，外联走 直连(trust_env)→本机代理 回退。"""
+    """S140：外联不稳环境下走 直连(trust_env)→显式代理(SAP_PROXY) 回退。"""
 
     def test_router_has_fallback_helper(self):
         s = _read("py", "routers", "island.py")
         assert "_external_get_json" in s
         assert "trust_env=True" in s
-        assert "SAP_PROXY" in s and "127.0.0.1:1080" in s and "127.0.0.1:7890" in s
+        assert "SAP_PROXY" in s and "_FALLBACK_PROXIES = ()" in s
         # 三个外联端点统一走回退出口
         for url in ("http://ip-api.com/json/", "api.open-meteo.com/v1/forecast",
                     "geocoding-api.open-meteo.com/v1/search"):
@@ -175,12 +175,12 @@ class TestIslandProxyFallbackS140:
         monkeypatch.delenv("SAP_PROXY", raising=False)
         m._proxy_state["sticky"] = None
         order = m._attempt_order()
-        assert order[0] is None and "http://127.0.0.1:7890" in order and "http://127.0.0.1:1080" in order
+        assert order == [None]  # 默认无内置代理口，仅直连
         # 粘滞：代理成功后优先该代理，直连降为次选
-        m._proxy_state["sticky"] = "http://127.0.0.1:7890"
+        m._proxy_state["sticky"] = "http://127.0.0.1:5555"
         order = m._attempt_order()
-        assert order[0] == "http://127.0.0.1:7890" and order[1] is None
-        # SAP_PROXY 显式指定时只用它（不外探默认口）
+        assert order[0] == "http://127.0.0.1:5555" and order[1] is None
+        # SAP_PROXY 显式指定时只用它
         monkeypatch.setenv("SAP_PROXY", "http://127.0.0.1:9999")
         m._proxy_state["sticky"] = None
         order = m._attempt_order()

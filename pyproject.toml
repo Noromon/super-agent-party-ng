@@ -157,7 +157,6 @@ max-complexity = 60
 "py/extensions.py" = ["F401"]
 "py/feishu_bot_manager.py" = ["C901", "E701", "E722", "F401", "F841"]
 "py/get_setting.py" = ["E401", "E701", "F401"]
-"py/image_host.py" = ["F401"]
 "py/know_base.py" = ["E722", "F541"]
 "py/live_router.py" = ["E401", "E722", "F541", "F841"]
 "py/llm_tool.py" = ["E701", "F541"]

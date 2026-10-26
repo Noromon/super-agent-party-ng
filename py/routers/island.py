@@ -34,11 +34,11 @@ from py.ws_manager import ws_manager
 router = APIRouter()
 _logger = logging.getLogger("app")
 
-# S140：本机网络环境（本地 DNS 挂起 / IPv6 黑洞）下 aiohttp 直连 open-meteo/ip-api 必挂，
-# 且 aiohttp 不读系统代理。外联统一走 _external_get_json：直连（trust_env 尊重标准
-# 代理环境变量）→ 本机混合代理回退（SAP_PROXY 可覆盖默认 1080/7890），成功后粘滞。
+# S140：部分网络环境下 aiohttp 直连 open-meteo/ip-api 不稳，且 aiohttp 不读系统
+# 代理配置。外联统一走 _external_get_json：直连（trust_env 尊重标准代理环境变量，
+# 含设置中已应用的代理）→ 显式代理回退（SAP_PROXY 指定），成功后粘滞。
 _PROXY_TIMEOUT = 8
-_FALLBACK_PROXIES = ("http://127.0.0.1:1080", "http://127.0.0.1:7890")
+_FALLBACK_PROXIES = ()  # 无内置默认代理；需显式回退时经 SAP_PROXY 配置
 _proxy_state = {"sticky": None}
 
 
