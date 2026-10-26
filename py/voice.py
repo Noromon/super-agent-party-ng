@@ -601,6 +601,8 @@ class TTSConnectionManager:
         # S91(THA)：桌面宠物姿态生成器连接（websocket._tha_gen 由 /ws/tha 挂载）
         self.tha_connections: List[WebSocket] = []
         self.overlay_connections: list[WebSocket] = []
+        # S136(SoulX)：真人伴侣窗口连接（TTS 音频字节+指令广播）
+        self.soulx_connections: List[WebSocket] = []
 
     async def connect_main(self, websocket: WebSocket):
         await websocket.accept()
@@ -629,6 +631,15 @@ class TTSConnectionManager:
         if websocket in self.tha_connections:
             self.tha_connections.remove(websocket)
 
+    async def connect_soulx(self, websocket: WebSocket):
+        await websocket.accept()
+        self.soulx_connections.append(websocket)
+        logging.info(f"SoulX interface connected. Total: {len(self.soulx_connections)}")
+
+    def disconnect_soulx(self, websocket: WebSocket):
+        if websocket in self.soulx_connections:
+            self.soulx_connections.remove(websocket)
+
     # 批 1c 迁出时清理：此处原有第一版 broadcast_to_vrm（只发 vrm_connections），
     # 被下方第二版（二进制→VRM、文本→VRM+字幕）覆盖 = 死代码，已删除。
 
@@ -655,18 +666,26 @@ class TTSConnectionManager:
 
     async def broadcast_to_vrm(self, message: Union[str, bytes]):
         """核心广播逻辑：区分发送内容"""
-        # 1. 如果是二进制（音频流），只发给真正的 VRM 页面
+        # 1. 如果是二进制（音频流），只发给真正的 VRM 页面 和 SoulX 窗口（S136）
         if isinstance(message, bytes):
             for conn in list(self.vrm_connections):
                 try: await conn.send_bytes(message)
                 except: self.disconnect_vrm(conn)
+            for conn in list(self.soulx_connections):
+                try: await conn.send_bytes(message)
+                except: self.disconnect_soulx(conn)
         
-        # 2. 如果是字符串（指令/文字），发给 VRM 页面 和 字幕页面
+        # 2. 如果是字符串（指令/文字），发给 VRM 页面、字幕页面 和 SoulX 窗口（S136）
         else:
             # 发给 VRM 窗口（同步表情、UI等）
             for conn in list(self.vrm_connections):
                 try: await conn.send_text(message)
                 except: self.disconnect_vrm(conn)
+
+            # 发给 SoulX 窗口（口型/动作驱动指令）
+            for conn in list(self.soulx_connections):
+                try: await conn.send_text(message)
+                except: self.disconnect_soulx(conn)
             
             # 发给字幕窗口（显示文字）
             for conn in list(self.overlay_connections):

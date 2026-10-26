@@ -564,6 +564,10 @@
                           <i :class='isTHAStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-hat-wizard"'></i>
                         </el-button>
 
+                      <el-button :title="t('startSoulxPet')" @click="startSoulx" class="icon-btn soulx-btn" :type="'default'" v-if="MoreButtonDict.find(b => b.name === 'soulxButton')?.enabled&&!isCapsuleMode" circle>
+                          <i :class='isSoulxStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-face-laugh-beam"'></i>
+                        </el-button>
+
                       <el-button :title="t('enableAutoBehavior')" @click="behaviorSettings.enabled=!behaviorSettings.enabled; autoSaveSettings();" class="icon-btn behavior-btn" :type="behaviorSettings.enabled ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'behaviorBotton')?.enabled&&!isCapsuleMode" circle>
                           <i class="fa-solid fa-person-running"></i>
                         </el-button>

@@ -45,7 +45,7 @@ class TestMinimalModeS135:
         assert 'id="minimal-mode-btn"' in h
         assert 'toggleMinimalMode' in h
         assert "fa-feather" in h
-        assert "build=S135" in _read("static", "js", "renderer.js")
+        assert "build=S136" in _read("static", "js", "renderer.js")
 
     def test_i18n_parity(self):
         z = _read("static", "js", "locales", "zh-CN.js")

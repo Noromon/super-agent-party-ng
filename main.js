@@ -19,6 +19,7 @@ let vmcReceiverActive = false;  // 接收是否运行
 let vrmWindows = []; 
 let thaWindows = []; // S91(THA)：桌宠窗口列表
 let minimalWindow = null; // S135(minimal)：极简模式窗口（上游 A4；island 联动行不随迁=R6）
+let soulxWindows = []; // S136(SoulX)：真人伴侣窗口列表
 let shotOverlay = null
 let isMac = process.platform === 'darwin';
 const vmcSendSocket = dgram.createSocket('udp4'); // 发送复用同一 socket
@@ -1291,6 +1292,84 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
           }
         });
         thaWindows = [];
+      }
+    });
+    // === S136(SoulX)：真人伴侣窗口（上游终态：单例复用 + 透明置顶 + 免手势自动播放） ===
+    ipcMain.handle('start-soulx-window', async (_, windowConfig = {}) => {
+      // 单例：已有 SoulX 窗口则聚焦复用，避免多窗口同时播放音频
+      soulxWindows = soulxWindows.filter(w => !w.isDestroyed());
+      if (soulxWindows.length > 0) {
+        const existing = soulxWindows[0];
+        if (existing.isMinimized()) existing.restore();
+        existing.show();
+        existing.focus();
+        return existing.id;
+      }
+
+      const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+      const windowWidth = windowConfig.width || 540;
+      const windowHeight = windowConfig.height || 540;
+
+      const x = windowConfig.x !== undefined ? windowConfig.x : width - windowWidth - 40;
+      let defaultY;
+      if (height >= windowHeight) {
+        defaultY = height - windowHeight;
+      } else {
+        defaultY = 0;
+      }
+      const y = windowConfig.y !== undefined ? windowConfig.y : defaultY;
+
+      const soulxWindow = new BrowserWindow({
+        width: windowWidth,
+        height: windowHeight,
+        x,
+        y,
+        transparent: true,
+        frame: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        acceptFirstMouse: true,
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: true,
+          enableRemoteModule: true,
+          sandbox: false,
+          webgl: true,
+          devTools: isDev,
+          webAudio: true,
+          autoplayPolicy: 'no-user-gesture-required',
+          preload: path.join(__dirname, 'static/js/preload.js')
+        }
+      });
+
+      await soulxWindow.loadURL(`http://${HOST}:${PORT}/soulx.html`);
+      soulxWindow.setIgnoreMouseEvents(false);
+      soulxWindow.setAlwaysOnTop(true);
+      soulxWindows.push(soulxWindow);
+
+      soulxWindow.on('closed', () => {
+        soulxWindows = soulxWindows.filter(w => w !== soulxWindow);
+      });
+
+      return soulxWindow.id;
+    });
+
+    ipcMain.handle('stop-soulx-window', (_, windowId) => {
+      if (windowId !== undefined) {
+        const win = soulxWindows.find(w => w.id === windowId);
+        if (win && !win.isDestroyed()) {
+          win.close();
+        }
+        soulxWindows = soulxWindows.filter(w => w.id !== windowId);
+      } else {
+        soulxWindows.forEach(win => {
+          if (!win.isDestroyed()) {
+            win.close();
+          }
+        });
+        soulxWindows = [];
       }
     });
     // === S135(minimal)：极简模式窗口（上游 A4 终态；灵动岛通知一行不随迁） ===

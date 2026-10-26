@@ -102,6 +102,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // S91(THA)：桌宠窗口
   startTHAWindow: (windowConfig) => ipcRenderer.invoke('start-tha-window', windowConfig),
   stopTHAWindow: () => ipcRenderer.invoke('stop-tha-window'),
+  // S136(SoulX)：真人伴侣窗口
+  startSoulxWindow: (windowConfig) => ipcRenderer.invoke('start-soulx-window', windowConfig),
+  stopSoulxWindow: () => ipcRenderer.invoke('stop-soulx-window'),
   getServerInfo: () => ipcRenderer.invoke('get-server-info'),
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.invoke('set-ignore-mouse-events', ignore, options),
   getIgnoreMouseStatus: () => ipcRenderer.invoke('get-ignore-mouse-status'),

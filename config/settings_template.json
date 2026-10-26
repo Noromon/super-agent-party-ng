@@ -617,6 +617,17 @@
       "defaultModels": [],
       "userModels": []
     },
+    "SoulxConfig": {
+      "name": "default",
+      "enabled": false,
+      "serverUrl": "ws://127.0.0.1:8765",
+      "condImage": "",
+      "selectedImageId": "",
+      "images": [],
+      "transparentBg": true,
+      "windowWidth": 512,
+      "windowHeight": 512
+    },
     "comfyuiServers": ["http://127.0.0.1:8188"],
     "comfyuiAPIkey": "",
     "BotConfig": {

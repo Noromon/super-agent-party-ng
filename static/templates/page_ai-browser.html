@@ -446,6 +446,10 @@
                                 <i :class='isTHAStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-hat-wizard"'></i>
                               </button>
 
+                            <button type="button" class="el-button is-circle icon-btn soulx-btn" :title="t('startSoulxPet')" @click="startSoulx" v-if="MoreButtonDict.find(b => b.name === 'soulxButton')?.enabled&&!isCapsuleMode" :class="['el-button--' + ('default')]">
+                                <i :class='isSoulxStarting? "fa-solid fa-spinner fa-spin" : "fa-solid fa-face-laugh-beam"'></i>
+                              </button>
+
                             <button type="button" class="el-button is-circle icon-btn send-btn" :title="isSending ? t('stopGenerating') : t('sendMessage')" @click="isSending ? stopGenerate() : sendMessage()" :class="['el-button--' + (isSending ? 'danger' : 'primary')]">
                                 <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
                               </button>

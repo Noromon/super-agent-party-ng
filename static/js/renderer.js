@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S135 loaded');
+console.warn('[Probe] renderer build=S136 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -1454,6 +1454,11 @@ const app = Vue.createApp({
     },
   },
   computed: {
+
+    selectedSoulxImage() {
+      const imgs = (this.SoulxConfig && this.SoulxConfig.images) || [];
+      return imgs.find(i => i.id === this.SoulxConfig.selectedImageId) || null;
+    },
 
     // ===== R2-1 外观包：字号 px <-> scale 换算（基准 14px / 12px） =====
     currentFontPx() {

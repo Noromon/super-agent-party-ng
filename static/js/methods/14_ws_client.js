@@ -163,6 +163,7 @@ Object.assign(vue_methods, {
           this.loadTHAModels(); // S91(THA)
           this.loadDefaultMotions();
           this.loadGaussScenes();
+          this.loadSoulxImages(); // S136(SoulX)
           this.checkMobile();
           this.checkQQBotStatus(); 
           this.checkFeishuBotStatus();

@@ -96,6 +96,9 @@ DEFAULT_VRM_DIR = os.path.join(base_path, 'vrm')
 # S91(THA)：桌宠默认模型随包分发（base_path），用户上传模型进用户数据区
 DEFAULT_THA_DIR = os.path.join(base_path, 'tha_models')
 THA_USER_MODELS_DIR = os.path.join(UPLOAD_FILES_DIR, 'tha_models')
+# S136(SoulX)：真人伴侣参考图随包分发（base_path），用户上传参考图进用户数据区
+DEFAULT_SOULX_IMAGES_DIR = os.path.join(base_path, 'default_soulx_images')
+SOULX_IMAGES_DIR = os.path.join(UPLOAD_FILES_DIR, 'soulx_images')
 STATIC_DIR = os.path.join(base_path, "static")
 
 # --- 数据库 ---
@@ -107,7 +110,7 @@ dirs_to_create = [
     USER_DATA_DIR, LOG_DIR, MEMORY_CACHE_DIR, UPLOAD_FILES_DIR, 
     TOOL_TEMP_DIR, AGENT_DIR, KB_DIR, EXT_DIR, 
     DEFAULT_ASR_DIR, DEFAULT_TTS_DIR, DEFAULT_EBD_DIR, CONFIG_BASE_PATH, SKILLS_DIR,
-    THA_USER_MODELS_DIR
+    THA_USER_MODELS_DIR, SOULX_IMAGES_DIR
 ]
 for d in set(dirs_to_create):
     try:

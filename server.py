@@ -461,7 +461,7 @@ from py.diary_query_tool import diary_query_tool, diary_books_tool, handle_query
 from py.diary_chat_integration import append_to_chat_buffer, update_buffer_identity, get_chat_buffer
 from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK
 
-from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH,DEFAULT_THA_DIR
+from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH,DEFAULT_THA_DIR,DEFAULT_SOULX_IMAGES_DIR
 from py.llm_tool import get_image_base64,get_image_media_type
 from py.tool_dispatch import (_APPROVAL_PREFIX, _approval_payload,
                               _is_approval_result)
@@ -1097,6 +1097,8 @@ app.include_router(status.router)
 app.include_router(voice_router)  # 批 1c：/ws/asr /ws/tts /ws/vrm /ws/subtitles
 from py.routers.tha import router as tha_router  # S91(THA)：/tha_* 端点 + /ws/tha
 app.include_router(tha_router)
+from py.routers.soulx import router as soulx_router  # S136(SoulX)：/soulx_* 端点 + /ws/soulx
+app.include_router(soulx_router)
 from py.diary_api import router as diary_router  # A5：/api/diary/*（book CRUD + 查询）
 app.include_router(diary_router)
 
@@ -8836,6 +8838,10 @@ mcp.mount()
 app.mount("/vrm", StaticFiles(directory=DEFAULT_VRM_DIR), name="vrm")
 # S91(THA)：桌宠默认模型静态分发（必须在 "/" catch-all 之前）
 app.mount("/tha_models", StaticFiles(directory=DEFAULT_THA_DIR), name="tha_models")
+# S136(SoulX)：真人伴侣默认参考图静态分发（上游无条件挂载；fork 加 isdir 守卫，
+# 防打包缺目录时启动崩溃——挂载缺失仅丢默认图，不影响其余功能）
+if os.path.isdir(DEFAULT_SOULX_IMAGES_DIR):
+    app.mount("/default_soulx_images", StaticFiles(directory=DEFAULT_SOULX_IMAGES_DIR), name="default_soulx_images")
 app.mount("/tool_temp", StaticFiles(directory=TOOL_TEMP_DIR), name="tool_temp")
 app.mount("/uploaded_files", StaticFiles(directory=UPLOAD_FILES_DIR), name="uploaded_files")
 app.mount("/ext", StaticFiles(directory=EXT_DIR), name="ext")

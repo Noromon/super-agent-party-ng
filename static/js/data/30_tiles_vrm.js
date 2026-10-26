@@ -121,6 +121,7 @@ Object.assign(vue_data, {
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
       {"name": "thaButton", "enabled": true},
+      {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
@@ -158,6 +159,7 @@ Object.assign(vue_data, {
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
       {"name": "thaButton", "enabled": true},
+      {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
@@ -195,6 +197,7 @@ Object.assign(vue_data, {
       {"name": "comfyuiButton", "enabled": false},
       {"name": "vrmButton", "enabled": true},
       {"name": "thaButton", "enabled": true},
+      {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
       {"name": "groupChatBotton", "enabled": false},
     ],
@@ -250,6 +253,25 @@ Object.assign(vue_data, {
     },
     showThaModelDialog: false,
     newThaModel: {
+      file: null,
+      name: '',
+      displayName: ''
+    },
+
+    // S136(SoulX)：真人伴侣配置（随上游终态；FlashHead GPU 服务另行部署）
+    SoulxConfig: {
+      name: 'default',
+      enabled: false,
+      serverUrl: 'ws://127.0.0.1:8765',
+      condImage: '',
+      selectedImageId: '',
+      images: [],
+      transparentBg: true,
+      windowWidth: 512,
+      windowHeight: 512
+    },
+    showSoulxImageDialog: false,
+    newSoulxImage: {
       file: null,
       name: '',
       displayName: ''

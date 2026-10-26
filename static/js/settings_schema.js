@@ -82,6 +82,7 @@
     ['behaviorSettings', 'behaviorSettings'],
     ['VRMConfig', 'VRMConfig'],
     ['THAConfig', 'THAConfig'],
+    ['SoulxConfig', 'SoulxConfig'],
     ['comfyuiServers', 'comfyuiServers'],
     ['comfyuiAPIkey', 'comfyuiAPIkey'],
     ['workflows', 'workflows'],
