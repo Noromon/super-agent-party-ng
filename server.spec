@@ -39,6 +39,10 @@ a = Analysis(
         'botpy',
         'imageio_ffmpeg', 
         *collect_submodules('mem0'),
+        # S139(R6)：灵动岛媒体模块为函数内动态 import，冻结包需显式收集
+        *(collect_submodules('winrt') if platform.system() == 'Windows' else []),
+        *(collect_submodules('pycaw') if platform.system() == 'Windows' else []),
+        *(collect_submodules('comtypes') if platform.system() == 'Windows' else []),
     ],
     hookspath=[],
     hooksconfig={},

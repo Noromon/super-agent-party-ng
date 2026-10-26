@@ -19,6 +19,7 @@ let vmcReceiverActive = false;  // 接收是否运行
 let vrmWindows = []; 
 let thaWindows = []; // S91(THA)：桌宠窗口列表
 let minimalWindow = null; // S135(minimal)：极简模式窗口（上游 A4；island 联动行不随迁=R6）
+let dynamicIslandWindow = null; // S139(R6)：灵动岛全屏覆盖窗口（上游终态）
 let soulxWindows = []; // S136(SoulX)：真人伴侣窗口列表
 let shotOverlay = null
 let isMac = process.platform === 'darwin';
@@ -1412,6 +1413,10 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('minimal-window-closed');
         }
+        // S139(R6)：通知灵动岛极简模式已关闭（上游终态，S135 遗留随迁）
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.webContents.send('minimal-window-closed');
+        }
       });
 
       return true;
@@ -1427,6 +1432,126 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
 
     ipcMain.handle('get-minimal-window-state', async () => {
       return !!(minimalWindow && !minimalWindow.isDestroyed());
+    });
+
+    // === S139(R6)：灵动岛窗口 (全屏覆盖层)，上游终态；webSecurity:false 已剥离（S137 cookie 教训） ===
+    ipcMain.handle('open-island-window', async () => {
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.close();
+        dynamicIslandWindow = null;
+      }
+
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { x, y, width: screenW, height: screenH } = primaryDisplay.bounds;
+      const isWindows = process.platform === 'win32';
+      const isLinux = process.platform === 'linux';
+      const windowType = isWindows ? 'toolbar' : 'panel';
+
+      dynamicIslandWindow = new BrowserWindow({
+        width: screenW,
+        height: screenH,
+        x: x,
+        y: y,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        resizable: false,
+        backgroundColor: '#00000000',
+        type: windowType,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          devTools: isDev,
+          preload: path.join(__dirname, 'static/js/preload.js')
+        }
+      });
+
+      remoteMain.enable(dynamicIslandWindow.webContents);
+
+      dynamicIslandWindow.webContents.on('render-process-gone', (event, details) => {
+        console.error('[Island] Render process gone:', details.reason, details.exitCode);
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.close();
+          dynamicIslandWindow = null;
+        }
+      });
+
+      dynamicIslandWindow.on('unresponsive', () => {
+        console.warn('[Island] Renderer unresponsive, restoring mouse forwarding');
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          if (isLinux) {
+            dynamicIslandWindow.setIgnoreMouseEvents(true);
+          } else {
+            dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
+          }
+        }
+      });
+
+      if (isLinux) {
+        dynamicIslandWindow.setIgnoreMouseEvents(true);
+      } else {
+        dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
+      }
+
+      await dynamicIslandWindow.loadURL(`http://${HOST}:${PORT}/island.html`);
+
+      dynamicIslandWindow.on('closed', () => {
+        dynamicIslandWindow = null;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('island-window-closed');
+        }
+      });
+
+      return true;
+    });
+
+    ipcMain.handle('close-island-window', async () => {
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.close();
+        dynamicIslandWindow = null;
+      }
+      return true;
+    });
+
+    ipcMain.handle('get-island-window-state', async () => {
+      return !!(dynamicIslandWindow && !dynamicIslandWindow.isDestroyed());
+    });
+
+    // S139(R6)：剪切板 IPC（island-app 消费，上游终态逐字）
+    ipcMain.handle('clipboard-read', async () => {
+      try {
+        return clipboard.readText() || '';
+      } catch (e) { return ''; }
+    });
+    ipcMain.handle('clipboard-write', async (event, text) => {
+      try {
+        clipboard.writeText(String(text || ''));
+        return { success: true };
+      } catch (e) { return { success: false, error: e.message }; }
+    });
+    ipcMain.handle('clipboard-read-image', async () => {
+      try {
+        const img = clipboard.readImage();
+        if (img.isEmpty()) return null;
+        return img.toDataURL();
+      } catch (e) { return null; }
+    });
+    ipcMain.handle('clipboard-read-file-paths', async () => {
+      try {
+        let paths = clipboard.readFilePaths() || [];
+        if (!paths.length) {
+          const fileUrl = clipboard.read('public.file-url');
+          if (fileUrl) {
+            const url = require('url');
+            const fp = url.fileURLToPath(fileUrl.trim());
+            if (fp && fs.existsSync(fp)) paths = [fp];
+          }
+        }
+        return paths;
+      } catch (e) { return []; }
     });
 
     // 👈 桌面截图
@@ -1586,6 +1711,10 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       currentLanguage = lang;
       updateTrayMenu();
       updatecontextMenu();
+      // S139(R6)：语言切换转发灵动岛（上游终态）
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.webContents.send('language-changed');
+      }
     });
     // 创建系统托盘
     createTray();

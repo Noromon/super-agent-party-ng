@@ -146,6 +146,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('minimal-window-closed');
     ipcRenderer.on('minimal-window-closed', () => callback());
   },
+  // S139(R6)：灵动岛 + 语言 + 剪切板桥（上游终态逐字）
+  openIslandWindow: () => ipcRenderer.invoke('open-island-window'),
+  closeIslandWindow: () => ipcRenderer.invoke('close-island-window'),
+  getIslandWindowState: () => ipcRenderer.invoke('get-island-window-state'),
+  onIslandWindowClosed: (callback) => {
+    ipcRenderer.removeAllListeners('island-window-closed');
+    ipcRenderer.on('island-window-closed', () => callback());
+  },
+  onLanguageChanged: (callback) => {
+    ipcRenderer.removeAllListeners('language-changed');
+    ipcRenderer.on('language-changed', () => callback());
+  },
+  clipboardRead: () => ipcRenderer.invoke('clipboard-read'),
+  clipboardWrite: (text) => ipcRenderer.invoke('clipboard-write', text),
+  clipboardReadImage: () => ipcRenderer.invoke('clipboard-read-image'),
+  clipboardReadFilePaths: () => ipcRenderer.invoke('clipboard-read-file-paths'),
   getBackendLogs: () => ipcRenderer.invoke('get-backend-logs'),
 
   onRemoteInstall: (callback) => ipcRenderer.on('remote-install-any', (_, payload) => callback(payload)),

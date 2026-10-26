@@ -1,0 +1,130 @@
+# -*- coding: utf-8 -*-
+"""S139(R6)：灵动岛移植钉桩（资产哈希、M2 token 补丁、后端接线、Electron 桥）。"""
+import hashlib
+import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 上游 origin/main@3eb32bb2 终态哈希（dynamic_island.py / island.css 逐字节）
+SHA_DYNAMIC_ISLAND = "0728ca9a843925e8e210a6c217bf272dd07fea482f2249598787964cb1647c46"
+SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
+# fork 补丁后资产哈希（上游 + S139 M2 token 补丁，白名单改动）
+SHA_ISLAND_APP = "d223d10077a137635ed46d54e7712c0383436e2a91c929b356df17a3c8118a0a"
+SHA_ISLAND_HTML = "a61461132425e9ccab40cf428dc04d7752af7ed1f076a7b0c38464d0bc316654"
+
+
+def _read(*p):
+    return open(os.path.join(ROOT, *p), encoding="utf-8", errors="replace").read()
+
+
+def _sha(*p):
+    return hashlib.sha256(open(os.path.join(ROOT, *p), "rb").read()).hexdigest()
+
+
+class TestIslandAssetsS139:
+    def test_dynamic_island_verbatim(self):
+        assert _sha("py", "dynamic_island.py") == SHA_DYNAMIC_ISLAND
+        assert os.path.getsize(os.path.join(ROOT, "py", "dynamic_island.py")) == 19287
+
+    def test_island_css_verbatim(self):
+        assert _sha("static", "css", "island.css") == SHA_ISLAND_CSS
+
+    def test_island_app_patched_hash(self):
+        assert _sha("static", "js", "island-app.js") == SHA_ISLAND_APP
+
+    def test_island_app_m2_patches(self):
+        s = _read("static", "js", "island-app.js")
+        assert "sap_token" in s and "__SAP_TOKEN" in s and "__SAP_READY" in s
+        # fork 补丁必须恰好 2 处（上游 2027 行 + 补丁行）
+        assert s.count("__SAP_TOKEN") == 1
+        assert s.count("__SAP_READY") == 2
+        # 上游能力面不回归
+        assert "register_node_extension_mcp" in s and "dynamic_island" in s
+        for tool in ("island_music_play", "island_pomodoro_start", "island_task_create",
+                     "island_weather_get_current", "island_translate", "island_clipboard_list"):
+            assert tool in s
+
+    def test_island_html_bootstrap(self):
+        assert _sha("static", "island.html") == SHA_ISLAND_HTML
+        h = _read("static", "island.html")
+        assert "session_token" in h
+        assert h.find("__SAP_READY") < h.find('js/island-app.js')
+        assert "css/island.css" in h
+
+
+class TestIslandBackendS139:
+    def test_router_endpoints(self):
+        s = _read("py", "routers", "island.py")
+        for ep in ('/api/heatmap"', '/api/heatmap/increment', '/api/weather', '/api/ip-city', '/api/geocode', '/cur_language'):
+            assert ep in s
+        assert "island_ai_reply_done" in s and "notify_island_reply_done" in s
+        for h in ("island_enable", "island_disable", "island_music_control", "island_track_set",
+                  "island_poll_music", "island_request_clipboard", "island_write_clipboard", "island_request_tasks"):
+            assert '"%s"' % h in s
+
+    def test_server_wiring(self):
+        s = _read("server.py")
+        assert "app.include_router(island_router)" in s
+        assert 'elif msg_type.startswith("island_"):' in s
+        assert "await _ws_island(websocket, msg_type, data)" in s
+        # 流尾钩子：DONE 之后、finalize 之前（上游 5842-5850 语义位）
+        b = s.find("await notify_island_reply_done(request.is_sub_agent)")
+        assert b != -1
+        window = s[b - 200:b + 250]
+        assert 'yield "data: [DONE]' in window and "_stream_finalize_jobs" in window
+
+    def test_deps_and_spec(self):
+        p = _read("pyproject.toml")
+        for dep in ("winrt-windows-media-control>=3.2.1 ; sys_platform == 'win32'",
+                    "pycaw>=20240210 ; sys_platform == 'win32'",
+                    "jeepney>=0.8.0 ; sys_platform == 'linux'"):
+            assert dep in p
+        assert '"py/dynamic_island.py" = ["E401", "F401", "F541", "F811"]' in p
+        sp = _read("server.spec")
+        assert "collect_submodules('winrt')" in sp and "collect_submodules('pycaw')" in sp
+
+
+class TestIslandElectronS139:
+    def test_main_window_ipc(self):
+        g = _read("main.js")
+        for ch in ("open-island-window", "close-island-window", "get-island-window-state",
+                   "clipboard-read", "clipboard-write", "clipboard-read-image", "clipboard-read-file-paths"):
+            assert "ipcMain.handle('%s'" % ch in g
+        assert "let dynamicIslandWindow = null" in g
+        assert "island.html" in g
+        assert "setIgnoreMouseEvents(true, { forward: true })" in g
+        assert "dynamicIslandWindow.webContents.send('language-changed')" in g
+
+    def test_island_window_no_websecurity_off(self):
+        # S137 教训：island 窗口 webPreferences 不得含 webSecurity:false（历史窗口 2 处不在本钉范围）
+        g = _read("main.js")
+        block = g[g.find("open-island-window"):g.find("close-island-window")]
+        assert "webSecurity: false" not in block
+
+    def test_preload_bridges(self):
+        p = _read("static", "js", "preload.js")
+        for api in ("openIslandWindow", "closeIslandWindow", "getIslandWindowState",
+                    "onIslandWindowClosed", "onLanguageChanged", "clipboardRead",
+                    "clipboardWrite", "clipboardReadImage", "clipboardReadFilePaths"):
+            assert api in p
+
+
+class TestIslandUiS139:
+    def test_button_and_registration(self):
+        h = _read("static", "index.html")
+        assert 'id="dynamic-island-btn"' in h
+        assert "toggleDynamicIsland" in h and "fa-jar" in h
+        assert "46_island_domain.js" in h
+        assert "dynamicIslandClose" in h
+
+    def test_methods_data_i18n(self):
+        m = _read("static", "js", "methods", "46_island_domain.js")
+        assert "toggleDynamicIsland()" in m and "onIslandWindowClosed" in m
+        d = _read("static", "js", "data", "50_bots_translate.js")
+        assert "isDynamicIsland: false" in d
+        for loc, val in (("zh-CN", "灵动岛"), ("en-US", "Dynamic Island")):
+            z = _read("static", "js", "locales", "%s.js" % loc)
+            assert val in z and "dynamicIslandClose" in z
+
+    def test_stamp_s139(self):
+        assert "build=S139" in _read("static", "js", "renderer.js")

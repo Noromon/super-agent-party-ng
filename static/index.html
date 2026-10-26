@@ -363,6 +363,17 @@ function updateElement(el, rawMarkdown, formatFn) {
             <i class="fa-solid fa-feather"></i>
           </el-icon>
         </el-button>
+        <el-button
+          v-if="!isAssistantMode&&!isMobile"
+          @click="toggleDynamicIsland"
+          class="top-bar-btn"
+          text
+          id="dynamic-island-btn"
+          :title="isDynamicIsland ? t('dynamicIslandClose') : t('dynamicIsland')">
+          <el-icon>
+            <i class="fa-solid fa-jar"></i>
+          </el-icon>
+        </el-button>
       <!-- 添加移动端菜单按钮 -->
       <el-button 
       class="top-bar-btn"
@@ -1048,6 +1059,7 @@ function updateElement(el, rawMarkdown, formatFn) {
     <script src="js/methods/43_tha_domain.js"></script>
     <script src="js/methods/44_diary.js"></script>
     <script src="js/methods/45_soulx_domain.js"></script>
+<script src="js/methods/46_island_domain.js"></script>
     <script src="js/methods/50_bots_lifecycle.js"></script>
     <script src="js/methods/51_bots_conversations.js"></script>
     <script src="js/methods/54_ui_nav.js"></script>

@@ -1099,6 +1099,9 @@ from py.routers.tha import router as tha_router  # S91(THA)：/tha_* 端点 + /w
 app.include_router(tha_router)
 from py.routers.soulx import router as soulx_router  # S136(SoulX)：/soulx_* 端点 + /ws/soulx
 app.include_router(soulx_router)
+from py.routers.island import notify_island_reply_done, router as island_router  # S139(R6)：/api/heatmap|weather|ip-city|geocode + /cur_language
+from py.routers.island import _ws_island  # S139(R6)：island_* ws 消息卸载（S71 惯例）
+app.include_router(island_router)
 from py.diary_api import router as diary_router  # A5：/api/diary/*（book CRUD + 查询）
 app.include_router(diary_router)
 
@@ -6133,6 +6136,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             yield _c
         logger.info(f"all msg: {request.messages}")
         yield "data: [DONE]\n\n"
+        # S139(R6)：灵动岛热力图+1 并通知（上游 5842-5850 语义：非 sub_agent、异常吞）
+        await notify_island_reply_done(request.is_sub_agent)
         await _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory)
 
         return
@@ -8759,6 +8764,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "messages_update",
                     "data": messages_data
                 }, exclude=websocket)
+
+            elif msg_type.startswith("island_"):
+                # S139(R6)：灵动岛 8 类消息，重活在 _ws_island（保 ws 循环壳尺寸）
+                await _ws_island(websocket, msg_type, data)
 
     except Exception as e:
         logging.getLogger("app").info(f"WebSocket error for {connection_id}: {e}")

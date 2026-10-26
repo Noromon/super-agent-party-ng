@@ -318,6 +318,8 @@ Object.assign(vue_data, {
 
     isMinimalMode: false, // S135(minimal)
 
+    isDynamicIsland: false, // S139(R6/灵动岛)
+
     searchKeyword: '',
 
     newCustomHttpTool: {

@@ -50,6 +50,8 @@ def test_print_ratchet():
         norm = "/" + path.replace("\\", "/")
         if "/blivedm/" in norm:
             continue
+        if norm == "/py/dynamic_island.py":
+            continue  # S139(R6)：上游逐字节文件，print 日志原样，同 blivedm 豁免
         try:
             tree = ast.parse(io.open(path, encoding="utf-8-sig").read())
         except (SyntaxError, UnicodeDecodeError):

@@ -80,6 +80,12 @@ dependencies = [
     "slack-sdk>=3.39.0",
     "dingtalk-stream>=0.24.3",
     "pyautogui>=0.9.54",
+    # S139(R6)：灵动岛媒体控制（上游 dep 行逐字：win=SMTC/winrt 状态+pycaw 音量，linux=jeepney MPRIS；mac 走 osascript 无依赖）
+    "jeepney>=0.8.0 ; sys_platform == 'linux'",
+    "pycaw>=20240210 ; sys_platform == 'win32'",
+    "winrt-windows-media-control>=3.2.1 ; sys_platform == 'win32'",
+    "winrt-windows-foundation>=3.2.1 ; sys_platform == 'win32'",
+    "winrt-windows-foundation-collections>=3.2.1 ; sys_platform == 'win32'",
     "elevenlabs>=2.41.0",
     "litellm>=1.83.7",
     "wecom-aibot-python-sdk>=1.0.2",
@@ -145,6 +151,8 @@ max-complexity = 60
 "py/context_manager.py" = ["F401"]
 "py/dingtalk_bot_manager.py" = ["E701", "E722", "F401", "F541"]
 "py/discord_bot_manager.py" = ["E701", "E702", "F401", "F841"]
+# S139(R6)：灵动岛媒体模块上游逐字节移植，样式违规入账（同 M-2 legacy 策略）
+"py/dynamic_island.py" = ["E401", "F401", "F541", "F811"]
 "py/ebd_model_manager.py" = ["E701", "E722"]
 "py/extensions.py" = ["F401"]
 "py/feishu_bot_manager.py" = ["C901", "E701", "E722", "F401", "F841"]

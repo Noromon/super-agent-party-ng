@@ -22,10 +22,10 @@ class TestMinimalModeS135:
             assert ch in g
         assert "let minimalWindow = null" in g
         assert "minimal.html" in g
-        # island 联动不随迁（R6）：closed 回调里不得引用 dynamicIslandWindow
+        # R6(S139) 起 island 联动行随迁：closed 回调须通知灵动岛
         i = g.find("open-minimal-window")
-        block = g[i:i + 2600]
-        assert "dynamicIslandWindow" not in block
+        block = g[i:i + 2900]
+        assert "dynamicIslandWindow" in block
         assert "minimal-window-closed" in block
 
     def test_preload_bridge(self):
@@ -45,7 +45,7 @@ class TestMinimalModeS135:
         assert 'id="minimal-mode-btn"' in h
         assert 'toggleMinimalMode' in h
         assert "fa-feather" in h
-        assert "build=S138" in _read("static", "js", "renderer.js")
+        assert "build=S139" in _read("static", "js", "renderer.js")
 
     def test_stream_snapshot_full_key(self):
         # S138：快照键含内容长度+尾部——上游原版只取前 300 字符，
