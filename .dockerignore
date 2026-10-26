@@ -35,3 +35,10 @@ static/ext/*
 
 .agent/
 vts_token.txt
+# publish hygiene: never ship VCS/IDE/audit/log artifacts in the image
+.git/
+.github/
+.opencode/
+logs/
+backups/
+SECURITY.md

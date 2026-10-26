@@ -121,10 +121,10 @@ jobs:
         run: |
           case "${{ matrix.os }}" in
             windows-latest)
-              npx electron-builder build --win --publish always
+              npx electron-builder build --win --publish never
               ;;
             ubuntu-latest)
-              npx electron-builder build --linux --publish always
+              npx electron-builder build --linux --publish never
               ;;
           esac
         env:

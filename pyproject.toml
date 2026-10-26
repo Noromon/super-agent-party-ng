@@ -172,7 +172,7 @@ max-complexity = 60
 "py/recover_from_log.py" = ["E741"]
 # media router: legacy carried verbatim from server.py (R1 migration).
 # RA-27/BL-09（S66）：原「M-3 拆分时退役」承诺未兑现且不在 M-3 验收面——
-# 改记「退役另立 R3 尾项」跟踪（见 docs/AUDIT/09 backlog）；豁免现压制 ~31 错。
+# 改记「退役另立 R3 尾项」跟踪；豁免现压制 ~31 错。
 "py/routers/media.py" = ["C901", "E701", "E702", "E722"]
 # RA-27：system.py F541 豁免现压制 ~4 错，同列 R3 尾项
 "py/routers/system.py" = ["F541"]

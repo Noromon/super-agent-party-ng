@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """M2 acceptance matrix: the four runtime-proven S1/S2 exploits from
-docs/AUDIT/07-verification.md (audit_p3.py, 2026-10-18) must now REJECT.
-One test per audit finding; run output archived as M2 evidence.
+the 2026-10 security audit must now REJECT.
+One test per audit finding; verification records kept out-of-tree by maintainers.
 """
 import socket
 

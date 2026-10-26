@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Contract test batch 1: SSE frame dictionary + tool round trip + approval + cancel.
 
-Spec source: docs/AUDIT/03-contract.md (frame dictionary A1) and 04-lifecycle.md.
+Spec source: SSE frame contract / lifecycle spec (maintainer-internal docs, out-of-tree).
 """
 import json
 

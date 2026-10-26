@@ -1,0 +1,41 @@
+# Normalize line endings: LF in repo; working tree per-OS via text=auto.
+* text=auto eol=lf
+
+# Windows scripts must stay CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never touch binaries
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.onnx binary
+*.wasm binary
+*.glb binary
+*.gltf binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.dylib binary
+*.so binary
+*.model binary
+*.bin binary
+
+# Lockfiles & vendored libs: suppress diff noise
+package-lock.json linguist-generated=true
+uv.lock linguist-generated=true
+static/libs/** linguist-vendored
+static/source/** linguist-vendored
