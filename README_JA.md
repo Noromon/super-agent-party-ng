@@ -1,367 +1,140 @@
 ![image](static/source/cover.png)
 
-> ⚠️ **変更版に関する通知**：本リポジトリは [heshengtao/super-agent-party](https://github.com/heshengtao/super-agent-party)
-> の変更版フォークであり、同じ AGPL-3.0 ライセンスで再配布されています。多数の変更（Windows 向け修正、
-> セキュリティ強化、新機能。コミット履歴を参照）を含みます。本家作者はこれらの変更による問題について
-> 責任を負いません。本家が元のプロジェクトです。
+# Super Agent Party **NG**
 
-<div align="center">
-  <a href="./README_ZH.md">
-    <img src="https://img.shields.io/badge/简体中文-自述文档-00B4AB?style=for-the-badge&logo=markdown"/>
-  </a>
-  <a href="./README.md">
-    <img src="https://img.shields.io/badge/English-Readme-0057D2?style=for-the-badge&logo=markdown"/>
-  </a>
-  <a href="./README_JA.md">
-    <img src="https://img.shields.io/badge/日本語-Readme-FF69B4?style=for-the-badge&logo=markdown"/>
-  </a>
-</div>
+> [super-agent-party](https://github.com/heshengtao/super-agent-party)（AGPL-3.0）の**再構築フォーク**。
+> 本フォークは独立して維持されており、本家作者とは**無関係**です。本家が元のプロジェクトであり、著作権は原作者に帰属します。
+> [简体中文](README_ZH.md) | [English](README.md) | 日本語
 
-####
+<a href="https://github.com/Noromon/super-agent-party-ng"><img src="https://img.shields.io/badge/repo-super--agent--party--ng-0052CC?style=for-the-badge&logo=github"/></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge"/></a>
+<a href="#"><img src="https://img.shields.io/badge/version-1.0.0-00B4AB?style=for-the-badge"/></a>
+<a href="SECURITY.md"><img src="https://img.shields.io/badge/security-SECURITY.md-red?style=for-the-badge"/></a>
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/16259" target="_blank">
-    <img src="https://trendshift.io/api/badge/repositories/16259" alt="Trendshift" width="250" height="55">
-  </a>
-</p>
+---
 
-####
+## このフォークが存在する理由
 
-<div align="center">
-  <a href="https://www.agentparty.top/"><img src="https://img.shields.io/badge/公式サイト-AgentParty-blueviolet?style=for-the-badge"/></a>
-  <a href="https://www.agentparty.top/blog.html"><img src="https://img.shields.io/badge/公式ブログ-Blog-orange?style=for-the-badge&logo=rss&logoColor=white"/></a>
-  <a href="https://space.bilibili.com/26978344"><img src="https://img.shields.io/badge/Bilibili-チュートリアル-red?style=for-the-badge&logo=bilibili"/></a>
-  <a href="https://www.youtube.com/@LLM-party"><img src="https://img.shields.io/badge/YouTube-チャンネル登録-FF0000?style=for-the-badge&logo=youtube"/></a>
-  <a href="https://gcnij7egmcww.feishu.cn/wiki/DPRKwdetCiYBhPkPpXWcugujnRc"><img src="https://img.shields.io/badge/中国語ガイド-Feishuドキュメント-00CDCD?style=for-the-badge&logo=docsdotrs"/></a>
-  <a href="https://temporal-lantern-7e8.notion.site/super-agent-party-211b2b2cb6f180c899d1c27a98c4965d"><img src="https://img.shields.io/badge/英語ガイド-Notion-000000?style=for-the-badge&logo=notion"/></a>
-  <a href="#クイックスタート"><img src="https://img.shields.io/badge/クイックスタート-ダウンロード-0052CC?style=for-the-badge&logo=github"/></a>
-</div>
+「自前の製品を作ろう」から始まったのではありません。
 
-## はじめに
+**第一幕・ひとつのスキル。**
+Super Agent Party にワークフロースキルを追加しようとしたのが始まりです。優れたコーディングエージェントのように、手順通りに動けるように。
 
-### 🚀 **無限の可能性を秘めたAIデスクトップコンパニオン！**
+**第二幕・現実。**
+詰まりどころはスキル自体ではなく、その下のエージェント基盤でした。ツールループはモデルの不正出力一文で脱線し、プランモードは飾り、権限モードは強制されず、システムプロンプトは平坦な文字列。opencode 世代のエージェントと比べた差は機能リストではなく**土台**にありました。
 
-#### デスクトップコンパニオン：カスタムVRMモデル、アクション、3Dシーンをサポートし、[live2D拡張](https://github.com/heshengtao/sap-live2d)にも対応しています。
-![image](doc/image/img-2/cover.jpeg)
+**第三幕・小さな問題。**
+ツールループ完全性・プランモード・権限強制・階層プロンプトを埋めた後、小さな問題が列を作りました：境界で壊れるメッセージ連鎖、失われるツール引数、停止後に残る返信、通話と競合する記憶抽出。個別は軽微、しかし全部合わせて一つのことを示していました——データ経路に単一の真実源がない、と。
 
-#### Link VTS: Vtube StudioでLive2Dモデルを制御し、カスタムアクションや表情コントロールをサポート
-![image](doc/image/img-2/vts.jpeg)
+**第四幕・監査。**
+2026 年 10 月、全面監査を実施：コード、バックエンド、フロントエンド、ビルド、git 履歴。結論は「パッチ数個」の域を超えていました。実到達可能な認証回避、パス処理のインジェクション、危険なビルド既定値。
 
-#### タスクセンター：AIエージェントにバックグラウンドで高度なタスクを実行させ、自動的にコンピュータを制御して作業を完了させます。MCPとAgent Skillsに対応。
-![image](doc/image/img-2/task.jpeg)
+**第五幕・再構築。**
+M/R 系列のリファクタ：メッセージ連鎖の単一真実源化、サーバー側権威 `turn_log`、ループバックセッショントークン認証カーネル、コンテキスト管理パイプライン、承認とストリームの相関スナップショット——そして **807 本のテスト**によるラチェットで退化を許しません。
 
-#### コンピューター制御：デスクトップの視覚情報と、マウス、キーボード、ターミナルの三方向からの制御ツールチェーンを組み合わせることで、AIエージェントがコンピューター上であらゆるタスクを遂行できるようになります！下の画像は、AIがWordleをプレイしている様子です。
-![image](doc/image/img-2/vision.jpeg)
+**第六幕・収束。**
+再構築後の土台はむしろ本家追跡が容易くなりました。日記システム、OpenAI Responses / Gemini アダプタ、新規検索エンジン、IM クイックコマンドなど本家の新機能を新アーキテクチャへ移植。ここに「モダンなエージェントワークフローを載せられる Super Agent Party」が成立しました。
 
-#### マルチロールグループチャット：タバーンキャラクターカードと長期記憶に対応し、複数のキャラクターと同時にチャットできます！
-![image](doc/image/img-2/group.jpeg)
+初回コミットから v1.0.0 まで：10 日間、313 コミット。全工程は履歴にあります。隠していません。
 
-#### インスタントメッセージングBot：QQ、WeChat、Feishu、DingTalk、Telegram、Discord、Slackへのワンクリックデプロイに対応
-![image](doc/image/img-2/im.jpeg)
+## 本家との差分（vs 本家 v0.4.1）
 
-#### ライブ配信Bot：Bilibili、YouTube、Twitchへのワンクリックデプロイに対応し、360度パノラマライブ配信も可能。
-![image](doc/image/img-2/yt.jpeg)
+| 領域 | 本家 | NG |
+|---|---|---|
+| ツールループ | 不正出力で中断・履歴汚染 | 完全性検証＋再試行上限＋履歴サニタイザ |
+| プラン／権限モード | 存在するが未強制 | 強制実行、範囲外呼び出しを遮断 |
+| システムプロンプト | 単層連結 | 階層化（ペルソナ／ツール／安全） |
+| メッセージ連鎖のデータ経路 | 3 箇所に重複した清洗処理 | 単一真実源（`py/context_builder`）＋権威 `turn_log` |
+| 認証 | ループバック面は無防備に近い | セッショントークンカーネル（cookie/Origin/Host/WS 4401）＋免除面ホワイトリスト |
+| 外部 API（/v1, /mcp） | 完全トークンフリー・ワイルドカード CORS | 既定は互換のためフリー、ワンタップでトークン必須化＋起動時警告；CORS 強化 |
+| パスと ID 面 | トラバーサル／インジェクション余地 | realpath 包含検証＋書式ホワイトリスト |
+| レンダリング | mermaid `securityLevel: loose` | `strict` ＋ DOMPurify |
+| 品質ガードレール | テストまばら | 807 本の回帰テスト＋ruff/eslint ゲート＋構造ピン |
+| Windows | 概ね動作 | 主戦場として修正（文字コード・シグナル・パス等） |
+| 準拠 | 第三者告知不完全 | vendored 全 LICENSE＋KaTeX フォント復元（`static/libs/VENDORED.md`） |
+| バージョン | v0.4.x | フォーク独立 semver、現在 **1.0.0**（本家 v0.4.1 系譜） |
 
-#### AIブラウザ：AIエージェントに専用ブラウザを装備し、自動制御に対応
-![image](doc/image/img-2/browser.jpeg)
+## できること
 
-#### 拡張機能システム：拡張機能のインストールと新規作成に対応。下の画像はギャルゲー拡張機能です。すべての拡張機能は独立ウィンドウまたはサイドバーで開くことができます。
-![image](doc/image/img-2/ext.jpeg)
+本家の全機能を、信頼できる土台の上で：
 
-#### 開発者フレンドリー：オープンなOpenAI APIインターフェースとMCPインターフェースを提供し、エージェントの外部接続が可能
-![image](doc/image/img-2/api.jpeg)
+- **デスクトップパートナー**：VRM モデル／モーション／3D シーン、[live2D 拡張](https://github.com/heshengtao/sap-live2d)
+- **タスクセンター**：バックエンド高度タスク、PC 自動操作、MCP／Agent Skills
+- **PC 制御**：デスクトップ視覚＋マウス／キーボード／ターミナル
+- **多キャラグループチャット**：キャラカード＋長期記憶
+- **IM ボット**：QQ／WeChat／Feishu／DingTalk／Telegram／Discord／Slack ワンクリック展開
+- **配信ボット**：Bilibili／YouTube／Twitch、360° パノラマ
+- **AI ブラウザ**：エージェント専用ブラウザの自動操作
+- **拡張システム**：導入も自作も、独立ウィンドウ／サイドバー両対応
+- **開発者向け**：OpenAI 互換 API＋MCP 中継
 
-## クイックスタート
+機能スクリーンショットは[本家 README](https://github.com/heshengtao/super-agent-party)参照。
 
-### CLIエージェントの場合
+## インストール
 
-CLIエージェントは[README_AGENT.md](https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md)のドキュメントを確認してください。このドキュメントを参考に、ユーザーに本ソフトウェアのインストールを案内してください！
+### デスクトップ（本フォーク、ソース実行）
 
-### CLIエージェントを使用する人間の場合
-
-このリンクをAIに送信すると、AIが本ソフトウェアのインストールを案内します！
-
-```
-https://raw.githubusercontent.com/heshengtao/super-agent-party/main/README_AGENT.md
+```bash
+git clone https://github.com/Noromon/super-agent-party-ng.git
+cd super-agent-party-ng
+npm install
+npm start        # Electron デスクトップ
 ```
 
-### Windowsポータブルパッケージ（推奨！インストール不要のソースバージョン、最新リポジトリへのワンクリック同期対応、デスクトップ版のパッケージングを待つ必要なし）
+バックエンドのみ：
 
-  👉 [ダウンロードはこちら](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/super-agent-party-win-v0.4.1.zip)
-
-⭐ 注意！ `一键更新(update).bat` をダブルクリックしてソフトウェアを更新するか、`一键启动(start).bat` をダブルクリックしてソフトウェアを起動できます。OSは **Windows 10/11、Windows Server 2025** 以降が必要です！
-
-### Windowsデスクトップインストール
-
-  👉 [ダウンロードはこちら](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-Setup-0.4.1.exe)
-
-⭐ 注意！ インストール時に「現在のユーザーのみにインストール」を選択してください。そうしないと、起動時に管理者権限が必要になります。OSは **Windows 10/11、Windows Server 2025** 以降が必要です！
-
-### MacOS 統合パッケージ（現在はMチップのみ対応、インストール不要のソースコード版、ワンクリックでリポジトリ最新版に同期可能、デスクトップ版のパッケージ化待ち不要）
-> **開発者/上級ユーザー向け**：インストール不要のソースコード版、ワンクリックでリポジトリ最新版に同期可能、デスクトップ版のパッケージ化待ち不要。
-
-👉 [国際ユーザーはこちらをクリックしてダウンロード](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/super-agent-party-mac-v0.4.1.zip) 
-
-#### 🚀 使用方法
-
-**1. ネットワークダウンロード隔離を解除（重要）**
-ダウンロードして解凍後、ターミナルを開き、以下のコマンドを入力し（最後のスペースに注意）、**解凍したフォルダ**をターミナルウィンドウにドラッグ＆ドロップしてEnterキーを押します：
-```shell
-sudo xattr -rd com.apple.quarantine 
-```
-*(注：`-rd` パラメータはフォルダ内のすべてのコンポーネントの隔離属性を再帰的に削除します。これを行わないとPython環境が正常に呼び出せない可能性があります)*
-
-**2. スクリプトに実行権限を付与**
-ターミナルで該当フォルダに移動し、以下を実行：
-```shell
-chmod +x 一键更新(update).sh 一键启动(start).sh
+```bash
+uv sync
+uv run python server.py
 ```
 
-**3. ソフトウェアを実行**
-- **初回使用/更新時：** まず `./一键更新(update).sh` を実行し、依存関係が最新版に同期されていることを確認することをお勧めします。
-- **日常的な起動：** 直接 `./一键启动(start).sh` を実行します。
+> フォークのプレビルドは未提供。パッケージングは `npm run build`（出力先 `release/`）。
 
-### macOSデスクトップインストール（現在Mチップのみ対応）
+### 本家インストーラ（NG 変更を**含まない**）
 
-  👉 [ダウンロードはこちら](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-0.4.1-Mac.dmg)
+本家が各プラットフォーム版を提供：<https://github.com/heshengtao/super-agent-party/releases>
+ただし本家のビルドに本フォークの再構築・セキュリティ強化は**含まれません**。
 
-⭐ 注意！ ダウンロード後、dmgファイルのアプリを `/Applications` ディレクトリにドラッグしてください。その後、ターミナルを開き、以下のコマンドを実行してルートパスワードを入力し、ネットワークダウンロードに付与されたQuarantine属性を削除してください：
+### Docker
 
-  ```shell
-  sudo xattr -dr com.apple.quarantine /Applications/Super-Agent-Party.app
-  ```
+```bash
+git clone https://github.com/Noromon/super-agent-party-ng.git
+cd super-agent-party-ng
+# まず .env に JWT_SECRET（長いランダム文字列）、INIT_USER、INIT_PASS を設定
+# — デフォルト認証情報はなく、未設定ならゲートウェイは起動を拒否します
+docker-compose up -d
+```
 
-### Linuxデスクトップインストール
+<http://localhost:3456/> にアクセスし、設定した `INIT_USER` / `INIT_PASS` でログイン。
+（compose のイメージは本家ビルドのため NG 変更なし。フォーク版は `docker build .` で。）
 
-さまざまなシナリオに対応するため、2つの主要なLinuxインストールパッケージ形式を提供しています。
+## セキュリティと外部 API
 
-#### 1. `.AppImage` を使用してインストール
+- 既定では `127.0.0.1` のみリッスン。LAN／公開は明示的な選択です。まず [SECURITY.md](SECURITY.md) を。
+- **`/v1` と `/mcp` は設計上トークンフリー**（到達できるローカルプロセス／LAN 機器から。クォータを消費されます）。設定で `Authorization: Bearer <マシントークン>` 必須化への切替が可能。
+- 脆弱性報告：本リポジトリの GitHub Issues / Security Advisories。本家にも存在する所見は本家メンテナへの通知もご検討ください。
 
-`.AppImage` はインストール不要で即座に使用できるLinuxアプリケーション形式です。ほとんどのLinuxディストリビューションに対応しています。
+## 本家との関係 / ライセンス
 
-  👉 [ダウンロードはこちら](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-0.4.1-Linux.AppImage)
+- 本家：<https://github.com/heshengtao/super-agent-party>、著作権は原作者（Copyright © 2025 Heshengtao）。
+- 本フォークは **AGPL-3.0**（本家と同ライセンス）で配布される変更版です。変更点はコミット履歴と上表参照。
+- ユーザーデータ目錄と設定フォーマットは本家と**完全互換**：データパスも拡張エコシステム URL も未変更のため、両バージョンで同一データを共用できます。
+- 第三者コンポーネントのライセンス：[static/libs/VENDORED.md](static/libs/VENDORED.md)。
 
-#### 2. `.deb` パッケージを使用してインストール（Ubuntu/Debianシステム向け）
+## FAQ
 
-  👉 [ダウンロードはこちら](https://github.com/heshengtao/super-agent-party/releases/download/v0.4.1/Super-Agent-Party-0.4.1-Linux.deb)
+**Q: 本家に PR を出さないのですか？**
+A: 再構築の規模と方向（コア置換）は「寄与パッチ」の範囲を超えるため、フォークで先行し全公開（AGPL）。誰でも持っていけます。
 
-### Dockerデプロイ（このバージョンのデスクトップペットはブラウザからのみ閲覧できます。）
+**Q: 本家からそのまま移行できますか？**
+A: 可能です。データ目錄改名なし・フォーマット互換。同じフォルダを指すだけです。
 
-- 2つのコマンドでインストール：
-  ```shell
-  docker pull ailm32442/super-agent-party:latest
-  docker run -d -p 3456:3456 -v ./super-agent-data:/app/data ailm32442/super-agent-party:latest
-  ```
+**Q: 本家の今後の更新には？**
+A: 本家とのコミット対応関係を保持。「バッチ＋機能別適配」で移植（`feat(port/...)` 参照）。
 
-- ⭐注意！ `./super-agent-data` は任意のローカルフォルダに置き換えることができます。Docker起動後、すべてのデータはこのローカルフォルダにキャッシュされ、どこにもアップロードされません。
+**Q: テスト数が硬性指標なのは何故？**
+A: 再構築最大のリスクは静かな退化。807 本と構造ピンはラチェット：緑になる方向にしか進みません。
 
-- 使用準備完了：http://localhost:3456/ にアクセス
+---
 
-### Docker Composeデプロイ（このバージョンのデスクトップペットはブラウザからのみ閲覧できます。ログイン管理用に追加のゲートウェイコンテナが起動されます。）
-
-- プロジェクトのインストール：
-
-  ```shell
-  git clone https://github.com/heshengtao/super-agent-party.git
-  cd super-agent-party
-  docker-compose up -d
-  ```
-
-- ⭐注意！ Docker モードの初回起動前に認証情報の設定が必要です：`docker-compose.yml` と同じディレクトリに `.env` を作成し、`JWT_SECRET`（長いランダム文字列）、`INIT_USER`、`INIT_PASS`（初回ログイン用）を設定してください。**デフォルトの認証情報はありません** — 未設定の場合ゲートウェイは起動しません。
-
-- 使用準備完了：http://localhost:3456/ にアクセス（設定した `INIT_USER` / `INIT_PASS` でログイン）
-
-- APIキー管理：ブラウザでアプリを開き、設定内のキーボックス／モデル設定ページから管理してください
-
-### Docker版に対応するLiteクライアント（Dockerをデスクトップアプリに変換）
-
-👉 [SAP-lite-Windows-exe](https://github.com/heshengtao/desktop-for-sap/releases/download/v0.1.2/super-agent-party-lite-Setup-0.1.2.exe)
-
-👉 [SAP-lite-MacOS-dmg](https://github.com/heshengtao/desktop-for-sap/releases/download/v0.1.2/super-agent-party-lite-0.1.2-Mac.dmg)
-
-### ソースコードデプロイ
-
-  ```shell
-  git clone https://github.com/heshengtao/super-agent-party.git
-  cd super-agent-party
-  uv sync
-  npm install
-  npm run dev
-  ```
-
-## 拡張機能
-
-全く新しい拡張機能システムが追加されました。[プラグインリスト](https://super-agent-party.github.io/plugins.html)で利用可能なプラグインを確認するか、Party内の【開発者】→【拡張機能】で直接確認・インストールできます。また、[super-agent-party.github.io](https://github.com/super-agent-party/super-agent-party.github.io)で自作の拡張機能を公式プラグインリストに追加することもできます！
-
-### 既存の拡張機能
-
-| 名前                  | 作者            | 説明                                                        | リポジトリURL                                   |
-|-----------------------|-------------------|--------------------------------------------------------------------|--------------------------------------------------|
-| Super Agent Party Example | heshengtao        | Super Agent Partyのサンプルプラグイン。プラグインのアーキテクチャと機能をデモンストレーション。 | https://github.com/heshengtao/sap-example        |
-| Super Agent Party Example With NodeJS | heshengtao        | NodeJS環境を使用したチャットフロントエンドのサンプル | https://github.com/heshengtao/sap-example-with-node        |
-| Web Preview           | heshengtao        | Super Agent PartyにWebプレビュー機能を追加するプラグイン。 | https://github.com/heshengtao/sap-web-preview    |
-| Story Adventure       | heshengtao | AIを使用してストーリーコンテンツと選択肢を生成するインタラクティブなストーリーアドベンチャープラグイン。 | https://github.com/heshengtao/sap-story-adventure |
-| Live 2D      | heshengtao  | Live 2D拡張機能                   | https://github.com/heshengtao/sap-live2d  |
-| AI Editor      | heshengtao  | AIエディター       | https://github.com/heshengtao/sap-aieditor  |
-| AI galgame      | heshengtao  | AIギャルゲー拡張機能     | https://github.com/heshengtao/sap-aigalgame  |
-| AI tarot reader      | heshengtao  | AIタロットリーダー拡張機能      | https://github.com/heshengtao/sap-tarot  |
-| AI sheet      | heshengtao  | AIスプレッドシート拡張機能                | https://github.com/heshengtao/sap-ai-sheet  |
-| AI drawio      | heshengtao  | AI drawio拡張機能                 | https://github.com/heshengtao/sap-ai-drawio  |
-| AI mermaid      | heshengtao  | AI Mermaidエディター拡張機能                  | https://github.com/heshengtao/sap-ai-mermaid  |
-| AI RSS reader      | heshengtao  | Super Agent Party用のAI RSSリーダー拡張機能      | https://github.com/heshengtao/sap-rss  |
-| Remote      | heshengtao  | Super Agent Partyをワンクリックでインターネットに公開             | https://github.com/heshengtao/sap-remote  |
-| Code Server      | heshengtao  | Super Agent Party用のIDE拡張機能          | https://github.com/heshengtao/sap-code-server  |
-| CLI      | heshengtao  |  Super Agent Party用CLI拡張機能          | https://github.com/heshengtao/sap-cli  |
-| LX-music      | heshengtao  | super agent party を LX Music API に接続し、AI パートナーが音楽再生を操作できるようにします！ | https://github.com/heshengtao/sap-lx-music  |
-| AI PPT      | heshengtao  | Super Agent Party 向けの AI PPT 拡張プラグイン          | https://github.com/heshengtao/sap-ai-ppt  |
-
-## ハードウェア要件
-
-- CPU：2コア以上
-- メモリ：2GB以上
-
-**すべてのモデルはオプションであり、ローカルデプロイメントエンジンにアクセスするか、すべてクラウドサービスプロバイダーのインターフェースを使用できるため、ハードウェア要件はほとんどありません。2コア2GBのクラウドサーバーでDocker版をテストし、問題なく動作することを確認しています。**
-
-## 使い方
-
-- デスクトップ：デスクトップアイコンをクリックするだけで使用できます。
-
-- WebまたはDocker：起動後に http://localhost:3456/ にアクセスしてください。
-
-- API呼び出し：開発者フレンドリーで、OpenAI形式に完全互換。リアルタイム出力が可能で、元のAPIの応答速度に影響しません。呼び出しコードの変更は不要です：
-
-  > ⚠️ 設計上、`/v1` と `/mcp` はポートに到達できる任意の送信元（ローカルプロセス、LAN 機器 — モデルのクォータを消費します）に対し、**トークンなし**で呼び出しを受け付けます。設定で「外部 API にトークンが必要」を有効にすると `Authorization: Bearer <マシントークン>` が必須になります（詳細は [SECURITY.md](SECURITY.md) 参照）。
-
-  ```python
-  from openai import OpenAI
-  client = OpenAI(
-    api_key="super-secret-key",
-    base_url="http://localhost:3456/v1"
-  )
-  response = client.chat.completions.create(
-    model="super-model",
-    messages=[
-        {"role": "user", "content": "Super Agent Partyとは何ですか？"}
-    ]
-  )
-  print(response.choices[0].message.content)
-  ```
-
-- MCP呼び出し：起動後、設定ファイルに以下の内容を記述してローカルMCPサービスを呼び出すことができます：
-
-  ```json
-  {
-    "mcpServers": {
-      "super-agent-party": {
-        "url": "http://127.0.0.1:3456/mcp"
-      }
-    }
-  }
-  ```
-
-## 機能一覧
-
-主な機能については以下のドキュメントを参照してください：
-  - 👉 [中国語ドキュメント](https://gcnij7egmcww.feishu.cn/wiki/DPRKwdetCiYBhPkPpXWcugujnRc)
-  - 👉 [英語ドキュメント](https://temporal-lantern-7e8.notion.site/super-agent-party-211b2b2cb6f180c899d1c27a98c4965d)
-
-| 機能 | 詳細 |
-| --- | --- |
-| 対応モデルサービスプロバイダー | openai/ollama/difyなど、一般的なローカルデプロイメントエンジンインターフェースとクラウドサービスプロバイダーインターフェースに対応。 |
-| マルチモーダルモデル統合 | ロールプレイ、推論、画像認識、画像生成、音声認識、音声合成など、さまざまなタイプのモデルを統合して組み合わせて使用。 |
-| VRMデスクトップペットロボット | カスタムアバター、カスタムアニメーション、音声インタラクション、対話中断に対応する高度にカスタマイズ可能なペット。OBSなどの画面録画ソフトウェアに透過的にストリーミング可能で、双方向VMCプロトコルに対応！ |
-| メッセージングプラットフォームBot | 現在QQ、WeChat、Feishu、Telegram、Discord、Slackに対応。今後さらにプラットフォームを追加予定。 |
-| ライブ配信Bot | 現在Bilibili、YouTube、Twitchに対応。今後さらにプラットフォームを追加予定。 |
-| アナウンサーBot | 長文ナレーション、マルチボイスナレーション、デジタルヒューマンビデオナレーション、超長文テキストの一括音声変換（ダウンロード機能付き）、EPUBなどの一般的な電子書籍フォーマットの解析に対応。チャプターベースの変換は今後開発予定。 |
-| チャットインターフェース | チャットインターフェースはA2UI、数式、Mermaidダイアグラム、HTMLコードグラフィックスなどのフロントエンドレンダリング機能に対応。画像のダウンロードとコピーが可能。カプセルモードとアシスタントモードに対応し、会話インターフェースの縮小とドッキングが簡単。デスクトップビジョンとスクリーンショットと組み合わせて、仕事とエンターテイメントにシームレスに統合。 |
-| ロールプレイ | タバーンキャラクターカードのアップロード、編集、ダウンロードに対応。キャラクターごとに異なる音声とアバターを設定可能。長期記憶、キャラクターカード使用時のマルチボイス対応、非キャラクターテキスト用のナレーター音声、絵文字とミームに対応。 |
-| 豊富なネイティブツール | ツール呼び出しは非同期実行に対応。Web検索、ナレッジベースアクセス、スマートホーム制御、ブラウザ制御、サンドボックス環境でのコード実行、ComfyUIを制御した画像生成、Claude codeによるファイルシステム操作に対応。 |
-| カスタムツールインターフェース | MCP、Skills、A2A、HTTPリクエスト、および任意のLLMインターフェースをメインエージェントのツールとして使用可能。ユーザーがエージェントのツールチェーンを自由にカスタマイズ可能。 |
-| オープン外部API | OpenAIとMCPをシミュレートするオープンAPI、およびデスクトップペットAPIを備えた開発者フレンドリーな設計。 |
-| 拡張機能システム | [拡張機能リスト](https://super-agent-party.github.io/plugins.html)で利用可能なプラグインを確認できます。Party内の【開発者】→【拡張機能】で直接プラグインの確認とインストールも可能。[super-agent-party.github.io](https://github.com/super-agent-party/super-agent-party.github.io)で自作の拡張機能を公式リストに追加できます！ |
-| ストレージスペース | すべてのファイルとデータはユーザーのローカルデータフォルダに保存されます。NASでデプロイすると、ローカルネットワーク内の個人用画像またはファイルホストとしても使用可能。 |
-
-## 免責事項：
-このオープンソースプロジェクトとそのコンテンツ（以下「プロジェクト」）は参考用であり、明示的または暗示的な保証を意味するものではありません。プロジェクトの貢献者は、プロジェクトの完全性、正確性、信頼性、または適用性について一切の責任を負いません。プロジェクトのコンテンツに依存する行為は、ユーザー自身の責任において行われるものとします。いかなる場合も、プロジェクトの貢献者は、プロジェクトのコンテンツの使用により生じた間接的、特別、または偶発的な損失または損害について責任を負いません。
-
-## 特記事項
-1. このオープンソースプロジェクトの特定の機能（例えばEdge TTS音声合成など）は、サードパーティサービスが提供するパブリックインターフェースまたは実験的機能に依存しています。これらの機能は、サードパーティのポリシー変更により、いつでも利用できなくなる可能性があります。開発者はそれらの安定性、合法性、または継続性について一切の責任を負いません。このプロジェクトを使用することにより、ユーザーは関連するリスクを理解し、受け入れたものとみなされます。開発者は、これらの機能を商用または大規模デプロイメントシナリオで使用することを推奨しません。
-
-2. QQ Botは公式QQ Botインターフェースを使用しています。[AIGC QQ Bot使用ガイドライン](https://q.qq.com/#/news/detail?id=1376238e8e2fbbc036676bb09d2f37da)を遵守してください。
-
-3. このプロジェクトで提供されるブラウザ制御機能は、大規模言語モデル（LLM）に基づくアクセシビリティ支援ブラウジングインターフェースです。視覚障害者、高齢者、または身体に課題のある方が自然言語コマンドを通じてブラウザをより便利に操作できるよう、AI視覚認識技術を活用して設計されています。自動クローリングやハッキング目的ではありません。本プロジェクトは「LLM視覚推論→単一ステップ操作」の技術アーキテクチャを採用しています。アクセシビリティ支援ブラウジングインターフェースには以下の特徴があります：
-   a. 高頻度の同時実行なし：LLMの推論速度（1ステップあたり3〜5秒）と組み込みのランダム化された人間らしい遅延アルゴリズムに依存しているため、ツールの操作頻度は一般的な人間ユーザーの最大手動速度を厳密に下回ります。
-   b. サーバーへの負荷なし：このツールはマルチスレッドの同時実行、バッチデータスクレイピング、またはDDoS攻撃をサポートしていません。サーバーの観点から見ると、その動作は通常の人間ユーザーの動作と区別がつかず、対象ウェブサイトのサーバーに追加の負荷をかけることはありません。
-
-4. このプロジェクトを銀行、決済ゲートウェイ、または機密性の高い情報ページで使用しないでください。開発者は、ユーザーの不適切な操作により生じたプライバシー侵害について責任を負いません。禁止される行為には、大規模データスクレイピング、セキュリティメカニズムの回避、ネットワーク妨害、法律・規制違反が含まれます。
-
-5. このプロジェクトに表示されるサードパーティの商標、ロゴ、またはブランド名（OpenAI、Microsoft、Google、Bing、Bilibiliなどを含むがこれらに限定されない）は、それぞれの所有者の資産です。これらの識別子は、使用されているモデルまたはサービスをユーザーが認識しやすくするためにのみ表示されており、これらの権利保有者による公式な提携、スポンサーシップ、または承認を意味するものではありません。関連する商標、インターフェース、またはブランドの所有者が、このプロジェクトの使用が不適切であると考える場合、またはブランド識別子/インターフェースがこのソフトウェアを通じて表示またはアクセスされることを望まない場合は、GitHub Issuesまたはhst97@qq.comを通じてリポジトリ管理者にご連絡ください。通知を受け取り次第、速やかに（通常48時間以内に）要求に応じてコンテンツを削除、修正いたします。
-
-6. このプロジェクトは独自に開発されたオープンソースツールです。ユーザーがこのソフトウェアを使用してサードパーティのAPIサービスにアクセスする場合、関連するサービスプロバイダーの利用規約を遵守する責任はユーザーにあります。
-
-7. このソフトウェアがサードパーティの大規模モデルを通じて生成したコンテンツの正確性、完全性、およびコンプライアンスについては、モデルプロバイダーとユーザーの行為が責任を負います。本ソフトウェアの作者は、そのようなコンテンツに対して法的責任を負いません。
-
-## ライセンス契約
-
-このプロジェクトはデュアルライセンスモデルを採用しています：
-1. デフォルトでは、このプロジェクトは **GNU Affero General Public License v3.0 (AGPLv3)** ライセンス契約に従います。
-2. このプロジェクトをクローズドソースの商用目的で使用する場合は、プロジェクト管理者から商用ライセンスを取得する必要があります。ビジネス協力：hst97@qq.com
-
-書面による許可なくこのプロジェクトをクローズドソースの商用目的で使用することは、この契約の違反とみなされます。AGPLv3の全文は、プロジェクトルートディレクトリのLICENSEファイルまたは[gnu.org/licenses](https://www.gnu.org/licenses/agpl-3.0.html)で確認できます。
-
-### サードパーティライセンス通知
-
-このプロジェクトには、メインプロジェクトのライセンスとは異なるライセンスを持つサードパーティのライブラリまたはコンポーネントが含まれている場合があります。関連するライセンス要件を遵守するため、プロジェクトのルートディレクトリにある[LICENSE-third-party](./LICENSE-third-party)フォルダ、または対応するコンポーネントのソースコード内でこれらのサードパーティコンポーネントのライセンス情報を確認できます。
-
-すべてのサードパーティライブラリおよびコンポーネントの貢献者に感謝し、ライセンス条項を尊重することをお約束します。
-
-## サポート：
-
-### スターをお願いします！
-⭐あなたのサポートが私たちの前進の原動力です！
-
-<div align="center">
-  <img src="doc/image/star.gif" width="400" alt="star">
-</div>
-
-### フォローしてください
-<div align="center">
-  <a href="https://space.bilibili.com/26978344">
-    <img src="doc/image/B.png" width="100" height="100" style="border-radius: 80%; overflow: hidden;" alt="octocat"/>
-  </a>
-  <a href="https://www.youtube.com/@agentParty">
-    <img src="doc/image/YT.png" width="100" height="100" style="border-radius: 80%; overflow: hidden;" alt="octocat"/>
-  </a>
-</div>
-
-<div align="center">
-  <a href="https://www.youtube.com/watch?v=fIzlQOsuhZE" target="_blank">
-    <img src="https://img.youtube.com/vi/fIzlQOsuhZE/0.jpg"
-         width="600"
-         alt="YouTube Video Thumbnail"
-         style="border-radius: 8px; border: 1px solid #eee;">
-  </a>
-</div>
-
-### コミュニティに参加
-プロジェクトに関する質問や問題がありましたら、コミュニティへの参加を歓迎します。
-
-1. QQグループ：`931057213`
-
-<div style="display: flex; justify-content: center;">
-    <img src="doc/image/Q群.jpg" style="width: 48%;" />
-</div>
-
-2. WeChatグループ：`we_glm`（アシスタントのWeChatを追加してグループに参加）
-
-3. Discord：[Discordリンク](https://discord.gg/f2dsAKKr2V)
-
-## コントリビューター
-
-<a href="https://github.com/heshengtao/super-agent-party/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=heshengtao/super-agent-party" />
-</a>
-
-## Star履歴
-
-[![Star History Chart](https://api.star-history.com/svg?repos=heshengtao/super-agent-party&type=Date)](https://www.star-history.com/#heshengtao/super-agent-party&Date)
+**Maintained by [Noromon](https://github.com/Noromon)** · 本フォークは本家作者と無関係です。問題は本リポジトリの Issue へ。

@@ -1,3 +1,9 @@
+> **Note (NG fork)**: This CLA is provided by the upstream project
+> ([super-agent-party](https://github.com/heshengtao/super-agent-party)) and governs upstream
+> contributions only. Contributions to the NG fork are distributed under AGPL-3.0 and are
+> **not** subject to this CLA. For the fork, open an issue at
+> <https://github.com/Noromon/super-agent-party-ng> instead.
+
 # Contributor License Agreement (CLA)
 
 
