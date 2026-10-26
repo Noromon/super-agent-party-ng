@@ -45,7 +45,20 @@ class TestMinimalModeS135:
         assert 'id="minimal-mode-btn"' in h
         assert 'toggleMinimalMode' in h
         assert "fa-feather" in h
-        assert "build=S136" in _read("static", "js", "renderer.js")
+        assert "build=S137" in _read("static", "js", "renderer.js")
+
+    def test_minimal_ws_auth_bootstrap(self):
+        # S137：minimal 是上游无鉴权版移植——补 M2 session token 面
+        h = _read("static", "minimal.html")
+        assert "fetch('/session_token'" in h
+        assert "sap_token=" in h and "bootWS()" in h
+        g = _read("main.js")
+        i = g.find("open-minimal-window")
+        block = g[i:i + 1600]
+        assert "webSecurity" not in block
+        s = _read("server.py")
+        j = s.find("if not sap_auth.ws_auth_ok(websocket):")
+        assert "handshake rejected" in s[j:j + 280]
 
     def test_i18n_parity(self):
         z = _read("static", "js", "locales", "zh-CN.js")

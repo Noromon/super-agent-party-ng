@@ -1399,7 +1399,6 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: false,
-          webSecurity: false,
           devTools: isDev,
           preload: path.join(__dirname, 'static/js/preload.js')
         }

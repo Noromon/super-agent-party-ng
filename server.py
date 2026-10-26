@@ -8520,6 +8520,7 @@ async def _ws_diary_im_targets(websocket: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     if not sap_auth.ws_auth_ok(websocket):
+        logging.getLogger("app").info("[WS] handshake rejected: auth failed (missing/invalid sap_token)")
         await websocket.close(code=4401)
         return
     # 1. 建立连接

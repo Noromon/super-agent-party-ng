@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>极简模式</title>
+  <script>fetch('/session_token', { cache: 'no-store' }).catch(function () {});</script>
   <link rel="stylesheet" href="fontawesome/css/all.min.css">
   <link rel="stylesheet" href="css/github-markdown.min.css">
   <link rel="stylesheet" href="css/github.min.css">
@@ -452,9 +453,20 @@
       var _lastSnapshot = '';
       var _scrollRAFId = null;
 
+      var _sapTok = null;
+      function withToken(u) {
+        return _sapTok ? u + (u.indexOf('?') === -1 ? '?' : '&') + 'sap_token=' + encodeURIComponent(_sapTok) : u;
+      }
+      // fork(M2)适配：上游无鉴权版直连；这里先取 session token 再连（拿不到则回退 cookie 路径）
+      function bootWS() {
+        fetch('/session_token', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d && d.token) _sapTok = d.token;
+        }).catch(function () {}).then(function () { connectWS(); });
+      }
+
       function connectWS() {
         var p = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(p + '//' + location.host + '/ws');
+        ws = new WebSocket(withToken(p + '//' + location.host + '/ws'));
         ws.onopen = function() {
           startHB();
           ws.send(JSON.stringify({ type: 'get_messages', data: {} }));
@@ -690,7 +702,7 @@
         if (asrWs && (asrWs.readyState === WebSocket.OPEN || asrWs.readyState === WebSocket.CONNECTING)) return;
         if (asrWs) { asrWs.onclose = null; try { asrWs.close(); } catch(_) {} asrWs = null; }
         var p = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        asrWs = new WebSocket(p + '//' + location.host + '/ws/asr');
+        asrWs = new WebSocket(withToken(p + '//' + location.host + '/ws/asr'));
         asrWs.onopen = function() {
           if (asrWs && asrWs.readyState === WebSocket.OPEN) asrWs.send(JSON.stringify({ type: 'init' }));
         };
@@ -951,7 +963,7 @@
       } else {
         document.documentElement.setAttribute('data-theme', 'light');
       }
-      connectWS();
+      bootWS();
       userInput.value = '';
 
       setTimeout(function() { userInput.focus(); }, 400);
