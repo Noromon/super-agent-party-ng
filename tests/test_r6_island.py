@@ -5,7 +5,7 @@ import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# dynamic_island.py：上游 origin/main@3eb32bb2 逐字节 + fork 补丁（S145：print→logging，白名单改动）
+# dynamic_island.py：上游 origin/main@3eb32bb2 逐字节 + fork 补丁（S150：print→logging，白名单改动）
 SHA_DYNAMIC_ISLAND = "a0a52cc8168b877219458341b64aaf4f3a335182c44aa9c45140538eee4426ed"
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
 # fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S141 纯图标刷新徽章，白名单改动）
@@ -151,7 +151,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S145" in _read("static", "js", "renderer.js")
+        assert "build=S150" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS140:

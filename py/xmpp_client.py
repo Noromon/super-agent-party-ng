@@ -154,9 +154,14 @@ class XmppClient:
         self._upload_service_jid: Optional[str] = None
         self._xep0363_supported = True
         self._ready_future: Optional[asyncio.Future] = None
+        self._approval_queue: Dict[str, List] = {}    # S150: 审批挂起期同 peer 消息排队
 
         from py.behavior_engine import global_behavior_engine
         global_behavior_engine.register_handler("xmpp", self.execute_behavior_event)
+        # S150: IM 审批闭环——挂起通知与原位续流接线（resolve 后快照重放 /v1）
+        from py import approval_store
+        approval_store.register_handlers("xmpp", self._on_approval_notify,
+                                         self._on_approval_resolved)
 
     # -------------------- 生命周期 --------------------
     async def run(self):
@@ -573,6 +578,14 @@ class XmppClient:
         from py.behavior_engine import global_behavior_engine
         global_behavior_engine.report_activity("xmpp", frm)
 
+        # S150: 斜杠审批批复（/y /n /a）——独立于快捷指令总开关（安全闭环）
+        from py import approval_im, approval_store
+        _apcmd = approval_im.parse_approval_command(text)
+        if _apcmd:
+            reply = await approval_im.resolve_and_resume("xmpp", frm, _apcmd[0], _apcmd[1])
+            await self._send_text(frm, reply)
+            return
+
         if self.quickRestart and text in {"/restart", "/重启", "/new"}:
             self.memoryList[frm] = []
             await self._persist_conv(frm)
@@ -590,7 +603,11 @@ class XmppClient:
             _act = shortcut_commands.parse_im_action(text)
             if _act:
                 if _act == "stop":
-                    await self._send_text(frm, shortcut_commands.STOP_MSG_ZH)
+                    _canc = await approval_im.cancel_pending("xmpp", frm)  # S150
+                    _stop_msg = shortcut_commands.STOP_MSG_ZH
+                    if _canc:
+                        _stop_msg += f"\n（已作废 {_canc} 个待审批。）"
+                    await self._send_text(frm, _stop_msg)
                 elif _act == "reset":
                     self.memoryList[frm] = []
                     await self._persist_conv(frm)
@@ -615,9 +632,17 @@ class XmppClient:
         if images:
             content = [{"type": "image_url", "image_url": {"url": uri}} for uri in images]
             content.append({"type": "text", "text": text or "用户发送了一张图片"})
-            await self._process_llm(frm, "", content)
+            item = ("", content)
         else:
-            await self._process_llm(frm, text, [])
+            item = (text, [])
+        # S150: 审批挂起期同 peer 新消息排队，批复闭环后依序处理
+        if approval_store.has_pending("xmpp", frm):
+            self._approval_queue.setdefault(frm, []).append(item)
+            await self._send_text(
+                frm, "⏳ 本会话有任务正等待审批，你的消息已排队，批复后依序处理"
+                     "（/y 批准 · /n 拒绝 · /a 批准并加白名单）。")
+            return
+        await self._process_llm(frm, item[0], item[1])
 
     _IMG_URL_RE = re.compile(
         r"https?://[^\s<>\"'\)\]]+"
@@ -673,66 +698,28 @@ class XmppClient:
             self.memoryList[chat_jid].append(store_msg)
         history = [*self.memoryList[chat_jid][:-1], user_msg]
 
-        settings = await load_settings()
-        client = AsyncOpenAI(api_key="super-secret-key",
-                             base_url=f"http://127.0.0.1:{get_port()}/v1")
-        out_buffer = ""
-        full_text = []
-        reasoning_chars = 0
-        finish_reason = ""
-        err_text = ""
         try:
-            stream = await client.chat.completions.create(
-                model=self.XmppAgent,
-                messages=history,
-                stream=True,
-                extra_body={
-                    "asyncToolsID": self.asyncToolsID[chat_jid],
-                    "fileLinks": self.fileLinks[chat_jid],
-                    "is_app_bot": True,
-                    "platform": "xmpp",
-                    "peer_id": chat_jid,  # S145：对端身份注入
-                    **self._tools_override(),
-                },
-            )
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                finish_reason = chunk.choices[0].finish_reason or finish_reason
-                delta = chunk.choices[0].delta
-                content = getattr(delta, "content", "") or ""
-                reasoning = getattr(delta, "reasoning_content", "") or ""
-                reasoning_chars += len(reasoning)
-                tool_link = getattr(delta, "tool_link", "") or ""
-                async_tool_id = getattr(delta, "async_tool_id", "") or ""
-                if not err_text:
-                    err_text = error_from_delta(delta)  # S89-B：流内错误帧不再沉默
-                if tool_link and settings["tools"]["toolMemorandum"]["enabled"]:
-                    self.fileLinks[chat_jid].append(tool_link)
-                if async_tool_id:
-                    lst = self.asyncToolsID[chat_jid]
-                    if async_tool_id in lst:
-                        lst.remove(async_tool_id)
-                    else:
-                        lst.append(async_tool_id)
-                seg = reasoning if (self.reasoningVisible and reasoning) else content
-                full_text.append(content)
-                if seg:
-                    out_buffer += seg
-                    out_buffer, ready = self._flush_segments(out_buffer)
-                    for piece in ready:
-                        await self._send_text(chat_jid, piece)
+            res = await self._agent_stream_to_peer(chat_jid, history)
         except Exception as e:
             logging.error(f"XMPP LLM 调用失败: {e}")
             await self._send_text(chat_jid, f"⚠️ Agent 调用失败: {e}")
             return
 
-        assistant_text = "".join(full_text)
+        # S150：本轮被审批挂起掐断——不写历史、不闭合回合（批复续流后补 assistant），
+        # 仅把已流出的半句先发出去
+        from py import approval_store
+        if approval_store.has_pending("xmpp", chat_jid):
+            if res["out_buffer"].strip():
+                await self._send_text(chat_jid, res["out_buffer"].strip())
+            return
+
+        out_buffer = res["out_buffer"]
+        assistant_text = res["assistant_text"]
         if not assistant_text.strip():
-            log_empty_reply("xmpp", chat_jid, reasoning_chars, finish_reason)
+            log_empty_reply("xmpp", chat_jid, res["reasoning_chars"], res["finish_reason"])
             # S89-B/C：带流内错误摘要如实告知；标记本轮空回复供重发去重
             self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = True
-            await self._send_text(chat_jid, empty_reply_msg(err_text))
+            await self._send_text(chat_jid, empty_reply_msg(res["err_text"]))
             return
         self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = False
         self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
@@ -746,6 +733,114 @@ class XmppClient:
         if out_buffer.strip():
             await self._send_text(chat_jid, out_buffer.strip())
         await self._send_local_images(chat_jid, assistant_text)
+
+    @llm_gate.gated  # S150：create 已移入本 helper，gate 计数器可重入，外层再套无害
+    async def _agent_stream_to_peer(self, chat_jid: str, history: List[dict]) -> Dict:
+        """调 /v1 agent 内核并按分隔符分段外发，返回账目元组。
+        S150：新一轮（_process_llm）与审批原位续流（_resume_llm）共用。"""
+        settings = await load_settings()
+        client = AsyncOpenAI(api_key="super-secret-key",
+                             base_url=f"http://127.0.0.1:{get_port()}/v1")
+        out_buffer = ""
+        full_text = []
+        reasoning_chars = 0
+        finish_reason = ""
+        err_text = ""
+        stream = await client.chat.completions.create(
+            model=self.XmppAgent,
+            messages=history,
+            stream=True,
+            extra_body={
+                "asyncToolsID": self.asyncToolsID[chat_jid],
+                "fileLinks": self.fileLinks[chat_jid],
+                "is_app_bot": True,
+                "platform": "xmpp",
+                "peer_id": chat_jid,  # S145：对端身份注入
+                **self._tools_override(),
+            },
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            finish_reason = chunk.choices[0].finish_reason or finish_reason
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", "") or ""
+            reasoning = getattr(delta, "reasoning_content", "") or ""
+            reasoning_chars += len(reasoning)
+            tool_link = getattr(delta, "tool_link", "") or ""
+            async_tool_id = getattr(delta, "async_tool_id", "") or ""
+            if not err_text:
+                err_text = error_from_delta(delta)  # S89-B：流内错误帧不再沉默
+            if tool_link and settings["tools"]["toolMemorandum"]["enabled"]:
+                self.fileLinks[chat_jid].append(tool_link)
+            if async_tool_id:
+                lst = self.asyncToolsID[chat_jid]
+                if async_tool_id in lst:
+                    lst.remove(async_tool_id)
+                else:
+                    lst.append(async_tool_id)
+            seg = reasoning if (self.reasoningVisible and reasoning) else content
+            full_text.append(content)
+            if seg:
+                out_buffer += seg
+                out_buffer, ready = self._flush_segments(out_buffer)
+                for piece in ready:
+                    await self._send_text(chat_jid, piece)
+        return {"assistant_text": "".join(full_text), "out_buffer": out_buffer,
+                "reasoning_chars": reasoning_chars, "finish_reason": finish_reason,
+                "err_text": err_text}
+
+    # -------------------- S150 审批闭环（通知 / 批复续流 / 排队） --------------------
+    async def _on_approval_notify(self, record: Dict):
+        from py import approval_im
+        await self._send_text(record["peer_id"], approval_im.build_notice(record, "zh"))
+
+    async def _on_approval_resolved(self, record: Dict, decision: str,
+                                    note: str, result_text: str):
+        from py import approval_store
+        jid = record["peer_id"]
+        if decision == "stop":
+            self._approval_queue.pop(jid, None)
+            await self._send_text(jid, "⏹ 任务与待审批已取消。")
+            return
+        if decision == "timeout":
+            await self._send_text(jid, "⌛ 审批超时无人批复，工具未执行，正在继续收尾任务…")
+        await self._resume_llm(jid, record.get("messages") or [], result_text)
+        if not approval_store.has_pending("xmpp", jid):
+            queued = self._approval_queue.pop(jid, []) or []
+            for _t, _extra in queued:
+                await self._process_llm(jid, _t, _extra)
+
+    @llm_gate.gated
+    async def _resume_llm(self, chat_jid: str, snapshot: List[dict], result_text: str):
+        """原位续流：审批结果替换快照内哨兵 tool 消息后重放 /v1（与前端
+        backend_content 重放同构），续写文本照常分段回推同一会话。"""
+        from py import approval_im, approval_store
+        self.asyncToolsID.setdefault(chat_jid, [])
+        self.fileLinks.setdefault(chat_jid, [])
+        messages = [dict(m) for m in snapshot]
+        approval_im.replace_sentinel_content(messages, result_text)
+        try:
+            res = await self._agent_stream_to_peer(chat_jid, messages)
+        except Exception as e:
+            logging.error(f"XMPP 审批续流失败: {e}")
+            await self._send_text(chat_jid, f"⚠️ 续跑失败: {e}")
+            return
+        if res["out_buffer"].strip():
+            await self._send_text(chat_jid, res["out_buffer"].strip())
+        if approval_store.has_pending("xmpp", chat_jid):
+            return  # 嵌套新审批：继续挂起等待批复，队列保留
+        assistant_text = res["assistant_text"]
+        if assistant_text.strip():
+            self.memoryList.setdefault(chat_jid, [])
+            self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
+            if self.memoryLimit > 0:
+                while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:
+                    self.memoryList[chat_jid].pop(0)
+                    if self.memoryList[chat_jid]:
+                        self.memoryList[chat_jid].pop(0)
+            await self._persist_conv(chat_jid)
+            await self._send_local_images(chat_jid, assistant_text)
 
     def _flush_segments(self, buffer: str):
         """切出可直接发送的完整片段，返回 (剩余缓冲, 就绪片段)。"""

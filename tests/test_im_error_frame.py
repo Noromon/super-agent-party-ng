@@ -55,6 +55,6 @@ def test_server_stream_error_logging_pin():
 def test_xmpp_wiring_pins():
     xm = _src("py/xmpp_client.py")
     assert "err_text = error_from_delta(delta)" in xm
-    assert "empty_reply_msg(err_text)" in xm
+    assert "empty_reply_msg(res[\"err_text\"])" in xm  # S150：内核抽 helper 后从账目取值
     assert "_empty_reply_flags" in xm
     assert "EMPTY_REPLY_MSG" not in xm

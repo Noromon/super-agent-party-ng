@@ -3287,7 +3287,15 @@ def _inject_task_checkpoint(request, cli_settings, engine):
             logging.getLogger("app").info(f"[Context] 检查点注入失败: {e}")
 
 async def tools_change_messages(request: ChatRequest, settings: dict):
-    
+    # S150：模型面人话化——历史中残留的审批哨兵 JSON 换成人类可读说明
+    # （事故根因之一：哨兵原文随历史回灌诱发本地底模泄漏漂移；
+    # 前端审批卡嗅探的是实时流帧，不经过此处，不受影响）
+    try:
+        from py import approval_im
+        approval_im.sanitize_incoming(request.messages)
+    except Exception:
+        pass
+
     if request.messages and request.messages[0]['role'] == 'system' and request.messages[0]['content'] != '':
         basic_message = " "
         request.messages[0]['content'] += basic_message
@@ -5244,6 +5252,27 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
 
     # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
     append_missing_results(request.messages, assistant_tool_calls, acked_ids)
+
+    # S150：IM 渠道审批挂起——快照内部 messages（tool_calls 成对闭合后）登记挂起表，
+    # 由 bot 通知对端斜杠批复并「原位续流」；前端哨兵帧与审批卡流程原样不动。
+    if pending_abort and request.is_app_bot and request.platform and request.peer_id:
+        try:
+            from py import approval_im, approval_store
+            _ap = _is_approval_result(_st.get("results"))
+            if _ap and approval_store.has_handlers(request.platform):
+                _hit_id = ""
+                for _m in reversed(request.messages):
+                    if _m.get("role") == "tool" and _is_approval_result(_m.get("content")) is not None:
+                        _hit_id = _m.get("tool_call_id", "")
+                        break
+                await approval_store.create(
+                    platform=request.platform, peer_id=request.peer_id,
+                    tool_name=_ap.get("tool_name", ""), tool_params=_ap.get("tool_params"),
+                    tool_call_id=_hit_id, permission_mode=_ap.get("permission_mode", ""),
+                    cwd=_ap.get("cwd", ""),
+                    messages=approval_im.strip_system_messages(copy.deepcopy(request.messages)))
+        except Exception as _ape:
+            logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
 
 
     # =========================================================================
@@ -7362,18 +7391,13 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             content={"error": {"message": str(e), "type": "api_error"}}
         )
 
-@app.post("/execute_tool_manually")
-async def execute_tool_manually(request: Request):
-    """
-    前端点击审批按钮后调用的接口
-    """
-    data = await request.json()
-    tool_name = data.get("tool_name")
-    tool_params = data.get("tool_params")
-    approval_type = data.get("approval_type") # 'once' 或 'always'
+async def execute_approved_tool(tool_name, tool_params, approval_type="once", stream_id=None):
+    """S150: 审批通过后执行工具（前端审批卡与 IM /y 批复共用）。返回 {"result": ...}。
 
+    原 execute_tool_manually 函数体原样搬入；端点变薄壳（M-3 棘轮：巨函数只许缩）。
+    """
     # 安全围栏：所属生成流已被用户取消时，拒绝执行审批工具
-    _appr_stream_id = data.get("stream_id")
+    _appr_stream_id = stream_id
     if _appr_stream_id:
         _appr_entry = _active_streams.get(_appr_stream_id)
         if _appr_entry and _appr_entry.get("cancelled"):
@@ -7665,6 +7689,22 @@ async def execute_tool_manually(request: Request):
         
     except Exception as e:
         return {"result": f"Error executing {tool_name}: {str(e)}"}
+
+
+@app.post("/execute_tool_manually")
+async def execute_tool_manually(request: Request):
+    """
+    前端点击审批按钮后调用的接口
+    """
+    data = await request.json()
+    return await execute_approved_tool(
+        data.get("tool_name"), data.get("tool_params"),
+        data.get("approval_type"), data.get("stream_id"))
+
+
+# S150：IM 审批闭环——把审批执行器交给编排模块（bot 侧 /y /a 批复经此执行工具）
+from py import approval_im as _approval_im
+_approval_im.set_executor(execute_approved_tool)
 
 # 在现有路由后添加以下代码
 
