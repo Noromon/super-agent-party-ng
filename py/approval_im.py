@@ -195,3 +195,32 @@ async def resolve_and_resume(platform: str, peer_id: str, decision: str,
 async def cancel_pending(platform: str, peer_id: str) -> int:
     from py import approval_store
     return await approval_store.cancel_all(platform, peer_id)
+
+
+async def resolve_by_id_web(aid: str, decision: str, note: str = "") -> Tuple[bool, str]:
+    """S151 双向审批：通知中心面板批复 IM 挂起任务。
+
+    与 resolve_and_resume 同构（摘除→执行→派发育续跑器），但操作者是
+    本机 Web 主人，不走 IM approver 名录门禁；decision 用 approve/always/deny。
+    """
+    from py import approval_store
+    if decision not in ("approve", "always", "deny"):
+        return False, "decision 需为 approve/always/deny"
+    record, err = await approval_store.resolve_by_id(aid)
+    if record is None:
+        return False, err
+    tool = record.get("tool_name", "?")
+    result_text = ""
+    if decision in ("approve", "always"):
+        if _EXECUTOR is None:
+            return False, "审批执行器未就绪（服务未完成初始化）"
+        try:
+            res = await _EXECUTOR(tool, record.get("tool_params") or {}, decision, None)
+        except Exception as e:
+            res = {"result": f"Error executing {tool}: {e}"}
+        result_text = str((res or {}).get("result", res))
+    else:
+        result_text = denied_text(tool, note)
+    _log_note(record, decision, note, actor="web-panel")
+    asyncio.create_task(approval_store._fire(record, decision, note, result_text))
+    return True, "已批复，IM 侧任务继续"

@@ -58,6 +58,7 @@ Object.assign(vue_methods, {
         console.log('WebSocket connection established');
         stopHeartbeat(); // 防止重复心跳
         startHeartbeat();
+        if (typeof this.fetchNotifications === 'function') { this.fetchNotifications(); } // S151：断线重连后补齐通知
         if (!this._covsSaveTimer) {
           this._covsSaveTimer = setInterval(() => { this.flushDirtyConversations(); }, 30000);
         }
@@ -267,6 +268,10 @@ Object.assign(vue_methods, {
         else if (data.type === 'request_messages') {
           // 发送当前消息列表给请求方
           this.sendMessagesToExtension();
+        }
+        // S151：通知中心实时推送
+        else if (data.type === 'notification') {
+          this.onWsNotification(data.data);
         }
       };
 

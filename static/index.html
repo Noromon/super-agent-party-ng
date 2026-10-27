@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/appearance.css">
   <link rel="stylesheet" href="css/transition.css">
+  <link rel="stylesheet" href="css/notifications.css">
   <!-- GitHub Markdown CSS for styling -->
   <link rel="stylesheet" href="css/github-markdown.min.css">
   <!-- Highlight.js CSS for code highlighting -->
@@ -374,6 +375,18 @@ function updateElement(el, rawMarkdown, formatFn) {
             <i class="fa-solid fa-jar"></i>
           </el-icon>
         </el-button>
+        <!-- S151：通知中心铃铛 -->
+        <el-button
+          @click="openNotificationsPanel"
+          class="top-bar-btn notif-bell-btn"
+          text
+          :title="t('notifCenterTitle')">
+          <el-badge :value="notifBadgeCount()" :max="99" :hidden="notifBadgeCount() <= 0">
+            <el-icon>
+              <i class="fa-regular fa-bell"></i>
+            </el-icon>
+          </el-badge>
+        </el-button>
       <!-- 添加移动端菜单按钮 -->
       <el-button 
       class="top-bar-btn"
@@ -474,6 +487,49 @@ function updateElement(el, rawMarkdown, formatFn) {
         </el-button>
       </div>
     </el-header>
+
+    <!-- S151：通知中心抽屉面板 -->
+    <div v-show="notificationsOpen" class="notif-mask" @click.self="closeNotificationsPanel">
+      <div class="notif-panel">
+        <div class="notif-head">
+          <span class="notif-title"><i class="fa-regular fa-bell"></i> {{ t('notifCenterTitle') }}</span>
+          <div class="notif-actions">
+            <el-button size="small" text @click="notifMarkAllRead">{{ t('notifMarkAllRead') }}</el-button>
+            <el-button size="small" text @click="notifClearAll">{{ t('notifClearAll') }}</el-button>
+            <el-button size="small" text @click="closeNotificationsPanel"><i class="fa-solid fa-xmark"></i></el-button>
+          </div>
+        </div>
+        <div class="notif-filters">
+          <el-radio-group v-model="notificationFilter" size="small">
+            <el-radio-button label="">{{ t('notifCatAll') }}</el-radio-button>
+            <el-radio-button label="approval">{{ t('notifCatApproval') }}</el-radio-button>
+            <el-radio-button label="generation">{{ t('notifCatGeneration') }}</el-radio-button>
+            <el-radio-button label="bot">{{ t('notifCatBot') }}</el-radio-button>
+            <el-radio-button label="error">{{ t('notifCatError') }}</el-radio-button>
+            <el-radio-button label="system">{{ t('notifCatSystem') }}</el-radio-button>
+          </el-radio-group>
+        </div>
+        <div class="notif-list">
+          <div v-if="!notifFilteredItems().length" class="notif-empty">{{ t('notifEmpty') }}</div>
+          <div v-for="item in notifFilteredItems()" :key="item.id" class="notif-item" :class="'notif-' + (item.level || 'info')">
+            <div class="notif-item-head">
+              <span class="notif-cat">{{ notifCatLabel(item) }}</span>
+              <el-tag v-if="notifIsPending(item)" size="small" type="warning">{{ t('notifPending') }}</el-tag>
+              <span class="notif-time">{{ notifTime(item) }}</span>
+            </div>
+            <div class="notif-msg">{{ item.msg }}</div>
+            <div v-if="notifIsPending(item) && (item.extra || {}).source === 'im'" class="notif-buttons">
+              <el-button size="small" type="primary" @click="notifDecision(item, 'approve')">{{ t('notifApprove') }}</el-button>
+              <el-button size="small" @click="notifDecision(item, 'always')">{{ t('notifApproveAlways') }}</el-button>
+              <el-button size="small" type="danger" @click="notifDecision(item, 'deny')">{{ t('notifDeny') }}</el-button>
+            </div>
+            <div v-else-if="notifIsPending(item)" class="notif-buttons">
+              <el-button size="small" @click="notifGoChat">{{ t('notifGoChat') }}</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- 主容器 -->
     <el-container class="main-container">
@@ -1024,6 +1080,7 @@ function updateElement(el, rawMarkdown, formatFn) {
   <script src="libs/element-plus-icons.js"></script>
 <script src="js/vue_data.js"></script>
     <script src="js/data/00_ui_core.js"></script>
+    <script src="js/data/05_notifications.js"></script>
     <script src="js/data/20_brain_settings.js"></script>
     <script src="js/data/30_tiles_vrm.js"></script>
     <script src="js/data/40_tts_voice.js"></script>
@@ -1060,7 +1117,8 @@ function updateElement(el, rawMarkdown, formatFn) {
     <script src="js/methods/44_diary.js"></script>
     <script src="js/methods/45_soulx_domain.js"></script>
 <script src="js/methods/46_island_domain.js"></script>
-<script src="js/methods/47_peer_roster.js"></script>
+    <script src="js/methods/47_peer_roster.js"></script>
+    <script src="js/methods/48_notifications.js"></script>
     <script src="js/methods/50_bots_lifecycle.js"></script>
     <script src="js/methods/51_bots_conversations.js"></script>
     <script src="js/methods/54_ui_nav.js"></script>

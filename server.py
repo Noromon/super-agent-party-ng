@@ -756,6 +756,13 @@ async def _temp_sweep_loop():
             logging.getLogger("app").warning(f"T-10 周期临时目录清扫失败: {e}")
 
 
+def _notify_center_startup():
+    """S151：通知中心绑定 uvicorn 主 loop（ws 广播桥）并发射启动事件。"""
+    from py import notification_center as _notifc
+    _notifc.bind_loop(asyncio.get_running_loop())
+    _notifc.emit("system", "后端启动完成")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sap_auth.write_token_file(USER_DATA_DIR)
@@ -1020,8 +1027,7 @@ async def lifespan(app: FastAPI):
                 try:
                     raw = dict((settings or {}).get(cfg_key) or {})
                     cfg_cls = getattr(importlib.import_module(mod_name), cls_name)
-                    await asyncio.to_thread(getattr(BotContainer, getter_map[cfg_key])().start_bot,
-                                            cfg_cls(**raw))
+                    await asyncio.to_thread(getattr(BotContainer, getter_map[cfg_key])().start_bot, cfg_cls(**raw))
                     logger.info(f"IM 自动连接成功: {cfg_key}")
                 except Exception as e:
                     logger.warning(f"IM 自动连接失败 {cfg_key}: {e}")
@@ -1032,6 +1038,7 @@ async def lifespan(app: FastAPI):
     # --- [T-4 流缓存 TTL 清扫] ---
     stream_ttl_task = asyncio.create_task(_stream_ttl_loop())
 
+    _notify_center_startup()  # S151：通知中心主 loop 绑定（ws 广播桥）+ 启动事件
     # --- [启动完成] ---
     yield
 
@@ -1085,7 +1092,8 @@ from py.stream_relay import (
 )
 from py.routers import (media, bots, memories, system, files,
                         bot_conversations, tasks, agents, workflows,
-                        status)
+                        status, notifications)
+app.include_router(notifications.router)  # S151：通知中心
 app.include_router(media.router)
 app.include_router(bots.router)
 app.include_router(memories.router)
@@ -5013,6 +5021,24 @@ def _stream_round_compress(request, settings, _st):
     request.messages = sanitize_tool_chains(chat_messages)
     request.messages = ensure_thinking_fields(request.messages)
 
+def _notify_web_approval_pending(_st):
+    """S151：Web 会话审批挂起落通知中心（M3 棘轮：逻辑移出巨函数体）。"""
+    try:
+        from py import notification_center
+        _ap = _is_approval_result(_st.get("results"))
+        if not _ap:
+            return
+        _ent = _st.get("_entry")
+        _sid = _ent.get("id") if isinstance(_ent, dict) else None
+        notification_center.emit(
+            "approval", f"工具 {_ap.get('tool_name', '?')} 等待审批（Web 会话）",
+            extra={"pending_key": _sid or "web-anon", "source": "web",
+                   "stream_id": _sid, "tool_name": _ap.get("tool_name", ""),
+                   "tool_params": _ap.get("tool_params") or {}, "status": "pending"})
+    except Exception:
+        pass
+
+
 async def _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
     """While-loop tool round: ack, dispatch, SSE results, abort/cancel signals.
 
@@ -5278,6 +5304,10 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
                     messages=approval_im.strip_system_messages(copy.deepcopy(request.messages)))
         except Exception as _ape:
             logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
+
+    # S151：web 侧审批挂起落通知中心（面板引导回会话卡处理）；IM 来源已经 approval_store 登记
+    if pending_abort and not (request.is_app_bot and request.platform and request.peer_id):
+        _notify_web_approval_pending(_st)
 
 
     # =========================================================================
@@ -6416,6 +6446,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             # 生产者/消费者解耦模式：客户端断开后生成器继续运行
             stream_id = str(uuid.uuid4())
             _active_streams[stream_id] = {
+                "id": stream_id,  # S151：entry 自带 id（通知中心 pending_key 用）
                 "buffer": [],
                 "done": False,
                 "error": None,
@@ -7718,9 +7749,22 @@ async def execute_tool_manually(request: Request):
     前端点击审批按钮后调用的接口
     """
     data = await request.json()
-    return await execute_approved_tool(
+    result = await execute_approved_tool(
         data.get("tool_name"), data.get("tool_params"),
         data.get("approval_type"), data.get("stream_id"))
+    # S151：Web 审批决策落通知中心（面板销账 + 审计）
+    try:
+        from py import notification_center
+        _t = data.get("approval_type") or "once"
+        _label = {"once": "已批准", "approve": "已批准", "always": "已批准并加白名单"}.get(_t, _t)
+        notification_center.emit(
+            "approval", f"Web 审批{_label}：{data.get('tool_name')}",
+            extra={"pending_key": data.get("stream_id") or "web-anon",
+                   "source": "web", "decision": _t,
+                   "tool_name": data.get("tool_name"), "status": "resolved"})
+    except Exception:
+        pass
+    return result
 
 
 # S150：IM 审批闭环——把审批执行器交给编排模块（bot 侧 /y /a 批复经此执行工具）

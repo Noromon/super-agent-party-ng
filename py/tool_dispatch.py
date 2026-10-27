@@ -94,6 +94,15 @@ async def dispatch_external_tool(tool_name, tool_params, settings):
         image_input_2 = tool_params.get('image_input_2', None)
         logging.getLogger("app").info(tool_name)
         result = await comfyui_tool_call(tool_name, text_input, image_input, text_input_2, image_input_2)
+        # S151：生成任务落通知中心（长任务完成可见性）
+        try:
+            from py import notification_center
+            _s = str(result)
+            notification_center.emit(
+                "generation", f"comfyui 生成任务完成：{tool_name}" if not _s.startswith("Error")
+                else f"comfyui 生成任务失败：{tool_name}", level="info" if not _s.startswith("Error") else "warn")
+        except Exception:
+            pass
         return tool_name, str(result)
 
     if settings["HASettings"]["enabled"]:

@@ -87,6 +87,17 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
     notify = _NOTIFY.get(platform)
     if notify:
         _spawn(_safe_notify(notify, record))
+    # S151：通知中心（IM 来源 pending，面板双向审批入口）
+    try:
+        from py import notification_center
+        notification_center.emit("approval", f"工具 {tool_name} 等待审批（{platform} · {peer_id}）",
+                                 extra={"pending_key": aid, "source": "im",
+                                        "approval_id": aid, "platform": platform,
+                                        "peer_id": peer_id, "tool_name": tool_name,
+                                        "tool_params": tool_params or {},
+                                        "status": "pending"})
+    except Exception:
+        pass
     return record
 
 
@@ -115,6 +126,15 @@ async def _safe_notify(notify, record):
         await notify(record)
     except Exception as e:  # 通知失败不影响挂起本身（用户可稍后 /y 补救）
         logging.getLogger("app").warning("[Approval] 挂起通知失败: %r", e)
+        try:
+            from py import notification_center
+            notification_center.emit(
+                "error", f"审批推送到 {record.get('platform')} 失败，请到通知中心批复: {e!r}",
+                extra={"pending_key": record.get("approval_id"), "source": "im",
+                       "approval_id": record.get("approval_id"),
+                       "tool_name": record.get("tool_name")}, level="error")
+        except Exception:
+            pass
 
 
 async def _expire(aid: str):
@@ -126,6 +146,19 @@ async def _expire(aid: str):
 
 
 async def _fire(record, decision, note, result_text):
+    # S151：决策事件回落通知中心（面板销账 + 审计留痕）
+    try:
+        from py import notification_center
+        label = {"approve": "已批准", "always": "已批准并加白名单", "deny": "已拒绝",
+                 "timeout": "超时未批", "stop": "已取消"}.get(decision, decision)
+        notification_center.emit(
+            "approval", f"审批{label}：{record.get('tool_name')}（{record.get('platform')}）",
+            extra={"pending_key": record.get("approval_id"), "source": "im",
+                   "approval_id": record.get("approval_id"),
+                   "tool_name": record.get("tool_name"), "decision": decision,
+                   "status": "resolved"})
+    except Exception:
+        pass
     resolver = _RESOLVER.get(record["platform"])
     if not resolver:
         logging.getLogger("app").info(
@@ -159,6 +192,17 @@ async def resolve(platform: str, peer_id: str, decision: str,
     if record is None:
         return None, "没有待审批的任务"
     aid = record["approval_id"]
+    th = _EXPIRE_TASKS.pop(aid, None)
+    if th:
+        th.cancel()
+    return _pop_pending(aid), ""
+
+
+async def resolve_by_id(aid: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    """S151：按 approval_id 原子摘除（通知中心面板审批用）。"""
+    record = _PENDING.get(aid)
+    if record is None or record.get("status") != "pending":
+        return None, "该审批已失效或不存在"
     th = _EXPIRE_TASKS.pop(aid, None)
     if th:
         th.cancel()

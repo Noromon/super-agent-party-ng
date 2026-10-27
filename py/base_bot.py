@@ -60,6 +60,30 @@ class BaseBotManager:
     # ---------- 启动 ----------
 
     def start_bot(self, config):
+        # S151：bot 生命周期落通知中心（成功/失败均可见）
+        try:
+            self._start_bot_inner(config)
+        except Exception as e:
+            self._notify_bot_event(f"启动失败: {e}", "error")
+            raise
+        self._notify_bot_event("已启动并上线")
+
+    def _notify_bot_event(self, msg, level="info"):
+        # 通知发射必须离开调用线程：start_bot 返回瞬间 is_running 可能翻转
+        # （dingtalk 就绪即设位、长连接任务退出即复位），同步落盘的窗口会
+        # 把调用方紧随其后的 is_running 断言拖进竞态（S151 实测教训）。
+        def _send():
+            try:
+                from py import notification_center
+                notification_center.emit(
+                    "bot", f"{self.PLATFORM_LABEL}: {msg}",
+                    extra={"platform": (self.ENGINE_TARGET_KEY or self.PLATFORM_LABEL).lower()},
+                    level=level)
+            except Exception:
+                pass
+        threading.Thread(target=_send, daemon=True, name="bot-notify").start()
+
+    def _start_bot_inner(self, config):
         if self.is_running:
             raise Exception(f"{self.PLATFORM_LABEL} 机器人已在运行")
         if self.bot_thread and self.bot_thread.is_alive():
@@ -218,6 +242,7 @@ class BaseBotManager:
             logging.info(f"{self.PLATFORM_LABEL} 机器人未在运行")
             return
         logging.info(f"正在停止 {self.PLATFORM_LABEL} 机器人...")
+        was_live = self.is_running  # S151：仅真正在线时的停止才落通知（启动失败清理不算）
         self._stop_requested = True
         self.is_running = False
         self.on_stop_requested()
@@ -230,6 +255,8 @@ class BaseBotManager:
                 logging.warning(f"{self.PLATFORM_LABEL} 机器人线程未能在 {self.STOP_JOIN_TIMEOUT} 秒内停止")
                 self._cleanup()
         self._stop_requested = False
+        if was_live:
+            self._notify_bot_event("已停止")
 
     def _cleanup(self):
         """D3：统一清理形状（原先 7/9 各自复制、dingtalk/qq 缺失）。"""

@@ -49,9 +49,14 @@ class FakeEngine:
         pass
 
     async def start(self):
-        # 立即完成：dingtalk 的 gather(engine.start(), client.start())
-        # 依赖 client 停止即收敛；长驻引擎任务是真实引擎行为，不在本测试范围。
-        await asyncio.sleep(0)
+        # S151：长驻 fake（真实长连接不会秒返回）。旧「立即完成」版使
+        # run_client 就绪后立即正常退出并复位 is_running，调用方紧随
+        # start_bot 返回的断言始终在跟线程退出赛跑（此前仅靠时序侥幸）。
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
 
 
 def wait_until(pred, timeout=15.0, interval=0.05):

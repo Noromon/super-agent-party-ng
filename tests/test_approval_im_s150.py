@@ -223,8 +223,9 @@ class TestWiringS150:
         assert seg and "approval_store.create(" in seg and "has_handlers" in seg
         assert "approval_im.sanitize_incoming(request.messages)" in s
         assert "async def execute_approved_tool(" in s
-        ep = s[s.find('@app.post("/execute_tool_manually")'):][:600]
-        assert "return await execute_approved_tool(" in ep
+        ep = s[s.find('@app.post("/execute_tool_manually")'):][:900]
+        # S151：端点先执行后发射决策事件，故改为 result 中转（委托关系不变）
+        assert "await execute_approved_tool(" in ep and "return result" in ep
         assert "_approval_im.set_executor(execute_approved_tool)" in s
 
     def test_xmpp_chain(self):
