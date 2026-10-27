@@ -786,6 +786,9 @@ class XmppClient:
         reasoning_chars = 0
         finish_reason = ""
         err_text = ""
+        from py.base_bot import ToolProgressLedger
+        ledger = ToolProgressLedger(
+            detail_mode=(getattr(self, "progress_mode", "summary") == "detail"))
         stream = await client.chat.completions.create(
             model=self.XmppAgent,
             messages=history,
@@ -819,6 +822,19 @@ class XmppClient:
                     lst.remove(async_tool_id)
                 else:
                     lst.append(async_tool_id)
+            # S152：块级封口+进度行——正文块被工具打断即封口发出
+            tc = getattr(delta, "tool_content", None)
+            if tc is not None:
+                _tt = ToolProgressLedger.field(tc, "type")
+                _tn = ToolProgressLedger.field(tc, "title")
+                if _tt == "call":
+                    if ledger.on_call(_tn) and out_buffer.strip():
+                        await self._send_text(chat_jid, out_buffer.strip())
+                        out_buffer = ""
+                elif _tt == "tool_result":
+                    _line = ledger.on_result(_tn, ToolProgressLedger.field(tc, "content"))
+                    if _line:
+                        await self._send_text(chat_jid, _line)
             seg = reasoning if (self.reasoningVisible and reasoning) else content
             full_text.append(content)
             if seg:
@@ -826,6 +842,9 @@ class XmppClient:
                 out_buffer, ready = self._flush_segments(out_buffer)
                 for piece in ready:
                     await self._send_text(chat_jid, piece)
+        _summ = ledger.summary_line()
+        if _summ:
+            await self._send_text(chat_jid, _summ)
         return {"assistant_text": "".join(full_text), "out_buffer": out_buffer,
                 "reasoning_chars": reasoning_chars, "finish_reason": finish_reason,
                 "err_text": err_text}

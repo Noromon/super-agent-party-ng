@@ -15,6 +15,7 @@ class XmppBotConfig(BaseModel):
     memoryLimit: int = 10
     separators: list[str] = Field(default_factory=lambda: ["。", "\n", "？", "！"])
     reasoningVisible: bool = False
+    progress_mode: str = "summary"   # S152: summary=任务尾一条🔧汇总 | detail=逐工具进度行
     quickRestart: bool = True
     wakeWord: Optional[str] = None
     bot_username: str
@@ -50,6 +51,7 @@ class XmppBotManager(BaseBotManager):
         client.memoryLimit = config.memoryLimit
         client.separators = config.separators or ["。", "\n", "？", "！"]
         client.reasoningVisible = config.reasoningVisible
+        client.progress_mode = config.progress_mode  # S152：进度行模式
         client.quickRestart = config.quickRestart
         client.wakeWord = config.wakeWord
         client.bot_username = config.bot_username
@@ -82,6 +84,7 @@ class XmppBotManager(BaseBotManager):
         client.XmppAgent = config.XmppAgent
         client.wakeWord = config.wakeWord
         client.reasoningVisible = config.reasoningVisible  # S142：流式读 client 属性，热更必须同步
+        client.progress_mode = config.progress_mode  # S152：同上
         client.config = config
 
     def get_status(self):

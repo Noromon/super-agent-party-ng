@@ -28,6 +28,71 @@ import threading
 import weakref
 
 
+class ToolProgressLedger:
+    """S152：IM 渠道工具进度账目（块级封口 + 摘要/详细两种进度行）。
+
+    事件源=server 流内 delta.tool_content 帧（call / tool_result）：
+      call     → on_call：登记工具（返回 True=正文块被打断，调用方应封口发出缓冲）
+      result   → on_result：哨兵前缀（审批挂起，工具未执行）回销该次；
+                 正常完成时详细模式返回一行进度文案，摘要模式返回 None
+      流结束   → summary_line：摘要模式发一条 🔧 汇总；详细模式不发
+
+    文案中文硬编码（bot 线程无 i18n，approval_im.build_notice 先例）。
+    """
+
+    APPROVAL_PREFIX = '{"__sap_approval_v1__":1,'  # 只嗅探前缀，不改协议（前端 pins 同源）
+
+    def __init__(self, detail_mode=False):
+        self.detail_mode = detail_mode
+        self.names = []      # 按首现顺序去重
+        self._pending = set()
+        self._done = set()
+
+    @staticmethod
+    def field(obj, key, default=""):
+        """tool_content 帧字段双形态提取（SDK extra 字段=dict；兼容对象形态）。"""
+        if isinstance(obj, dict):
+            return obj.get(key, default) or default
+        return getattr(obj, key, default) or default
+
+    def on_call(self, name):
+        """登记开始执行的工具；返回 True 表示正文块被打断（调用方封口）。"""
+        if not name:
+            return False
+        if name not in self.names:
+            self.names.append(name)
+        self._pending.add(name)
+        return True
+
+    def on_result(self, name, content):
+        """工具结果落账；详细模式返回要发送的一行，否则 None。"""
+        if not name:
+            return None
+        if str(content or "").startswith(self.APPROVAL_PREFIX):
+            # 审批挂起哨兵=工具从未执行：回销本次 call，续流重放后会重新记账
+            if name in self._pending:
+                self._pending.discard(name)
+                if name in self.names:
+                    self.names.remove(name)
+            return None
+        self._pending.discard(name)
+        self._done.add(name)
+        if self.detail_mode:
+            return f"✅ {name} 完成"
+        return None
+
+    def summary_line(self):
+        if self.detail_mode or not self.names:
+            return None
+        parts = [n for n in self.names if n in self._done]
+        bg = [n for n in self.names if n in self._pending]
+        line = "🔧 本次执行：" + "、".join(parts) if parts else ""
+        if bg:
+            line = (line + "；" if line else "🔧 本次执行：") + \
+                   "、".join(f"{n}（后台运行中）" for n in bg)
+        return line or None
+
+
 class BaseBotManager:
     PLATFORM_LABEL = "Bot"
     THREAD_NAME = "BotThread"
