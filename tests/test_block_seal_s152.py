@@ -23,7 +23,7 @@ SENTINEL = ('{"__sap_approval_v1__":1,"tool_name":"shell_exec",'
 # ---------- ToolProgressLedger 单元 ----------
 
 def test_ledger_call_and_summary():
-    led = ToolProgressLedger()
+    led = ToolProgressLedger("summary")
     assert led.on_call("a") is True
     assert led.on_call("a") is True  # 同名重复仍封口
     assert led.on_result("a", "ok") is None  # 摘要模式不发逐行
@@ -32,14 +32,23 @@ def test_ledger_call_and_summary():
 
 
 def test_ledger_detail_mode():
-    led = ToolProgressLedger(detail_mode=True)
+    led = ToolProgressLedger("detail")
     led.on_call("a")
     assert led.on_result("a", "ok") == "✅ a 完成"
     assert led.summary_line() is None
 
 
+def test_ledger_default_off_and_illegal_normalized():
+    led = ToolProgressLedger()          # 默认 off（S152b）
+    assert led.mode == "off"
+    assert led.on_call("a") is True     # 封口信号与档位无关
+    assert led.on_result("a", "ok") is None
+    assert led.summary_line() is None
+    assert ToolProgressLedger("bogus").mode == "off"  # 非法值归一最保守档
+
+
 def test_ledger_approval_sentinel_rollback():
-    led = ToolProgressLedger()
+    led = ToolProgressLedger("summary")
     led.on_call("shell_exec")
     assert led.on_result("shell_exec", SENTINEL) is None
     assert led.summary_line() is None  # 未执行=不入账
@@ -152,6 +161,18 @@ def test_block_seal_detail_mode(monkeypatch):
         _chunk(content="收尾"),
     ], mode="detail")
     assert c.sent == ["开工", "✅ a 完成"]  # 详细模式不发汇总
+    assert res["out_buffer"] == "收尾"
+
+
+def test_block_seal_off_mode(monkeypatch):
+    # 默认档：封口照常（正文实时），但零工具行、零汇总
+    c, res = _run_stream(monkeypatch, [
+        _chunk(content="先做第一步"),
+        _chunk(tc={"type": "call", "title": "search_web", "content": "{}"}),
+        _chunk(tc={"type": "tool_result", "title": "search_web", "content": "结果"}),
+        _chunk(content="收尾"),
+    ], mode="off")
+    assert c.sent == ["先做第一步"]
     assert res["out_buffer"] == "收尾"
 
 

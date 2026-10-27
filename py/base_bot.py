@@ -31,19 +31,25 @@ import weakref
 class ToolProgressLedger:
     """S152：IM 渠道工具进度账目（块级封口 + 摘要/详细两种进度行）。
 
+    三档进度可见性（S152b，默认 off=纯正文流零打扰）：
+      off     → 无任何进度行（封口仍生效：on_call 的封口信号与显示档无关）
+      summary → 流结束发一条 🔧 汇总（含后台运行项）
+      detail  → 每个工具完成即时一行 ✅，任务尾不再汇总
+
     事件源=server 流内 delta.tool_content 帧（call / tool_result）：
       call     → on_call：登记工具（返回 True=正文块被打断，调用方应封口发出缓冲）
       result   → on_result：哨兵前缀（审批挂起，工具未执行）回销该次；
-                 正常完成时详细模式返回一行进度文案，摘要模式返回 None
-      流结束   → summary_line：摘要模式发一条 🔧 汇总；详细模式不发
+                 正常完成时详细模式返回一行进度文案，其余返回 None
+      流结束   → summary_line：仅 summary 档返回汇总行
 
     文案中文硬编码（bot 线程无 i18n，approval_im.build_notice 先例）。
     """
 
     APPROVAL_PREFIX = '{"__sap_approval_v1__":1,'  # 只嗅探前缀，不改协议（前端 pins 同源）
+    MODES = ("off", "summary", "detail")
 
-    def __init__(self, detail_mode=False):
-        self.detail_mode = detail_mode
+    def __init__(self, mode="off"):
+        self.mode = mode if mode in self.MODES else "off"  # 非法值归一最保守档
         self.names = []      # 按首现顺序去重
         self._pending = set()
         self._done = set()
@@ -77,12 +83,12 @@ class ToolProgressLedger:
             return None
         self._pending.discard(name)
         self._done.add(name)
-        if self.detail_mode:
+        if self.mode == "detail":
             return f"✅ {name} 完成"
         return None
 
     def summary_line(self):
-        if self.detail_mode or not self.names:
+        if self.mode != "summary" or not self.names:
             return None
         parts = [n for n in self.names if n in self._done]
         bg = [n for n in self.names if n in self._pending]

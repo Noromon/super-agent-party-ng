@@ -787,8 +787,7 @@ class XmppClient:
         finish_reason = ""
         err_text = ""
         from py.base_bot import ToolProgressLedger
-        ledger = ToolProgressLedger(
-            detail_mode=(getattr(self, "progress_mode", "summary") == "detail"))
+        ledger = ToolProgressLedger(mode=getattr(self, "progress_mode", "off"))
         stream = await client.chat.completions.create(
             model=self.XmppAgent,
             messages=history,

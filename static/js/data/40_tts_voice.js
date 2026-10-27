@@ -595,7 +595,7 @@ Object.assign(vue_data, {
       memoryLimit: 20,
       separators: ['。', '\n', '？', '！'],
       reasoningVisible: false,
-      progress_mode: 'summary',
+      progress_mode: 'off',
       quickRestart: true,
       wakeWord: '',
       bot_username: '',

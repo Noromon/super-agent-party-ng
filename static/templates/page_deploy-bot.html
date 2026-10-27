@@ -1298,6 +1298,7 @@
                               </el-form-item>
                               <el-form-item :label="t('xmppProgressMode')">
                                 <el-radio-group v-model="xmppBotConfig.progress_mode" @change="autoSaveSettings">
+                                  <el-radio-button value="off">{{ t('xmppProgressOff') }}</el-radio-button>
                                   <el-radio-button value="summary">{{ t('xmppProgressSummary') }}</el-radio-button>
                                   <el-radio-button value="detail">{{ t('xmppProgressDetail') }}</el-radio-button>
                                 </el-radio-group>

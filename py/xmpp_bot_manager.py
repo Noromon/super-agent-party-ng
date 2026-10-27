@@ -15,7 +15,7 @@ class XmppBotConfig(BaseModel):
     memoryLimit: int = 10
     separators: list[str] = Field(default_factory=lambda: ["。", "\n", "？", "！"])
     reasoningVisible: bool = False
-    progress_mode: str = "summary"   # S152: summary=任务尾一条🔧汇总 | detail=逐工具进度行
+    progress_mode: str = "off"   # S152b: off=隐藏(默认) | summary=任务尾🔧汇总 | detail=逐工具行
     quickRestart: bool = True
     wakeWord: Optional[str] = None
     bot_username: str
