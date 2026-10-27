@@ -606,6 +606,18 @@ function updateElement(el, rawMarkdown, formatFn) {
             </el-icon>
             <template #title>{{ t('systemSettings') }}</template>
           </el-menu-item>
+          <!-- S151b：通知中心侧栏入口（纯浏览器专用，与顶栏铃铛条件互补） -->
+          <el-menu-item
+            v-if="!isElectron && !isMobile"
+            index="notifications"
+            @click="openNotificationsPanel">
+            <el-icon>
+              <el-badge :value="notifBadgeCount()" :max="99" :hidden="notifBadgeCount() <= 0" class="notif-menu-badge">
+                <i class="fa-regular fa-bell"></i>
+              </el-badge>
+            </el-icon>
+            <template #title>{{ t('notifCenterTitle') }}</template>
+          </el-menu-item>
           <el-menu-item 
             index="logo"
             class="sidebar-logo">

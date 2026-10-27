@@ -226,6 +226,7 @@ openAiBrowser(){
 },
 
     async handleSelect(key) {
+      if (key === 'notifications') return; // S151b：通知中心开抽屉不路由（点击已在 item @click 处理）
       if (key === 'model-config') {
         this.activeMenu = 'model-config';
         this.subMenu = 'service'; // 默认显示第一个子菜单

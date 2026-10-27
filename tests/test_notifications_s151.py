@@ -159,6 +159,17 @@ def test_resolve_by_id_atomic_and_pending_event(tmp_path, monkeypatch):
         restore()
 
 
+def test_browser_entry_pins():
+    """S151b 钉桩：侧栏通知入口与路由守卫必须同存（缺一即浏览器端空白页）。"""
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "static" / "index.html").read_text(encoding="utf-8")
+    nav = (root / "static" / "js" / "methods" / "54_ui_nav.js").read_text(encoding="utf-8")
+    assert 'index="notifications"' in html
+    assert '@click="openNotificationsPanel"' in html
+    assert 'v-if="!isElectron && !isMobile"' in html  # 与顶栏铃铛(isElectron||isMobile)互补
+    assert "if (key === 'notifications') return;" in nav
+
+
 def test_resolve_by_id_web_deny_emits_resolved(tmp_path, monkeypatch):
     import py.approval_im as aim
     import py.approval_store as store

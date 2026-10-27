@@ -103,3 +103,26 @@
 .notif-bell-btn .el-badge__content {
   z-index: 10;
 }
+
+
+/* S151b：侧栏菜单项徽标（折叠态图标列不裁切角标） */
+.sidebar .el-menu-item .el-badge__content {
+  z-index: 5;
+}
+
+.notif-menu-badge .el-badge__content {
+  top: 6px;
+  right: 2px;
+}
+
+.el-menu--collapse .el-menu-item .el-icon {
+  overflow: visible;
+}
+
+.el-menu--collapse .el-menu-item .notif-menu-badge {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
