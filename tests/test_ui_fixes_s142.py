@@ -44,6 +44,9 @@ class TestNarrowLayoutS144:
         assert ".main-container .content { min-width: 0; }" in css
         assert ".page { min-width: 0; }" in css
         assert ".settings-form { min-width: 0; }" in css
+        # S145b：suite-layout 深一层同病灶
+        assert ".suite-layout { min-width: 0; }" in css
+        assert ".suite-content { min-width: 0; }" in css
 
     def test_fluid_settings_rows_unconditional(self):
         css = _read("static", "css", "styles.css")

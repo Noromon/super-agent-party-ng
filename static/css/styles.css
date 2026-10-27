@@ -12803,6 +12803,10 @@ pre.sp-content.sp-code {
 .main-container .content { min-width: 0; }
 .page { min-width: 0; }
 .settings-form { min-width: 0; }
+/* S145b：suite-layout 同病灶再深一层（deploy-bot/role/toolkit 等右侧内容列
+   flex:1 缺 min-width:0，名录行等宽内容把 flex 撑出可视区被祖先裁掉） */
+.suite-layout { min-width: 0; }
+.suite-content { min-width: 0; }
 
 /* S144：设置页行内流体化（无条件生效：宽度够保持左右同行，挤不下自动换行，
    杜绝「要么触发窄屏模式要么宽到装下全内容」的二极管） */

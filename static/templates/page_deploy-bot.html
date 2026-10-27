@@ -1881,8 +1881,8 @@
                               <i class="fa-solid fa-trash"></i>
                             </el-button>
                           </div>
-                          <div style="display:flex; gap:8px; margin-top:6px;">
-                            <el-input v-model="imPeerNewId" :placeholder="t('imPeerAddPlaceholder')" style="width:260px"
+                          <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;">
+                            <el-input v-model="imPeerNewId" :placeholder="t('imPeerAddPlaceholder')" style="width:260px; max-width:100%"
                                       @keydown.enter="imPeerAdd"></el-input>
                             <el-button size="small" type="primary" @click="imPeerAdd">{{ t('imPeerAdd') }}</el-button>
                           </div>
