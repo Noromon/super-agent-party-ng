@@ -691,6 +691,7 @@ class XmppClient:
                     "fileLinks": self.fileLinks[chat_jid],
                     "is_app_bot": True,
                     "platform": "xmpp",
+                    "peer_id": chat_jid,  # S145：对端身份注入
                     **self._tools_override(),
                 },
             )

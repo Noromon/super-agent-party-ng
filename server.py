@@ -1104,6 +1104,9 @@ app.include_router(soulx_router)
 from py.routers.island import notify_island_reply_done, router as island_router  # S139(R6)：/api/heatmap|weather|ip-city|geocode + /cur_language
 from py.routers.island import _ws_island  # S139(R6)：island_* ws 消息卸载（S71 惯例）
 app.include_router(island_router)
+from py.routers.peers import router as peers_router  # S145：/api/peers-seen
+app.include_router(peers_router)
+from py.peer_identity import build_peer_identity_block, display_name, record_seen, resolve_entry  # S145：对端身份注入
 from py.diary_api import router as diary_router  # A5：/api/diary/*（book CRUD + 查询）
 app.include_router(diary_router)
 
@@ -1973,6 +1976,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[Union[str, int, float]] = None
     group_id: Optional[Union[str, int, float]] = None
     user_message_id: Optional[Union[str, int, float]] = None
+    peer_id: Optional[str] = None  # S145：bot 频道对端平台 id（xmpp jid 等），身份注入用
 
 GROUP_MEMORY_TYPES = {"fact", "decision", "preference", "todo", "constraint", "glossary"}
 GROUP_MEMORY_DONE_HINTS = ("完成", "已完成", "done", "resolved", "fixed", "closed")
@@ -3310,8 +3314,19 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         await _inject_workspace_memory(request, cwd, cli_settings)
 
     if request.is_app_bot and request.platform:
-        platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流\n\n"
+        # S145：对端名录——来源行升级（别名+ID）+ 身份/名录注入 + seen 登记
+        _pid = request.peer_id
+        _peer_ent = resolve_entry(request.platform, _pid, settings) if _pid else None
+        if _peer_ent:
+            platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流（当前对端：{display_name(request.platform, _pid, settings)} <{_pid}>）\n\n"
+        else:
+            platform_message = f"\n\n用户正在使用 {request.platform} 软件与你交流\n\n"
         content_append(request.messages, 'system', platform_message)
+        if _pid:
+            record_seen(request.platform, _pid)
+            _blk = build_peer_identity_block(request.platform, _pid, settings)
+            if _blk:
+                content_append(request.messages, 'system', _blk)
 
     if cwd and Path(cwd).exists() and cli_settings.get("enabled", False):
         _append_permission_mode_message(request, permissionMode)

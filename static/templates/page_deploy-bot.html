@@ -7,7 +7,7 @@
                             v-for="tile in deployTiles" 
                             class="nav-item"
                             :class="{ active: subMenu === tile.id }"
-                            @click="subMenu = tile.id">
+                            @click="subMenu = tile.id; if (tile.id === 'im_peers') imPeerLoadSeen()">
                             <el-icon class="nav-icon"><i :class="tile.icon"></i></el-icon>
                             <span class="nav-text">{{ t(tile.title) }}</span>
                         </div>
@@ -1849,6 +1849,52 @@
                       </el-tab-pane>
 
                     </el-tabs>
+                  </div>
+                  <!-- S145：IM 对端名录 -->
+                  <div v-show="subMenu === 'im_peers'" class="page">
+                    <el-form class="settings-form" label-position="top">
+                      <div class="tool-item">
+                        <div class="tool-header">
+                          <span>
+                            <el-icon><i class="fa-solid fa-address-book"></i></el-icon>
+                            {{ t('imPeerRoster') }}
+                          </span>
+                        </div>
+                        <div class="tool-content">
+                          <el-form-item :label="t('imPeerInject')" class="form-item-align" label-position="left">
+                            <el-switch v-model="imPeerSettings.injectEnabled" @change="imPeerChanged"></el-switch>
+                          </el-form-item>
+                          <el-form-item :label="t('imPeerPlatform')">
+                            <el-select v-model="imPeerPlatform" style="width: 200px;">
+                              <el-option v-for="p in imPeerPlatforms" :key="p.id" :label="t(p.labelKey)" :value="p.id"></el-option>
+                            </el-select>
+                          </el-form-item>
+                          <div v-for="row in imPeerRows()" :key="row.id"
+                               style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px;">
+                            <span :title="row.id" style="min-width:160px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:monospace; font-size:12px;">{{ row.id }}</span>
+                            <el-input v-model="row.e.alias" :placeholder="t('imPeerAlias')" style="width:130px" @change="imPeerChanged"></el-input>
+                            <el-input v-model="row.e.roleDesc" :placeholder="t('imPeerRole')" style="width:150px" @change="imPeerChanged"></el-input>
+                            <el-input v-model="row.e.notes" :placeholder="t('imPeerNotes')" style="width:150px" @change="imPeerChanged"></el-input>
+                            <span style="font-size:12px; color:var(--el-text-color-secondary);">{{ t('imPeerApprover') }}</span>
+                            <el-switch v-model="row.e.approver" @change="imPeerChanged"></el-switch>
+                            <el-button size="small" type="danger" text @click="imPeerRemove(row.id)">
+                              <i class="fa-solid fa-trash"></i>
+                            </el-button>
+                          </div>
+                          <div style="display:flex; gap:8px; margin-top:6px;">
+                            <el-input v-model="imPeerNewId" :placeholder="t('imPeerAddPlaceholder')" style="width:260px"
+                                      @keydown.enter="imPeerAdd"></el-input>
+                            <el-button size="small" type="primary" @click="imPeerAdd">{{ t('imPeerAdd') }}</el-button>
+                          </div>
+                          <div v-if="imPeerSeenUnlisted().length" style="margin-top:14px;">
+                            <div style="font-size:12px; color:var(--el-text-color-secondary); margin-bottom:6px;">{{ t('imPeerSeenHint') }}</div>
+                            <el-tag v-for="sid in imPeerSeenUnlisted()" :key="sid"
+                                    style="margin:0 6px 6px 0; cursor:pointer;"
+                                    @click="imPeerQuickAdd(sid)">{{ sid }} +</el-tag>
+                          </div>
+                        </div>
+                      </div>
+                    </el-form>
                   </div>
                   <!-- 翻译机器人 -->
                   <div v-show="subMenu === 'translate_bot'" class="page translate-container">

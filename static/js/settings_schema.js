@@ -29,6 +29,7 @@
     ['slackBotConfig', 'slackBotConfig'],
     ['telegramBotConfig', 'telegramBotConfig'],
     ['xmppBotConfig', 'xmppBotConfig'],
+    ['imPeerSettings', 'imPeerSettings'],
     ['targetLangSelected', 'targetLangSelected'],
     ['allBriefly', 'allBriefly'],
     ['isForceScrollToBottom', 'isForceScrollToBottom'],

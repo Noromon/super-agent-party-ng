@@ -35,6 +35,7 @@
       "enableNotifications": false,
       "rememberWindowSize": true
     },
+    "imPeerSettings": { "injectEnabled": true, "roster": {} },
     "mainAgent":"super-model",
     "mcpServers": {},
     "llmTools": [],

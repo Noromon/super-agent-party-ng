@@ -8,11 +8,29 @@ Object.assign(vue_data, {
       { id: 'vts_config', title: 'vtsbot', icon: "fa-solid fa-child"},
       { id: 'live_stream', title: 'live_stream_bot', icon: "fa-solid fa-video"},
       { id: 'im_bot', title: 'imBot', icon: 'fa-solid fa-comment' },
+      { id: 'im_peers', title: 'imPeerRoster', icon: 'fa-solid fa-address-book' },
       { id: 'read_bot', title: 'readBot', icon: "fa-solid fa-book-open-reader"}, 
       { id: 'translate_bot', title: 'translateBot', icon: "fa-solid fa-language"}, 
     ],
 
     activeImBotTab: 'qq',
+
+    // S145：IM 对端名录（roster[platform][peer_id]={alias,roleDesc,approver,notes}）
+    imPeerSettings: { injectEnabled: true, roster: {} },
+    imPeerPlatform: 'xmpp',
+    imPeerNewId: '',
+    imPeersSeen: {},
+    imPeerPlatforms: [
+      { id: 'xmpp', labelKey: 'xmppBot' },
+      { id: 'telegram', labelKey: 'telegramBot' },
+      { id: 'qq', labelKey: 'qqBot' },
+      { id: 'wechat', labelKey: 'wechatBot' },
+      { id: 'wecom', labelKey: 'weComBot' },
+      { id: 'feishu', labelKey: 'feishuBot' },
+      { id: 'dingtalk', labelKey: 'dingtalkBot' },
+      { id: 'discord', labelKey: 'discordBot' },
+      { id: 'slack', labelKey: 'slackBot' },
+    ],
 
     sourceText: '',
 
