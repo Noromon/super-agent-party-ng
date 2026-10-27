@@ -1123,6 +1123,9 @@ def resolve_strict_path(cwd: str, sub_path: str, check_symlink: bool = True) -> 
     - 禁止绝对路径
     - 禁止 ../ 遍历  
     - 禁止通过符号链接指向工作区外
+    - S153: 以上区外形态若命中 path_scope GRANTS（用户在路径门单独批复/
+      allowed_dirs/yolo），按解析后真实路径放行；symlink 经 resolve 后参与
+      授权匹配，链接逃逸无法借 grants 之外的路径混入。
     """
     base = Path(cwd).resolve()
     
@@ -1132,32 +1135,40 @@ def resolve_strict_path(cwd: str, sub_path: str, check_symlink: bool = True) -> 
     # 清理输入（阻止空字节、换行等）
     sub_path = sub_path.strip().replace('\x00', '').replace('\n', '')
     
-    # 显式禁止路径遍历模式（快速失败）
-    if '..' in sub_path.split(os.sep):
-        raise PermissionError(f"Path traversal detected: {sub_path}")
-    
-    # 禁止绝对路径（Windows C:\ 和 Unix /）
-    if os.path.isabs(sub_path) or (len(sub_path) > 1 and sub_path[1] == ':'):
-        raise PermissionError(f"Absolute paths not allowed: {sub_path}")
-    
-    # 解析完整路径
-    target = (base / sub_path).resolve()
-    
-    # 关键检查：确保 resolve 后的路径仍在 base 内
-    try:
-        target.relative_to(base)
-    except ValueError:
-        raise PermissionError(f"Access denied: {sub_path} resolves outside workspace")
-    
-    # 符号链接检查（防止 /workspace/link -> /etc）
-    if check_symlink and target.exists():
-        real_path = target.resolve(strict=True)
+    traversal = '..' in sub_path.split(os.sep) or '..' in sub_path.split('/')
+    absolute = os.path.isabs(sub_path) or (len(sub_path) > 1 and sub_path[1] == ':')
+
+    if not traversal and not absolute:
+        # 常规区内路径：先按旧规则快速通过（行为与 S153 前完全一致）
+        target = (base / sub_path).resolve()
         try:
-            real_path.relative_to(base)
+            target.relative_to(base)
+            # 符号链接检查（防止 /workspace/link -> /etc）
+            if check_symlink and target.exists():
+                real_path = target.resolve(strict=True)
+                try:
+                    real_path.relative_to(base)
+                except ValueError:
+                    raise PermissionError(f"Symlink escape detected: {sub_path} -> {real_path}")
+            return target
         except ValueError:
-            raise PermissionError(f"Symlink escape detected: {sub_path} -> {real_path}")
-            
-    return target
+            pass  # 区内符号链接指向区外等 → 落入区外判定（GRANTS 或原拒绝）
+
+    from py import path_scope
+    cand = Path(sub_path) if absolute else (base / sub_path)
+    try:
+        target = cand.expanduser().resolve()
+    except Exception:
+        target = cand
+    if path_scope.grants_allow(str(target)):
+        return target
+
+    # 显式拒绝（错误消息与 S153 前保持一致）
+    if traversal:
+        raise PermissionError(f"Path traversal detected: {sub_path}")
+    if absolute:
+        raise PermissionError(f"Absolute paths not allowed: {sub_path}")
+    raise PermissionError(f"Access denied: {sub_path} resolves outside workspace")
 
 from typing import Tuple
 

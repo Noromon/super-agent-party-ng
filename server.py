@@ -1889,6 +1889,20 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
     if approval is not None:
         return approval
 
+    # S153: 路径门（工作区外本地路径 / 读取族任意本地路径）——独立于工具名白名单
+    # （opencode external_directory 语义；哨兵复用 → 前端审批卡与 IM /y/n/a 自动生效）
+    try:
+        from py import path_scope
+        _ps = path_scope.evaluate(tool_name, tool_params or {}, settings)
+        if _ps is not None:
+            if _ps.block is not None:
+                logging.getLogger("app").info(f"[PathScope] Blocked '{tool_name}': 等待用户路径授权")
+                return _ps.block
+            if _ps.grants:
+                path_scope.set_grants(_ps.grants)
+    except Exception as _pse:
+        logging.getLogger("app").warning("[PathScope] 路径门异常（放行）: %r", _pse)
+
     # ==================== 4. 常规工具处理逻辑 (原有代码) ====================
 
     tool_name, handled = await _dispatch_external_tool(tool_name, tool_params, settings)
@@ -3760,19 +3774,10 @@ def truncate_tool_result(text, limit: int = 32000):
             + text[-tail:])
 
 def cli_permission_mode_for(settings: dict) -> str:
-    """读取当前 CLI 引擎对应的权限模式（值域已归一化）"""
-    from py.cli_tool import normalize_permission_mode
-    cli = settings.get("CLISettings", {})
-    engine = cli.get("engine", "")
-    if engine == "local":
-        env = settings.get("localEnvSettings", {})
-    elif engine == "ds":
-        env = settings.get("dsSettings", {})
-    elif engine == "wsl":
-        env = settings.get("wslSettings", {})
-    else:
-        env = settings.get("acpSettings", {})
-    return normalize_permission_mode(env.get("permissionMode", "default"))
+    """读取当前 CLI 引擎对应的权限模式（值域已归一化）
+    S153: 逻辑平移至 py/path_scope.permission_mode_for，此处委托保持既有调用点。"""
+    from py.path_scope import permission_mode_for
+    return permission_mode_for(settings)
 
 RESUME_NUDGE_TEXT = (
     "【系统提示】上面的工具结果已收到。工具的“成功”仅代表这一处操作完成，"
@@ -7407,10 +7412,26 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
     # 获取当前配置
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
-    
+
+    # S153: 路径门批复执行——外部/本地直读类注入本次调用的目录授权（grants），
+    # 使被批工具内部的 resolve_strict_path 按批复范围放行
+    from py import path_scope
+    _ps_grants = path_scope.approved_call_grants(tool_name, tool_params or {}, cwd)
+    if _ps_grants:
+        path_scope.set_grants(_ps_grants)
+
     # ==================== 核心逻辑：处理 "Always" ====================
     if approval_type == "always":
-        # 如果用户选择“不再询问”，则将该工具写入当前项目的 .agent/config.json
+        # S153: 路径门类"不再询问"→ allowed_dirs 目录白名单（与 allowed_tools 隔离，
+        # 工具白名单永远绕不过路径门）
+        if _ps_grants:
+            try:
+                from py.agent import add_dirs_to_project_config
+                add_dirs_to_project_config(cwd, _ps_grants)
+                logging.getLogger("app").info(f"[PathScope] allowed_dirs += {_ps_grants} ({cwd})")
+            except Exception as e:
+                return {"result": f"[System Error] Failed to save dir permission: {str(e)}"}
+        # 如果用户选择"不再询问"，则将该工具写入当前项目的 .agent/config.json
         if cwd:
             try:
                 add_tool_to_project_config(cwd, tool_name)

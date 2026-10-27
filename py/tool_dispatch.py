@@ -20,15 +20,22 @@ from py import app_state
 _APPROVAL_PREFIX = '{"__sap_approval_v1__":1,'
 
 
-def _approval_payload(tool_name, tool_params, permission_mode, cwd) -> str:
-    return json.dumps({
+def _approval_payload(tool_name, tool_params, permission_mode, cwd,
+                      scope=None, reason=None) -> str:
+    obj = {
         "__sap_approval_v1__": 1,
         "type": "approval_required",
         "tool_name": tool_name,
         "tool_params": tool_params,
         "permission_mode": permission_mode,
         "cwd": cwd,
-    }, ensure_ascii=False, separators=(",", ":"))
+    }
+    # S153: 附加字段（S150 起 IM 编排与审批卡容忍未知键；哨兵前缀顺序不变）
+    if scope:
+        obj["scope"] = scope
+    if reason:
+        obj["reason"] = reason
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
 def _is_approval_result(res) -> dict:

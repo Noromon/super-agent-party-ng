@@ -23,11 +23,30 @@ ROBOTS_CACHE = {}
 async def get_image_base64(image_url: str) -> str:
     """
     下载图片并转换为base64编码
-    - 本地：支持直接读取本地磁盘路径文件
+    - 本地：支持直接读取本地磁盘路径文件（S153：file://、~、工作区相对路径归一；
+      像路径但不存在→清晰报错，不再掉进 URL 抓取分支产生误导性失败。
+      本地盘访问的授权在 dispatch 层路径门完成，本函数只管读取）
     - 对内：仅允许 'uploaded_files' 路径并重定向至本地
     - 对外：遵守 robots.txt 并拦截内网 IP (放行 Fake-IP)
     """
-    # 首先检查是否为存在的本地文件路径
+    from py.path_scope import normalize_path
+    try:
+        _st0 = await load_settings()
+        _cwd = (_st0.get("CLISettings") or {}).get("cc_path") or os.getcwd()
+    except Exception:
+        _cwd = os.getcwd()
+    info = normalize_path(image_url, _cwd)
+    if info["kind"] == "path":
+        if not info["exists"]:
+            raise RuntimeError(f"本地文件不存在: {image_url}")
+        try:
+            with open(info["resolved"], 'rb') as f:
+                image_data = f.read()
+                return base64.b64encode(image_data).decode('utf-8')
+        except Exception as e:
+            raise RuntimeError(f"读取本地图片失败: {str(e)}")
+
+    # 首先检查是否为存在的本地文件路径（kind=none 但真实存在的兜底，历史行为）
     if os.path.exists(image_url):
         try:
             with open(image_url, 'rb') as f:

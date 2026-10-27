@@ -21,7 +21,9 @@ GIANT_WHITELIST = {
     # S71：ws +4 行（get_diary_im_targets 两行分支，重活已抽 _ws_diary_im_targets 模块级 helper），重冻结 302->306
     "websocket_endpoint": 306,
     # S132（WSL 引擎）：execute_tool_manually +3 行（wsl hooks/import）越过 300 线，冻结现值，后续拆分时下调
-    "execute_tool_manually": 302,
+    # S150 拆出 execute_approved_tool（298 含端点体）、S153 路径门 grants 注入 +16 →
+    # 314 重冻结（改名条目按 S66 勘误惯例带注）
+    "execute_approved_tool": 314,
 }
 
 STREAM_HELPERS = [

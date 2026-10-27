@@ -71,8 +71,11 @@ class TestServerWiring:
         assert self.src.count('("shell_tool_local", "docker_sandbox", "shell_tool_wsl")') >= 2
 
     def test_env_settings_wsl_branches(self):
-        # plan 硬拦 + 审批门 + tools_change + cli_permission_mode_for + stream = 5 处
-        assert self.src.count('settings.get("wslSettings", {})') >= 5
+        # plan 硬拦 + 审批门 + tools_change + cli_permission_mode_for(S153 起委托
+        # py/path_scope.permission_mode_for) + stream = 5 处（跨文件合计）
+        total = self.src.count('settings.get("wslSettings", {})')
+        total += _read("py/path_scope.py").count('get("wslSettings", {})')
+        assert total >= 5
 
     def test_toolkit_registered(self):
         assert '"get_wsl_tools_for_permission": get_wsl_tools_for_permission,' in self.src
