@@ -23,7 +23,11 @@ PRINT_BASELINE = 38
 
 
 def test_setup_logger_rotating_and_idempotent(tmp_path):
+    root = logging.getLogger()
+    saved_root_h, saved_root_level = list(root.handlers), root.level
     logging.getLogger("app").handlers.clear()
+    logging.getLogger("mem0").handlers.clear()
+    root.handlers.clear()
     try:
         lg = setup_logger(str(tmp_path))
         n1 = len(lg.handlers)
@@ -35,12 +39,29 @@ def test_setup_logger_rotating_and_idempotent(tmp_path):
         assert fh.maxBytes == MAX_BYTES and fh.backupCount == BACKUP_COUNT
         assert os.path.basename(fh.baseFilename) == "backend.log"
         lg.info("m5-rotation-probe")
+        # S155：root 挂同一 file handler（bot 线程 root logging.* 入档）、
+        # app 不再双写、高噪声库压到 WARNING
+        assert any(getattr(h, "baseFilename", "") == fh.baseFilename
+                   for h in root.handlers)
+        assert logging.getLogger("app").propagate is False
+        assert logging.getLogger("openai").level == logging.WARNING
+        logging.info("root-rotation-probe-s155")
         with io.open(fh.baseFilename, encoding="utf-8") as f:
-            assert "m5-rotation-probe" in f.read()
+            body = f.read()
+        assert body.count("m5-rotation-probe") == 1  # app→root 双写防住
+        assert "root-rotation-probe-s155" in body
     finally:
-        for h in logging.getLogger("app").handlers:
-            h.close()
-        logging.getLogger("app").handlers.clear()
+        seen = set()
+        for lg in (logging.getLogger("app"), logging.getLogger("mem0"), root):
+            for h in list(lg.handlers):
+                if id(h) not in seen:
+                    seen.add(id(h))
+                    h.close()
+            lg.handlers.clear()
+        logging.getLogger("mem0").propagate = True
+        logging.getLogger("app").propagate = True
+        root.handlers[:] = saved_root_h
+        root.setLevel(saved_root_level)
 
 
 def test_print_ratchet():

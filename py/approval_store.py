@@ -94,6 +94,16 @@ def _spawn(coro):
     t = asyncio.create_task(coro)
     _LOOP_TASKS.add(t)
     t.add_done_callback(_LOOP_TASKS.discard)
+    t.add_done_callback(_done_log)  # S155：后台任务静默死亡归案
+
+
+def _done_log(t):
+    if t.cancelled():
+        return
+    exc = t.exception()
+    if exc is not None:
+        logging.getLogger("app").error("[Approval] 后台任务异常: %r", exc,
+                                       exc_info=exc)
 
 
 def _spawn_later(fn, *args):

@@ -48,4 +48,21 @@ def setup_logger(log_dir):
             lg.setLevel(logging.INFO)
             lg.addHandler(fh)
             lg.addHandler(sh)
+            lg.propagate = False  # S155：root 挂 handler 后防重复写
+        # S155：bot 线程与多数模块用模块级 logging.*（直达 root），此前
+        # backend.log 对 bot 生命周期（会话就绪/断开/重连/启动失败）完全盲区。
+        # root 挂同一对 handler；高噪声库压到 WARNING 防爆量。
+        root = logging.getLogger()
+        if not any(getattr(h, "baseFilename", "") == fh.baseFilename
+                   for h in root.handlers):
+            root.addHandler(fh)
+        # vts_manager 等模块 import 时的 basicConfig 可能已给 root 挂过控制台
+        # handler，仅在没有时才补，避免 console 双写
+        if not any(isinstance(h, logging.StreamHandler)
+                   and not hasattr(h, "baseFilename") for h in root.handlers):
+            root.addHandler(sh)
+        if root.level == logging.NOTSET or root.level > logging.INFO:
+            root.setLevel(logging.INFO)
+        for noisy in ("openai", "httpx", "httpcore", "urllib3", "aiohttp"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     return logger

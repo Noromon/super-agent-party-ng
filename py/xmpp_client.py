@@ -155,6 +155,7 @@ class XmppClient:
         self._xep0363_supported = True
         self._ready_future: Optional[asyncio.Future] = None
         self._approval_queue: Dict[str, List] = {}    # S150: 审批挂起期同 peer 消息排队
+        self._bot_loop: Optional[asyncio.AbstractEventLoop] = None  # S155
 
         from py.behavior_engine import global_behavior_engine
         global_behavior_engine.register_handler("xmpp", self.execute_behavior_event)
@@ -169,6 +170,7 @@ class XmppClient:
             raise RuntimeError("XMPP 配置不完整（需要用户名/密码/域名）")
         jid = f"{self.bot_username}@{self.domain}"
         host, port, use_ssl = self._parse_service(self.service_url)  # fail before any I/O
+        self._bot_loop = asyncio.get_running_loop()  # S155：审批回调桥接的目的地
         # TLS verification is delegated to the application-level TOFU hook
         # (ssl_cert); connector ssl=False lets every request carry its own ssl ctx.
         self._tls_key = f"{host}:{port}"
@@ -231,6 +233,7 @@ class XmppClient:
         for t in asyncio.all_tasks():
             if t not in skip:
                 t.cancel()
+        self._bot_loop = None  # S155：桥接目的地失效，后续回调走直连路径
 
     @staticmethod
     def _parse_service(service_url: str):
@@ -242,13 +245,16 @@ class XmppClient:
         return u.hostname or "localhost", u.port or default_port, u.scheme == "xmpps"
 
     async def _on_session_start(self, _event):
-        self.xmpp.send_presence()
         try:
             await self.xmpp.get_roster()
         except Exception:
             pass
+        # S155：presence 在 roster 处理完成后宣告（标准客户端时序）；
+        # 曾出现「会话已建但服务器侧不见在线、消息不路由」，presence 时序提前嫌疑最大
+        self.xmpp.send_presence()
         self._is_ready = True
-        logging.info("XMPP bot 会话就绪: %s@%s", self.bot_username, self.domain)
+        logging.getLogger("app").info("XMPP bot 会话就绪并已宣告 presence: %s@%s",
+                                      self.bot_username, self.domain)
         if self._manager_ref:
             manager = self._manager_ref()
             if manager:
@@ -261,7 +267,7 @@ class XmppClient:
         self._is_ready = False
         if getattr(self, "_tearing_down", False):
             return  # 收尾阶段的断开是主动的，不是掉线
-        logging.warning("XMPP bot 连接断开（slixmpp 将自动重连）")
+        logging.getLogger("app").warning("XMPP bot 连接断开（slixmpp 将自动重连）")
 
     # -------------------- TLS / TOFU --------------------
     def _on_ssl_cert(self, pem):
@@ -587,9 +593,19 @@ class XmppClient:
     # -------------------- 消息入口 --------------------
     def _on_message(self, msg):
         try:
-            asyncio.create_task(self._handle_message(msg))
+            task = asyncio.create_task(self._handle_message(msg))
+            task.add_done_callback(self._log_task_error)  # S155：静默死亡归案
         except RuntimeError:
-            logging.warning("XMPP 消息处理未启动（事件循环不可用）")
+            logging.getLogger("app").warning("XMPP 消息处理未启动（事件循环不可用）")
+
+    @staticmethod
+    def _log_task_error(task):
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logging.getLogger("app").exception(
+                "XMPP 消息处理任务异常终止", exc_info=exc)
 
     async def _handle_message(self, msg):
         if msg.get("type") == "groupchat":
@@ -815,12 +831,34 @@ class XmppClient:
                 "err_text": err_text}
 
     # -------------------- S150 审批闭环（通知 / 批复续流 / 排队） --------------------
+    def _on_bot_loop(self, coro_factory):
+        """S155：审批回调的跨 loop 桥。approval_store 的挂起通知与 TTL 超时
+        在 server 主 loop 上调度，而 slixmpp transport 与 aiohttp session 都
+        归 bot loop——跨线程写 transport 会静默丢消息。桥回 bot loop 执行；
+        已在 bot loop（/y /n 批复路径）则直接执行。"""
+        try:
+            cur = asyncio.get_running_loop()
+        except RuntimeError:
+            cur = None
+        loop = self._bot_loop
+        if loop is not None and loop.is_running() and cur is not loop:
+            return asyncio.wrap_future(
+                asyncio.run_coroutine_threadsafe(coro_factory(), loop))
+        return coro_factory()
+
     async def _on_approval_notify(self, record: Dict):
         from py import approval_im
-        await self._send_text(record["peer_id"], approval_im.build_notice(record, "zh"))
+        await self._on_bot_loop(
+            lambda: self._send_text(record["peer_id"],
+                                    approval_im.build_notice(record, "zh")))
 
     async def _on_approval_resolved(self, record: Dict, decision: str,
                                     note: str, result_text: str):
+        await self._on_bot_loop(
+            lambda: self._approval_resolved_impl(record, decision, note, result_text))
+
+    async def _approval_resolved_impl(self, record: Dict, decision: str,
+                                      note: str, result_text: str):
         from py import approval_store
         jid = record["peer_id"]
         if decision == "stop":
