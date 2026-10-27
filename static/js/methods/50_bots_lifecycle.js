@@ -718,6 +718,9 @@ async checkXmppBotStatus() {
     const res = await fetch('/xmpp_bot_status');
     const st = await res.json();
     this.isXmppBotRunning = st.is_running;
+    // S154 僵尸逃生口：线程存活与 is_running 分离跟踪，启动失败原因透出到卡片
+    this.isXmppThreadAlive = !!st.thread_alive;
+    this.xmppStartError = st.error_message || '';
   } catch (e) {
     console.error('检查 XMPP 机器人状态失败', e);
   }

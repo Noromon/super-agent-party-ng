@@ -178,37 +178,59 @@ class XmppClient:
             # NetBIOS names — plain socket resolution is what users expect.
             connector=aiohttp.TCPConnector(ssl=False, resolver=aiohttp.ThreadedResolver()))
 
-        self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password,
-                                       ssl_context=xmpp_trust.insecure_client_context())
-        for plug in self.PLUGINS:
-            self.xmpp.register_plugin(plug)  # disco(0030) / OOB(0066) / keepalive(0199)
-        self.xmpp.auto_reconnect = True
-        self.xmpp.add_event_handler("session_start", self._on_session_start)
-        self.xmpp.add_event_handler("ssl_cert", self._on_ssl_cert)
-        self.xmpp.add_event_handler("message", self._on_message)
-        self.xmpp.add_event_handler("disconnected", self._on_disconnected)
-
-        self._ready_future = asyncio.get_running_loop().create_future()
-        # slixmpp 1.17: TLS via switches; connect(host, port) returns a
-        # background retry future (never await it) — readiness comes from
-        # session_start, bounded by the 30 s wait below.
-        self.xmpp.enable_direct_tls = bool(use_ssl)
-        self.xmpp.enable_starttls = not use_ssl
-        self.xmpp.enable_plaintext = False
-        self.xmpp.connect(host=host, port=port)
-        await asyncio.wait_for(self._ready_future, timeout=30)
-
+        # S154：connect() 之后的一切出口（就绪超时/认证失败/停止/异常）都必须
+        # 走 _teardown——否则 slixmpp 重连任务与 aiohttp session 泄漏，
+        # 僵尸重试永动且管理器线程无法真正收敛
         try:
+            self.xmpp = slixmpp.ClientXMPP(jid, self.bot_password,
+                                           ssl_context=xmpp_trust.insecure_client_context())
+            for plug in self.PLUGINS:
+                self.xmpp.register_plugin(plug)  # disco(0030) / OOB(0066) / keepalive(0199)
+            self.xmpp.auto_reconnect = True
+            self.xmpp.add_event_handler("session_start", self._on_session_start)
+            self.xmpp.add_event_handler("ssl_cert", self._on_ssl_cert)
+            self.xmpp.add_event_handler("message", self._on_message)
+            self.xmpp.add_event_handler("disconnected", self._on_disconnected)
+
+            self._ready_future = asyncio.get_running_loop().create_future()
+            # slixmpp 1.17: TLS via switches; connect(host, port) returns a
+            # background retry future (never await it) — readiness comes from
+            # session_start, bounded by the 30 s wait below.
+            self.xmpp.enable_direct_tls = bool(use_ssl)
+            self.xmpp.enable_starttls = not use_ssl
+            self.xmpp.enable_plaintext = False
+            self.xmpp.connect(host=host, port=port)
+            await asyncio.wait_for(self._ready_future, timeout=30)
+
             while not self._shutdown_requested:
                 await asyncio.sleep(0.5)
         finally:
+            await self._teardown()
+
+    async def _teardown(self):
+        """杀 slixmpp 重连僵尸 + 关 aiohttp session + 清扫本 loop 残留任务。
+
+        在 bot loop 内执行（run() 的 finally / 协作取消路径），取消可正常投递。
+        """
+        self._tearing_down = True
+        try:
+            xmpp = getattr(self, "xmpp", None)
+            if xmpp is not None:
+                xmpp.disconnect()  # slixmpp 默认 preserve=False
+        except Exception:
+            pass
+        if self.session:
             try:
-                self.xmpp.disconnect()
+                await self.session.close()
             except Exception:
                 pass
-            if self.session:
-                await self.session.close()
-                self.session = None
+            self.session = None
+        cur = asyncio.current_task()
+        mgr = self._manager_ref() if self._manager_ref else None
+        skip = {cur, getattr(mgr, "_main_task", None)}
+        for t in asyncio.all_tasks():
+            if t not in skip:
+                t.cancel()
 
     @staticmethod
     def _parse_service(service_url: str):
@@ -237,6 +259,8 @@ class XmppClient:
 
     def _on_disconnected(self, _event):
         self._is_ready = False
+        if getattr(self, "_tearing_down", False):
+            return  # 收尾阶段的断开是主动的，不是掉线
         logging.warning("XMPP bot 连接断开（slixmpp 将自动重连）")
 
     # -------------------- TLS / TOFU --------------------

@@ -620,6 +620,10 @@ Object.assign(vue_data, {
 
     isXmppReloading: false,
 
+    isXmppThreadAlive: false,
+
+    xmppStartError: '',
+
     xmppCertPending: [],
 
     xmppBotSessions: [],

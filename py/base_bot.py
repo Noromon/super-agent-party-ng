@@ -55,14 +55,22 @@ class BaseBotManager:
         self._ready_complete = threading.Event()
         self._startup_error = None
         self._stop_requested = False
+        self._main_task = None  # S154：bot loop 主任务（teardown 清扫时豁免）
 
     # ---------- 启动 ----------
 
     def start_bot(self, config):
-        if self.bot_thread and self.bot_thread.is_alive():
-            raise Exception(f"{self.PLATFORM_LABEL} 机器人线程正在清理中，请稍后再试")
         if self.is_running:
             raise Exception(f"{self.PLATFORM_LABEL} 机器人已在运行")
+        if self.bot_thread and self.bot_thread.is_alive():
+            # S154：线程未退出且未在运行=清理中/僵尸态。旧行为=直接拒绝，
+            # 与前端「停止需 is_running」组合成不可恢复死锁；改为先做一次
+            # 有界同步自救清理，清不掉才报错（前端另留 thread_alive 逃生口）。
+            logging.warning(f"{self.PLATFORM_LABEL} 机器人线程未退出，启动前尝试自救清理")
+            self.stop_bot()
+            if self.bot_thread and self.bot_thread.is_alive():
+                raise Exception(
+                    f"{self.PLATFORM_LABEL} 机器人线程未能自我清理，请稍后重试或重启 SAP")
 
         self.pre_start_reset()
         self.config = config
@@ -71,6 +79,7 @@ class BaseBotManager:
         self._ready_complete.clear()
         self._startup_error = None
         self._stop_requested = False
+        self._main_task = None
 
         self.bot_thread = threading.Thread(
             target=self._run_bot_thread, args=(config,), daemon=True,
@@ -100,7 +109,7 @@ class BaseBotManager:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
-        async def main_startup():
+        async def boot_and_run():
             try:
                 from py.get_setting import load_settings
                 from py.behavior_engine import global_behavior_engine, BehaviorSettings
@@ -152,15 +161,32 @@ class BaseBotManager:
 
                 self._startup_complete.set()
                 await self.run_client()
+            except asyncio.CancelledError:
+                # S154：协作停止路径（_shutdown_watch 投递取消），不是异常
+                if not self._stop_requested:
+                    logging.warning(f"{self.PLATFORM_LABEL} 机器人主任务被取消")
             except Exception as e:
                 if not self._stop_requested:
                     logging.error(f"{self.PLATFORM_LABEL} 机器人启动/运行异常: {e}")
                     self._startup_error = str(e)
+            finally:
                 # 确保主线程不被卡死
                 if not self._startup_complete.is_set():
                     self._startup_complete.set()
                 if not self._ready_complete.is_set():
                     self._ready_complete.set()
+
+        async def main_startup():
+            # S154 协作退出：watcher 在 bot loop 内轮询停止标志，取消在协程
+            # await 点投递，run() 的 finally 得以正常收尾；
+            # _cleanup 的跨线程硬杀退化为兜底手段（跨线程 wake 不可靠）
+            self._main_task = asyncio.current_task()
+            run_task = asyncio.ensure_future(boot_and_run())
+            watch_task = asyncio.ensure_future(self._shutdown_watch(run_task))
+            try:
+                await run_task
+            finally:
+                watch_task.cancel()
 
         try:
             self.loop.run_until_complete(main_startup())
@@ -171,6 +197,12 @@ class BaseBotManager:
                 logging.error(f"{self.PLATFORM_LABEL} 线程 Loop 异常: {e}")
         finally:
             self._cleanup()
+
+    async def _shutdown_watch(self, run_task):
+        """S154：loop 内轮询停止标志，置位即取消主任务（协作退出）。"""
+        while not self._shutdown_event.is_set():
+            await asyncio.sleep(0.25)
+        run_task.cancel()
 
     def _on_bot_ready(self):
         """client 就绪回调（供 post_client_init 接线，或 client 经 _manager_ref 调用）"""

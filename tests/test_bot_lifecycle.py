@@ -14,6 +14,7 @@ bot 线程内 load_settings() 读空配置即跳过行为同步，不触碰真�
 import asyncio
 import importlib
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -519,4 +520,92 @@ def test_stop_idempotent(bot_id, monkeypatch):
     mgr, _, _ = _make(monkeypatch, spec)
     mgr.stop_bot()
     mgr.stop_bot()
+
+
+# ---------------------------------------------------------------- S154 僵尸线程恢复
+
+
+class _HangingClient:
+    """run() 全挂起（只响应取消，不轮询停止标志）：模拟 slixmpp 失联重连态。"""
+    _is_ready = False
+    _shutdown_requested = False
+    _manager_ref = None
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def run(self):
+        self._is_ready = True
+        if self._manager_ref:
+            m = self._manager_ref()
+            if m:
+                m._ready_complete.set()
+                m.is_running = True
+        await asyncio.Event().wait()
+
+
+def _xmpp_mgr(monkeypatch, client_cls):
+    import py.xmpp_bot_manager as mod
+    import py.xmpp_client as xmpp_client_mod
+    eng = FakeEngine()
+    _apply_engine(monkeypatch, mod, eng)
+    monkeypatch.setattr(xmpp_client_mod, "XmppClient", client_cls)
+    mgr = mod.XmppBotManager()
+    cfg = mod.XmppBotConfig(XmppAgent="super-model", bot_username="u", bot_password="p")
+    return mgr, cfg
+
+
+def test_cooperative_stop_kills_hanging_thread(monkeypatch):
+    """client 只响应取消的极端形态：loop 内 watcher 必须在有界时间内收敛线程。"""
+    mgr, cfg = _xmpp_mgr(monkeypatch, _HangingClient)
+    mgr.start_bot(cfg)
+    assert wait_until(lambda: mgr.is_running is True, timeout=20)
+    mgr.stop_bot()
+    thread = mgr.bot_thread
+    assert wait_until(lambda: not thread.is_alive(), timeout=20), \
+        "S154 协作停止未能收敛全挂起 client 线程"
     assert mgr.is_running is False
+
+
+def test_zombie_selfheal_restart(monkeypatch):
+    """僵尸态（线程存活+未运行）start 必须自救：清掉旧线程并完成完整启动。"""
+    mgr, cfg = _xmpp_mgr(monkeypatch, _XmppClient)
+    zombie = threading.Thread(target=lambda: time.sleep(2), daemon=True)
+    zombie.start()
+    mgr.bot_thread = zombie  # 模拟清理失败残留：线程活着但 bot 未在运行
+    mgr.start_bot(cfg)
+    assert wait_until(lambda: mgr.is_running is True, timeout=20), \
+        f"僵尸自救后启动失败 startup_error={mgr._startup_error}"
+    assert not zombie.is_alive()
+    mgr.stop_bot()
+
+
+def test_start_guard_running_message(monkeypatch):
+    """运行中重复 start：文案必须是「已在运行」（旧实现被线程存活守卫吞成「清理中」）。"""
+    mgr, cfg = _xmpp_mgr(monkeypatch, _XmppClient)
+    mgr.start_bot(cfg)
+    try:
+        with pytest.raises(Exception) as ei:
+            mgr.start_bot(cfg)
+        assert "已在运行" in str(ei.value)
+    finally:
+        mgr.stop_bot()
+
+
+def test_start_guard_zombie_cleanup_failure_raises():
+    """真僵尸（join 超时且硬清理无效）→ 明确「未能自我清理」错误，不再无限「稍后再试」。"""
+    mgr, cfg = _xmpp_mgr_no_patch()
+    zombie = threading.Thread(target=lambda: time.sleep(30), daemon=True)
+    zombie.start()
+    mgr.bot_thread = zombie
+    mgr.STOP_JOIN_TIMEOUT = 0.2
+    with pytest.raises(Exception) as ei:
+        mgr.start_bot(cfg)
+    assert "自我清理" in str(ei.value)
+    zombie.join(timeout=1)
+
+
+def _xmpp_mgr_no_patch():
+    import py.xmpp_bot_manager as mod
+    return mod.XmppBotManager(), mod.XmppBotConfig(
+        XmppAgent="super-model", bot_username="u", bot_password="p")

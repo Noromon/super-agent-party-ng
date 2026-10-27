@@ -1243,18 +1243,26 @@
                                     <template v-else><i class="fa-solid fa-play"></i></template>
                                   </el-button>
                                   <el-button type="danger" @click="stopXmppBot"
-                                    :disabled="!isXmppBotRunning || isXmppStopping" circle :title="t('stop_bot')">
+                                    :disabled="(!isXmppBotRunning && !isXmppThreadAlive) || isXmppStopping" circle :title="t('stop_bot')">
                                     <template v-if="isXmppStopping"><i class="fa-solid fa-spinner fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-stop"></i></template>
                                   </el-button>
                                   <el-button @click="reloadXmppBotConfig"
-                                    :disabled="!isXmppBotRunning || isXmppReloading" circle :title="t('reload_bot')">
+                                    :disabled="(!isXmppBotRunning && !isXmppThreadAlive) || isXmppReloading" circle :title="t('reload_bot')">
                                     <template v-if="isXmppReloading"><i class="fa-solid fa-rotate fa-spin"></i></template>
                                     <template v-else><i class="fa-solid fa-rotate"></i></template>
                                   </el-button>
                               </div>
                             </div>
 
+                            <div v-if="isXmppThreadAlive && !isXmppBotRunning"
+                                 style="border:1px solid var(--el-color-warning); border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:13px; color:var(--el-color-warning);">
+                              {{ t('xmppZombieWarning') }}
+                            </div>
+                            <div v-if="xmppStartError"
+                                 style="border:1px solid var(--el-color-danger); border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:13px; color:var(--el-color-danger);">
+                              {{ xmppStartError }}
+                            </div>
                             <div v-if="xmppCertPending.length" class="tool-content"
                                  style="border:1px solid var(--el-color-warning); border-radius:6px; padding:10px; margin-bottom:8px;">
                               <div style="font-weight:bold; margin-bottom:6px;">{{ t('xmppCertPendingTitle') }}</div>

@@ -1429,6 +1429,7 @@
   "isXmppReloading",
   "isXmppStarting",
   "isXmppStopping",
+  "isXmppThreadAlive",
   "isdocker",
   "jsonFile",
   "knowledgeBases",
@@ -1736,7 +1737,8 @@
   "xmppCertPending",
   "xmppSessionDetail",
   "xmppSessionOpen",
-  "xmppSessionTitle"
+  "xmppSessionTitle",
+  "xmppStartError"
  ],
  "_dup_methods": [
   "addLoveDimension",

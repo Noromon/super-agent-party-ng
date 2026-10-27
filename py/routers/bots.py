@@ -327,7 +327,8 @@ async def start_xmpp_bot(config_data: dict):
     try:
         from py.xmpp_bot_manager import XmppBotConfig
         config = XmppBotConfig(**config_data)
-        BotContainer.get_xmpp().start_bot(config)
+        # S154：start_bot 最长阻塞 40s，必须离环（否则冻结 uvicorn 事件循环）
+        await asyncio.to_thread(BotContainer.get_xmpp().start_bot, config)
         return {"success": True, "message": "XMPP 机器人已成功启动", "environment": "thread-based"}
     except Exception as e:
         logger.error(f"启动 XMPP 机器人失败: {e}")
@@ -384,9 +385,10 @@ async def reload_xmpp_bot(config_data: dict):
         from py.xmpp_bot_manager import XmppBotConfig
         config = XmppBotConfig(**config_data)
         manager = BotContainer.get_xmpp()
-        manager.stop_bot()
+        # S154：stop/start 均可能长阻塞（join/就绪等待），离环执行
+        await asyncio.to_thread(manager.stop_bot)
         await asyncio.sleep(1)
-        manager.start_bot(config)
+        await asyncio.to_thread(manager.start_bot, config)
         return {"success": True, "message": "XMPP 机器人已重新加载", "config_changed": True}
     except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
