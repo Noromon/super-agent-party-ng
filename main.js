@@ -1496,100 +1496,120 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
     });
 
     // === S139(R6)：灵动岛窗口 (全屏覆盖层)，上游终态；webSecurity:false 已剥离（S137 cookie 教训） ===
+    let islandOpening = false;
     ipcMain.handle('open-island-window', async () => {
-      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
-        dynamicIslandWindow.close();
-        dynamicIslandWindow = null;
-      }
-
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { x, y, width: screenW, height: screenH } = primaryDisplay.bounds;
-      const isWindows = process.platform === 'win32';
-      const isLinux = process.platform === 'linux';
-      const windowType = isWindows ? 'toolbar' : 'panel';
-
-      dynamicIslandWindow = new BrowserWindow({
-        width: screenW,
-        height: screenH,
-        x: x,
-        y: y,
-        frame: false,
-        transparent: true,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        hasShadow: false,
-        resizable: false,
-        backgroundColor: '#00000000',
-        type: windowType,
-        webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: false,
-          devTools: isDev,
-          preload: path.join(__dirname, 'static/js/preload.js')
-        }
-      });
-
-      remoteMain.enable(dynamicIslandWindow.webContents);
-
-      dynamicIslandWindow.webContents.on('render-process-gone', (event, details) => {
-        console.error('[Island] Render process gone:', details.reason, details.exitCode);
+      if (islandOpening) return true;  // S170：loadURL 期间防重入（预览连点曾造出泄漏窗口群）
+      islandOpening = true;
+      try {
         if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
           dynamicIslandWindow.close();
           dynamicIslandWindow = null;
         }
-      });
 
-      dynamicIslandWindow.on('unresponsive', () => {
-        console.warn('[Island] Renderer unresponsive, restoring mouse forwarding');
-        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
-          if (isLinux) {
-            dynamicIslandWindow.setIgnoreMouseEvents(true);
-          } else {
-            dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
-          }
-        }
-      });
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const { x, y, width: screenW, height: screenH } = primaryDisplay.bounds;
+        const isWindows = process.platform === 'win32';
+        const isLinux = process.platform === 'linux';
+        const windowType = isWindows ? 'toolbar' : 'panel';
 
-      if (isLinux) {
-        dynamicIslandWindow.setIgnoreMouseEvents(true);
-      } else {
-        dynamicIslandWindow.setIgnoreMouseEvents(true, { forward: true });
-      }
-
-      await dynamicIslandWindow.loadURL(`http://${HOST}:${PORT}/island.html`);
-
-      // S166：游戏 HUD——screen-saver 层压过无边框全屏游戏 + 30s 轻重申（防焦点抢层）
-      dynamicIslandWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-      try { dynamicIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
-      const _islandReassert = setInterval(() => {
-        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
-          dynamicIslandWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-        } else {
-          clearInterval(_islandReassert);
-        }
-      }, 30000);
-
-      // S166：Alt+Shift+H 全局切换胶囊模式（无焦点可用；独占全屏的 raw input 抓取下可能失效，属平台限制）
-      try {
-        globalShortcut.unregister('Alt+Shift+H');
-        globalShortcut.register('Alt+Shift+H', () => {
-          if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
-            dynamicIslandWindow.webContents.send('hud-toggle-capsule');
+        const win = dynamicIslandWindow = new BrowserWindow({
+          width: screenW,
+          height: screenH,
+          x: x,
+          y: y,
+          frame: false,
+          transparent: true,
+          alwaysOnTop: true,
+          skipTaskbar: true,
+          hasShadow: false,
+          resizable: false,
+          backgroundColor: '#00000000',
+          type: windowType,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false,
+            devTools: isDev,
+            preload: path.join(__dirname, 'static/js/preload.js')
           }
         });
-      } catch (e) { console.warn('[Island] HUD 快捷键注册失败:', e); }
 
-      dynamicIslandWindow.on('closed', () => {
-        dynamicIslandWindow = null;
-        clearInterval(_islandReassert);
-        try { globalShortcut.unregister('Alt+Shift+H'); } catch (e) {}
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('island-window-closed');
+        remoteMain.enable(win.webContents);
+
+        win.webContents.on('render-process-gone', (event, details) => {
+          console.error('[Island] Render process gone:', details.reason, details.exitCode);
+          if (dynamicIslandWindow === win) {
+            dynamicIslandWindow = null;
+            if (!win.isDestroyed()) win.close();
+          }
+        });
+
+        win.on('unresponsive', () => {
+          console.warn('[Island] Renderer unresponsive, restoring mouse forwarding');
+          if (!win.isDestroyed()) {
+            if (isLinux) {
+              win.setIgnoreMouseEvents(true);
+            } else {
+              win.setIgnoreMouseEvents(true, { forward: true });
+            }
+          }
+        });
+
+        if (isLinux) {
+          win.setIgnoreMouseEvents(true);
+        } else {
+          win.setIgnoreMouseEvents(true, { forward: true });
         }
-      });
 
-      return true;
+        await win.loadURL(`http://${HOST}:${PORT}/island.html`);
+
+        // S170：岛页就绪后推送已持久化的 HUD 配置（ipc 主通道，localStorage 仅兜底）
+        try {
+          const savedCfg = fs.readFileSync(path.join(app.getPath('userData'), 'hud_cfg.json'), 'utf8');
+          win.webContents.send('hud-cfg', JSON.parse(savedCfg));
+        } catch (e) {}
+
+        // S166：游戏 HUD——screen-saver 层压过无边框全屏游戏 + 30s 轻重申（防焦点抢层）
+        win.setAlwaysOnTop(true, 'screen-saver', 1);
+        try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
+        const _islandReassert = setInterval(() => {
+          if (dynamicIslandWindow === win && !win.isDestroyed()) {
+            win.setAlwaysOnTop(true, 'screen-saver', 1);
+          } else {
+            clearInterval(_islandReassert);
+          }
+        }, 30000);
+
+        // S166：Alt+Shift+H 全局切换胶囊模式（无焦点可用；独占全屏的 raw input 抓取下可能失效，属平台限制）
+        try {
+          globalShortcut.unregister('Alt+Shift+H');
+          globalShortcut.register('Alt+Shift+H', () => {
+            if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+              dynamicIslandWindow.webContents.send('hud-toggle-capsule');
+            }
+          });
+        } catch (e) { console.warn('[Island] HUD 快捷键注册失败:', e); }
+
+        win.on('closed', () => {
+          clearInterval(_islandReassert);
+          // S170 身份守卫：旧窗迟到的 closed 不得清空新窗引用/注销新窗快捷键（曾致岛失控群）
+          if (dynamicIslandWindow !== win) return;
+          dynamicIslandWindow = null;
+          try { globalShortcut.unregister('Alt+Shift+H'); } catch (e) {}
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('island-window-closed');
+          }
+        });
+
+        // S170：岛为 click-through 覆盖层，创建即抢焦点无意义——把焦点还给主窗口
+        if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+          mainWindow.focus();
+        }
+
+        return true;
+      } finally {
+        islandOpening = false;
+      }
     });
 
     ipcMain.handle('close-island-window', async () => {
@@ -1618,6 +1638,18 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         send();
       }
       return true;
+    });
+
+    // S170：HUD 配置主进程通道——持久化 + 转发岛窗（storage 事件跨窗不可靠，localStorage 仅兜底）
+    ipcMain.handle('hud-cfg-publish', async (event, cfg) => {
+      try { fs.writeFileSync(path.join(app.getPath('userData'), 'hud_cfg.json'), JSON.stringify(cfg || {}), 'utf8'); } catch (e) {}
+      if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+        dynamicIslandWindow.webContents.send('hud-cfg', cfg);
+      }
+      return true;
+    });
+    ipcMain.handle('hud-cfg-get', async () => {
+      try { return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'hud_cfg.json'), 'utf8')); } catch (e) { return null; }
     });
 
     // S139(R6)：剪切板 IPC（island-app 消费，上游终态逐字）

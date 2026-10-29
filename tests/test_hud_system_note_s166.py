@@ -58,14 +58,15 @@ class TestHudWindow:
         assert "setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })" in MAIN
 
     def test_reassert_timer_cleared_on_close(self):
-        seg = _seg(MAIN, "dynamicIslandWindow.on('closed'", "return true;")
+        # S170 起 closed 回调挂在局部 win 上（身份守卫防旧窗迟到回调误清新窗引用）
+        seg = _seg(MAIN, "win.on('closed'", "return true;")
         assert "clearInterval(_islandReassert)" in seg
 
     def test_capsule_hotkey(self):
         assert "Alt+Shift+H" in MAIN
         assert "'hud-toggle-capsule'" in MAIN
         # 快捷键随岛关闭注销，避免残留劫持全局按键
-        seg = _seg(MAIN, "dynamicIslandWindow.on('closed'", "return true;")
+        seg = _seg(MAIN, "win.on('closed'", "return true;")
         assert "globalShortcut.unregister('Alt+Shift+H')" in seg
 
     def test_preload_whitelist(self):

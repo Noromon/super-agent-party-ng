@@ -55,10 +55,9 @@
   align-items: flex-start;
   gap: 8px;
   opacity: 0;
-  transform: translateY(-6px);
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  transition: opacity 0.35s ease;
 }
-.sap-hud-bubble.hud-show { opacity: 1; transform: translateY(0); }
+.sap-hud-bubble.hud-show { opacity: 1; }
 .sap-hud-bubble .hud-icon { margin-top: 2px; color: #8ab4ff; }
 .sap-hud-bubble.hud-approval .hud-icon { color: #ffb020; }
 .sap-hud-bubble .hud-text { white-space: pre-wrap; word-break: break-all; }

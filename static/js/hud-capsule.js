@@ -67,6 +67,20 @@
     wake();
   }
 
+  function mergeCfg(u) {
+    // S170：ipc 主通道推送的配置合并（主进程持久化值优先于本地兜底）
+    if (!u || typeof u !== 'object') return;
+    for (var k in u) {
+      if (!(k in DEFAULTS)) continue;
+      if (k === 'show' && u.show && typeof u.show === 'object') cfg.show = Object.assign({}, cfg.show, u.show);
+      else if (k === 'position') { if (POS.indexOf(u.position) >= 0) cfg.position = u.position; }
+      else if (typeof u[k] === typeof DEFAULTS[k]) cfg[k] = u[k];
+    }
+    if (cfg.enabled && !layer) build();
+    applyCfg();
+    wake();
+  }
+
   function applyCfg() {
     if (!layer) return;
     if (!cfg.enabled) { layer.classList.add('hud-hidden'); teardownWS(); return; }
@@ -232,6 +246,7 @@
       if (t.id === 'sap-hud-save') {
         try {
           localStorage.setItem(CFG_KEY, JSON.stringify(draft));
+          if (window.electronAPI && window.electronAPI.publishHudCfg) window.electronAPI.publishHudCfg(draft);
           dirty = false;
           status('已保存 ✓（灵动岛侧即时生效）', true);
           setTimeout(function () { if (!dirty) status(''); }, 2500);
@@ -244,8 +259,14 @@
       } else if (t.id === 'sap-hud-open') {
         var api = window.electronAPI || {};
         if (api && api.openIslandWindow) {
-          api.openIslandWindow();
-          if (api.showHudDemo) setTimeout(function () { api.showHudDemo(); }, 800);
+          // S170：岛已开则只发演示，绝不重建（重建连点曾造出泄漏窗口群）
+          var demoDelayed = function () { if (api.showHudDemo) setTimeout(function () { api.showHudDemo(); }, 800); };
+          if (api.getIslandWindowState) {
+            Promise.resolve(api.getIslandWindowState()).then(function (open) {
+              if (open) { if (api.showHudDemo) api.showHudDemo(); }
+              else { api.openIslandWindow(); demoDelayed(); }
+            });
+          } else { api.openIslandWindow(); demoDelayed(); }
         } else {
           status('预览需在桌面端主窗口中使用');
         }
@@ -272,6 +293,10 @@
     } else {
       window.electron.ipcRenderer.on('hud-toggle-capsule', toggleCapsule);
       window.electron.ipcRenderer.on('hud-demo', showDemo);
+      window.electron.ipcRenderer.on('hud-cfg', function (c) { mergeCfg(c); });
+      if (window.electronAPI && window.electronAPI.getHudCfg) {
+        Promise.resolve(window.electronAPI.getHudCfg()).then(function (c) { if (c) mergeCfg(c); });
+      }
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () { if (cfg.enabled) build(); });
