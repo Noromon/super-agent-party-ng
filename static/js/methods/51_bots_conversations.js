@@ -16,7 +16,7 @@ async openBotConversation(c) {
     const res = await fetch('/bot_conversation?id=' + encodeURIComponent(c.conv_id));
     const json = await res.json();
     if (json.success) {
-      this.xmppSessionDetail = json.messages || [];
+      this.xmppSessionDetail = (json.messages || []).filter(m => !(m && m.name === 'system_note'));  // S166：注记不入人线时间线
       this.xmppSessionTitle = c.peer || c.conv_id;
       this.xmppSessionOpen = true;
     } else {

@@ -1559,8 +1559,31 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
 
       await dynamicIslandWindow.loadURL(`http://${HOST}:${PORT}/island.html`);
 
+      // S166：游戏 HUD——screen-saver 层压过无边框全屏游戏 + 30s 轻重申（防焦点抢层）
+      dynamicIslandWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+      try { dynamicIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
+      const _islandReassert = setInterval(() => {
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+        } else {
+          clearInterval(_islandReassert);
+        }
+      }, 30000);
+
+      // S166：Alt+Shift+H 全局切换胶囊模式（无焦点可用；独占全屏的 raw input 抓取下可能失效，属平台限制）
+      try {
+        globalShortcut.unregister('Alt+Shift+H');
+        globalShortcut.register('Alt+Shift+H', () => {
+          if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+            dynamicIslandWindow.webContents.send('hud-toggle-capsule');
+          }
+        });
+      } catch (e) { console.warn('[Island] HUD 快捷键注册失败:', e); }
+
       dynamicIslandWindow.on('closed', () => {
         dynamicIslandWindow = null;
+        clearInterval(_islandReassert);
+        try { globalShortcut.unregister('Alt+Shift+H'); } catch (e) {}
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('island-window-closed');
         }

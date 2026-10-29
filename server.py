@@ -3811,7 +3811,7 @@ def append_resume_nudge(messages):
     """恢复续跑 nudge：当请求历史以 tool 结果结尾（审批通过后手动执行工具再恢复的典型场景）时，
     追加一条“继续推进”指令，防止模型把成功的工具结果当成最终报告直接收尾。"""
     if messages and get_role(messages[-1]) == "tool":
-        messages.append({"role": "user", "content": RESUME_NUDGE_TEXT})
+        messages.append({"role": "user", "content": RESUME_NUDGE_TEXT, "name": "system_note"})  # S166：元频道注记，不进前端时间线/mem0
     return messages
 
 # =========================================================================
@@ -5110,6 +5110,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
                 request.messages.append({
                     "role": "user",
                     "content": build_correction_message(_leaked, _declared),
+                    "name": "system_note",  # S166：元频道注记
                 })
                 logging.getLogger("app").info(
                     "[TCG] 正文泄漏未声明工具调用，自纠重试 %d/%d: %s",
@@ -6458,7 +6459,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 update_buffer_identity(buffer_key, book_id=buffer_key,
                                        character_name=(ms.get("userName") or ""))
                 last_msg = request.messages[-1] if request.messages else None
-                if last_msg and last_msg.get("role") == "user":
+                if last_msg and last_msg.get("role") == "user" and last_msg.get("name") != "system_note":  # S166：注记不入 DiaryChat 缓冲
                     append_to_chat_buffer(buffer_key, "user", _neutralize(_extract_text_content(last_msg.get("content", "")), store="diary-buffer"))
         except Exception as e:
             logging.getLogger("app").info(f"[DiaryBuffer] 记录对话缓冲失败: {e}")

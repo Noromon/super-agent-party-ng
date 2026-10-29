@@ -1009,6 +1009,7 @@ class XmppClient:
         names = "、".join(os.path.basename(p) for _, p in uniq[:4])
         self.memoryList.setdefault(chat_jid, []).append({
             "role": "user",
+            "name": "system_note",  # S166：元频道注记（会话卡渲染过滤，模型上下文保留）
             "content": ("【系统提示】你上一条回复中的图片路径被拦截，图片没有发出（"
                         + detail + ("；另有若干" if len(uniq) > 4 else "") + "）。"
                         "这些文件不存在或位于允许外发目录之外。若图片交付尚未完成："

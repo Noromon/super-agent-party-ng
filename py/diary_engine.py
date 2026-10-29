@@ -699,6 +699,11 @@ class DiaryEngine:
         """复用已连接 IM 机器人的行为引擎 handler，把日记内容原样转达给用户"""
         if not platform:
             return False
+        try:  # S166：主动外发登记观战线（HUD/通知中心可见）
+            from py import notification_center as _nc
+            _nc.emit("bot", "日记主动转达（" + str(platform) + "）：" + content[:80])
+        except Exception:
+            pass
         try:
             from py.behavior_engine import (
                 global_behavior_engine, BehaviorItem, BehaviorAction,

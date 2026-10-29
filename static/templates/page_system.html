@@ -26,6 +26,46 @@
               </div>
             </div>
 
+            <!-- S166：游戏 HUD（灵动岛观战层）设置，纯 localStorage 承载，与灵动岛页 storage 事件热同步 -->
+            <div class="tool-item" id="sap-hud-card">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-gamepad"></i>
+                  </el-icon>
+                  游戏 HUD（灵动岛）
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-alert type="info" :closable="false" class="mb-2">
+                  <div class="alert-content">
+                    在游戏画面上方显示通知胶囊与气泡（基于灵动岛悬浮层）。<b>独占全屏会盖住一切覆盖层，游戏请使用「无边框窗口」模式。</b>快捷键 Alt+Shift+H 可切换胶囊/完整模式。
+                  </div>
+                </el-alert>
+                <div style="display:flex;flex-wrap:wrap;gap:14px 26px;align-items:center;padding:6px 2px;">
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-enabled">启用 HUD</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-capsule">胶囊模式（折叠圆点+角标）</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-dim">空闲时深隐</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;">位置
+                    <select id="sap-hud-pos">
+                      <option value="nw">左上</option><option value="n">上中</option><option value="ne">右上</option>
+                      <option value="sw">左下</option><option value="s">下中</option><option value="se">右下</option>
+                    </select>
+                  </label>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;padding:2px;font-size:13px;">
+                  <span style="opacity:.75;">显示类别：</span>
+                  <label><input type="checkbox" class="sap-hud-cat" data-cat="approval">审批</label>
+                  <label><input type="checkbox" class="sap-hud-cat" data-cat="error">错误</label>
+                  <label><input type="checkbox" class="sap-hud-cat" data-cat="generation">生成完成</label>
+                  <label><input type="checkbox" class="sap-hud-cat" data-cat="bot">角色消息</label>
+                  <label><input type="checkbox" class="sap-hud-cat" data-cat="system">系统</label>
+                </div>
+              </div>
+
+
+            </div>
+
             <div class="tool-item">
               <div class="tool-header">
                 <span>

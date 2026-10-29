@@ -1,0 +1,85 @@
+/* S166: 游戏 HUD 胶囊层（灵动岛 overlay 顶层，与岛自身样式文件相互独立，勿合并） */
+#sap-hud-layer {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 2147483000;
+  opacity: 0.9;
+  transition: opacity 1.2s ease;
+  font-family: 'OpenRunde', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+#sap-hud-layer.hud-dim { opacity: 0.1; }
+#sap-hud-layer.hud-hidden { display: none; }
+
+.sap-hud-capsule {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: rgba(20, 20, 24, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(6px);
+}
+.sap-hud-capsule .hud-badge {
+  position: absolute;
+  top: -6px; right: -8px;
+  min-width: 15px; height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #e5484d;
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  display: none;
+}
+.sap-hud-capsule.hud-has-unread .hud-badge { display: block; }
+.sap-hud-capsule.hud-alert { animation: hud-pulse 1.6s ease-in-out infinite; }
+@keyframes hud-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+}
+
+.sap-hud-bubble {
+  position: absolute;
+  max-width: 340px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(18, 18, 22, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(10px);
+  color: #f2f2f4;
+  font-size: 12.5px;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.sap-hud-bubble.hud-show { opacity: 1; transform: translateY(0); }
+.sap-hud-bubble .hud-icon { margin-top: 2px; color: #8ab4ff; }
+.sap-hud-bubble.hud-approval .hud-icon { color: #ffb020; }
+.sap-hud-bubble .hud-text { white-space: pre-wrap; word-break: break-all; }
+
+.hud-pos-nw { top: 12px; left: 12px; }
+.hud-pos-ne { top: 12px; right: 12px; }
+.hud-pos-sw { bottom: 12px; left: 12px; }
+.hud-pos-se { bottom: 12px; right: 12px; }
+.hud-pos-n { top: 12px; left: 50%; transform: translateX(-50%); }
+.hud-pos-s { bottom: 12px; left: 50%; transform: translateX(-50%); }
+
+.sap-hud-toast {
+  position: absolute;
+  top: 12px; left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(18, 18, 22, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f2f2f4;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.sap-hud-toast.hud-show { opacity: 1; }

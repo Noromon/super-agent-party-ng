@@ -10,7 +10,7 @@ SHA_DYNAMIC_ISLAND = "a0a52cc8168b877219458341b64aaf4f3a335182c44aa9c45140538eee
 SHA_ISLAND_CSS = "ede0b79dce0675e1c0b81b97a80b1fe8f65e049959c6f792a21dbdb135a4d5de"
 # fork 补丁后资产哈希（上游 + S139 M2 token 补丁 + S141 纯图标刷新徽章，白名单改动）
 SHA_ISLAND_APP = "4445e7df71f3899ac9ab8efec1ad619881cb373016ea596f2f96a808341ea450"
-SHA_ISLAND_HTML = "93fab8cd4993f67aa674316165ac9bd748540cc14a6c396cf629c849c6ed506b"
+SHA_ISLAND_HTML = "3c302635b2653f9ea0a3a5da499111cc8b6de71d44f9df3e6ba8ced7bf8a4956"
 
 
 def _read(*p):
@@ -151,7 +151,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S165" in _read("static", "js", "renderer.js")
+        assert "build=S166" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS140:

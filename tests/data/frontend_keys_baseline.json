@@ -196,7 +196,8 @@
    "js/methods/98_browser_tabs.js",
    "js/methods/99_skills.js",
    "js/boot_templates.js",
-   "js/renderer.js"
+   "js/renderer.js",
+   "js/hud-capsule.js"
   ]
  },
  "vue_methods_keys": [
