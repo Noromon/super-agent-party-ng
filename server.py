@@ -677,6 +677,9 @@ def content_append(message, role, content):
     """
     将content添加到指定role消息的末尾
     """
+    if role == 'assistant' and content:
+        # S163：泄漏的工具调用块文本不落历史（防 few-shot 污染；用户侧流内不拦）
+        content = _tcg_neutralize(content)
     target_message = _get_target_message(message, role)
     if target_message:
         current_content = target_message.get('content', '')
@@ -1091,6 +1094,7 @@ from py.stream_relay import (
     _st_cancelled, _stream_producer_wrapper, _stream_consumer_generator,
     _stream_ttl_loop, _cleanup_stream,
 )
+from py.tool_call_guard import neutralize_leaked_blocks as _tcg_neutralize
 from py.routers import (media, bots, memories, system, files,
                         bot_conversations, tasks, agents, workflows,
                         status, notifications, transfer)
@@ -5047,6 +5051,75 @@ def _notify_web_approval_pending(_st):
         pass
 
 
+async def _stream_second_round(_st, client, model, msg, extra, extra_params, settings, request,
+                               tools, force_no_tools, usage_info, _ctx_peak, in_reasoning,
+                               content_buffer, reasoning_buffer, open_tag, close_tag):
+    """工具循环轮：create + 消费（_stream_loop_pass）+ 终守卫 + 闭合落账。
+
+    S163：正文泄漏幻觉调用块（引擎把未声明名的调用降级回文本）且本轮声明了
+    工具时——中和落账 + 注入自纠消息重发（上限 MAX_TCG_RETRIES），新轮产出
+    结构化 tool_calls 即由外层走既有工具循环真实执行；只提示不改写执行。
+    写回 _st：tc_round / fc / usage_info / _ctx_peak / in_reasoning /
+    content_buffer / reasoning_buffer；cancel 路径置 tc_round_done 并终结。
+    """
+    from py.tool_call_guard import (MAX_TCG_RETRIES, build_correction_message,
+                                    declared_tool_names, detect_leaked_calls)
+    _tools_now = []
+    if tools and not force_no_tools:
+        extra['tools'] = tools
+        _tools_now = tools
+    while True:
+        full_content = ""
+        if _st_cancelled(_st):
+            logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
+            yield "data: [DONE]\n\n"
+            _st["tc_round"] = []
+            _st["tc_round_done"] = True
+            return
+        response = await client.chat.completions.create(
+            model=model,
+            messages=msg,  # 添加图片信息到消息
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body=extra_params,  # 其他参数
+            **_apply_ctx_guardrail(extra, msg, settings)
+        )
+        tool_calls = []
+        _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
+        async for _c in _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
+            yield _c
+        usage_info = _st["usage_info"]
+        _ctx_peak = _st["_ctx_peak"]
+        full_content = _st["full_content"]
+        in_reasoning = _st["in_reasoning"]
+        content_buffer = _st["content_buffer"]
+        reasoning_buffer = _st["reasoning_buffer"]
+        _st["fc"] = full_content
+        async for _c in _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
+            yield _c
+        full_content = _st["fc"]
+        if not tool_calls and full_content:
+            _leaked = detect_leaked_calls(full_content)
+            _declared = declared_tool_names(_tools_now)
+            _retries = _st.get("tcg_retries", 0)
+            if _leaked and _declared and _retries < MAX_TCG_RETRIES and not _st_cancelled(_st):
+                _st["tcg_retries"] = _retries + 1
+                content_append(request.messages, 'assistant', full_content)  # 已含 S163 中和
+                request.messages.append({
+                    "role": "user",
+                    "content": build_correction_message(_leaked, _declared),
+                })
+                logging.getLogger("app").info(
+                    "[TCG] 正文泄漏未声明工具调用，自纠重试 %d/%d: %s",
+                    _retries + 1, MAX_TCG_RETRIES, _leaked)
+                continue
+            # 将响应添加到消息列表（S68：空生成不写历史；S163：泄漏块经
+            # content_append 中和后落账，防 few-shot 污染）
+            content_append(request.messages, 'assistant', full_content)
+        _st["tc_round"] = tool_calls
+        return
+
+
 async def _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
     """While-loop tool round: ack, dispatch, SSE results, abort/cancel signals.
 
@@ -5068,7 +5141,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
         })
     request.messages.append({
         "role": "assistant",
-        "content": full_content or "",
+        "content": _tcg_neutralize(full_content) or "",  # S163：防泄漏块入历史
         "tool_calls": assistant_tool_calls,
         "reasoning_content": "",
     })
@@ -6181,39 +6254,17 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             if settings['temperature'] !=1:
                 extra['temperature'] = settings['temperature']
 
-            full_content = ""
-            if tools and not force_no_tools:
-                extra['tools'] = tools
-            if _st_cancelled(_st):
-                logging.getLogger("app").info("[Cancel] 流已被用户取消，工具后续轮次终止")
-                yield "data: [DONE]\n\n"
-                return
-            response = await client.chat.completions.create(
-                model=model,
-                messages=msg,  # 添加图片信息到消息
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body = extra_params, # 其他参数
-                **_apply_ctx_guardrail(extra, msg, settings)
-            )
-            tool_calls = []
-            _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
-            async for _c in _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
+            async for _c in _stream_second_round(_st, client, model, msg, extra, extra_params, settings, request, tools, force_no_tools, usage_info, _ctx_peak, in_reasoning, content_buffer, reasoning_buffer, open_tag, close_tag):
                 yield _c
+            if _st.pop("tc_round_done", False):
+                return  # cancel 路径：helper 已发 DONE
+            tool_calls = _st["tc_round"]
             usage_info = _st["usage_info"]
             _ctx_peak = _st["_ctx_peak"]
-            full_content = _st["full_content"]
+            full_content = _st["fc"]
             in_reasoning = _st["in_reasoning"]
             content_buffer = _st["content_buffer"]
             reasoning_buffer = _st["reasoning_buffer"]
-            _chunk_count2 = _st["_chunk_count2"]
-            _st["fc"] = full_content
-            async for _c in _stream_final_guard(_st, content_buffer, reasoning_buffer, settings):
-                yield _c
-            full_content = _st["fc"]
-            if not tool_calls and full_content:
-                # 将响应添加到消息列表（S68：空生成不写历史，防 assistant 空串污染上下文）
-                content_append(request.messages, 'assistant', full_content)
             # 工具和深度搜索
             if tool_calls:
                 pass

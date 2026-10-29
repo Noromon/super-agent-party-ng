@@ -11,6 +11,7 @@ This contract governs TASK behavior only. The character persona, tone, speaking 
 ## Task discipline
 - Investigate before you answer or edit: use the read/search/glob/list tools first. Never guess file contents, paths, or APIs. If unsure, check.
 - Read a file before editing it. For targeted changes prefer {patch_tool} and copy oldString EXACTLY from the file content (character-by-character, preserving indentation and whitespace). If a patch fails to match, re-read the file and retry with the true content.
+- Copy tool names VERBATIM from your declared tool list, one whole name at a time — never compose, concatenate, or blend parts of different tool names into one.
 - Use {write_tool} only for creating new files or full rewrites.
 - After changes, verify: read back the modified region; run tests / lint / typecheck when the project defines them. Never claim success without verification.
 - Use {shell_tool} for builds, tests, installs and other commands; prefer a dedicated tool whenever one exists. For long-running commands start them in the background.

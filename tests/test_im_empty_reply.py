@@ -154,7 +154,9 @@ def test_guard_module_contract():
 
 
 def test_server_no_empty_assistant_append():
+    # S163：该闭合段随工具循环轮拆入 _stream_second_round（S68 语义不变）
     src = _read("server.py")
-    assert ("if not tool_calls and full_content:\n"
-            "                # 将响应添加到消息列表（S68：空生成不写历史，防 assistant 空串污染上下文）\n"
-            "                content_append(request.messages, 'assistant', full_content)") in src
+    seg = src[src.find("async def _stream_second_round"):]
+    assert ("if not tool_calls and full_content:" in seg
+            and "content_append(request.messages, 'assistant', full_content)" in seg
+            and "S68：空生成不写历史" in seg)

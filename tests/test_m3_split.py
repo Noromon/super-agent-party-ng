@@ -42,6 +42,7 @@ STREAM_HELPERS = [
     "_stream_reasoner_update",
     "_stream_regrab",
     "_stream_loop_pass",
+    "_stream_second_round",  # S163：工具循环轮（自纠重试）自 stream_generator 拆出
     "_stream_drs_loop_round",
     "_stream_round_compress",
     "_stream_usage_event",
