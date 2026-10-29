@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     on: (channel, func) => {
       // 只允许特定的通道
-      const validChannels = ['backend-ready', 'trigger-search', 'hud-toggle-capsule'];
+      const validChannels = ['backend-ready', 'trigger-search', 'hud-toggle-capsule', 'hud-demo'];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
       }
@@ -151,6 +151,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openIslandWindow: () => ipcRenderer.invoke('open-island-window'),
   closeIslandWindow: () => ipcRenderer.invoke('close-island-window'),
   getIslandWindowState: () => ipcRenderer.invoke('get-island-window-state'),
+  showHudDemo: () => ipcRenderer.invoke('show-hud-demo'),  // S167
   onIslandWindowClosed: (callback) => {
     ipcRenderer.removeAllListeners('island-window-closed');
     ipcRenderer.on('island-window-closed', () => callback());

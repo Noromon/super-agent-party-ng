@@ -9,7 +9,7 @@
     enabled: true,        // HUD 总开关（关=不渲染本层）
     capsule: true,        // 胶囊模式：折叠圆点+角标；关=完整气泡
     position: 'se',       // nw|ne|sw|se|n|s
-    dim: true,            // 空闲深隐
+    dim: false,           // 空闲深隐（S167：默认关，深隐后仅剩 10% 圆点几乎不可见，改为可选）
     idleMs: 5000,         // 空闲判定
     opacity: 0.9,         // 活跃不透明度
     dimOpacity: 0.1,      // 空闲不透明度
@@ -177,35 +177,88 @@
     if (e.key === CFG_KEY) { cfg = loadCfg(); applyCfg(); }
   });
 
+  function showDemo() {
+    if (!layer) { cfg.enabled = true; build(); }
+    wake();
+    lastIcon = ICONS.system;
+    lastText = 'HUD 演示气泡：新通知会像这样弹出（审批类会自动展开）';
+    expandBubble(ICONS.system, lastText, 8000);
+    toast('HUD 已启用');
+  }
+
+  var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim' };
+
   function bindSettings() {
-    // 主窗口（chat.html）系统设置页：卡片控件 ↔ localStorage 双向，岛页经 storage 事件热应用
+    // 主窗口（chat.html）系统设置页：草稿模式 + 显式保存；保存后岛页经 storage 事件热应用
+    var draft = loadCfg();
+    var dirty = false;
     function $id(x) { return document.getElementById(x); }
-    function fill() {
-      var c = loadCfg();
-      if (!$id('sap-hud-enabled')) return;
-      $id('sap-hud-enabled').checked = !!c.enabled;
-      $id('sap-hud-capsule').checked = !!c.capsule;
-      $id('sap-hud-dim').checked = !!c.dim;
-      $id('sap-hud-pos').value = c.position;
+    function status(txt, ok) {
+      var s = $id('sap-hud-status');
+      if (!s) return;
+      s.textContent = txt;
+      s.style.color = ok ? '#5bbf6b' : 'rgba(255,255,255,.55)';
+    }
+    function paint() {
+      $id('sap-hud-enabled').checked = !!draft.enabled;
+      $id('sap-hud-capsule').checked = !!draft.capsule;
+      $id('sap-hud-dim').checked = !!draft.dim;
+      $id('sap-hud-pos').value = draft.position;
       Array.prototype.forEach.call(document.querySelectorAll('.sap-hud-cat'), function (n) {
-        n.checked = !!(c.show && c.show[n.getAttribute('data-cat')]);
+        n.checked = !!(draft.show && draft.show[n.getAttribute('data-cat')]);
       });
+    }
+    function fill() {
+      if (!$id('sap-hud-enabled')) return;
+      if (dirty) return; // 有未保存草稿时不用存储值覆盖编辑
+      draft = loadCfg();
+      paint();
     }
     document.addEventListener('change', function (e) {
       var t = e.target;
       if (!t || !t.id || t.id.indexOf('sap-hud-') !== 0) return;
-      var c = loadCfg();
-      if (t.id === 'sap-hud-pos') { c.position = t.value; }
-      else if (t.classList.contains('sap-hud-cat')) { c.show[t.getAttribute('data-cat')] = !!t.checked; }
-      else if (t.id === 'sap-hud-enabled') { c.enabled = !!t.checked; }
-      else if (t.id === 'sap-hud-capsule') { c.capsule = !!t.checked; }
-      else if (t.id === 'sap-hud-dim') { c.dim = !!t.checked; }
+      if (t.id === 'sap-hud-save' || t.id === 'sap-hud-open' || t.id === 'sap-hud-reset') return;
+      if (t.id === 'sap-hud-pos') { draft.position = t.value; }
+      else if (t.classList.contains('sap-hud-cat')) { draft.show[t.getAttribute('data-cat')] = !!t.checked; }
+      else if (KEYMAP[t.id]) { draft[KEYMAP[t.id]] = !!t.checked; }
       else { return; }
-      try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch (e2) {}
+      dirty = true;
+      status('有未保存的更改，点击「保存设置」生效');
     });
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      while (t && t.id !== 'sap-hud-save' && t.id !== 'sap-hud-open' && t.id !== 'sap-hud-reset') { t = t.parentElement; }
+      if (!t) return;
+      if (t.id === 'sap-hud-save') {
+        try {
+          localStorage.setItem(CFG_KEY, JSON.stringify(draft));
+          dirty = false;
+          status('已保存 ✓（灵动岛侧即时生效）', true);
+          setTimeout(function () { if (!dirty) status(''); }, 2500);
+        } catch (e2) { status('保存失败：' + e2); }
+      } else if (t.id === 'sap-hud-reset') {
+        draft = (function () { var c = {}; for (var k in DEFAULTS) c[k] = DEFAULTS[k]; c.show = Object.assign({}, DEFAULTS.show); return c; })();
+        dirty = true;
+        paint();
+        status('已恢复默认值（未保存），点击「保存设置」生效');
+      } else if (t.id === 'sap-hud-open') {
+        var api = window.electronAPI || {};
+        if (api && api.openIslandWindow) {
+          api.openIslandWindow();
+          if (api.showHudDemo) setTimeout(function () { api.showHudDemo(); }, 800);
+        } else {
+          status('预览需在桌面端主窗口中使用');
+        }
+      }
+    });
+    // 持续回填：Vue v-if 每次切回都会重建卡片 DOM，一次性 observer 会导致控件回到默认态（S167 根因）
+    var fillTimer = null;
+    function scheduleFill() {
+      if (fillTimer) return;
+      fillTimer = setTimeout(function () { fillTimer = null; fill(); }, 120);
+    }
+    new MutationObserver(scheduleFill).observe(document.body, { childList: true, subtree: true });
     if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', fill); } else { fill(); }
-    var mo = new MutationObserver(function () { if ($id('sap-hud-enabled')) { fill(); mo.disconnect(); } });
-    mo.observe(document.body, { childList: true, subtree: true });
   }
 
   function init() {
@@ -218,6 +271,7 @@
       });
     } else {
       window.electron.ipcRenderer.on('hud-toggle-capsule', toggleCapsule);
+      window.electron.ipcRenderer.on('hud-demo', showDemo);
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () { if (cfg.enabled) build(); });

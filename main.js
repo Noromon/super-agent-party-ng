@@ -1604,6 +1604,22 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       return !!(dynamicIslandWindow && !dynamicIslandWindow.isDestroyed());
     });
 
+    // S167：设置卡「预览 HUD」——岛存活即发，页面未加载完则 did-finish-load 兜底补发一次
+    ipcMain.handle('show-hud-demo', async () => {
+      if (!dynamicIslandWindow || dynamicIslandWindow.isDestroyed()) return false;
+      const send = () => {
+        if (dynamicIslandWindow && !dynamicIslandWindow.isDestroyed()) {
+          dynamicIslandWindow.webContents.send('hud-demo');
+        }
+      };
+      if (dynamicIslandWindow.webContents.isLoading()) {
+        dynamicIslandWindow.webContents.once('did-finish-load', send);
+      } else {
+        send();
+      }
+      return true;
+    });
+
     // S139(R6)：剪切板 IPC（island-app 消费，上游终态逐字）
     ipcMain.handle('clipboard-read', async () => {
       try {

@@ -13,10 +13,11 @@
 
 .sap-hud-capsule {
   position: absolute;
-  width: 14px; height: 14px;
+  width: 18px; height: 18px;
   border-radius: 50%;
-  background: rgba(20, 20, 24, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(24, 24, 30, 0.72);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(6px);
 }
 .sap-hud-capsule .hud-badge {
