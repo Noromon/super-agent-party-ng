@@ -3355,8 +3355,10 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         
         await _inject_workspace_memory(request, cwd, cli_settings)
 
-    if request.is_app_bot and request.platform:
+    if request.is_app_bot and request.platform and request.platform != "diary":
         # S145：对端名录——来源行升级（别名+ID）+ 身份/名录注入 + seen 登记
+        # S165：diary 独处书写非对话语境，「用户正在使用 diary 软件与你交流」
+        # 与日记引擎「用户并没有主动与你说话」正面矛盾（认知扭曲源头），整块跳过
         _pid = request.peer_id
         _peer_ent = resolve_entry(request.platform, _pid, settings) if _pid else None
         if _peer_ent:
@@ -6714,7 +6716,7 @@ def _version_fingerprint():
 async def _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0):
     """Character-book lore + persona fields + mem0 relevant-memory recall."""
     if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
-        if settings["memorySettings"]["userName"] and settings["memorySettings"]["userName"] != "user":
+        if settings["memorySettings"]["userName"] and settings["memorySettings"]["userName"] != "user" and getattr(request, "platform", "") != "diary":  # S165：diary 独处无「当前交流者」，名字行是认知扭曲原料
             logging.getLogger("app").info("添加用户名：\n\n" + settings["memorySettings"]["userName"] + "\n\n用户名结束\n\n")
             content_append(request.messages, 'system', "当前与你交流的人的名字为：\n\n" + settings["memorySettings"]["userName"] + "\n\n")
         lore_content = ""

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 import random
 import logging
@@ -91,8 +92,9 @@ async def build_recall_seed(book_id: str = DEFAULT_BOOK_ID, prev_ratio: float = 
         try:
             recent = await get_recent_diary_entries(book_id, n=1)
             if recent:
-                head = (recent[-1].get("content") or "").strip().replace("\n", " ")
-                if head:
+                head = _strip_injection_traces(
+                    (recent[-1].get("content") or "").strip().replace("\n", " "))
+                if len(head) >= 8:  # S165：剥痕后残壳过短则退回词池种子，不引用残句
                     return f"上一篇日记你写到「{head[:40]}」，可以顺着往下想，也可以彻底想点别的"
         except Exception as e:
             logging.debug(f"[DiaryEngine] 读取上一篇日记失败，退回词池种子: {e}")
@@ -106,6 +108,21 @@ _TODAY_TYPE_CN = {
     "imMessage": "主动消息", "browserControl": "浏览器", "smartHome": "智能家居",
     "chatSummary": "对话摘要",
 }
+
+
+# S165：注入痕迹过滤器——旧的污染日记（把「当前与你交流的人的名字为…」等
+# 系统配置行当冥想题材）会经【今日概况】条目头与思绪种子引子回灌新日记，
+# 形成杜撰引文的自我强化链。入概况/引子前剥除这类句式，存量污染随时间脱敏。
+_INJECTION_TRACE_RE = re.compile(
+    r"(?:宇宙)?当前与你交流的人的名字[为是]?[：:]?[\u4e00-\u9fff\w]{0,10}"
+    r"|用户正在使用\s*\S{0,12}\s*软件与你交流\S{0,30}"
+    r"|【系统提示】[^\n]{0,60}")
+
+
+def _strip_injection_traces(text):
+    if not text:
+        return text
+    return _INJECTION_TRACE_RE.sub("", str(text)).strip()
 
 
 async def _fetch_today_new_memories(limit: int = 5):
@@ -155,7 +172,8 @@ async def build_today_context(book_id: str, now=None, max_entries: int = 6):
         think_n = sum(1 for e in todays if e.get("type") == "think")
         for e in [e for e in todays if e.get("type") != "think"][-max_entries:]:
             t = str(e.get("time") or e.get("created_at") or "")[11:16]
-            head = (e.get("content") or "").strip().replace("\n", " ")[:30]
+            head = _strip_injection_traces(
+                (e.get("content") or "").strip().replace("\n", " "))[:30]
             kind = _TODAY_TYPE_CN.get(e.get("type"), e.get("type") or "记录")
             interact.append(f"- {t} {kind}：{head}")
     except Exception as e:
@@ -586,7 +604,7 @@ class DiaryEngine:
         sys_parts = []
         if persona:
             sys_parts.append(persona)
-        sys_parts.append(f"当前时间：{now_str}（星期{weekday}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。")
+        sys_parts.append(f"当前时间：{now_str}（星期{weekday}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。日夜晨昏的判断只以当前时间为准，旧日记或记忆里的夜晚场景与此刻无关。")
         system_prompt = "\n\n".join(sys_parts)
         user_prompt = ACTION_DEFAULT_PROMPTS.get(action, ACTION_DEFAULT_PROMPTS["think"])
         # S83：思绪种子——让每次检索 query 变化，长期记忆召回不再恒为同一条
