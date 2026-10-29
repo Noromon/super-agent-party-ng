@@ -43,6 +43,14 @@ class TestSettingsCardUi:
         assert "showHudDemo" in HUD_JS
 
 
+class TestGlueLoadedOnBothEntries:
+    def test_index_and_chat_both_load_hud_glue(self):
+        # S169 事故钉：主窗口 UI=index.html，只挂 chat.html 会导致设置卡胶水永不执行
+        for page in ("index.html", "chat.html"):
+            body = (ROOT / "static" / page).read_text(encoding="utf-8")
+            assert 'src="js/hud-capsule.js"' in body, f"{page} 缺 hud-capsule.js"
+
+
 class TestDemoChannel:
     def test_main_handle(self):
         assert "'show-hud-demo'" in MAIN

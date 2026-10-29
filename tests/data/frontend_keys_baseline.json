@@ -104,7 +104,8 @@
    "js/methods/99_skills.js",
    "js/vendor_params.js",
    "js/boot_templates.js",
-   "js/renderer.js"
+   "js/renderer.js",
+   "js/hud-capsule.js"
   ],
   "chat.html": [
    "libs/clipboard.min.js",
