@@ -388,6 +388,13 @@ def get_mem0_instance(memory_id, cur_memory, settings):
     return m0
 
 
+def invalidate_memory_cache(memory_id):
+    """S161：清除缓存的 mem0 实例（覆盖式导入删库后必须调用，否则旧实例
+    内存态会被下次写回盘）。应在 submit_memory_job 锁内调用。"""
+    with _m0_lock:
+        _m0_cache.pop(memory_id, None)
+
+
 def _idx2id_guard_warning(m0, memory_id: str):
     """S133/S134：faiss 索引/docstore/idx2id 一致性自检 + 自动补齐。
 

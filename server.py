@@ -13,6 +13,7 @@ from py.context_builder import sanitize_tool_chains
 from py import auth as sap_auth
 from py.defaults import DEFAULT_SERVER_PORT, GSV_TTS_URL
 from py.guard import load_safety_words, check_content_safety
+from py.token_guard import neutralize as _neutralize, neutralize_deep, apply_eos_guard
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 
 from py.tool_assembly import build_llm_tools
@@ -1092,8 +1093,9 @@ from py.stream_relay import (
 )
 from py.routers import (media, bots, memories, system, files,
                         bot_conversations, tasks, agents, workflows,
-                        status, notifications)
+                        status, notifications, transfer)
 app.include_router(notifications.router)  # S151：通知中心
+app.include_router(transfer.router)  # S161：记忆/日记导入导出
 app.include_router(media.router)
 app.include_router(bots.router)
 app.include_router(memories.router)
@@ -1117,6 +1119,8 @@ app.include_router(peers_router)
 from py.peer_identity import build_peer_identity_block, display_name, record_seen, resolve_entry  # S145：对端身份注入
 from py.diary_api import router as diary_router  # A5：/api/diary/*（book CRUD + 查询）
 app.include_router(diary_router)
+from py.routers.eos_guard import router as eos_guard_router  # S160：/api/eos_guard/*（潜龙勿用面板）
+app.include_router(eos_guard_router)
 
 @app.middleware("http")
 async def external_api_cors(request: Request, call_next):
@@ -1992,6 +1996,7 @@ class ChatRequest(BaseModel):
     is_app_bot: bool = False
     platform: str = None
     is_sub_agent: bool = False
+    is_quarantined: bool = False  # S160：受污染话题会话——跳过 mem0/日记/总结等一切持久化写入，保留读侧
     recall_query: str = None
     enable_tools : List[str] = None
     disable_tools: List[str] = None
@@ -2112,8 +2117,8 @@ def _build_group_memory_prompt(group: dict, memories: list[dict]) -> str:
     ]
     lines = []
     for idx, memory in enumerate(memories, 1):
-        summary = str(memory.get('summary') or '').strip()
-        content = str(memory.get('content') or '').strip()
+        summary = _neutralize(str(memory.get('summary') or '').strip(), store="group-recall")
+        content = _neutralize(str(memory.get('content') or '').strip(), store="group-recall")
         memory_type = memory.get('memory_type', 'fact')
         if summary and content and summary != content:
             lines.append(f"{idx}. [{memory_type}] 摘要: {summary}")
@@ -2256,6 +2261,9 @@ async def _upsert_group_memories(group_id: str, source_chat_id: str, source_mess
     async with aiosqlite.connect(COVS_PATH) as db:
         db.row_factory = aiosqlite.Row
         for memory in memories:
+            # S160：控制 token 形状净化（写侧收口，防持久群记忆成为强化源）
+            memory["content"] = _neutralize(memory.get("content") or "", store="group-memory")
+            memory["summary"] = _neutralize(memory.get("summary") or "", store="group-memory")
             normalized_summary = _normalize_memory_text(memory["summary"])
             normalized_content = _normalize_memory_text(memory["content"])
             async with db.execute(
@@ -4199,7 +4207,7 @@ async def _stream_character_context(request, settings, user_prompt, cur_memory, 
                 user_id=memoryId, 
                 limit=memoryLimit
             )
-            relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
+            relevant_memories = json.dumps(neutralize_deep(relevant_memories, "recall"), ensure_ascii=False)
         except Exception as e:
             logging.getLogger("app").warning(f"m0.search error: {e}")
             relevant_memories = ""
@@ -5870,16 +5878,16 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
     # ========== 对话缓冲：记录助手回复用于闲时自动总结 ==========
     try:
         diary_settings_inner = (settings.get("diarySettings", {}) or {})
-        if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True):
+        if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined:
             ms = (settings or {}).get("memorySettings", {}) or {}
             buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
             if full_content:
-                append_to_chat_buffer(buffer_key, "assistant", full_content)
+                append_to_chat_buffer(buffer_key, "assistant", _neutralize(full_content, store="diary-buffer"))
     except Exception as e:
         logging.getLogger("app").info(f"[DiaryBuffer] 记录助手回复失败: {e}")
-    if m0 and not request.is_sub_agent:
+    if m0 and not request.is_sub_agent and not request.is_quarantined:
         logging.getLogger("app").info("记忆更新任务开始提交")
-        messages = f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}"
+        messages = _neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}", store="mem0-add")
         infer = cur_memory.get('infer', False) or False
         _m0_job = m0
         _mid = memoryId
@@ -5997,6 +6005,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
         if settings['reasoner']['reasoning_effort'] is not None:
             reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort']
+        # S160 L0a：本地推理引擎软压制（eosGuard.enabled 且 base_url 为回环时生效）
+        apply_eos_guard(reasoner_extra, settings, str(getattr(reasoner_client, "base_url", "") or ""))
         # 处理传入的异步工具ID查询
         async for _c in _stream_async_tools(request, async_tools_id):
             yield _c
@@ -6379,7 +6389,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     for e in recent:
                         diary_title = e.get("title", "") or e.get("content", "")[:24]
                         diary_lines.append(f"- [{e.get('time', '')[:16]}] ({e.get('type', '')}) {diary_title}: {e.get('content', '')[:200]}")
-                    diary_text = "\n".join(diary_lines)
+                    diary_text = _neutralize("\n".join(diary_lines), store="diary-recall")
                     content_append(request.messages, 'system',
                         "\n\n[角色日记 - 近期回忆]\n以下是该角色最近的日记记录，可供你参考其心境和经历：\n" + diary_text + "\n")
                     logging.getLogger("app").info(f"📔 [日记集成] 已注入 {len(recent)} 条日记到对话上下文")
@@ -6389,14 +6399,14 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # ========== 对话缓冲：记录用户消息用于闲时自动总结 ==========
         try:
             diary_settings = (settings.get("diarySettings", {}) or {})
-            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True):
+            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined:
                 ms = (settings or {}).get("memorySettings", {}) or {}
                 buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
                 update_buffer_identity(buffer_key, book_id=buffer_key,
                                        character_name=(ms.get("userName") or ""))
                 last_msg = request.messages[-1] if request.messages else None
                 if last_msg and last_msg.get("role") == "user":
-                    append_to_chat_buffer(buffer_key, "user", _extract_text_content(last_msg.get("content", "")))
+                    append_to_chat_buffer(buffer_key, "user", _neutralize(_extract_text_content(last_msg.get("content", "")), store="diary-buffer"))
         except Exception as e:
             logging.getLogger("app").info(f"[DiaryBuffer] 记录对话缓冲失败: {e}")
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
@@ -6737,7 +6747,7 @@ async def _complete_character_context(request, settings, user_prompt, cur_memory
                 )
                 if is_diary:
                     relevant_memories = _diary_recall_sample(relevant_memories, memoryLimit)
-                relevant_memories = json.dumps(relevant_memories, ensure_ascii=False)
+                relevant_memories = json.dumps(neutralize_deep(relevant_memories, "recall"), ensure_ascii=False)
             except Exception as e:
                 logging.getLogger("app").warning(f"m0.search error: {e}")
                 relevant_memories = ""
@@ -7135,8 +7145,8 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
             response_dict["choices"][0]['message']['reasoning_content'] = reasoning_content.group(1).strip()
             # 移除原内容中的标签部分
             response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
-    if m0:
-        messages=f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}"
+    if m0 and not request.is_sub_agent and not request.is_quarantined:
+        messages=_neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}", store="mem0-add-complete")
         infer = cur_memory.get('infer') or False
         _m0_job = m0
         _mid = memoryId
@@ -7242,6 +7252,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
     tools = await build_llm_tools(request, settings, _assemble_toolkit())
     extra = {}
     reasoner_extra = {}
+    # S160 L0a：本地推理引擎软压制（eosGuard.enabled 且 base_url 为回环时生效）
+    apply_eos_guard(reasoner_extra, settings, str(getattr(reasoner_client, "base_url", "") or ""))
     search_not_done = False
     search_task = ""
     try:
@@ -8595,6 +8607,11 @@ async def _ws_save_settings(websocket: WebSocket, data: dict):
             global_diary_engine.update_config(current.get("diarySettings"))
         except Exception as _de:
             logger.info(f"日记引擎配置同步异常: {_de}")
+        try:
+            from py.token_guard import apply_setting as _tg_apply_setting
+            _tg_apply_setting(current.get("eosGuard"))  # S160：净化总开关热更新
+        except Exception as _te:
+            logger.info(f"EOS 净化开关同步异常: {_te}")
     except Exception as _save_e:
         logger.error(f"[WS] save_settings 失败: {_save_e}")
         await ws_manager.send_json({

@@ -279,6 +279,63 @@
                       </template>
                     </el-dialog>
 
+                    <!-- S161：数据导入对话框（目标角色卡必选；覆盖=双重确认） -->
+                    <el-dialog destroy-on-close append-to-body
+                      v-model="transferImportOpen"
+                      :title="t('transferImportTitle')"
+                      width="640px"
+                    >
+                      <div style="display:flex;flex-direction:column;gap:14px;">
+                        <div>
+                          <div class="form-item-hint" style="margin-bottom:6px;">{{ t('transferFileStep') }}</div>
+                          <input type="file" accept="application/json,.json" @change="handleTransferFile" />
+                        </div>
+                        <div v-if="transferSources.length">
+                          <div style="font-weight:600;margin-bottom:6px;">{{ t('transferSources') }}</div>
+                          <el-checkbox
+                            v-for="s in transferSources" :key="s.card_id"
+                            v-model="transferSelected[s.card_id]" style="display:block;">
+                            {{ s.card_name || s.card_id }} —
+                            {{ t('transferMemoryCount').replace('{n}', (s.memories || []).length) }} /
+                            {{ t('transferDiaryCount').replace('{n}', (s.diary_entries || []).length) }}
+                            <span v-if="s.memory_error" style="color:var(--el-color-warning);">⚠ {{ t('transferMemReadFailed') }}</span>
+                          </el-checkbox>
+                        </div>
+                        <div v-if="transferSources.length">
+                          <div style="font-weight:600;margin-bottom:6px;">{{ t('transferTarget') }}</div>
+                          <el-select
+                            :persistent="false"
+                            v-model="transferTarget"
+                            filterable
+                            class="full-width-input"
+                            :placeholder="t('transferPickTarget')"
+                            @change="transferTargetChanged"
+                          >
+                            <el-option v-for="m in memories" :key="m.id" :label="m.name" :value="m.id" />
+                          </el-select>
+                        </div>
+                        <div v-if="transferTarget">
+                          <div style="font-weight:600;margin-bottom:6px;">{{ t('transferStrategy') }}</div>
+                          <el-radio-group v-model="transferStrategy">
+                            <el-radio-button value="merge">{{ t('transferMerge') }}</el-radio-button>
+                            <el-radio-button value="replace">{{ t('transferReplace') }}</el-radio-button>
+                          </el-radio-group>
+                          <div class="form-item-hint" :style="transferStrategy === 'replace' ? 'color:var(--el-color-danger);' : ''">
+                            {{ transferStrategy === 'replace' ? transferWarnText() : t('transferMergeHint') }}
+                          </div>
+                        </div>
+                      </div>
+                      <template #footer>
+                        <el-button @click="transferImportOpen = false">{{ t('cancel') }}</el-button>
+                        <el-button
+                          type="primary"
+                          :loading="transferBusy"
+                          :disabled="!transferPayload || !transferTarget"
+                          @click="transferDoImport"
+                        >{{ t('transferDoImport') }}</el-button>
+                      </template>
+                    </el-dialog>
+
                     <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;">           
                       <!-- 大输入框：限制最大宽度，让出空间给按钮 -->
                       <el-input
@@ -312,6 +369,16 @@
                           <i class="fa-solid fa-stop"></i>
                         </el-button>
                     </div>
+                    <!-- S161：数据备份工具条（内容级导出/导入，与卡定义导出互补） -->
+                    <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                      <el-button size="small" @click="transferExport('all')">
+                        <i class="fa-solid fa-file-export"></i>&nbsp;{{ t('transferExportAll') }}
+                      </el-button>
+                      <el-button size="small" @click="openTransferImport()">
+                        <i class="fa-solid fa-file-import"></i>&nbsp;{{ t('transferImportData') }}
+                      </el-button>
+                      <span class="form-item-hint">{{ t('transferToolbarHint') }}</span>
+                    </div>
                     <div class="provider-grid">
                       <!-- 已有记忆磁贴 -->
                       <div class="provider-card knowledge-card" v-for="memory in memories" :key="memory.id">
@@ -329,6 +396,23 @@
                                 v-if="memory.providerId"
                                :title="t('vectorInteract')">
                                 <i class="fa-solid fa-brain"></i>
+                              </el-button>
+                              <!-- S161：本卡数据（记忆+日记）导出/导入 -->
+                              <el-button
+                                @click="transferExport('card', memory.id)"
+                                type="info"
+                                circle
+                                size="small"
+                               :title="t('transferExport')">
+                                <i class="fa-solid fa-file-export"></i>
+                              </el-button>
+                              <el-button
+                                @click="openTransferImport(memory.id)"
+                                type="info"
+                                circle
+                                size="small"
+                               :title="t('transferImportToCard')">
+                                <i class="fa-solid fa-file-import"></i>
                               </el-button>
                               <el-button
                                 @click="downloadMemory(memory)"
