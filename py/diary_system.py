@@ -6,6 +6,7 @@ import logging
 import shortuuid
 from datetime import datetime
 from py.get_setting import USER_DATA_DIR
+from py.token_guard import neutralize
 
 # 存放所有日记本的目录（独立于系统配置文件，每个角色一个 JSON 文件）
 DIARY_DIR = os.path.join(USER_DATA_DIR, 'diary')
@@ -97,6 +98,12 @@ async def save_diary_data(data, book_id: str = DEFAULT_BOOK_ID):
     data.setdefault("characterName", "")
     # 截断，仅保留最近 MAX_ENTRIES 条
     data["entries"] = data["entries"][-MAX_ENTRIES:]
+    # S160：写侧收口——自主日记与 chatSummary 都经此落盘，控制 token 形状不得入本
+    for entry in data["entries"]:
+        if isinstance(entry, dict):
+            for key in ("title", "content"):
+                if isinstance(entry.get(key), str) and entry[key]:
+                    entry[key] = neutralize(entry[key], "diary")
     path = _book_file(book_id)
     try:
         def _write():

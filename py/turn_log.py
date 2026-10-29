@@ -12,6 +12,7 @@ import time
 import aiosqlite
 
 from py.get_setting import COVS_PATH
+from py.token_guard import neutralize_deep
 
 
 async def shadow_append(conversation_id, messages, log=None):
@@ -34,7 +35,7 @@ async def shadow_append(conversation_id, messages, log=None):
                 if _get(msg, "role") is None:
                     continue
                 batch.append((conversation_id, written + offset,
-                              json.dumps(msg, ensure_ascii=False, default=str), now))
+                              json.dumps(neutralize_deep(msg, "turn-log"), ensure_ascii=False, default=str), now))
             if batch:
                 await db.executemany(
                     "INSERT OR REPLACE INTO turn_log "

@@ -77,6 +77,7 @@
     ['memories', 'memories'],
     ['memorySettings', 'memorySettings'],
     ['llmGuardSettings', 'llmGuardSettings'],
+    ['eosGuard', 'eosGuardSettings'],
     ['text2imgSettings', 'text2imgSettings'],
     ['asrSettings', 'asrSettings'],
     ['ttsSettings', 'ttsSettings'],

@@ -495,6 +495,8 @@ async togglePlugin(plugin) {
   handleAutoLoadOnMenu(menu, sub) {
     if (menu === 'system') {
       this.loadBackupList();
+      this.eosGuardInit();          // S160 潜龙勿用：状态与巡检基线
+      this.eosGuardLoadQuarantine();
     } else if (menu === 'deploy-bot' && sub === 'im_bot') {
       this.fetchBotConversations();
       this.fetchXmppCertPending();

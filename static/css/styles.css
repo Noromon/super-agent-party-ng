@@ -12451,6 +12451,51 @@ pre.sp-content.sp-code {
   line-height: 1.5;
   margin-top: 4px;
 }
+.eos-help-icon {
+  margin-left: 6px;
+  color: var(--el-text-color-secondary, #909399);
+  cursor: help;
+  vertical-align: -2px;
+}
+.eos-help-icon:hover {
+  color: var(--el-color-primary, #409eff);
+}
+/* S160b 纯 CSS 帮助悬浮（禁用 el-tooltip：S111 popper 链红线） */
+.eos-help-wrap {
+  position: relative;
+  display: inline-block;
+}
+.eos-help-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 3000;
+  width: 480px;
+  max-width: 60vw;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.7;
+  text-align: left;
+  background: var(--el-bg-color-overlay, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: var(--el-text-color-primary, #303133);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: default;
+}
+.eos-help-wrap:hover .eos-help-pop {
+  visibility: visible;
+  opacity: 1;
+}
+.eos-help-pop b {
+  color: var(--el-color-primary, #409eff);
+}
 .ctx-ring {
   width: 34px;
   height: 34px;

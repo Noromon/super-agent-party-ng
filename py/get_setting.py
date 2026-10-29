@@ -562,12 +562,23 @@ async def load_settings():
                     await _write_settings_row(user_settings)  # B8(b03e7c0e): 火忘任务改 await，防与后续保存竞态
                 if not parse_ok:
                     return defaults if not IS_DOCKER else {**defaults, "isdocker": True}
-                return secret_box.decrypt_settings(user_settings)
+                out = secret_box.decrypt_settings(user_settings)
+                _sync_eos_guard(out)
+                return out
             else:
                 if IS_DOCKER:
                     defaults["isdocker"] = True
                 await _write_settings_row(defaults)
                 return defaults
+
+def _sync_eos_guard(settings):
+    """S160：把 eosGuard.sanitize 同步到 token_guard 总开关（惰性导入，独立加载时恒等回退）。"""
+    try:
+        from py.token_guard import apply_setting
+        apply_setting(settings.get("eosGuard") if isinstance(settings, dict) else None)
+    except Exception:
+        pass
+
 
 async def _write_settings_row(settings):
     # D-2 护栏：会话不属于主配置；用副本 pop，不改动调用方内存对象
@@ -645,11 +656,22 @@ async def load_covs():
         _COVS_DEGRADED = True
         return {"conversations": []}
 
+def _neutralize_covs(obj):
+    """S160：会话 blob 落库前净化控制 token 形状（写侧收口）。
+    本模块被 importlib 独立加载的场景下 py 包可能不可得，回退恒等。"""
+    try:
+        from py.token_guard import neutralize_deep
+    except Exception:
+        return obj
+    return neutralize_deep(obj, "covs")
+
+
 async def save_covs(settings):
     global _COVS_DEGRADED
     if _COVS_DEGRADED and not settings.get("conversations"):
         raise RuntimeError("covs save refused: 上次读取失败，拒绝用空会话库覆盖（坏数据已隔离备份）")
     await init_covs_db()
+    settings = _neutralize_covs(settings)
     data = json.dumps(settings, ensure_ascii=False, indent=2)
     async with _COVS_LOCK:
         async with aiosqlite.connect(COVS_PATH) as db:
@@ -674,6 +696,7 @@ async def save_bot_conv(conv_id, messages):
     if not str(conv_id).startswith(BOT_CONV_PREFIX):
         raise ValueError(f"bot 会话 id 必须以 {BOT_CONV_PREFIX} 开头: {conv_id!r}")
     await init_covs_db()
+    messages = _neutralize_covs(messages)
     async with _BOT_CONV_LOCK:
         async with aiosqlite.connect(COVS_PATH) as db:
             await db.execute(

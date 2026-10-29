@@ -527,6 +527,133 @@
                 <div style="font-size:12px; opacity:.65; margin-top:6px;">{{ t('dataGuardRestoreHint') }}</div>
               </div>
             </div>
+            <!-- ===== S160 潜龙勿用：EOS 污染防御与存量隔离 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-shield-halved"></i>
+                  </el-icon>
+                  {{ t('eosGuardTitle') }}
+                  <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpTitle')"></span>
+                  </span>
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-alert
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  :title="t('eosGuardWarn')"
+                  :description="t('eosGuardWarnNote')"
+                  style="margin-bottom:12px;">
+                </el-alert>
+                <el-form-item class="form-item-align">
+                  <template #label>
+                    <span>{{ t('eosGuardSanitize') }}</span>
+                    <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpSanitize')"></span>
+                  </span>
+                  </template>
+                  <el-switch v-model="eosGuardSettings.sanitize" @change="autoSaveSettings" />
+                  <span v-if="eosPatrol.sanitizeActive" style="margin-left:10px; font-size:12px; color:#67c23a;">{{ t('eosGuardActive') }}</span>
+                  <span v-else style="margin-left:10px; font-size:12px; color:#e6a23c;">{{ t('eosGuardInactive') }}</span>
+                  <div class="form-item-hint">{{ t('eosGuardSanitizeNote') }}</div>
+                </el-form-item>
+                <el-form-item class="form-item-align">
+                  <template #label>
+                    <span>{{ t('eosGuardBias') }}</span>
+                    <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpBias')"></span>
+                  </span>
+                  </template>
+                  <el-switch v-model="eosGuardSettings.enabled" @change="autoSaveSettings" />
+                  <div class="form-item-hint">{{ t('eosGuardBiasNote') }}</div>
+                </el-form-item>
+                <template v-if="eosGuardSettings.enabled">
+                  <el-form-item :label="t('eosGuardBiasValue')" class="form-item-align">
+                    <el-input-number v-model="eosGuardSettings.softBias" :min="-100" :max="-1" @change="autoSaveSettings" />
+                  </el-form-item>
+                  <el-form-item :label="t('eosGuardIds')" class="form-item-align">
+                    <el-input v-model="eosPatrol.idsText" @change="eosGuardIdsChanged" class="full-width-input" />
+                  </el-form-item>
+                </template>
+                <el-divider content-position="left">
+                  <span>{{ t('eosGuardPatrol') }}</span>
+                  <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpPatrol')"></span>
+                  </span>
+                </el-divider>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <el-button :loading="eosPatrol.scanning" @click="eosGuardScan">{{ t('eosGuardScanBtn') }}</el-button>
+                  <el-button
+                    type="danger"
+                    :loading="eosPatrol.applying"
+                    :disabled="!eosPatrol.report || !eosPatrol.report.total || !eosPatrol.confirmToken"
+                    @click="eosGuardApply">
+                    {{ t('eosGuardApplyBtn') }}
+                  </el-button>
+                  <el-button @click="eosGuardLoadQuarantine">{{ t('eosGuardInvBtn') }}</el-button>
+                </div>
+                <div v-if="eosPatrol.report" style="margin-top:10px; font-size:12px;">
+                  <div style="margin-bottom:4px;">
+                    {{ t('eosGuardScanTs') }}: {{ eosPatrol.report.ts }} — {{ t('eosGuardScanTotal') }}: {{ eosPatrol.report.total }}
+                    <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpReport')"></span>
+                  </span>
+                  </div>
+                  <div
+                    v-for="(v, k) in eosPatrol.report.stores"
+                    :key="k"
+                    v-show="eosRowKind(k) !== 'report' || eosPatrol.showReportOnly"
+                    style="opacity:.8;">
+                    <el-tag
+                      size="small"
+                      effect="plain"
+                      :type="eosRowKind(k) === 'report' ? 'warning' : (eosRowKind(k) === 'snapshot' ? 'info' : 'danger')"
+                      style="margin-right:6px;">
+                      {{ t('eosKind_' + eosRowKind(k)) }}
+                    </el-tag>
+                    {{ k }} — shapes {{ v[0] }} / names {{ v[1] }}
+                  </div>
+                  <div v-if="eosReportOnlyCount()" style="margin-top:4px;">
+                    <el-button link size="small" @click="eosPatrol.showReportOnly = !eosPatrol.showReportOnly">
+                      {{ eosPatrol.showReportOnly
+                        ? t('eosGuardHideReportOnly')
+                        : t('eosGuardShowReportOnly').replace('{n}', eosReportOnlyCount()) }}
+                    </el-button>
+                  </div>
+                </div>
+                <template v-if="eosPatrol.backups.length">
+                  <el-divider content-position="left">
+                    <span>{{ t('eosGuardBackups') }}</span>
+                    <span class="eos-help-wrap">
+                    <el-icon class="eos-help-icon"><i class="fa-solid fa-circle-question"></i></el-icon>
+                    <span class="eos-help-pop" v-html="t('eosHelpBackups')"></span>
+                  </span>
+                  </el-divider>
+                  <div v-for="b in eosPatrol.backups" :key="b.ts" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <span style="font-size:12px; flex:1;">{{ b.ts }}（{{ b.files.length }} {{ t('eosGuardFiles') }}）</span>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      plain
+                      :loading="eosPatrol.restoring"
+                      @click="eosGuardRestore(b.ts)">
+                      {{ t('eosGuardRestoreBtn') }}
+                    </el-button>
+                  </div>
+                  <div style="font-size:12px; opacity:.65; margin-top:4px;">{{ t('eosGuardRestoreHint') }}</div>
+                </template>
+                <div v-else style="margin-top:8px; font-size:12px; opacity:.65;">{{ t('eosGuardNoBackups') }}</div>
+              </div>
+            </div>
             <!-- R2-1 外观：保存背景图命名弹窗 -->
             <el-dialog
               v-model="saveBgDialogVisible"

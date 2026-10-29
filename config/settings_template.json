@@ -194,6 +194,11 @@
       "enabled": true,
       "debounceSeconds": 20
     },
+    "eosGuard": {
+      "enabled": false,
+      "softBias": -30,
+      "eosTokenIds": [248044, 248046]
+    },
     "codeSettings": {
       "enabled": false,
       "engine": "e2b",

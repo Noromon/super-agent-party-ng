@@ -9,6 +9,7 @@ import httpx
 from py.get_setting import get_port, load_settings, save_settings
 from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAULT_BOOK_ID
 from py.diary_chat_integration import summarize_and_save_buffers
+from py.token_guard import neutralize as _neutralize
 
 # 日记智能体「允许」使用的低权限只读工具（白名单）。
 # 相比黑名单，白名单更安全也更易维护：新增任何高权限工具都不会被日记系统误用，
@@ -172,7 +173,7 @@ async def build_today_context(book_id: str, now=None, max_entries: int = 6):
         tail = f"\n（此外今天你已自行发呆写下 {think_n} 篇思考，非互动证据）" if think_n else ""
         return ("【今日概况】以下是今天已经发生的记录，据此认知时间线，"
                 "切勿写出「用户今天还没找过我」之类与记录矛盾的话：\n"
-                + "\n".join(interact) + tail)
+                + _neutralize("\n".join(interact), store="diary-today") + tail)
     if think_n:
         return ("【今日概况】到目前为止，今天还没有与用户交流的记录"
                 f"（今天你自己已写过 {think_n} 篇思考，非互动）。"
