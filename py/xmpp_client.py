@@ -972,14 +972,17 @@ class XmppClient:
 
     async def _send_local_images(self, chat_jid: str, full_text: str):
         roots = await self._fence_roots()
+        blocked = []  # S164：(原因, 路径) 收集——静默拦截会让模型以为图已发出
         for m in re.finditer(r"([A-Za-z]:[\\/][^\s|\"'<>\[\]]+|/[^\s|\"'<>\[\]]+)"
                              r"(" + "|".join(re.escape(e) for e in IMAGE_EXTS) + r")",
                              full_text, re.IGNORECASE):
             raw = m.group(0)
             if not self._fence_ok(raw, roots):
                 logging.getLogger("app").warning("[XMPP] 拒绝外发围栏外路径: %s", raw)
+                blocked.append(("围栏外", raw))
                 continue
             if not os.path.isfile(raw):
+                blocked.append(("文件不存在", raw))
                 continue
             if not self._xep0363_supported:
                 await self._send_text(chat_jid, f"（图片暂无法上传：{os.path.basename(raw)}，"
@@ -993,6 +996,29 @@ class XmppClient:
             except Exception as e:
                 logging.getLogger("app").error("[XMPP] 图片外发失败: %r", e, exc_info=True)
                 await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(raw)}，{e}）")
+        if not blocked:
+            return
+        # S164 外发闭环：拦截必须反馈——注入提醒让下一轮模型自愈重发，
+        # 用户侧同步简报（此前静默 continue 使模型对丢图毫无感知）。
+        seen, uniq = set(), []
+        for why, p in blocked:
+            if p not in seen:
+                seen.add(p)
+                uniq.append((why, p))
+        detail = "; ".join(f"{why}: {p}" for why, p in uniq[:4])
+        names = "、".join(os.path.basename(p) for _, p in uniq[:4])
+        self.memoryList.setdefault(chat_jid, []).append({
+            "role": "user",
+            "content": ("【系统提示】你上一条回复中的图片路径被拦截，图片没有发出（"
+                        + detail + ("；另有若干" if len(uniq) > 4 else "") + "）。"
+                        "这些文件不存在或位于允许外发目录之外。若图片交付尚未完成："
+                        "先用 list_files 等工具确认文件的真实绝对路径"
+                        "（必须指向实际存在的文件），再以 markdown 图片语法重新发送；"
+                        "若本就不需要发图则忽略本提示。"),
+        })
+        await self._persist_conv(chat_jid)
+        await self._send_text(chat_jid, f"⚠ 有 {len(uniq)} 个图片路径被拦截（{names}），"
+                                        "已提醒模型确认真实绝对路径后重发。")
 
     async def _upload_and_share(self, chat_jid: str, file_path: str) -> Optional[str]:
         size = os.path.getsize(file_path)
