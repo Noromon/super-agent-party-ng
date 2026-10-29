@@ -25,6 +25,7 @@ from py.get_setting import convert_to_opus_simple, get_port, load_settings
 # ------------------ 配置模型 ------------------
 from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
+from py import stream_stop
 
 
 class DiscordBotConfig(BaseModel):
@@ -149,7 +150,7 @@ class DiscordClient(discord.Client):
             _act = shortcut_commands.parse_im_action(content_strip)
             if _act:
                 if _act == "stop":
-                    await msg.reply(shortcut_commands.STOP_MSG_EN)
+                    await msg.reply(await stream_stop.handle_im_stop("discord", cid, "en"))
                 elif _act == "reset":
                     self.memory[cid].clear()
                     await msg.reply(shortcut_commands.RESET_MSG_EN)
@@ -283,6 +284,7 @@ class DiscordClient(discord.Client):
         async for chunk in stream:
             if not chunk.choices: continue
             delta_raw = chunk.choices[0].delta
+            stream_stop.registry.track("discord", cid, delta_raw)  # S162：/stop 真实停止记账
             finish_reason = chunk.choices[0].finish_reason or finish_reason
             if hasattr(delta_raw, "audio") and delta_raw.audio:
                 if "data" in delta_raw.audio:
@@ -332,6 +334,7 @@ class DiscordClient(discord.Client):
                     seg = self._clean_text(seg)
                     if seg and not self.config.enable_tts: await self._send_segment(msg, seg)
                     if force_split: break
+        stream_stop.registry.clear("discord", cid)  # S162：流终清账
         if state["text_buffer"]:
             seg = self._clean_text(state["text_buffer"])
             if seg and not self.config.enable_tts: await self._send_segment(msg, seg)

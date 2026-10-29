@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
 
 from py.get_setting import get_port, load_settings
+from py import stream_stop
 from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSettings
 
 try:
@@ -327,7 +328,7 @@ class WeChatClient:
             _act = shortcut_commands.parse_im_action(user_text)
             if _act:
                 if _act == "stop":
-                    await self._send_text(msg, shortcut_commands.STOP_MSG_ZH)
+                    await self._send_text(msg, await stream_stop.handle_im_stop("wechat", chat_id))
                 elif _act == "reset":
                     self.memoryList[chat_id] = []
                     await self._send_text(msg, shortcut_commands.RESET_MSG_ZH)
@@ -372,6 +373,7 @@ class WeChatClient:
             async for chunk in stream:
                 if not chunk.choices: continue
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
+                stream_stop.registry.track("wechat", chat_id, chunk.choices[0].delta)  # S162：/stop 真实停止记账
                 content = chunk.choices[0].delta.content or ""
                 
                 # 处理推理内容
@@ -413,6 +415,7 @@ class WeChatClient:
                         await self._send_text(msg, clean_text)
                         await asyncio.sleep(0.1)
 
+            stream_stop.registry.clear("wechat", chat_id)  # S162：流终清账
             # 处理流结束后的残留内容
             if state["text_buffer"]:
                 clean_text = self._clean_text(state["text_buffer"])

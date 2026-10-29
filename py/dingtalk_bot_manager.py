@@ -25,6 +25,7 @@ from py.random_topic import get_random_topics
 from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
+from py import stream_stop
 
 class DingtalkBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -284,7 +285,7 @@ class DingtalkClientLogic:
             _act = shortcut_commands.parse_im_action(user_text)
             if _act:
                 if _act == "stop":
-                    handler.reply_text(shortcut_commands.STOP_MSG_ZH, incoming_message)
+                    handler.reply_text(await stream_stop.handle_im_stop("dingtalk", cid), incoming_message)
                 elif _act == "reset":
                     self.memoryList[cid] = []
                     handler.reply_text(shortcut_commands.RESET_MSG_ZH, incoming_message)
@@ -345,6 +346,7 @@ class DingtalkClientLogic:
             async for chunk in stream:
                 if not chunk.choices: continue
                 delta = chunk.choices[0].delta
+                stream_stop.registry.track("dingtalk", cid, delta)  # S162：/stop 真实停止记账
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
 
                 # 处理推理内容 (如 DeepSeek R1)
@@ -387,6 +389,8 @@ class DingtalkClientLogic:
         except Exception as e:
             logging.getLogger("app").info(f"钉钉 AI 生成异常: {e}")
             handler.reply_text(f"抱歉，处理消息时出错: {str(e)}", incoming_message)
+        finally:
+            stream_stop.registry.clear("dingtalk", cid)  # S162：流终清账
 
     async def _get_access_token(self) -> Optional[str]:
         """获取钉钉 OpenAPI 的访问令牌"""

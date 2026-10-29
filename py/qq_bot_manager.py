@@ -25,6 +25,7 @@ from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 
 from py.base_bot import BaseBotManager
+from py import stream_stop
 
 
 class QQBotConfig(BaseModel):
@@ -345,7 +346,7 @@ class MyClient(botpy.Client):
             _act = shortcut_commands.parse_im_action(message.content.strip())
             if _act:
                 if _act == "stop":
-                    await self._send_text_message(message, shortcut_commands.STOP_MSG_ZH)
+                    await self._send_text_message(message, await stream_stop.handle_im_stop("qq", c_id))
                 elif _act == "reset":
                     self.memoryList[c_id] = []
                     await self._send_text_message(message, shortcut_commands.RESET_MSG_ZH)
@@ -407,7 +408,8 @@ class MyClient(botpy.Client):
                     chunk_dict = chunk.model_dump()
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta:
-                        reasoning_content = delta.get("reasoning_content", "") 
+                        stream_stop.registry.track("qq", c_id, delta)  # S162：/stop 真实停止记账
+                        reasoning_content = delta.get("reasoning_content", "")
                         reasoning_chars += len(reasoning_content)
                         tool_content = delta.get("tool_content", "")
                         async_tool_id = delta.get("async_tool_id", "")
@@ -490,6 +492,7 @@ class MyClient(botpy.Client):
             if clean_text:
                 await self._send_text_message(message, clean_text)
         finally:
+            stream_stop.registry.clear("qq", c_id)  # S162：流终清账
             # 清理状态
             if c_id in self.processing_states:
                 del self.processing_states[c_id]
@@ -638,7 +641,7 @@ class MyClient(botpy.Client):
             _act = shortcut_commands.parse_im_action(message.content.strip())
             if _act:
                 if _act == "stop":
-                    await self._send_group_text(message, shortcut_commands.STOP_MSG_ZH, state)
+                    await self._send_group_text(message, await stream_stop.handle_im_stop("qq", g_id), state)
                 elif _act == "reset":
                     self.memoryList[g_id] = []
                     await self._send_group_text(message, shortcut_commands.RESET_MSG_ZH, state)
@@ -699,6 +702,7 @@ class MyClient(botpy.Client):
                     chunk_dict = chunk.model_dump()
                     delta = chunk_dict["choices"][0].get("delta", {})
                     if delta:
+                        stream_stop.registry.track("qq", g_id, delta)  # S162：/stop 真实停止记账
                         reasoning_content = delta.get("reasoning_content", "")
                         reasoning_chars += len(reasoning_content)
                         tool_content = delta.get("tool_content", "")
@@ -779,6 +783,7 @@ class MyClient(botpy.Client):
             if clean_text:
                 await self._send_group_text(message, clean_text, state)
         finally:
+            stream_stop.registry.clear("qq", g_id)  # S162：流终清账
             # 清理状态
             del self.group_states[g_id]
 

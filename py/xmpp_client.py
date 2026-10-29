@@ -637,17 +637,14 @@ class XmppClient:
         if text.lower() == "/help":
             await self._send_text(frm, "/new 清空对话  /id 查看目标ID  /help 帮助")
             return
-        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
-        from py import shortcut_commands
+        # A11 IM 快捷指令（S162：/stop 经 stream_stop 真实停止生成）
+        from py import shortcut_commands, stream_stop
         if await shortcut_commands.im_shortcuts_enabled():
             _act = shortcut_commands.parse_im_action(text)
             if _act:
                 if _act == "stop":
-                    _canc = await approval_im.cancel_pending("xmpp", frm)  # S150
-                    _stop_msg = shortcut_commands.STOP_MSG_ZH
-                    if _canc:
-                        _stop_msg += f"\n（已作废 {_canc} 个待审批。）"
-                    await self._send_text(frm, _stop_msg)
+                    # S162：S150 审批作废 + 活跃生成流取消（Web 停止键同一通道）
+                    await self._send_text(frm, await stream_stop.handle_im_stop("xmpp", frm))
                 elif _act == "reset":
                     self.memoryList[frm] = []
                     await self._persist_conv(frm)
@@ -786,6 +783,7 @@ class XmppClient:
         reasoning_chars = 0
         finish_reason = ""
         err_text = ""
+        from py import stream_stop
         from py.base_bot import ToolProgressLedger
         ledger = ToolProgressLedger(mode=getattr(self, "progress_mode", "off"))
         stream = await client.chat.completions.create(
@@ -806,6 +804,7 @@ class XmppClient:
                 continue
             finish_reason = chunk.choices[0].finish_reason or finish_reason
             delta = chunk.choices[0].delta
+            stream_stop.registry.track("xmpp", chat_jid, delta)  # S162：/stop 真实停止记账
             content = getattr(delta, "content", "") or ""
             reasoning = getattr(delta, "reasoning_content", "") or ""
             reasoning_chars += len(reasoning)
@@ -841,6 +840,7 @@ class XmppClient:
                 out_buffer, ready = self._flush_segments(out_buffer)
                 for piece in ready:
                     await self._send_text(chat_jid, piece)
+        stream_stop.registry.clear("xmpp", chat_jid)  # S162：流终清账
         _summ = ledger.summary_line()
         if _summ:
             await self._send_text(chat_jid, _summ)

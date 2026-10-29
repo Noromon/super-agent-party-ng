@@ -4,7 +4,7 @@ from openai import AsyncOpenAI
 from py.behavior_engine import BehaviorItem
 from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
-from py import llm_gate
+from py import llm_gate, stream_stop
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 
 class TelegramClient:
@@ -116,7 +116,7 @@ class TelegramClient:
             await self._send_text(chat_id, info_msg)
             return
 
-        # A11 IM 快捷指令（上游 3e58049f fork 适配：fork 无本地任务表，/stop 仅回执）
+        # A11 IM 快捷指令（S162：/stop 经 stream_stop 真实停止生成）
         from py import shortcut_commands
         _sub = shortcut_commands.parse_subscribe_action(text)
         if _sub:
@@ -129,7 +129,7 @@ class TelegramClient:
             _act = shortcut_commands.parse_im_action(text)
             if _act:
                 if _act == "stop":
-                    await self._send_text(chat_id, shortcut_commands.STOP_MSG_ZH)
+                    await self._send_text(chat_id, await stream_stop.handle_im_stop("telegram", chat_id))
                 elif _act == "reset":
                     self.memoryList[chat_id] = []
                     await self._send_text(chat_id, shortcut_commands.RESET_MSG_ZH)
@@ -253,6 +253,7 @@ class TelegramClient:
                 if not chunk.choices: continue
                 
                 delta = chunk.choices[0].delta
+                stream_stop.registry.track("telegram", chat_id, delta)  # S162：/stop 真实停止记账
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
                 content = getattr(delta, 'content', '') or ""
                 reasoning = getattr(delta, 'reasoning_content', '') or ""
@@ -324,6 +325,7 @@ class TelegramClient:
                                 
                         if force_split: break
 
+            stream_stop.registry.clear("telegram", chat_id)  # S162：流终清账
             # 发送剩余文本
             if state["text_buffer"]:
                 clean = self._clean_text(state["text_buffer"])

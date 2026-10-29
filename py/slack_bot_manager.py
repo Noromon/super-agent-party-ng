@@ -21,6 +21,7 @@ from py.get_setting import get_port, load_settings
 from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
+from py import stream_stop
 
 class SlackBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -142,7 +143,7 @@ class SlackBotManager(BaseBotManager):
             _act = shortcut_commands.parse_im_action(text)
             if _act:
                 if _act == "stop":
-                    await web_client.chat_postMessage(channel=cid, text=shortcut_commands.STOP_MSG_EN)
+                    await web_client.chat_postMessage(channel=cid, text=await stream_stop.handle_im_stop("slack", cid, "en"))
                 elif _act == "reset":
                     self.memory[cid].clear()
                     await web_client.chat_postMessage(channel=cid, text=shortcut_commands.RESET_MSG_EN)
@@ -203,6 +204,7 @@ class SlackBotManager(BaseBotManager):
             async for chunk in stream:
                 if not chunk.choices: continue
                 delta_raw = chunk.choices[0].delta
+                stream_stop.registry.track("slack", cid, delta_raw)  # S162：/stop 真实停止记账
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
 
                 tool_link = getattr(delta_raw, "tool_link", None)
@@ -255,6 +257,8 @@ class SlackBotManager(BaseBotManager):
         except Exception as e:
             logging.error(f"Slack Bot Error: {e}")
             await web_client.chat_update(channel=cid, ts=reply_ts, text=f"❌ 处理消息失败: {e}")
+        finally:
+            stream_stop.registry.clear("slack", cid)  # S162：流终清账
 
     # ---------- 工具函数 (1:1 复刻 Discord) ----------
     def _extract_images(self, state: Dict[str, Any]):

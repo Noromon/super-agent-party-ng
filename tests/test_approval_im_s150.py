@@ -232,7 +232,9 @@ class TestWiringS150:
         s = _read("py/xmpp_client.py")
         assert 'approval_store.register_handlers("xmpp"' in s
         assert "approval_im.parse_approval_command(text)" in s
-        assert "approval_im.cancel_pending(" in s
+        # S162：/stop 审批作废吸收进 stream_stop 编排（围栏语义不变）
+        assert 'stream_stop.handle_im_stop("xmpp", frm)' in s
+        assert "approval_im.cancel_pending(" in _read("py/stream_stop.py")
         assert "self._approval_queue.setdefault" in s
         assert "async def _resume_llm(" in s and "approval_im.replace_sentinel_content" in s
         assert s.count("_agent_stream_to_peer") >= 3  # 定义 + 两处共用

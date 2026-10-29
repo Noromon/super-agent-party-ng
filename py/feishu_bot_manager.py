@@ -19,6 +19,7 @@ from py.get_setting import convert_to_opus_simple, get_port, load_settings
 
 from py.behavior_engine import BehaviorItem, global_behavior_engine, BehaviorSettings
 from py.random_topic import get_random_topics
+from py import stream_stop
 # 飞书机器人配置模型
 from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
@@ -397,7 +398,7 @@ class FeishuClient:
                     _act = shortcut_commands.parse_im_action(text)
                     if _act:
                         if _act == "stop":
-                            await self._send_text(msg, shortcut_commands.STOP_MSG_ZH)
+                            await self._send_text(msg, await stream_stop.handle_im_stop("feishu", chat_id))
                         elif _act == "reset":
                             self.memoryList[chat_id] = []
                             await self._send_text(msg, shortcut_commands.RESET_MSG_ZH)
@@ -545,6 +546,7 @@ class FeishuClient:
                 
                 if chunk.choices:
                     delta = chunk.choices[0].delta
+                    stream_stop.registry.track("feishu", chat_id, delta)  # S162：/stop 真实停止记账
                     finish_reason = chunk.choices[0].finish_reason or finish_reason
                     
                     # [捕获音频]
@@ -588,6 +590,7 @@ class FeishuClient:
                             await self._send_text(msg, clean)
                     state["text_buffer"] = buffer
             
+            stream_stop.registry.clear("feishu", chat_id)  # S162：流终清账
             # 处理剩余内容
             self._extract_images(state)
             if state["text_buffer"]:

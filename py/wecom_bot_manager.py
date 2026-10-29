@@ -22,6 +22,7 @@ from aibot import WSClient, WSClientOptions, generate_req_id
 from py import llm_gate
 from py.im_empty_guard import EMPTY_REPLY_MSG, log_empty_reply
 from py.base_bot import BaseBotManager
+from py import stream_stop
 
 class WeComBotConfig(BaseModel):
     auto_connect: bool = False  # SAP 启动时自动连接
@@ -164,7 +165,7 @@ class WeComClient:
                 _act = shortcut_commands.parse_im_action(user_text)
                 if _act:
                     if _act == "stop":
-                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.STOP_MSG_ZH, True)
+                        await self.ws_client.reply_stream(frame, generate_req_id('stream'), await stream_stop.handle_im_stop("wecom", chat_id), True)
                     elif _act == "reset":
                         self.memoryList[chat_id] = []
                         await self.ws_client.reply_stream(frame, generate_req_id('stream'), shortcut_commands.RESET_MSG_ZH, True)
@@ -235,6 +236,7 @@ class WeComClient:
             )
             async for chunk in stream:
                 delta = chunk.choices[0].delta
+                stream_stop.registry.track("wecom", chat_id, delta)  # S162：/stop 真实停止记账
                 finish_reason = chunk.choices[0].finish_reason or finish_reason
                 content = delta.content or ""
                 reasoning = getattr(delta, "reasoning_content", "") or ""
@@ -261,6 +263,8 @@ class WeComClient:
         except Exception as e:
             logging.error(f"回复异常: {e}")
             await self.ws_client.reply_stream(frame, stream_id, f"机器人异常: {e}", True)
+        finally:
+            stream_stop.registry.clear("wecom", chat_id)  # S162：流终清账
 
     @llm_gate.gated
     async def execute_behavior_event(self, chat_id: str, behavior_item: BehaviorItem):
