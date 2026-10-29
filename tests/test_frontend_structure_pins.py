@@ -110,6 +110,22 @@ class TestTemplatesDirHygiene:
             body = f.read_text(encoding="utf-8")
             assert "<script" not in body.lower(), f"{f.name} 含可执行脚本"
 
+    def test_pages_have_balanced_native_tags(self):
+        # S168：S166 曾用脚本删内联 script 留下孤儿 </div>，破坏 Vue 模板容器边界，
+        # 系统页卡片泄漏进兄弟页面。任何手工/脚本编辑 templates 都必须过本配平关。
+        tpl = _STATIC / "templates"
+        if not tpl.exists():
+            pytest.skip("F3 之前 templates/ 不存在")
+        for f in tpl.iterdir():
+            if f.name == "MANIFEST.json":
+                continue
+            body = f.read_text(encoding="utf-8")
+            body = re.sub(r"<[a-zA-Z][^>]*/>", "", body)  # 剔除自闭合标签（el-* 组件常用）
+            for tag in ("div", "label", "select", "option", "button", "span", "form", "template"):
+                opens = len(re.findall(rf"<{tag}[\s>]", body))
+                closes = len(re.findall(rf"</{tag}>", body))
+                assert opens == closes, f"{f.name} <{tag}> 不配平: {opens} 开 vs {closes} 闭"
+
     def test_manifest_pages_wired(self):
         tpl = _STATIC / "templates"
         mf = tpl / "MANIFEST.json"
