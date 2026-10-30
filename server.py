@@ -465,7 +465,7 @@ from py.diary_system import get_recent_diary_entries, DEFAULT_BOOK_ID as DIARY_D
 from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills, convert_to_opus_simple, deep_update, load_covs, load_settings, save_covs,save_settings,clean_temp_files_task,base_path,configure_host_port,UPLOAD_FILES_DIR,AGENT_DIR,MEMORY_CACHE_DIR,KB_DIR,DEFAULT_VRM_DIR,USER_DATA_DIR,LOG_DIR,TOOL_TEMP_DIR,COVS_PATH,DEFAULT_THA_DIR,DEFAULT_SOULX_IMAGES_DIR,_SETTINGS_RMW_LOCK
 from py.llm_tool import get_image_base64,get_image_media_type
 from py.tool_dispatch import (_APPROVAL_PREFIX, _approval_payload,
-                              _is_approval_result)
+                              _is_approval_result, pending_approval_at_tail)
 from py.tool_dispatch import (dispatch_external_tool as _dispatch_external_tool,
                               dispatch_task_center_tool as _dispatch_task_center_tool,
                               dispatch_unknown_tool as _dispatch_unknown_tool)
@@ -1885,6 +1885,61 @@ def _sensitive_approval(tool_name, tool_params, settings):
     return None
 
 
+def _approval_precheck(tool_name, tool_params, settings):
+    """S172：审批/路径门必须在 dispatch **之前**同步预检——asyncTools 管道曾先回
+    「已启动」占位文本、把审批哨兵吞进后台结果表，导致 pending_abort 永不触发、
+    Web 审批卡与 IM /y /n 全部失联（2026-10-30 事故：拦截 18 次无一次送审）。
+    与 dispatch_tool 相同的只读检查；命中返回哨兵，未命中 None（不注入 grants，零副作用）。"""
+    approval = _sensitive_approval(tool_name, tool_params, settings)
+    if approval is not None:
+        return approval
+    try:
+        from py import path_scope
+        _ps = path_scope.evaluate(tool_name, tool_params or {}, settings)
+        if _ps is not None and _ps.block is not None:
+            return _ps.block
+    except Exception:
+        return None
+    return None
+
+
+
+def _pending_approval_reply_dict(ap, model):
+    """S172：历史尾部=未批复审批哨兵 → 静止态提示（不再动模型，掐灭自动重放风暴）。"""
+    note = (f"[等待审批] 操作 {ap.get('tool_name', '?')} 尚未获得用户批复，本轮不继续执行；"
+            "请在会话审批卡批复，或在 IM 回复 /y 或 /n。")
+    return {
+        "id": "agentParty", "object": "chat.completion", "created": int(time.time()),
+        "model": model or "super-model",
+        "choices": [{"index": 0, "finish_reason": "stop",
+                     "message": {"role": "assistant", "content": note}}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+async def _im_approval_hangup(request, messages, results):
+    """S150/S172：IM 渠道审批挂起登记（自 stream 巨函数抽出，流式/非流式共用）。"""
+    try:
+        from py import approval_im, approval_store
+        _ap = _is_approval_result(results)
+        if not (_ap and request.is_app_bot and request.platform and request.peer_id
+                and approval_store.has_handlers(request.platform)):
+            return
+        _hit_id = ""
+        for _m in reversed(messages):
+            if _m.get("role") == "tool" and _is_approval_result(_m.get("content")) is not None:
+                _hit_id = _m.get("tool_call_id", "")
+                break
+        await approval_store.create(
+            platform=request.platform, peer_id=request.peer_id,
+            tool_name=_ap.get("tool_name", ""), tool_params=_ap.get("tool_params"),
+            tool_call_id=_hit_id, permission_mode=_ap.get("permission_mode", ""),
+            cwd=_ap.get("cwd", ""),
+            messages=approval_im.strip_system_messages(copy.deepcopy(messages)))
+    except Exception as _ape:
+        logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
+
+
 async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
     global _TOOL_HOOKS, node_ext_mcp_clients, node_ext_mcp_tools
     logging.getLogger("app").debug(f"[dispatch] {tool_name} {str(tool_params)[:500]}")
@@ -1912,7 +1967,7 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         _ps = path_scope.evaluate(tool_name, tool_params or {}, settings)
         if _ps is not None:
             if _ps.block is not None:
-                logging.getLogger("app").info(f"[PathScope] Blocked '{tool_name}': 等待用户路径授权")
+                logging.getLogger("app").warning(f"[PathScope] Blocked '{tool_name}': 已产生审批哨兵，进入批复等待（Web 审批卡/通知中心；IM 渠道回复 /y /n）")
                 return _ps.block
             if _ps.grants:
                 path_scope.set_grants(_ps.grants)
@@ -4202,7 +4257,7 @@ async def _stream_character_context(request, settings, user_prompt, cur_memory, 
         # 替换cur_memory["systemPrompt"]中的{{char}}为cur_memory["name"]
         settings["memorySettings"]["genericSystemPrompt"] = settings["memorySettings"]["genericSystemPrompt"].replace("{{char}}", cur_memory["name"])
         content_append(request.messages, 'system', "\n\n" + settings["memorySettings"]["genericSystemPrompt"] + "\n\n")
-    if m0 and not request.is_sub_agent:
+    if m0 and not request.is_sub_agent and getattr(request, "platform", "") != "diary":  # S172: 日记总结自调用跳过记忆检索
         memoryLimit = settings["memorySettings"]["memoryLimit"]
         try:
             # 【核心修改】：使用 asyncio.to_thread 将同步的 search 方法放入线程池运行
@@ -5045,7 +5100,7 @@ def _notify_web_approval_pending(_st):
         _ent = _st.get("_entry")
         _sid = _ent.get("id") if isinstance(_ent, dict) else None
         notification_center.emit(
-            "approval", f"工具 {_ap.get('tool_name', '?')} 等待审批（Web 会话）",
+            "approval", f"工具 {_ap.get('tool_name', '?')} 等待审批（Web 会话）", level="warn",
             extra={"pending_key": _sid or "web-anon", "source": "web",
                    "stream_id": _sid, "tool_name": _ap.get("tool_name", ""),
                    "tool_params": _ap.get("tool_params") or {}, "status": "pending"})
@@ -5197,41 +5252,46 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
         yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
 
         if settings['tools']['asyncTools']['enabled']:
-            # ... 异步工具逻辑保持不变 ...
-            tool_id = uuid.uuid4()
-            async_tool_id = f"{response_content.name}_{tool_id}"
-            chunk_dict = {
-                "id": "agentParty",
-                "choices": [
-                    {
-                        "finish_reason": None,
-                        "index": 0,
-                        "delta": {
-                            "role":"assistant",
-                            "content": "",
-                            "async_tool_id": async_tool_id
+            # S172：审批/路径门同步预检——命中则本轮直接产哨兵走既有审批编排，
+            # 绝不进异步管道（哨兵一旦被吞进结果表，断流/登记/送审全部失联）
+            _pre_ap = _approval_precheck(response_content.name, args_dict, settings)
+            if _pre_ap is not None:
+                results = _pre_ap
+            else:
+                tool_id = uuid.uuid4()
+                async_tool_id = f"{response_content.name}_{tool_id}"
+                chunk_dict = {
+                    "id": "agentParty",
+                    "choices": [
+                        {
+                            "finish_reason": None,
+                            "index": 0,
+                            "delta": {
+                                "role":"assistant",
+                                "content": "",
+                                "async_tool_id": async_tool_id
+                            }
                         }
-                    }
-                ]
-            }
-            yield f"data: {json.dumps(chunk_dict)}\n\n"
-            asyncio.create_task(
-                execute_tool(
-                    async_tool_id,
-                    response_content.name,
-                    args_dict,
-                    settings,
-                    user_prompt
-                )
-            )
-            async with async_tools_lock:
-                async_tools[async_tool_id] = {
-                    "status": "pending",
-                    "result": None,
-                    "name":response_content.name,
-                    "parameters":args_dict
+                    ]
                 }
-            results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
+                yield f"data: {json.dumps(chunk_dict)}\n\n"
+                asyncio.create_task(
+                    execute_tool(
+                        async_tool_id,
+                        response_content.name,
+                        args_dict,
+                        settings,
+                        user_prompt
+                    )
+                )
+                async with async_tools_lock:
+                    async_tools[async_tool_id] = {
+                        "status": "pending",
+                        "result": None,
+                        "name":response_content.name,
+                        "parameters":args_dict
+                    }
+                results = f"{response_content.name}tool has been successfully launched. It will take some time to run, and the results will be provided in the next round of conversation."
         else:
             if _st_cancelled(_st):
                 logging.getLogger("app").info(f"[Cancel] 流已被用户取消，跳过工具 {response_content.name} 并终止本轮")
@@ -5961,7 +6021,7 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
                 append_to_chat_buffer(buffer_key, "assistant", _neutralize(full_content, store="diary-buffer"))
     except Exception as e:
         logging.getLogger("app").info(f"[DiaryBuffer] 记录助手回复失败: {e}")
-    if m0 and not request.is_sub_agent and not request.is_quarantined:
+    if m0 and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
         logging.getLogger("app").info("记忆更新任务开始提交")
         messages = _neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}", store="mem0-add")
         infer = cur_memory.get('infer', False) or False
@@ -6466,7 +6526,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
-        append_resume_nudge(request.messages)
+        if pending_approval_at_tail(request.messages) is None: append_resume_nudge(request.messages)  # S172: 待批复审批尾部不附继续催办
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'
         for modelProvider in settings['modelProviders']: 
@@ -7140,6 +7200,10 @@ async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, resp
     # 为未执行的调用补上说明性 tool 结果，保证成对闭合
     append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
     if ns_pending_abort:
+        # S172：非流式审批中断同样走 IM 挂起登记（与流式路径对齐；非 IM 渠道自动跳过）
+        _tail_m = next((m for m in reversed(request.messages) if get_role(m) == "tool"), None)
+        if _tail_m is not None and _is_approval_result(_tail_m.get("content")) is not None:
+            await _im_approval_hangup(request, request.messages, _tail_m.get("content"))
         return True
     return False
 
@@ -7199,7 +7263,7 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
             response_dict["choices"][0]['message']['reasoning_content'] = reasoning_content.group(1).strip()
             # 移除原内容中的标签部分
             response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
-    if m0 and not request.is_sub_agent and not request.is_quarantined:
+    if m0 and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
         messages=_neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}", store="mem0-add-complete")
         infer = cur_memory.get('infer') or False
         _m0_job = m0
@@ -7359,7 +7423,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
-        append_resume_nudge(request.messages)
+        if pending_approval_at_tail(request.messages) is None: append_resume_nudge(request.messages)  # S172: 待批复审批尾部不附继续催办
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'
         for modelProvider in settings['modelProviders']: 
@@ -7849,9 +7913,26 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     用来与agent party中的模型聊天
     """
     _tt0 = _TTFB_T0.get()
-    if _tt0:
-        logging.getLogger("app").info(f"[TTFBbrk] endpoint-enter +{int((time.monotonic() - _tt0) * 1000)}ms")
+    _ua = (fastapi_request.headers.get("user-agent") or "-")[:60]
+    logging.getLogger("app").info(
+        f"[TTFBbrk] endpoint-enter +{int((time.monotonic() - _tt0) * 1000) if _tt0 else -1}ms"
+        f" stream={bool(getattr(request, 'stream', False))} bot={int(bool(getattr(request, 'is_app_bot', False)))}"
+        f" plat={getattr(request, 'platform', '') or '-'} ua={_ua}")  # S172：请求来源指纹
     fastapi_base_url = str(fastapi_request.base_url)
+    # S172：尾部=未批复审批 → 静止态直接回执，不进模型（掐灭审批未决期间的自动重放风暴）
+    _ap_tail = pending_approval_at_tail(request.messages)
+    if _ap_tail is not None:
+        _rep = _pending_approval_reply_dict(_ap_tail, request.model)
+        if getattr(request, "stream", False):
+            async def _ap_hold_stream():
+                _c = {"id": "agentParty", "object": "chat.completion.chunk", "created": int(time.time()),
+                      "model": _rep["model"],
+                      "choices": [{"index": 0, "finish_reason": None,
+                                   "delta": {"role": "assistant", "content": _rep["choices"][0]["message"]["content"]}}]}
+                yield f"data: {json.dumps(_c, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(_ap_hold_stream(), media_type="text/event-stream")
+        return JSONResponse(content=_rep)
     # 【注意】引入全局 fast_client
     global client, reasoner_client, fast_client, settings
     

@@ -6,6 +6,13 @@ Object.assign(vue_methods, {
      * 复用现有的 SSE 解析逻辑，继续追加到 currentMsg
      */
     async _resumeStream(streamId, fromIndex, currentMsg, getBlock, isCodeBlock, tts_buffer, toolCallStack) {
+        // S172：重连限流——5 分钟窗口内最多 3 次 resume 尝试，掐灭断线重连风暴
+        this._resumeAttempts = (this._resumeAttempts || []).filter(t => Date.now() - t < 300000);
+        if (this._resumeAttempts.length >= 3) {
+            console.warn('[StreamResume] 5 分钟内 resume 尝试已达上限，放弃本次续传');
+            return null;
+        }
+        this._resumeAttempts.push(Date.now());
         const maxRetries = 3;
         const baseDelay = 1000;
         let currentFromIndex = fromIndex; // 跨重试追踪，避免重复处理 chunk
@@ -233,6 +240,7 @@ Object.assign(vue_methods, {
             } catch (e) { }
         }
         if (isApproval && approvalData) {
+            this._resumeSawApproval = true; // S172：本流出现待批复审批→终态，不得再自动续传/重放
             const b = getBlock('approval', toolCallId, toolName);
             b.data = approvalData;
             // 围栏快照：审批必须记住产生它的流，停止/换流后不得借用新流身份执行

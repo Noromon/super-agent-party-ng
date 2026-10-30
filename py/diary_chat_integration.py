@@ -56,11 +56,18 @@ def clear_chat_buffer(key: str):
         buf["last_user_msg_time"] = time.time()
 
 
+_RETRY_AFTER: dict = {}  # key -> 失败后下次允许重试的时间戳（S172：失败退避，防每分钟自调用风暴）
+_RETRY_COOLDOWN = 300.0
+
+
 async def summarize_and_save_buffers(idle_minutes: int = 15):
     idle_list = get_idle_buffers(idle_minutes)
     if not idle_list:
         return
+    _now = time.time()
     for key, buf in idle_list:
+        if _now < _RETRY_AFTER.get(key, 0.0):
+            continue
         try:
             messages_text = ""
             for m in buf["messages"][-50:]:
@@ -68,6 +75,7 @@ async def summarize_and_save_buffers(idle_minutes: int = 15):
                 messages_text += f"[{role_label}]: {m['content']}\n"
             if not messages_text.strip():
                 clear_chat_buffer(key)
+                _RETRY_AFTER.pop(key, None)
                 continue
 
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -107,5 +115,8 @@ async def summarize_and_save_buffers(idle_minutes: int = 15):
                                          character_name=buf.get("character_name", ""))
                 logging.info(f"[DiaryChat] 已自动总结对话到日记 [{buf['book_id']}]")
             clear_chat_buffer(key)
+            _RETRY_AFTER.pop(key, None)
         except Exception as e:
-            logging.error(f"[DiaryChat] 总结对话失败 [{key}]: {e}")
+            # S172：失败不再于下个 60s tick 立即重放——退避 5 分钟；异常打 repr 防空消息
+            _RETRY_AFTER[key] = time.time() + _RETRY_COOLDOWN
+            logging.error(f"[DiaryChat] 总结对话失败 [{key}]（{_RETRY_COOLDOWN:.0f}s 后重试）: {e!r}")

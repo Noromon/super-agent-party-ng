@@ -90,7 +90,7 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
     # S151：通知中心（IM 来源 pending，面板双向审批入口）
     try:
         from py import notification_center
-        notification_center.emit("approval", f"工具 {tool_name} 等待审批（{platform} · {peer_id}）",
+        notification_center.emit("approval", f"工具 {tool_name} 等待审批（{platform} · {peer_id}）", level="warn",
                                  extra={"pending_key": aid, "source": "im",
                                         "approval_id": aid, "platform": platform,
                                         "peer_id": peer_id, "tool_name": tool_name,

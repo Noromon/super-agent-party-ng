@@ -52,6 +52,21 @@ def _is_approval_result(res) -> dict:
     return None
 
 
+def pending_approval_at_tail(messages) -> dict:
+    """S172：历史尾部（连续 tool 块）存在未批复审批哨兵 → 返回该审批 dict，否则 None。
+    审批等待=等人输入的静止态：不得附继续任务 nudge、不得自动重放推理（风暴闸）。"""
+    for m in reversed(messages or []):
+        role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
+        if role == "tool":
+            content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+            _ap = _is_approval_result(content)
+            if _ap is not None:
+                return _ap
+            continue
+        return None
+    return None
+
+
 # ---------- 分发 helpers ----------
 
 def _stringify_result(result) -> str:

@@ -404,6 +404,7 @@ Object.assign(vue_methods, {
         let _streamId = null;
         let _chunkIndex = 0;
         const _enableStreamResume = this.settings?.enableStreamResume !== false;
+        this._resumeSawApproval = false; // S172: 每条新流重置审批刹车标记
 
         try {
             const response = await fetch(`/v1/chat/completions`, {
@@ -584,7 +585,7 @@ Object.assign(vue_methods, {
             console.error(error);
             if (error.name !== 'AbortError') {
                 // === 断点续传：如果是网络中断且后端支持续传，尝试自动恢复 ===
-                if (_enableStreamResume && _streamId && _chunkIndex > 0 && currentMsg && !currentMsg.generationFinished) {
+                if (_enableStreamResume && _streamId && _chunkIndex > 0 && currentMsg && !currentMsg.generationFinished && !this._resumeSawApproval) {
                     console.log(`[StreamResume] 网络中断，尝试断点续传: stream_id=${_streamId}, from_index=${_chunkIndex}`);
                     const resumed = await this._resumeStream(
                         _streamId, _chunkIndex, currentMsg, getBlock,

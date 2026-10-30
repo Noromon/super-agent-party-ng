@@ -220,6 +220,7 @@ class DiaryEngine:
         self.next_run = 0.0
         self._busy = False
         self._last_chat_summary_check = 0.0
+        self._chat_summary_task = None  # S172：总结任务单飞，防积压并发
 
     # ---------------- 配置 ----------------
 
@@ -307,7 +308,9 @@ class DiaryEngine:
             summary_cfg = self.config.get("chatSummary", {}) or {}
             if summary_cfg.get("enabled", True):
                 idle_min = max(1, int(summary_cfg.get("idleMinutes", 15) or 15))
-                asyncio.create_task(summarize_and_save_buffers(idle_min))
+                # S172：单飞——上一个总结未落地就不再叠任务（曾每分钟积压自调用打满引擎）
+                if self._chat_summary_task is None or self._chat_summary_task.done():
+                    self._chat_summary_task = asyncio.create_task(summarize_and_save_buffers(idle_min))
 
         if self._busy:
             return
