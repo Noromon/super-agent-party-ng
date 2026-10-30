@@ -90,6 +90,29 @@ uv run python server.py
 
 > fork 暂未发布预编译安装包；如需打包：`npm run build`（产物在 `release/`）。
 
+### 一键部署：源码引导脚本（空机与半残环境均可用）
+
+源码发布包**不自带任何运行时**。无论机器是全新空环境还是装到一半的"半环境"，运行仓库根目录的引导脚本即可；它在**每个安装动作前逐一询问**：
+
+| 平台 | 入口 |
+| --- | --- |
+| Windows | 双击 `setup_and_run.bat`（转调 `setup_and_run.ps1`；`-Full` 强制完整检查） |
+| Linux / macOS | `bash setup_and_run.sh`（`--full` 同上） |
+
+- **就绪即秒启**：环境完全就绪时零确认直接 `node start.js` 启动；未就绪才进入引导安装。
+- **引导流程**：探测运行时（缺 Python 3.12 / Node LTS 经确认用 winget 或官方直链补装）→ 项目内建 `.venv` 并校验确为 Python 3.12（不符经确认重建）→ 安装 uv 并按 `uv.lock` 可复现安装 Python 依赖 → `npm ci --ignore-scripts` 确定性安装 Node 依赖 → 显式产出 Electron 运行时 → 经确认启动。
+- 锁定安装（`uv sync --frozen`）失败时，脚本会**先明确警告"降级为非可复现 pip 安装"**，得到您的确认才执行 `pip install -e .`。
+- **Electron 运行时三级产出**（源码部署最常见的暗坑，全程打印现场证据与退出码）：
+  1. 直接执行 Electron 官方安装脚本（强制绕过本地下载缓存）；
+  2. 失败后经确认切 npmmirror 二进制镜像重试；
+  3. 仍失败则用系统自带下载器直接获取官方运行时压缩包，**SHASUMS256 强校验**（不过即拒绝解包）后自动解包就位——全程不依赖 npm 生命周期脚本，环境再怪也有一条路能走通。
+- **完整性闸门**：electron 二进制不足 50MB 或缺 path.txt 一律"未就绪"，永不带病启动；半残安装自动识别并进入修复路径。
+- **网络与镜像**：默认全官方源；清华 PyPI 与 npmmirror 仅在失败后经您确认启用。
+- **边界**：幂等可重跑；除经确认的运行时安装外只写项目目录；不静默提权、不静默安装、不改系统/用户环境变量。
+- **可选降级**：esbuild/@serialport 原生组件编译失败不阻断启动（相应功能降级）。
+
+故障排查：任何失败直接重跑（幂等）；脚本打印的文件大小/退出码/下载 URL 即诊断线索；极端情况可离线修复——拷贝同版本 `node_modules/electron/dist` + `path.txt`，或改用自带运行时的官方打包版。
+
 ### 上游安装包（不含 NG 改动）
 
 上游提供各平台安装包下载：<https://github.com/heshengtao/super-agent-party/releases>。

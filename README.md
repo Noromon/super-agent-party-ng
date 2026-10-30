@@ -91,6 +91,29 @@ uv run python server.py
 
 > No prebuilt binaries for the fork yet; to package one: `npm run build` (output in `release/`).
 
+### One-click source bootstrap (empty or half-configured machines alike)
+
+Source releases ship **no bundled runtimes**. Whether your machine is a clean empty one or a half-installed "half environment", just run the bootstrap script in the repository root — it asks for confirmation **before every single install action**:
+
+| Platform | Entry point |
+| --- | --- |
+| Windows | double-click `setup_and_run.bat` (launches `setup_and_run.ps1`; `-Full` forces a complete re-check) |
+| Linux / macOS | `bash setup_and_run.sh` (`--full` does the same) |
+
+- **Ready means instant launch**: if the environment is already complete the app starts immediately with zero prompts via `node start.js`; only incomplete environments enter guided setup.
+- **Guided flow**: detect runtimes (missing Python 3.12 / Node.js LTS installed via winget or official installer links, after your confirmation) → create `.venv` inside the project and verify it really runs Python 3.12 (recreated only after you confirm) → install Python dependencies **reproducibly from `uv.lock`** via `uv` → install Node dependencies deterministically with `npm ci --ignore-scripts` → explicitly produce the Electron runtime → start the app once you confirm.
+- If the locked install (`uv sync --frozen`) fails, the script **explicitly warns that it would fall back to a NON-reproducible `pip install -e .`** and waits for your confirmation before doing so.
+- **Three-stage Electron runtime production** (the most common hidden pitfall of source deployments; the script prints on-site evidence and exit codes throughout):
+  1. run the official Electron install script directly (local download cache forcibly bypassed);
+  2. on failure, retry through the npmmirror Electron binary mirror after your confirmation;
+  3. if that still fails, fetch the official runtime archive with the OS built-in downloader and enforce **SHASUMS256 verification** (unpack refused on mismatch), then unpack it into place — npm lifecycle scripting is never relied upon, so even the quirkiest machine has a path that works.
+- **Integrity gate**: an Electron binary under 50MB or a missing `path.txt` always counts as "not ready"; the app never launches in a half-installed state, and such states are detected automatically and routed into the repair path.
+- **Network & mirrors**: official sources by default; the Tsinghua PyPI mirror and npmmirror are enabled **only after a failure, and only with your confirmation**.
+- **Boundaries**: idempotent and re-runnable; apart from confirmed engine installs nothing outside the project folder is touched; no silent elevation, no silent installs, and your system/user environment variables are never modified.
+- **Optional degrades gracefully**: esbuild/@serialport native build failures never block launch (the affected features simply degrade).
+
+Troubleshooting: any failure — just re-run (idempotent). The printed file sizes, exit codes and download URLs are your diagnostic leads; in extreme cases repair offline by copying `node_modules/electron/dist` plus `path.txt` from a healthy same-version install, or use the official packaged release with bundled runtimes.
+
 ### Upstream installers (do NOT include NG changes)
 
 Upstream ships per-platform installers: <https://github.com/heshengtao/super-agent-party/releases>.
