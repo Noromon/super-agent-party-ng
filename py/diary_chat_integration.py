@@ -65,10 +65,25 @@ def clear_chat_buffer(key: str):
 
 
 _RETRY_AFTER: dict = {}  # key -> 失败后下次允许重试的时间戳（S172：失败退避，防每分钟自调用风暴）
-_RETRY_COOLDOWN = 300.0
+_RETRY_COOLDOWN = 300.0          # S181：默认重试间隔（秒）——可被角色设置 chatSummary.retrySeconds 覆盖
+_DEFAULT_READ_TIMEOUT = 120.0    # S181：默认总结响应等待（秒）——可被角色设置 chatSummary.timeoutSeconds 覆盖
+_CONNECT_TIMEOUT = 10.0          # 连接超时保持短：连不上就该快失败，慢只慢在"等模型生成"这一段
 
 
-async def summarize_and_save_buffers(idle_minutes: int = 15):
+async def summarize_and_save_buffers(idle_minutes: int = 15, timeout_seconds=None, retry_cooldown=None):
+    # S181：本地/慢模型场景下 120s 固定等待不够——超时与重试间隔交由角色设置，
+    # 非法值回落默认并钳位（读超时 10~1800s，重试间隔 10~3600s）。
+    try:
+        read_timeout = float(timeout_seconds) if timeout_seconds else _DEFAULT_READ_TIMEOUT
+    except (TypeError, ValueError):
+        read_timeout = _DEFAULT_READ_TIMEOUT
+    read_timeout = min(max(read_timeout, 10.0), 1800.0)
+    try:
+        retry_eff = float(retry_cooldown) if retry_cooldown else _RETRY_COOLDOWN
+    except (TypeError, ValueError):
+        retry_eff = _RETRY_COOLDOWN
+    retry_eff = min(max(retry_eff, 10.0), 3600.0)
+    http_cfg = httpx.Timeout(_CONNECT_TIMEOUT, read=read_timeout, write=read_timeout, pool=read_timeout)
     idle_list = get_idle_buffers(idle_minutes)
     if not idle_list:
         return
@@ -108,7 +123,7 @@ async def summarize_and_save_buffers(idle_minutes: int = 15):
                 "platform": "diary",
                 "enable_tools": [],
             }
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=http_cfg) as client:
                 resp = await client.post(url, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -125,6 +140,6 @@ async def summarize_and_save_buffers(idle_minutes: int = 15):
             clear_chat_buffer(key)
             _RETRY_AFTER.pop(key, None)
         except Exception as e:
-            # S172：失败不再于下个 60s tick 立即重放——退避 5 分钟；异常打 repr 防空消息
-            _RETRY_AFTER[key] = time.time() + _RETRY_COOLDOWN
-            logging.error(f"[DiaryChat] 总结对话失败 [{key}]（{_RETRY_COOLDOWN:.0f}s 后重试）: {e!r}")
+            # S172：失败不再于下个 60s tick 立即重放——退避（S181：间隔可配置，默认 5 分钟）；异常打 repr 防空消息
+            _RETRY_AFTER[key] = time.time() + retry_eff
+            logging.error(f"[DiaryChat] 总结对话失败 [{key}]（{retry_eff:.0f}s 后重试）: {e!r}")

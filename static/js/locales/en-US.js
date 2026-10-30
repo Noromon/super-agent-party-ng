@@ -483,6 +483,8 @@ window.lang_enUS = {
     'diaryChatSummary': 'Chat Summary',
     'diaryChatSummaryLabel': 'Auto-summarize conversation to diary after N minutes of idle',
     'diaryChatSummaryIdle': 'Idle minutes',
+    'diaryChatSummaryTimeout': 'Summary response timeout (s)',
+    'diaryChatSummaryRetry': 'Failure retry interval (s)',
     'diaryAutoTool_webSearch': 'Web search tool has been automatically enabled',
     'diaryAutoTool_knowledge': 'Knowledge base tool has been automatically enabled',
     'diaryAutoTool_browser': 'Browser control tool (built-in CDP) has been automatically enabled',

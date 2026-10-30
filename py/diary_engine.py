@@ -319,11 +319,20 @@ class DiaryEngine:
             summary_cfg = self.config.get("chatSummary", {}) or {}
             if summary_cfg.get("enabled", True):
                 idle_min = max(1, int(summary_cfg.get("idleMinutes", 15) or 15))
+                # S181：总结响应超时与失败重试间隔可配置（非法值交由下游回落默认）
+                def _cfg_num(name):
+                    try:
+                        return int(summary_cfg.get(name, 0) or 0)
+                    except (TypeError, ValueError):
+                        return 0
+                summary_timeout = _cfg_num("timeoutSeconds")
+                summary_retry = _cfg_num("retrySeconds")
                 # S172：单飞——上一个总结未落地就不再叠任务（曾每分钟积压自调用打满引擎）
                 # S173：在途流=对话正忙（agent 长任务执行中），本 tick 跳过，下个 60s 再查
                 if ((self._chat_summary_task is None or self._chat_summary_task.done())
                         and not has_live_streams()):
-                    self._chat_summary_task = asyncio.create_task(summarize_and_save_buffers(idle_min))
+                    self._chat_summary_task = asyncio.create_task(
+                        summarize_and_save_buffers(idle_min, summary_timeout, summary_retry))
 
         if self._busy:
             return

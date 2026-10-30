@@ -3075,6 +3075,16 @@
                               <el-input-number v-model="diarySettings.chatSummary.idleMinutes" :min="5" :max="120"
                                                @change="autoSaveSettings"></el-input-number>
                             </el-form-item>
+                            <el-form-item :label="t('diaryChatSummaryTimeout') || '总结响应超时（秒）'"
+                                          v-if="diarySettings.chatSummary.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatSummary.timeoutSeconds" :min="10" :max="1800" :step="30"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryChatSummaryRetry') || '失败重试间隔（秒）'"
+                                          v-if="diarySettings.chatSummary.enabled" class="form-item-align" label-position="left">
+                              <el-input-number v-model="diarySettings.chatSummary.retrySeconds" :min="10" :max="3600" :step="30"
+                                               @change="autoSaveSettings"></el-input-number>
+                            </el-form-item>
                           </div>
                         </div>
                       </div>

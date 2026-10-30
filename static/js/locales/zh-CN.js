@@ -483,6 +483,8 @@ window.lang_zhCN = {
     'diaryChatSummary': '聊天总结',
     'diaryChatSummaryLabel': '用户未对话超过 N 分钟后自动总结到日记',
     'diaryChatSummaryIdle': '空闲分钟数',
+    'diaryChatSummaryTimeout': '总结响应超时（秒）',
+    'diaryChatSummaryRetry': '失败重试间隔（秒）',
     'diaryAutoTool_webSearch': '联网搜索工具已被自动开启',
     'diaryAutoTool_knowledge': '知识库工具已被自动开启',
     'diaryAutoTool_browser': '浏览器控制工具（内建 CDP）已被自动开启',

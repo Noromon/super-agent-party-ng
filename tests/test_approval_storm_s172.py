@@ -137,7 +137,7 @@ class TestDiarySummaryStorm:
     def test_failure_backoff(self):
         assert "_RETRY_AFTER: dict = {}" in INTEG
         assert "_RETRY_COOLDOWN = 300.0" in INTEG
-        assert "_RETRY_AFTER[key] = time.time() + _RETRY_COOLDOWN" in INTEG
+        assert "_RETRY_AFTER[key] = time.time() + retry_eff" in INTEG
         assert "_RETRY_AFTER.pop(key, None)" in INTEG
         assert "_now < _RETRY_AFTER.get(key, 0.0)" in INTEG
 

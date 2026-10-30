@@ -386,6 +386,8 @@ main();`,
       chatSummary: {
         enabled: true,
         idleMinutes: 15,
+        timeoutSeconds: 120,
+        retrySeconds: 300,
       },
     },
     // 日记系统 UI 状态
