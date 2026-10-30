@@ -12,6 +12,17 @@ from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAUL
 from py.diary_chat_integration import summarize_and_save_buffers
 from py.token_guard import neutralize as _neutralize
 
+
+def has_live_streams() -> bool:
+    """S173：存在在途（未 done/未 cancelled）流式请求 → 对话正忙，空闲判定应延迟。
+    总结/日记自调用均为 stream:False 不注册 relay，不会自引用。"""
+    try:
+        from py.stream_relay import _active_streams
+        return any(not e.get("done") and not e.get("cancelled")
+                   for e in _active_streams.values())
+    except Exception:
+        return False
+
 # 日记智能体「允许」使用的低权限只读工具（白名单）。
 # 相比黑名单，白名单更安全也更易维护：新增任何高权限工具都不会被日记系统误用，
 # 这里只放联网搜索、知识库、时间天气维基百科 / arxiv 等纯查询类工具。
@@ -309,7 +320,9 @@ class DiaryEngine:
             if summary_cfg.get("enabled", True):
                 idle_min = max(1, int(summary_cfg.get("idleMinutes", 15) or 15))
                 # S172：单飞——上一个总结未落地就不再叠任务（曾每分钟积压自调用打满引擎）
-                if self._chat_summary_task is None or self._chat_summary_task.done():
+                # S173：在途流=对话正忙（agent 长任务执行中），本 tick 跳过，下个 60s 再查
+                if ((self._chat_summary_task is None or self._chat_summary_task.done())
+                        and not has_live_streams()):
                     self._chat_summary_task = asyncio.create_task(summarize_and_save_buffers(idle_min))
 
         if self._busy:

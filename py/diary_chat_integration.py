@@ -14,6 +14,7 @@ def get_chat_buffer(key: str):
         _chat_buffers[key] = {
             "messages": [],
             "last_user_msg_time": time.time(),
+            "last_activity_time": time.time(),  # S173：assistant 回复也刷新（真空闲语义）
             "book_id": DEFAULT_BOOK_ID,
             "character_name": "",
         }
@@ -25,6 +26,9 @@ def append_to_chat_buffer(key: str, role: str, content: str):
     buf["messages"].append({"role": role, "content": str(content)[:2000]})
     if len(buf["messages"]) > 200:
         buf["messages"] = buf["messages"][-200:]
+    # S173：空闲=用户沉默 且 对话本身无产出。旧语义只随 user 消息重置，
+    # agent 连续执行超过 idleMinutes 的长任务期间被误判「空闲」触发总结（事故实证）。
+    buf["last_activity_time"] = time.time()
     if role == "user":
         buf["last_user_msg_time"] = time.time()
 
@@ -44,7 +48,10 @@ def get_idle_buffers(idle_minutes: int = 15):
     for key, buf in list(_chat_buffers.items()):
         if not buf["messages"]:
             continue
-        if buf["last_user_msg_time"] < idle_threshold:
+        # S173：真空闲——用户最后消息 与 最后一次任何产出（含 assistant 回复）
+        # 双双超过 idleMinutes 才算空闲；agent 忙（流在跑/刚回复完）一律不入选。
+        _last_act = buf.get("last_activity_time") or buf.get("last_user_msg_time", 0)
+        if buf["last_user_msg_time"] < idle_threshold and _last_act < idle_threshold:
             result.append((key, buf))
     return result
 
@@ -54,6 +61,7 @@ def clear_chat_buffer(key: str):
     if buf:
         buf["messages"] = []
         buf["last_user_msg_time"] = time.time()
+        buf["last_activity_time"] = time.time()
 
 
 _RETRY_AFTER: dict = {}  # key -> 失败后下次允许重试的时间戳（S172：失败退避，防每分钟自调用风暴）
