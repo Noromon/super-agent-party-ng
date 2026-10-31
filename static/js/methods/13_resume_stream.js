@@ -115,6 +115,12 @@ Object.assign(vue_methods, {
                     }
                 }
 
+                if (delta.approval_pending) {
+                    // S186：后端宣告唯一活卡——流收尾时仅该卡保留可操作
+                    this._pendingApprovalToolCallId = delta.approval_pending.tool_call_id || null;
+                    this._resumeSawApproval = true;
+                }
+
                 this.sendMessagesToExtension();
                 } catch (frameErr) {
                     console.warn('[StreamResume] 帧处理异常，已跳过该帧:', frameErr.message);
@@ -126,6 +132,7 @@ Object.assign(vue_methods, {
                 this.flushStreamTextBuffer();
                 currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
                 this._flushToolStream(); // S93(F4)
+                this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
 
                 if (tts_buffer.trim() && this.ttsSettings.enabled) {
                     currentMsg.chunks_voice.push(this.cur_voice);
@@ -241,6 +248,8 @@ Object.assign(vue_methods, {
         }
         if (isApproval && approvalData) {
             this._resumeSawApproval = true; // S172：本流出现待批复审批→终态，不得再自动续传/重放
+            // S186：新审批卡出现=旧审批卡已被流程越过 → 立即折叠为已失效
+            this._collapseStaleApprovalCards(currentMsg, toolCallId);
             const b = getBlock('approval', toolCallId, toolName);
             b.data = approvalData;
             // 围栏快照：审批必须记住产生它的流，停止/换流后不得借用新流身份执行

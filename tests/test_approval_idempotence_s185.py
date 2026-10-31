@@ -94,7 +94,7 @@ class TestFrontendIdempotence:
     def test_guard_precedes_backend_call(self):
         body = CHAT_JS[CHAT_JS.index("async processToolApproval"):
                        CHAT_JS.index("    updateUIBlock(msg, blockId, newHtml)")]
-        guard = body.index("_approvalInFlight[toolCallId] || this.isSending || this.isTyping")
+        guard = body.index("if (this._approvalInFlight[toolCallId]) {")
         stale = body.index("if (!this.approvalMap[toolCallId])")
         backend = body.index("executeToolBackend")
         wake = body.index("await this.generateAIResponse")

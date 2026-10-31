@@ -3961,6 +3961,24 @@ def _tool_notice_chunk(title, content):
     return f"data: {json.dumps(_chunk)}\n\n"
 
 
+def _approval_pending_event_chunk(request):
+    """S186：真-pending 活卡宣告（唯一 approval_pending SSE 事件）。
+    前端流收尾据此只保留被点名 tool_call_id 的审批卡可操作，其余折叠为
+    已失效结果块——asyncTools 期间被模型越过的孤儿哨兵不再可点。"""
+    try:
+        for _m in reversed(getattr(request, "messages", None) or []):
+            _c = _m.get("content") if isinstance(_m, dict) else getattr(_m, "content", None)
+            _ap = _is_approval_result(_c)
+            if _ap is not None:
+                _tid = _m.get("tool_call_id", "") if isinstance(_m, dict) else getattr(_m, "tool_call_id", "")
+                _chunk = {"choices": [{"delta": {"approval_pending": {
+                    "tool_call_id": _tid, "tool_name": _ap.get("tool_name", "")}}}]}
+                return f"data: {json.dumps(_chunk, ensure_ascii=False)}\n\n"
+    except Exception:
+        return None
+    return None
+
+
 GATE_MAX = 2  # S183 完成闸门注入上限（固定值，非设置项——用户拍板）
 
 
@@ -5677,6 +5695,9 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
     # S151：web 侧审批挂起落通知中心（面板引导回会话卡处理）；IM 来源已经 approval_store 登记
     if pending_abort and not (request.is_app_bot and request.platform and request.peer_id):
         _notify_web_approval_pending(_st)
+        _ap_ev_chunk = _approval_pending_event_chunk(request)  # S186：真-pending 活卡宣告
+        if _ap_ev_chunk:
+            yield _ap_ev_chunk
 
     await _stream_anchor_inject(request, settings, _st, pending_abort)  # S183(T-A)
 

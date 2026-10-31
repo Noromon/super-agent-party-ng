@@ -404,7 +404,8 @@ Object.assign(vue_methods, {
         let _streamId = null;
         let _chunkIndex = 0;
         const _enableStreamResume = this.settings?.enableStreamResume !== false;
-        this._resumeSawApproval = false; // S172: 每条新流重置审批刹车标记
+            this._resumeSawApproval = false; // S172: 每条新流重置审批刹车标记
+            this._pendingApprovalToolCallId = null; // S186: 每条新流重置活卡点名标记
 
         try {
             const response = await fetch(`/v1/chat/completions`, {
@@ -548,6 +549,12 @@ Object.assign(vue_methods, {
                         }
                     }
 
+                    if (delta.approval_pending) {
+                        // S186：后端宣告唯一活卡——流收尾时仅该卡保留可操作
+                        this._pendingApprovalToolCallId = delta.approval_pending.tool_call_id || null;
+                        this._resumeSawApproval = true;
+                    }
+
                     this.sendMessagesToExtension();
             });
 
@@ -555,6 +562,7 @@ Object.assign(vue_methods, {
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
             this.flushStreamTextBuffer();
             this._flushToolStream(); // S93(F4)
+            this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
             if (currentMsg) currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
 
             if (tts_buffer.trim() && this.ttsSettings.enabled) {
@@ -599,6 +607,7 @@ Object.assign(vue_methods, {
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this.flushStreamTextBuffer();
                         this._flushToolStream(); // S93(F4)
+                        this._collapseStaleApprovalCards(currentMsg); // S186: 续传收尾折叠孤儿审批卡
                         this._markReasoningDone(currentMsg); // S93(F2)
                         currentMsg.generationFinished = true;
                         if (audioResolve) audioResolve();
@@ -723,9 +732,10 @@ Object.assign(vue_methods, {
         const currentMsg = this.messages[this.messages.length - 1];
         if (!currentMsg) return;
 
-        // S185：幂等防重入围栏——同一批复同时只允许一次处理；处理中禁止重复点击
+        // S186：仅 per-toolCallId 处理中锁拒重入（生成期间点击活卡合法；
+        // S185 的全局 isSending/isTyping 拒入会让卡片在生成期点击零反馈——撤销）
         if (!this._approvalInFlight) this._approvalInFlight = {};
-        if (this._approvalInFlight[toolCallId] || this.isSending || this.isTyping) {
+        if (this._approvalInFlight[toolCallId]) {
             if (typeof showNotification === 'function') {
                 showNotification('该审批正在处理中，请勿重复点击', 'warning');
             }
@@ -785,6 +795,30 @@ Object.assign(vue_methods, {
             } else {
                 resultText = await this.executeToolBackend(toolName, data.tool_params, action, data._stream_id);
 
+                // S186：幂等吞掉/已取消的闭合结果——折叠为禁用结果块、回写历史，
+                // 绝不唤醒模型（旧版把 "[已处理]" 当正常结果照样 generateAIResponse）
+                const _finalNote = String(resultText || '');
+                if (_finalNote.startsWith('[已处理]') || _finalNote.startsWith('[Cancelled]')) {
+                    if (targetBlock) {
+                        targetBlock.type = 'tool_result';
+                        targetBlock.expired = true;
+                        targetBlock.name = `${toolName} ${this.t('tool_result')}`;
+                        this._setResultDisplay(targetBlock, _finalNote);
+                        currentMsg._rv = (currentMsg._rv || 0) + 1;
+                    }
+                    this.updateUIBlock(currentMsg, blockId, `\n<div class="sap-process-block type-result" id="${blockId}"><div class="sp-header"><i class="fa-solid fa-circle-info"></i> ${escapeHtml(toolName)}</div><pre class="sp-content sp-code">${escapeHtml(_finalNote)}</pre></div>\n`);
+                    if (currentMsg.backend_content) {
+                        for (let i = currentMsg.backend_content.length - 1; i >= 0; i--) {
+                            const item = currentMsg.backend_content[i];
+                            if (item.role === 'tool' && item.tool_call_id === toolCallId) {
+                                item.content = _finalNote;
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
+
                 // 1. UI 显示：处理 \r 确保显示正常（比如手动执行了带进度条的脚本）
                 if (targetBlock) {
                     targetBlock.type = action === 'deny' ? 'error' : 'tool_result';
@@ -840,9 +874,16 @@ Object.assign(vue_methods, {
 
         } catch (e) {
             console.error("Approval flow failed:", e);
+            // S186：失败恢复卡片为可点原态（绝不卡在 Executing...），提示带真实异常
+            if (targetBlock && targetBlock.type !== 'tool_result') {
+                targetBlock.type = 'approval';
+                targetBlock.name = toolName;
+                currentMsg._rv = (currentMsg._rv || 0) + 1;
+            }
             // 兼容性判断，防止 showNotification 在其他环境也没有定义而二次崩溃
             if (typeof showNotification === 'function') {
-                showNotification("Tool execution failed", 'error');
+                const _em = (e && e.message) ? String(e.message).slice(0, 140) : String(e);
+                showNotification(`Tool execution failed: ${_em}`, 'error');
             }
             this.isSending = false;
             this.isTyping = false;

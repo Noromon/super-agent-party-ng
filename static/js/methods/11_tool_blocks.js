@@ -41,6 +41,25 @@ Object.assign(vue_methods, {
         this.activeSideView = 'list';  // 回到扩展列表视图
     },
 
+    // S186：孤儿审批卡折叠——流收尾/新审批卡出现时，未被点名活卡的
+    // approval 块一律折叠成已失效结果块（右侧详情走 openToolBlockDetail）
+    _collapseStaleApprovalCards(msg, keepOverride) {
+        if (!msg || !Array.isArray(msg.displayBlocks)) return;
+        const keep = (keepOverride !== undefined) ? keepOverride : (this._pendingApprovalToolCallId || null);
+        let changed = false;
+        msg.displayBlocks.forEach(b => {
+            if (b && b.type === 'approval' && b.id !== keep) {
+                const d = b.data || {};
+                b.type = 'tool_result';
+                b.expired = true;
+                b.name = `${b.name || 'Tool'} 已失效：流程已继续`;
+                this._setResultDisplay(b, `[已失效] 操作 ${d.tool_name || b.name || '?'} 的审批未获批复，生成流程已继续或结束，该批复入口已关闭。\n\n审批载荷：\n${JSON.stringify(d, null, 2)}`);
+                changed = true;
+            }
+        });
+        if (changed) msg._rv = (msg._rv || 0) + 1;
+    },
+
     // 根据块类型返回对应的图标类名
     getToolBlockIcon(type) {
         const icons = {
