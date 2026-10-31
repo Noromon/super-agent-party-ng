@@ -355,7 +355,11 @@ Object.assign(vue_methods, {
             if (id) {
                 const existing = blocks.find(b => b.type === type && b.id === id);
                 if (existing) {
-                    if (name && !existing.name) existing.name = name;
+                    // S187：冻结块补写 name 会抛 set falsish → 先判冻结
+                    if (name && !existing.name) {
+                        const _rex = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(existing) : existing;
+                        if (!Object.isFrozen(_rex)) existing.name = name;
+                    }
                     return existing;
                 }
             }
@@ -369,11 +373,19 @@ Object.assign(vue_methods, {
             }
             
             // 不复用，先冻结上一个不同类型的块（使其脱离响应式）
-            if (last && !Object.isFrozen(last)) {
-                Object.freeze(last);
-                if (typeof last.content === 'string') Object.freeze(last.content);
-                if (typeof last.args === 'string') Object.freeze(last.args);
-                if (last.data) Object.freeze(last.data);
+            // S187：toRaw 原目标操作，根治「先冻块后经代理读 .data」的 V8 不变量违例；
+            // 未批复审批卡不冻结（批复/点击需要可写），转结果块后下次收尾自然可冻
+            if (last) {
+                const _raw = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(last) : last;
+                if (_raw.type !== 'approval' && !Object.isFrozen(_raw)) {
+                    Object.freeze(_raw);
+                    if (typeof _raw.content === 'string') Object.freeze(_raw.content);
+                    if (typeof _raw.args === 'string') Object.freeze(_raw.args);
+                    if (_raw.data) {
+                        if (typeof Vue !== 'undefined' && Vue.markRaw) Vue.markRaw(_raw.data);
+                        Object.freeze(_raw.data);
+                    }
+                }
             }
             
             // 创建新块并推入数组
@@ -679,11 +691,17 @@ Object.assign(vue_methods, {
             // 冻结已完成消息的所有 displayBlocks 及内部字符串，减少响应式开销
             if (currentMsg && Array.isArray(currentMsg.displayBlocks)) {
                 currentMsg.displayBlocks.forEach(block => {
-                    if (!Object.isFrozen(block)) {
-                        Object.freeze(block);
-                        if (typeof block.content === 'string') Object.freeze(block.content);
-                        if (typeof block.args === 'string') Object.freeze(block.args);
-                        if (block.data) Object.freeze(block.data);
+                    // S187：toRaw 原目标 + 未批复审批卡跳过（toast 元凶=冻结后经代理读 .data）
+                    const _raw = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(block) : block;
+                    if (_raw.type === 'approval') return;
+                    if (!Object.isFrozen(_raw)) {
+                        Object.freeze(_raw);
+                        if (typeof _raw.content === 'string') Object.freeze(_raw.content);
+                        if (typeof _raw.args === 'string') Object.freeze(_raw.args);
+                        if (_raw.data) {
+                            if (typeof Vue !== 'undefined' && Vue.markRaw) Vue.markRaw(_raw.data);
+                            Object.freeze(_raw.data);
+                        }
                     }
                 });
             }
@@ -755,14 +773,22 @@ Object.assign(vue_methods, {
         const blockId = `approval-${toolCallId}`;
 
         // 【修复1】：用变量直接缓存找到的目标块的引用，不再二次查找
+        // S187：数组元素替换式转块——冻结卡经代理改写必失败；替换出新可写对象，
+        // 点击瞬间即变结果块（不等本次回应完成）
         let targetBlock = null;
         if (currentMsg.displayBlocks) {
             // 严格限定不仅 id 要匹配，而且必须是我们初始的 approval 块
-            targetBlock = currentMsg.displayBlocks.find(b => b.id === toolCallId && b.type === 'approval');
-            if (targetBlock) {
-                targetBlock.type = 'tool_result';
-                targetBlock.name = action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`;
-                this._setResultDisplay(targetBlock, '');
+            const _idx = currentMsg.displayBlocks.findIndex(b => b && b.id === toolCallId && b.type === 'approval');
+            if (_idx !== -1) {
+                const _src = (typeof Vue !== 'undefined' && Vue.toRaw)
+                    ? Vue.toRaw(currentMsg.displayBlocks[_idx]) : currentMsg.displayBlocks[_idx];
+                const _nb = Object.assign({}, _src, {
+                    type: 'tool_result',
+                    name: action === 'deny' ? this.t('denying') : `${this.t('executing')} ${toolName}...`,
+                });
+                this._setResultDisplay(_nb, '');
+                currentMsg.displayBlocks[_idx] = _nb;
+                targetBlock = _nb;
                 currentMsg._rv = (currentMsg._rv || 0) + 1;
             }
         }
@@ -874,10 +900,11 @@ Object.assign(vue_methods, {
 
         } catch (e) {
             console.error("Approval flow failed:", e);
-            // S186：失败恢复卡片为可点原态（绝不卡在 Executing...），提示带真实异常
-            if (targetBlock && targetBlock.type !== 'tool_result') {
-                targetBlock.type = 'approval';
-                targetBlock.name = toolName;
+            // S187：失败不再恢复回卡——保持结果块形态，把真实异常写为错误文本（即时反馈）
+            if (targetBlock) {
+                const _cm = (e && e.message) ? String(e.message).slice(0, 200) : String(e);
+                targetBlock.name = `${toolName} 执行失败`;
+                this._setResultDisplay(targetBlock, `执行失败: ${_cm}`);
                 currentMsg._rv = (currentMsg._rv || 0) + 1;
             }
             // 兼容性判断，防止 showNotification 在其他环境也没有定义而二次崩溃

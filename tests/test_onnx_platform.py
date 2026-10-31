@@ -40,7 +40,7 @@ def test_stream_finished_no_backend_freeze():
     src = _read("static/js/methods/10_chat_stream.js")
     m = re.search(r"backend_content\.forEach\(item => \{[\s\S]{0,80}?Object\.freeze\(item\)", src)
     assert m is None                                     # B10-1：finally 浅冻结已删
-    assert "Object.freeze(block)" in src                 # displayBlocks 冻结保留（纯展示）
+    assert "Object.freeze(_raw)" in src                  # displayBlocks 冻结保留（S187 起 toRaw 目标冻结，跳未批复审批卡）
 
 
 def test_onnx_cpu_provider_runtime():

@@ -247,6 +247,8 @@ Object.assign(vue_methods, {
             } catch (e) { }
         }
         if (isApproval && approvalData) {
+            // S187：审批数据拒绝响应式包装——根治冻结后代理 get 不变量违例（toast 元凶）
+            if (typeof Vue !== 'undefined' && Vue.markRaw) Vue.markRaw(approvalData);
             this._resumeSawApproval = true; // S172：本流出现待批复审批→终态，不得再自动续传/重放
             // S186：新审批卡出现=旧审批卡已被流程越过 → 立即折叠为已失效
             this._collapseStaleApprovalCards(currentMsg, toolCallId);

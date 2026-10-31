@@ -44,7 +44,7 @@ class TestOrphanCardCollapse:
     def test_collapse_method_defined(self):
         assert "_collapseStaleApprovalCards(msg, keepOverride)" in BLOCKS_JS
         assert "已失效：流程已继续" in BLOCKS_JS
-        assert "b.type = 'tool_result'" in BLOCKS_JS
+        assert "type: 'tool_result'," in BLOCKS_JS  # S187 起为替换式生成
 
     def test_supersede_on_new_card(self):
         assert "this._collapseStaleApprovalCards(currentMsg, toolCallId);" in RESUME_JS
@@ -75,7 +75,9 @@ class TestClickSemantics:
         wake = body.index("await this.generateAIResponse")
         assert body.index("return;\n                }", dup) < wake
 
-    def test_catch_restores_card_and_detail(self):
+    def test_catch_keeps_result_block_with_detail(self):
+        # S187 语义修正：失败不再恢复回卡，错误文本写进结果块
         body = _approval_body()
-        assert "targetBlock.type = 'approval';" in body
+        assert "targetBlock.type = 'approval';" not in body
+        assert "执行失败: ${_cm}" in body
         assert "Tool execution failed: ${_em}" in body

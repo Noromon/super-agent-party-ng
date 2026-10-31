@@ -47,13 +47,18 @@ Object.assign(vue_methods, {
         if (!msg || !Array.isArray(msg.displayBlocks)) return;
         const keep = (keepOverride !== undefined) ? keepOverride : (this._pendingApprovalToolCallId || null);
         let changed = false;
-        msg.displayBlocks.forEach(b => {
+        msg.displayBlocks.forEach((b, idx) => {
             if (b && b.type === 'approval' && b.id !== keep) {
-                const d = b.data || {};
-                b.type = 'tool_result';
-                b.expired = true;
-                b.name = `${b.name || 'Tool'} 已失效：流程已继续`;
-                this._setResultDisplay(b, `[已失效] 操作 ${d.tool_name || b.name || '?'} 的审批未获批复，生成流程已继续或结束，该批复入口已关闭。\n\n审批载荷：\n${JSON.stringify(d, null, 2)}`);
+                const _src = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(b) : b;
+                const d = _src.data || {};
+                // S187：元素替换式——冻结卡经代理改写必失败；替换为普通可冻结果块
+                const _nb = Object.assign({}, _src, {
+                    type: 'tool_result',
+                    expired: true,
+                    name: `${_src.name || 'Tool'} 已失效：流程已继续`,
+                });
+                this._setResultDisplay(_nb, `[已失效] 操作 ${d.tool_name || _src.name || '?'} 的审批未获批复，生成流程已继续或结束，该批复入口已关闭。\n\n审批载荷：\n${JSON.stringify(d, null, 2)}`);
+                msg.displayBlocks[idx] = _nb;
                 changed = true;
             }
         });
