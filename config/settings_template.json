@@ -20,6 +20,11 @@
         "reanchorEveryToolRounds": 6,
         "malformedCallRepairMax": 2
     },
+    "toolOutput": {
+        "retentionDays": 7,
+        "maxOutputLines": 800,
+        "maxOutputBytes": 20000
+    },
     "systemSettings": {
       "language": "auto",
       "theme": "light",
