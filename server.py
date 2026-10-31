@@ -1120,6 +1120,39 @@ from py.stream_relay import (
     _st_cancelled, _stream_producer_wrapper, _stream_consumer_generator,
     _stream_ttl_loop, _cleanup_stream,
 )
+
+# S185：审批执行一次性消费幂等表（锁内读写；FIFO 截断防无界增长）
+_approval_exec_once: set = set()
+_approval_exec_once_lock = asyncio.Lock()
+
+
+def _approval_prune_locked():
+    """锁内调用：幂等表超限时截断保留最近条目（防无界增长）。"""
+    global _approval_exec_once
+    _approval_exec_once = set(list(_approval_exec_once)[-400:])
+
+
+async def _approval_exec_dedup(stream_id, tool_name, tool_params, approval_type):
+    """S185：审批执行一次性消费——同流/同工具/同参数批复只执行一次；
+    重复请求返回幂等提示 dict，首次返回 None（放行）。锁内读写，FIFO 截断。"""
+    import hashlib as _hl
+    _exec_key = _hl.sha256(("|".join([
+        str(stream_id or ""), str(tool_name or ""),
+        json.dumps(tool_params if tool_params is not None else {},
+                   sort_keys=True, ensure_ascii=False, default=str),
+        str(approval_type or "")])).encode("utf-8")).hexdigest()[:32]
+    async with _approval_exec_once_lock:
+        if _exec_key in _approval_exec_once:
+            logging.getLogger("app").warning(
+                "[S185] 重复批复请求已幂等吞掉（未重复执行）: %s stream=%s",
+                tool_name, (stream_id or "-")[:8])
+            return {"result": "[已处理] 该批复的执行请求已消费完毕，请勿重复提交。"}
+        _approval_exec_once.add(_exec_key)
+        if len(_approval_exec_once) > 500:
+            _approval_prune_locked()
+    return None
+
+
 from py.tool_call_guard import neutralize_leaked_blocks as _tcg_neutralize
 from py.routers import (media, bots, memories, system, files,
                         bot_conversations, tasks, agents, workflows,
@@ -6837,6 +6870,20 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
 async def generate_complete_response(*args, **kwargs):
     """T-8/T-5: complete 路径统一闸门+取消围栏入口层（与 stream 共用
     _active_streams/cancel 端点/llm_gate 基建）。实现体在 _generate_complete_impl。"""
+    # S185：与 stream 入口同构的审批尾卫兵——历史尾部=未批复审批哨兵 →
+    # 静止态直接回执，不进模型（掐灭审批未决期间的重放推理/拥塞）。
+    try:
+        _req = args[2] if len(args) > 2 else kwargs.get("request")
+        _msgs = getattr(_req, "messages", None)
+        _ap_tail = pending_approval_at_tail(_msgs)
+        if _ap_tail is not None:
+            logging.getLogger("app").warning(
+                "[S185] complete 入口检出未批复审批尾部，静止态回执（不进模型）: %s",
+                _ap_tail.get("tool_name", "?"))
+            return JSONResponse(content=_pending_approval_reply_dict(
+                _ap_tail, getattr(_req, "model", "")))
+    except Exception as _ape:
+        logging.getLogger("app").warning("[S185] complete 审批尾卫兵异常（放行原流程）: %r", _ape)
     complete_stream_id = str(uuid.uuid4())
     entry = {
         "buffer": [], "done": False, "error": None, "cancelled": False,
@@ -7766,18 +7813,17 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         if _appr_entry and _appr_entry.get("cancelled"):
             logging.getLogger("app").info(f"[Cancel] 拒绝执行工具 {tool_name}：其生成流 {_appr_stream_id} 已被取消")
             return {"result": "[Cancelled] 该工具所属的生成已被用户取消，拒绝执行"}
-
-    # 获取当前配置
+    # S185：审批执行一次性消费（helper 内实现幂等吞掉重复批复）
+    _dedup_hit = await _approval_exec_dedup(_appr_stream_id, tool_name, tool_params, approval_type)
+    if _dedup_hit is not None: return _dedup_hit
     settings = await load_settings()
     cwd = settings.get("CLISettings", {}).get("cc_path")
-
     # S153: 路径门批复执行——外部/本地直读类注入本次调用的目录授权（grants），
     # 使被批工具内部的 resolve_strict_path 按批复范围放行
     from py import path_scope
     _ps_grants = path_scope.approved_call_grants(tool_name, tool_params or {}, cwd)
     if _ps_grants:
         path_scope.set_grants(_ps_grants)
-
     # ==================== 核心逻辑：处理 "Always" ====================
     if approval_type == "always":
         # S153: 路径门类"不再询问"→ allowed_dirs 目录白名单（与 allowed_tools 隔离，

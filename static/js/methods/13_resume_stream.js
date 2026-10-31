@@ -358,6 +358,8 @@ Object.assign(vue_methods, {
         try { _cancelPromise = fetch(`/v1/streams/cancel/${this._currentStreamId}`, { method: 'POST' }).catch(() => {}); } catch (e) {}
         this._currentStreamId = null;
       }
+      // S185：会话级全停——掐灭审批未决期间产生的全部重复/残留推理流（防漏停）
+      try { fetch('/v1/streams/cancel_all', { method: 'POST' }).catch(() => {}); } catch (e) {}
       if (this.abortController) {
 
         this.abortController.abort();

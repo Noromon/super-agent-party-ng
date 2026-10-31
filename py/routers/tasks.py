@@ -68,6 +68,37 @@ async def cancel_stream_endpoint(stream_id: str):
     return {"cancelled": True, "stopped": stopped, "stream_id": stream_id}
 
 
+@router.post("/v1/streams/cancel_all")
+async def cancel_all_streams_endpoint():
+    """S185: 会话级全停——对注册表内全部活跃生产者流逐条执行与单条取消
+    完全相同的围栏语义（置 cancelled + task.cancel + 有界等待退出 + 排程清理），
+    用于停止按钮一键掐灭审批未决期间产生的全部重复/残留推理流。"""
+    async with _active_streams_lock:
+        all_entries = list(_active_streams.items())
+        for _sid, _entry in all_entries:
+            _entry["cancelled"] = True
+            _entry["done"] = True
+    stopped, failed = 0, 0
+    for _sid, _entry in all_entries:
+        _task = _entry.get("task")
+        if _task and not _task.done():
+            _task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(_task), timeout=1.5)
+            except (asyncio.CancelledError, Exception):
+                pass
+        if _task and not _task.done():
+            failed += 1
+        else:
+            stopped += 1
+        asyncio.create_task(_cleanup_stream(_sid, delay=5.0))
+    logger.warning(
+        "[S185] cancel_all 全停执行: total=%d stopped=%d not_stopped=%d",
+        len(all_entries), stopped, failed)
+    return {"cancelled": True, "total": len(all_entries),
+            "stopped": stopped, "not_stopped": failed}
+
+
 @router.post("/v1/chat/resume")
 async def resume_stream_endpoint(req: StreamResumeRequest):
     """

@@ -722,7 +722,24 @@ Object.assign(vue_methods, {
     async processToolApproval(toolCallId, action) {
         const currentMsg = this.messages[this.messages.length - 1];
         if (!currentMsg) return;
-        
+
+        // S185：幂等防重入围栏——同一批复同时只允许一次处理；处理中禁止重复点击
+        if (!this._approvalInFlight) this._approvalInFlight = {};
+        if (this._approvalInFlight[toolCallId] || this.isSending || this.isTyping) {
+            if (typeof showNotification === 'function') {
+                showNotification('该审批正在处理中，请勿重复点击', 'warning');
+            }
+            return;
+        }
+        if (!this.approvalMap[toolCallId]) {
+            // 审批已消费或失效：安全降级——不触后端、不唤醒模型
+            if (typeof showNotification === 'function') {
+                showNotification('该审批已处理或已失效，未触发新的请求', 'warning');
+            }
+            return;
+        }
+        this._approvalInFlight[toolCallId] = true;
+        try {
         const data = this.approvalMap[toolCallId];
         const toolName = data?.tool_name || 'Tool';
         const blockId = `approval-${toolCallId}`;
@@ -738,6 +755,14 @@ Object.assign(vue_methods, {
                 this._setResultDisplay(targetBlock, '');
                 currentMsg._rv = (currentMsg._rv || 0) + 1;
             }
+        }
+
+        if (!targetBlock) {
+            // 审批卡已不存在（已转结果块）：安全降级，不触后端也不唤醒模型
+            if (typeof showNotification === 'function') {
+                showNotification('该审批已处理或已失效，未触发新的请求', 'warning');
+            }
+            return;
         }
 
         // 【修复2】：补充定义转义方法，避免 this.escapeHtml 报错崩溃
@@ -821,6 +846,10 @@ Object.assign(vue_methods, {
             }
             this.isSending = false;
             this.isTyping = false;
+        }
+        } finally {
+            // S185：处理结束后释放幂等锁，允许用户基于结果块继续新的决策
+            delete this._approvalInFlight[toolCallId];
         }
     },
 
