@@ -129,7 +129,10 @@ class TestNudgeAndRouteGate:
         assert '等待审批（{platform} · {peer_id}）", level="warn"' in STORE
 
     def test_pathscope_log_honest(self):
-        assert "已产生审批哨兵" in SERVER
+        # S182(T4): 文案再分线——哨兵/参数错误分开报，各自只陈述成立的状态
+        assert "审批哨兵已回注模型" in SERVER
+        assert "非审批、无批复等待" in SERVER
+        assert "进入批复等待（Web 审批卡" not in SERVER
         assert "等待用户路径授权" not in SERVER
 
 

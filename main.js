@@ -522,16 +522,16 @@ function attachFreezeProbe(win) {
       await dbg.sendCommand('Profiler.setSamplingInterval', { interval: 1000 })
       await dbg.sendCommand('Profiler.start')
       profFile = path.join(app.getPath('temp'), `sap-freeze-profile-${Date.now()}.json`)
-      // S106: 清理 3 天前的旧 profile（流式常开采样=每轮一个文件，防 TEMP 膨胀）
+      // S106→S182(P2): profile 滚动保留最近 20 份（3 天限期挡不住误报风暴式
+      // 堆积——曾因后台节流误报一夜攒下 1457 份/67MB；现抓取端已冷却，滚动保
+      // 留作兜底，文件名含时间戳、字典序=时间序）
       try {
         const tmp = app.getPath('temp')
         const fsx = require('fs')
-        const cut = Date.now() - 3 * 86400000
-        for (const fn of fsx.readdirSync(tmp)) {
-          if (/^sap-freeze-profile-.*\.json$/.test(fn)) {
-            const fp = path.join(tmp, fn)
-            try { if (fsx.statSync(fp).mtimeMs < cut) fsx.unlinkSync(fp) } catch (_) {}
-          }
+        const names = fsx.readdirSync(tmp)
+          .filter(fn => /^sap-freeze-profile-.*\.json$/.test(fn)).sort()
+        for (const fn of names.slice(0, Math.max(0, names.length - 20))) {
+          try { fsx.unlinkSync(path.join(tmp, fn)) } catch (_) {}
         }
       } catch (_) {}
       fdiag('冻结 CPU 采样已开始（' + ((opts && opts.hold) || 10000) / 1000 + ' 秒）…')

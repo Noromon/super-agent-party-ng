@@ -219,12 +219,10 @@ def evaluate(tool_name: str, tool_params: dict, settings: dict):
     kind, entries = got
     if not entries:
         return None
-    missing = [e["resolved"] for e in entries if not e["exists"]]
-    if missing:
-        return Decision(error="[参数错误] 本地文件/目录不存在："
-                        + "、".join(str(m)[:200] for m in missing)
-                        + "。请核实路径（支持工作区相对路径与绝对路径）；"
-                        "不要将其当作 URL 重试。")
+    # S182(T1) 区内 yolo：工作区内 fs 路径先行全免（rwx 含新建——"不存在"的
+    # 区内路径同样免门，存在性交工具层自身处理）。旧序把"不存在"检查排在免检
+    # 之前，区内新建文件被 [参数错误] 拒绝、把模型逼向 shell 绕行（事故实证
+    # 2026-10-31 nonogram_lab）。"不存在"检查此后仅对区外候选生效。
     need = []
     for e in entries:
         if kind == "fs" and path_within(e["resolved"], cwd):
@@ -232,6 +230,12 @@ def evaluate(tool_name: str, tool_params: dict, settings: dict):
         need.append(e)
     if not need:
         return None
+    missing = [e["resolved"] for e in need if not e["exists"]]
+    if missing:
+        return Decision(error="[参数错误] 本地文件/目录不存在："
+                        + "、".join(str(m)[:200] for m in missing)
+                        + "。请核实路径（支持工作区相对路径与绝对路径）；"
+                        "不要将其当作 URL 重试。")
     mode = permission_mode_for(settings)
     if mode in ("yolo", "cowork"):
         return Decision(grants="*")

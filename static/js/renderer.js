@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S181 loaded');
+console.warn('[Probe] renderer build=S182 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -969,16 +969,25 @@ const app = Vue.createApp({
     // S99/S100: 饥饿心跳。除定时器外，keydown/mousemove 活动戳互补——泵外阻塞
     // （同步 IPC/存储锁类）连定时器一起冻结时，冻结期间按下的键在恢复瞬间补发，
     // 回调里的 gap 检测照样报出精确饥饿时长。
+    // S182(P1): 后台节流误报修复——窗口隐藏后 Chromium 把定时器节流到约 1 次/分，
+    // gap≈60s 曾被整夜误判为饥饿并每分钟触发一轮抓栈（实测 profile 98% idle）。
+    // hidden 时只重置基线、按节流签名降级为 [TimerThrottle]；恢复可见先重置基线。
     try {
       let hbPrev = Date.now();
       let hbLastCapture = 0;
       const hbCheck = () => {
         const now = Date.now();
         const gap = now - hbPrev;
+        if (document.hidden) {
+          if (gap > 2000) console.info('[TimerThrottle] 后台节流间隙（非饥饿） ' + gap + 'ms');
+          hbPrev = now;
+          return;
+        }
         if (gap > 2000) console.warn('[Starve] 主线程饥饿 ' + gap + 'ms');
         // S104: 饥饿 >2.5s 请主进程 Debugger.pause 当场抓栈（不受挂死看门狗阈值
-        // 限制）。30s 冷却，暂停命令会打断当前 4s 任务——抓的就是正在卡的那口。
-        if (gap > 2500 && now - hbLastCapture > 30000) {
+        // 限制）。S182(P2): 冷却 30s→10 分钟且仅限可见态（hidden 分支已在上方
+        // 短路，双保险）——抓栈+10s 采样本身是开销，宁可漏抓不可轰炸。
+        if (gap > 2500 && now - hbLastCapture > 600000) {
           hbLastCapture = now;
           // S105: 双通道请抓——console 魔法行走已被证明能通的白名单转发；
           // preload/ipc 通道保留作第二腿（S104 单通道静默断裂全灭的教训）
@@ -991,6 +1000,8 @@ const app = Vue.createApp({
       setTimeout(hbTick, 100);
       window.addEventListener('keydown', hbCheck, { passive: true });
       window.addEventListener('mousemove', hbCheck, { passive: true, capture: true });
+      // S182(P1): 回到前台的瞬间把基线对齐到当下，隐藏期节流间隙不结转成饥饿
+      document.addEventListener('visibilitychange', () => { hbPrev = Date.now(); });
       // S105/S106: 抓取通道能力自检（进证据文件）——electron 整体缺失与
       // 函数缺失是两种故障，分开回显
       console.warn('[Probe] capture-channels electron=' + typeof window.electron +

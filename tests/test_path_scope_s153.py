@@ -105,8 +105,14 @@ class TestGateFs:
 
     def test_missing_path_clear_error(self, ws):
         ps = _ps()
-        w, _ = ws
-        d = ps.evaluate("read_file_tool_local", {"path": "no_such_dir_zz/x.txt"}, _settings(w))
+        w, out = ws
+        # S182(T1): 区内"不存在"不再拦——区内 rwx 全免含新建（旧序把区内新建
+        # 文件挡在门外，事故实证 2026-10-31 nonogram_lab）
+        assert ps.evaluate("edit_file_tool_local",
+                           {"path": "no_such_dir_zz/x.txt"}, _settings(w)) is None
+        # 区外不存在：仍是清晰参数错误，与审批无关
+        d = ps.evaluate("read_file_tool_local",
+                        {"path": str(out / "gone_zz" / "x.txt")}, _settings(w))
         assert d.error and "本地文件/目录不存在" in d.error and d.payload is None
 
 
@@ -228,7 +234,7 @@ class TestPermissionMode:
 class TestWiringS153:
     def test_server(self):
         s = _read("server.py")
-        seg = s[s.find("# S153: 路径门（工作区外本地路径"):][:600]
+        seg = s[s.find("# S153: 路径门（工作区外本地路径"):][:900]  # S182(T4): 分线日志加长，窗口放宽
         assert "path_scope.evaluate(" in seg and "set_grants" in seg
         ex = s[s.find("async def execute_approved_tool("):][:1600]
         assert "approved_call_grants" in ex and "add_dirs_to_project_config" in ex

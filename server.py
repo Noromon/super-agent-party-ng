@@ -1967,7 +1967,13 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
         _ps = path_scope.evaluate(tool_name, tool_params or {}, settings)
         if _ps is not None:
             if _ps.block is not None:
-                logging.getLogger("app").warning(f"[PathScope] Blocked '{tool_name}': 已产生审批哨兵，进入批复等待（Web 审批卡/通知中心；IM 渠道回复 /y /n）")
+                # S182(T4) 日志分线：旧文案把参数错误也报成"批复等待"，制造了
+                # 查无实据的审批幽灵（事故实证 2026-10-31）。哨兵与错误分开报，
+                # 且只陈述此刻真实成立的状态。
+                if _ps.payload is not None:
+                    logging.getLogger("app").warning(f"[PathScope] '{tool_name}' 区外路径：审批哨兵已回注模型（本轮收尾时将登记审批卡并推送会话渠道+通知中心；模型若继续则不登记）")
+                else:
+                    logging.getLogger("app").info(f"[PathScope] '{tool_name}' 路径参数错误，错误原文已回注模型（非审批、无批复等待）")
                 return _ps.block
             if _ps.grants:
                 path_scope.set_grants(_ps.grants)
