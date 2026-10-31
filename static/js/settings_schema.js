@@ -68,6 +68,7 @@
     ['knowledgeBases', 'knowledgeBases'],
     ['modelProviders', 'modelProviders'],
     ['systemSettings', 'systemSettings'],
+    ['agentRobustness', 'agentRobustness'],
     ['largeMoreButtonDict', 'largeMoreButtonDict'],
     ['smallMoreButtonDict', 'smallMoreButtonDict'],
     ['currentLanguage', 'currentLanguage'],

@@ -391,6 +391,34 @@
               </div>
             </div>
 
+            <!-- ===== S183 智能体健壮性（再锚 / 塌方调用返工） ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-shield-halved"></i>
+                  </el-icon>
+                  {{ t('agentRobustness') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('reanchorEveryToolRoundsDesc')" class="form-item-align" label-position="left">
+                  <el-input-number
+                    v-model="agentRobustness.reanchorEveryToolRounds"
+                    :min="0" :max="50" :step="1"
+                    @change="autoSaveSettings">
+                  </el-input-number>
+                </el-form-item>
+                <el-form-item :label="t('malformedCallRepairMaxDesc')" class="form-item-align" label-position="left">
+                  <el-input-number
+                    v-model="agentRobustness.malformedCallRepairMax"
+                    :min="0" :max="5" :step="1"
+                    @change="autoSaveSettings">
+                  </el-input-number>
+                </el-form-item>
+              </div>
+            </div>
+
             <div class="tool-item" v-if="isElectron">
               <div class="tool-header">
                 <span>

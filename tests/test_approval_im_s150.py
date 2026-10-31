@@ -219,7 +219,8 @@ class TestShortcutCatalog:
 class TestWiringS150:
     def test_server_chain(self):
         s = _read("server.py")
-        seg = s[s.find("# S150：IM 渠道审批挂起"):][:800]
+        # S183-M3：登记主体自 _stream_tool_round 抽至 _stream_im_approval_hang，改锚 helper 体
+        seg = s[s.find("async def _stream_im_approval_hang"):][:900]
         assert seg and "approval_store.create(" in seg and "has_handlers" in seg
         assert "approval_im.sanitize_incoming(request.messages)" in s
         assert "async def execute_approved_tool(" in s

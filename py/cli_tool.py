@@ -762,6 +762,25 @@ print(json.dumps(filtered))
     except Exception as e:
         return f"[Error] Glob failed: {str(e)}"
 
+def format_todo_snapshot_line(todos: list) -> str:
+    """S183(T-B)：紧凑 todo 快照「#1[done] #2[pending] ...」（30 项截断）。
+    供 todo 工具回显、再锚注记、完成闸门注记共用；纯函数。"""
+    parts = []
+    for t in todos or []:
+        if isinstance(t, dict) and t.get("id") is not None:
+            parts.append(f"#{t['id']}[{t.get('status', '?')}]")
+    line = " ".join(parts[:30])
+    if len(parts) > 30:
+        line += f" ...(+{len(parts) - 30})"
+    return line
+
+
+def todo_echo(todos: list) -> str:
+    """S183(T-B)：todo 工具结果全量回显后缀（opencode 式状态重锚）。"""
+    line = format_todo_snapshot_line(todos or [])
+    return ("\n[list] " + line) if line else ""
+
+
 async def read_todo_snapshot() -> list:
     """读取当前 workspace 的 ai_todos.json 快照（供 todo_stats 事件推送）。"""
     try:
@@ -932,7 +951,7 @@ async def todo_write_tool(action: str, id: str = None, content: str = None,
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
             
-        return msg
+        return msg + todo_echo(todos)  # S183(T-B): 结果回显全量状态
         
     except Exception as e:
         return f"[Error] Todo operation failed: {e}. Todo bookkeeping is NOT the task itself - continue the main work even if this fails."
@@ -2081,7 +2100,7 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
         async with aiofiles.open(todo_file, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(todos, indent=2, ensure_ascii=False))
             
-        return msg
+        return msg + todo_echo(todos)  # S183(T-B): 结果回显全量状态
 
     except Exception as e:
         return f"[Error] Todo operation failed: {e}. Todo bookkeeping is NOT the task itself - continue the main work even if this fails."

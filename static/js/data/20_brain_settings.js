@@ -139,6 +139,12 @@ Object.assign(vue_data, {
       externalApiRequireToken: false,
     },
 
+    // S183：智能体健壮性（再锚间隔轮数 / 塌方调用返工上限；0=关闭）
+    agentRobustness: {
+      reanchorEveryToolRounds: 6,
+      malformedCallRepairMax: 2,
+    },
+
     // --- 数据安全网（M4-lite 快照备份 UI）---
     backupSnapshots: [],
 

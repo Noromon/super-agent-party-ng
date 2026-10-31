@@ -1212,6 +1212,7 @@
   "affectionDataList",
   "affectionRawData",
   "affectionSearchQuery",
+  "agentRobustness",
   "agentTabActive",
   "agentTiles",
   "agents",

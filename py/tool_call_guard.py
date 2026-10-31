@@ -20,11 +20,17 @@ REDACTION = "[malformed tool call redacted]"
 
 # 调用块起始/结束标记（覆盖 Hermes 风格 <tool_call>、ChatML 风格
 # <|im_start|>、<function_call>，以及降级文本中残留的块结构）
-_BLOCK_START = r"<tool_call>|<\|tool_call\|>|<function_call>"
+# S183: 补 <function=/</function> 裸形——Hermes-XML 引擎降级文本常以
+# <function=NAME> 直接开块（2026-10-31 nonogram 事故形态），旧表漏检。
+_BLOCK_START = (r"<tool_call>|<\|tool_call\|>|<function_call>|<function=|<invoke=|"
+                r"</function>|</invoke>|</tool_call>")
 _BLOCK_FULL = re.compile(
-    r"(?:<tool_call>|<\|tool_call\|>|<function_call>)[\s\S]*?(?:</tool_call>|<\|tool_call\|>|</function_call>)")
+    r"(?:<tool_call>|<\|tool_call\|>|<function_call>|<function=|<invoke=)[\s\S]*?"
+    r"(?:</tool_call>|<\|tool_call\|>|</function_call>|</function>|</invoke>)",
+    re.IGNORECASE)
 _BLOCK_UNCLOSED = re.compile(
-    r"(?:<tool_call>|<\|tool_call\|>|<function_call>)[\s\S]*$")
+    r"(?:<tool_call>|<\|tool_call\|>|<function_call>|<function=|<invoke=)[\s\S]*$",
+    re.IGNORECASE)
 _HAS_MARKER = re.compile(_BLOCK_START)
 # 名字抽取：XML 属性/等号形态与 JSON 形态；仅在存在调用块标记时启用
 _NAME_XML = re.compile(r"<(?:function|invoke)[= ](?:name=\")?([A-Za-z0-9_.:\-]{2,})\"?(?=[>\s]|$)")
@@ -92,3 +98,37 @@ def build_correction_message(leaked_names, declared_names):
     if hints:
         lines.extend(hints)
     return "\n".join(lines)
+
+
+# ==================== S183: 流内显示拦截（holdback）辅助 ====================
+# 目标：调用块标记一旦成型，其起始位置之后的正文不再流向 UI/IM（旧策略
+# "流内原文不拦"废止——用户 2026-10-31 明示：展示错误调用块，不展示尸块）。
+# 标记跨越流式分块时，尾部"疑似标记前缀"先扣住不发，凑够再判。
+
+_MARKERS = ("<tool_call", "<|tool_call|>", "<function_call>", "<function=", "<invoke=",
+            "</function>", "</invoke>", "</tool_call>")
+_MAX_MARK = max(len(m) for m in _MARKERS)
+
+
+def cut_position(text) -> int:
+    """最早完整标记下标；无标记返回 -1。"""
+    low = text.lower()
+    best = -1
+    for m in _MARKERS:
+        i = low.find(m)
+        if i >= 0 and (best < 0 or i < best):
+            best = i
+    return best
+
+
+def partial_tail_len(text) -> int:
+    """尾部为某标记严格前缀的最大长度（0=无需扣住）。"""
+    if not text:
+        return 0
+    low = text[-_MAX_MARK:].lower()
+    for k in range(min(len(low), _MAX_MARK - 1), 0, -1):
+        tail = low[-k:]
+        for m in _MARKERS:
+            if m.startswith(tail):
+                return k
+    return 0

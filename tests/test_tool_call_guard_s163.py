@@ -180,10 +180,22 @@ def _run_second_round(rounds, cancelled=False, tools=None, retries_pre=0):
             content = neutralize_leaked_blocks(content)
         messages.append({"role": role, "content": content})
 
-    ns_local = {"_st_cancelled": _cancelled, "_stream_loop_pass": _loop_pass_ag,
+    async def _gate_pass(_st, _tools_now):
+        return ("pass", None)
+
+    ns_local = {"_st_cancelled": _cancelled, "_stream_gate_check": _gate_pass,
+                "_stream_loop_pass": _loop_pass_ag,
                 "_stream_final_guard": _final_guard, "logging": logging,
                 "_apply_ctx_guardrail": lambda extra, msg, s: extra,
-                "content_append": _content_append}
+                "content_append": _content_append,
+                # S183 新依赖桩（返工上限沿用缺省 2，与 MAX_TCG_RETRIES 对齐）
+                "_robust_cfg": lambda settings: (6, 2),
+                "_tool_notice_chunk": lambda title, content: "data: {}\n\n",
+                "_todo_open_items": lambda todos: [
+                    t for t in (todos or [])
+                    if isinstance(t, dict) and t.get("status") in ("pending", "in_progress")],
+                "_gate_note_text": lambda items, nth: f"gate {nth}",
+                "GATE_MAX": 2}
     src_node = next(n for n in ast.walk(ast.parse(SRC))
                     if isinstance(n, ast.AsyncFunctionDef) and n.name == "_stream_second_round")
     exec(compile(ast.Module(body=[src_node], type_ignores=[]), "<sr>", "exec"), ns_local)

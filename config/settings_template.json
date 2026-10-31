@@ -16,6 +16,10 @@
     "omniVoice": "Cherry",
     "mcpCallTimeout": 180,
     "extra_params":[],
+    "agentRobustness": {
+        "reanchorEveryToolRounds": 6,
+        "malformedCallRepairMax": 2
+    },
     "systemSettings": {
       "language": "auto",
       "theme": "light",

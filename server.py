@@ -3858,9 +3858,138 @@ def truncate_tool_result(text, limit: int = 32000):
 
 def cli_permission_mode_for(settings: dict) -> str:
     """读取当前 CLI 引擎对应的权限模式（值域已归一化）
-    S153: 逻辑平移至 py/path_scope.permission_mode_for，此处委托保持既有调用点。"""
+    S153: 逻辑平移至 py.path_scope.permission_mode_for，此处委托保持既有调用点。"""
     from py.path_scope import permission_mode_for
     return permission_mode_for(settings)
+
+
+def _tcg_display_slice(full_acc, new_content, emitted, cut):
+    """S183 流内显示拦截（纯函数）：调用块标记成型后其起始位置起的正文
+    不流向展示端；标记未成型时先扣住"疑似标记前缀"尾部待判。
+    返回（可见增量, 累计可见长度, 标记位置）。历史落账与 TCG 判定用原文，
+    不经此截断。"""
+    from py.tool_call_guard import cut_position, partial_tail_len
+    cand = full_acc + new_content
+    if cut < 0:
+        cut = cut_position(cand)
+    allow = cut if cut >= 0 else len(cand) - partial_tail_len(cand)
+    keep = max(0, allow - emitted)
+    show = new_content[:keep]
+    return show, emitted + len(show), cut
+
+
+def _robust_cfg(settings):
+    """S183：agentRobustness 设置 -> (再锚间隔轮数 0~50, 塌方返工上限 0~5)。
+    0=关闭对应机制；缺省 6/2。"""
+    ar = (settings or {}).get("agentRobustness") or {}
+    try:
+        n = int(ar.get("reanchorEveryToolRounds", 6))
+    except (TypeError, ValueError):
+        n = 6
+    try:
+        m = int(ar.get("malformedCallRepairMax", 2))
+    except (TypeError, ValueError):
+        m = 2
+    return max(0, min(50, n)), max(0, min(5, m))
+
+
+def _tool_notice_chunk(title, content):
+    """S183：工具样式提示块 SSE（type=error → UI 错误调用块；
+    IM 侧由 ToolProgressLedger 按 progressMode 桥接裁决）。"""
+    _chunk = {"choices": [{"delta": {"tool_content": {
+        "title": title, "content": content, "type": "error"}}}]}
+    return f"data: {json.dumps(_chunk)}\n\n"
+
+
+GATE_MAX = 2  # S183 完成闸门注入上限（固定值，非设置项——用户拍板）
+
+
+def _gate_note_text(open_items, nth):
+    """完成闸门注记（回注模型，name=system_note 元频道）。"""
+    ids = ", ".join(f"#{t.get('id')}[{t.get('status', '?')}]" for t in open_items[:8])
+    return (f"【完成闸门 {nth}/{GATE_MAX}】todo 列表仍有 {len(open_items)} 项未完成：{ids}。"
+            "若确有未做完的步骤：立即继续调用工具执行；若某项实际已完成：现在更新其状态。"
+            "本轮回复只针对当前任务，不得复述已回答过的旧话题。")
+
+
+def _anchor_note_text(todos):
+    """S183(T-A) 再锚注记（回注模型，name=system_note 元频道）。"""
+    from py.cli_tool import format_todo_snapshot_line
+    return ("【系统再锚】当前以工具推进中的任务进度快照：" + (format_todo_snapshot_line(todos) or "(空)")
+            + "。纪律：只汇报当前任务；已回答过的旧话题不得复述；"
+              "存在 pending/in_progress 项时不得结束回合。")
+
+
+def _todo_open_items(todos):
+    """未完成项（pending/in_progress）；结构异常项忽略。"""
+    return [t for t in (todos or [])
+            if isinstance(t, dict) and t.get("status") in ("pending", "in_progress")]
+
+
+async def _stream_anchor_inject(request, settings, _st, pending_abort):
+    """S183(T-A)：每 N 个工具轮把 todo 进度与任务纪律重新推到近端。
+    仅在 todo 激活、非审批挂起（不得污染批复尾检）、非取消时注入。"""
+    _rn = _robust_cfg(settings)[0]
+    if not _rn or pending_abort or _st_cancelled(_st):
+        return
+    _st["anchor_rounds"] = _st.get("anchor_rounds", 0) + 1
+    if _st["anchor_rounds"] % _rn != 0:
+        return
+    try:
+        from py.cli_tool import read_todo_snapshot
+        _snap_now = await read_todo_snapshot()
+    except Exception:
+        _snap_now = []
+    if _snap_now:
+        request.messages.append({
+            "role": "user",
+            "content": _anchor_note_text(_snap_now),
+            "name": "system_note",  # S166：元频道注记
+        })
+
+
+async def _stream_im_approval_hang(request, _st):
+    """S150：IM 渠道审批挂起——快照内部 messages（tool_calls 成对闭合后）登记挂起表，
+    由 bot 通知对端斜杠批复并「原位续流」；前端哨兵帧与审批卡流程原样不动。
+    （S183-M3：自 _stream_tool_round 抽出，行为不变。）"""
+    try:
+        from py import approval_im, approval_store
+        _ap = _is_approval_result(_st.get("results"))
+        if _ap and approval_store.has_handlers(request.platform):
+            _hit_id = ""
+            for _m in reversed(request.messages):
+                if _m.get("role") == "tool" and _is_approval_result(_m.get("content")) is not None:
+                    _hit_id = _m.get("tool_call_id", "")
+                    break
+            await approval_store.create(
+                platform=request.platform, peer_id=request.peer_id,
+                tool_name=_ap.get("tool_name", ""), tool_params=_ap.get("tool_params"),
+                tool_call_id=_hit_id, permission_mode=_ap.get("permission_mode", ""),
+                cwd=_ap.get("cwd", ""),
+                messages=approval_im.strip_system_messages(copy.deepcopy(request.messages)))
+    except Exception as _ape:
+        logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
+
+
+async def _stream_gate_check(_st, tools_now):
+    """S183(T-C) 完成闸门判定（M3：纯决策，注记/放行由调用方执行）。
+    返回 ("pass"|"block"|"exhaust", payload)。放行条件：无声明工具、todo 空、
+    无未完成项、或本轮既未用 todo 也无 in_progress 佐证。"""
+    if not tools_now or _st_cancelled(_st):
+        return "pass", None
+    from py.cli_tool import read_todo_snapshot
+    try:
+        open_items = _todo_open_items(await read_todo_snapshot())
+    except Exception:
+        return "pass", None
+    if not open_items or not (any(_t.get("status") == "in_progress" for _t in open_items)
+                              or _st.get("turn_used_todo")):
+        return "pass", None
+    nth = _st.get("gate_retries", 0) + 1
+    if nth > GATE_MAX:
+        return "exhaust", open_items
+    _st["gate_retries"] = nth
+    return "block", _gate_note_text(open_items, nth)
 
 RESUME_NUDGE_TEXT = (
     "【系统提示】上面的工具结果已收到。工具的“成功”仅代表这一处操作完成，"
@@ -3975,13 +4104,17 @@ TOOL_RESULT_CHAR_CAP = 15000
 
 
 def _cap_tool_result(result):
-    """工具输出源头截断（对齐 opencode）：单条结果超长截断并提示分页续读。"""
+    """工具输出源头截断（对齐 opencode）：单条结果超长截断并提示分页续读。
+    S183(T-D): 头 11000 + 尾 4000 保两端——旧盲切头部把代码/报错中段
+    （恰是最关键部分）留在盲区，模型只见半截文件（2026-10-31 事故 26700→15000）。"""
     if not isinstance(result, str) or len(result) <= TOOL_RESULT_CHAR_CAP:
         return result
-    head = result[:TOOL_RESULT_CHAR_CAP]
-    logging.getLogger("app").info(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符")
-    return (f"{head}\n\n==== [输出已截断：共 {len(result)} 字符，仅显示前 {TOOL_RESULT_CHAR_CAP} 字符。"
-            "如需后续内容，请使用工具的 offset/分页参数分段续读] ====")
+    _head = 11000
+    _tail = TOOL_RESULT_CHAR_CAP - _head
+    logging.getLogger("app").info(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符（头尾保留）")
+    return (f"{result[:_head]}\n\n==== [输出已截断：共 {len(result)} 字符，保留头 {_head} + 尾 {_tail}，"
+            f"中间 {len(result) - TOOL_RESULT_CHAR_CAP} 字符省略。中段内容请用工具 offset/分页参数续读] ====\n\n"
+            f"{result[-_tail:]}")
 
 
 def _apply_ctx_guardrail(extra, messages, settings):
@@ -4764,6 +4897,7 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
 
 async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
     """First LLM stream: tool_call slot merging + think-tag splitting + SSE."""
+    _st["tcg_emit"], _st["tcg_cut"] = len(full_content or ""), -1  # S183 显示拦截基线
     async for chunk in response:
         # S131/F1: 流内 chunk 围栏——在途 LLM 流取消后 ≤5 chunk 内终止，
         # 不依赖 task.cancel() 对 SDK 内部 await 的可达性
@@ -4861,7 +4995,11 @@ async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usa
             new_reasoning = "".join(reasoning_buffer)
                         
             # 更新chunk内容
-            delta["content"] = new_content.strip("\x00")  # 保留未完成内容
+            # S183: 流内显示拦截——调用块标记起始处起的正文不流向 UI/IM，
+            # 疑似标记前缀先扣住；full_content 仍按原文累积供 TCG 判定与落账。
+            _tcg_show, _st["tcg_emit"], _st["tcg_cut"] = _tcg_display_slice(
+                full_content, new_content, _st.get("tcg_emit", 0), _st.get("tcg_cut", -1))
+            delta["content"] = _tcg_show.strip("\x00")  # 保留未完成内容
             delta["reasoning_content"] = new_reasoning.strip("\x00") or None
                         
             # 重置缓冲区但保留未完成部分
@@ -4871,7 +5009,7 @@ async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usa
                 content_buffer = []
             reasoning_buffer = []
             yield f"data: {json.dumps(chunk_dict)}\n\n"
-            full_content += delta.get("content") or "" 
+            full_content += new_content.strip("\x00")  # S183: 累积原文（非显示截断文）
 
     _st["usage_info"] = usage_info
     _st["_ctx_peak"] = _ctx_peak
@@ -4944,7 +5082,7 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -4980,7 +5118,7 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5007,7 +5145,7 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5032,7 +5170,7 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5125,7 +5263,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
     写回 _st：tc_round / fc / usage_info / _ctx_peak / in_reasoning /
     content_buffer / reasoning_buffer；cancel 路径置 tc_round_done 并终结。
     """
-    from py.tool_call_guard import (MAX_TCG_RETRIES, build_correction_message,
+    from py.tool_call_guard import (build_correction_message,
                                     declared_tool_names, detect_leaked_calls)
     _tools_now = []
     if tools and not force_no_tools:
@@ -5165,7 +5303,19 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             _leaked = detect_leaked_calls(full_content)
             _declared = declared_tool_names(_tools_now)
             _retries = _st.get("tcg_retries", 0)
-            if _leaked and _declared and _retries < MAX_TCG_RETRIES and not _st_cancelled(_st):
+            _repair_max = _robust_cfg(settings)[1]  # S183 可配置（旧：常量 MAX_TCG_RETRIES）
+            _will_retry = bool(_leaked and _declared and _retries < _repair_max
+                               and not _st_cancelled(_st))
+            if _leaked:
+                # S183: 可见错误调用块——正文已在流内截断不展示尸块；
+                # IM 侧由 ToolProgressLedger 按工具块桥接设置裁决
+                yield _tool_notice_chunk(
+                    "⚠️ 畸形工具调用（已拦截，未执行）",
+                    "模型把调用块以纯文本写入正文：%s。%s" % (
+                        ", ".join(map(str, _leaked[:6])),
+                        "已要求改用结构化调用重发。" if _will_retry
+                        else "返工已达上限或本轮无声明工具，按正文收尾。"))
+            if _will_retry:
                 _st["tcg_retries"] = _retries + 1
                 content_append(request.messages, 'assistant', full_content)  # 已含 S163 中和
                 request.messages.append({
@@ -5175,11 +5325,29 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
                 })
                 logging.getLogger("app").info(
                     "[TCG] 正文泄漏未声明工具调用，自纠重试 %d/%d: %s",
-                    _retries + 1, MAX_TCG_RETRIES, _leaked)
+                    _retries + 1, _repair_max, _leaked)
                 continue
+            if _leaked:
+                logging.getLogger("app").warning(
+                    "[TCG] 泄漏调用已拦截显示，未返工（retries=%d max=%d declared=%d）: %s",
+                    _retries, _repair_max, len(_declared), _leaked)
             # 将响应添加到消息列表（S68：空生成不写历史；S163：泄漏块经
             # content_append 中和后落账，防 few-shot 污染）
             content_append(request.messages, 'assistant', full_content)
+            # S183(T-C) 完成闸门：todo 未清即收尾 → 打回续跑（上限 GATE_MAX）
+            if not _leaked:
+                _g_act, _g_payload = await _stream_gate_check(_st, _tools_now)
+                if _g_act == "block":
+                    request.messages.append({"role": "user", "content": _g_payload,
+                                             "name": "system_note"})
+                    logging.getLogger("app").info("[Gate] todo 未清即收尾，完成闸门打回: %s", _g_payload[:40])
+                    continue
+                if _g_act == "exhaust":
+                    yield _tool_notice_chunk(
+                        "⚠️ 任务未完结即收尾",
+                        f"todo 仍有 {len(_g_payload)} 项未收口，闸门返工上限已达，按收尾放行。")
+                    logging.getLogger("app").warning(
+                        "[Gate] todo 未清收尾放行（闸门 %d 用尽）：%d 项", GATE_MAX, len(_g_payload))
         _st["tc_round"] = tool_calls
         return
 
@@ -5425,6 +5593,8 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
             }
         )
 
+        if "todo_write" in str(getattr(response_content, "name", "") or ""):  # S183(T-C) todo 记账轮
+            _st["turn_used_todo"] = True
         # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
         # T-9: 结构化哨兵判定（非子串嗅探），命中即断
         if _is_approval_result(results) is not None:
@@ -5434,31 +5604,15 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
     # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
     append_missing_results(request.messages, assistant_tool_calls, acked_ids)
 
-    # S150：IM 渠道审批挂起——快照内部 messages（tool_calls 成对闭合后）登记挂起表，
-    # 由 bot 通知对端斜杠批复并「原位续流」；前端哨兵帧与审批卡流程原样不动。
+    # S150：IM 渠道审批挂起登记（S183-M3：主体抽至 _stream_im_approval_hang）
     if pending_abort and request.is_app_bot and request.platform and request.peer_id:
-        try:
-            from py import approval_im, approval_store
-            _ap = _is_approval_result(_st.get("results"))
-            if _ap and approval_store.has_handlers(request.platform):
-                _hit_id = ""
-                for _m in reversed(request.messages):
-                    if _m.get("role") == "tool" and _is_approval_result(_m.get("content")) is not None:
-                        _hit_id = _m.get("tool_call_id", "")
-                        break
-                await approval_store.create(
-                    platform=request.platform, peer_id=request.peer_id,
-                    tool_name=_ap.get("tool_name", ""), tool_params=_ap.get("tool_params"),
-                    tool_call_id=_hit_id, permission_mode=_ap.get("permission_mode", ""),
-                    cwd=_ap.get("cwd", ""),
-                    messages=approval_im.strip_system_messages(copy.deepcopy(request.messages)))
-        except Exception as _ape:
-            logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
+        await _stream_im_approval_hang(request, _st)
 
     # S151：web 侧审批挂起落通知中心（面板引导回会话卡处理）；IM 来源已经 approval_store 登记
     if pending_abort and not (request.is_app_bot and request.platform and request.peer_id):
         _notify_web_approval_pending(_st)
 
+    await _stream_anchor_inject(request, settings, _st, pending_abort)  # S183(T-A)
 
     # =========================================================================
     # 第一阶段：上下文压缩 (仅在达到阈值时触发，决定“保留哪些消息”)
@@ -5705,6 +5859,7 @@ async def _stream_regrab(request, settings, results, images, fastapi_base_url):
 
 async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
     """While-loop LLM re-request chunk stream (slot merge + think tags)."""
+    _st["tcg_emit"], _st["tcg_cut"] = len(full_content or ""), -1  # S183 显示拦截基线
     async for chunk in response:
         if not chunk.choices:
             if getattr(chunk, "usage", None):
@@ -5794,7 +5949,10 @@ async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usag
                 new_reasoning = "".join(reasoning_buffer)
                                 
                 # 更新chunk内容
-                delta["content"] = new_content.strip("\x00")  # 保留未完成内容
+                # S183: 流内显示拦截（与 first_pass 同构，full_content 累积原文）
+                _tcg_show, _st["tcg_emit"], _st["tcg_cut"] = _tcg_display_slice(
+                    full_content, new_content, _st.get("tcg_emit", 0), _st.get("tcg_cut", -1))
+                delta["content"] = _tcg_show.strip("\x00")  # 保留未完成内容
                 delta["reasoning_content"] = new_reasoning.strip("\x00") or None
                                 
                 # 重置缓冲区但保留未完成部分
@@ -5805,7 +5963,7 @@ async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usag
                 reasoning_buffer = []
                                 
                 yield f"data: {json.dumps(chunk_dict)}\n\n"
-                full_content += delta.get("content") or "" 
+                full_content += new_content.strip("\x00")  # S183: 累积原文（非显示截断文）
 
     _st["usage_info"] = usage_info
     _st["_ctx_peak"] = _ctx_peak
@@ -5879,7 +6037,7 @@ async def _stream_drs_loop_round(client, model, extra_params, request, source_pr
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5915,7 +6073,7 @@ async def _stream_drs_loop_round(client, model, extra_params, request, source_pr
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5941,7 +6099,7 @@ async def _stream_drs_loop_round(client, model, extra_params, request, source_pr
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
@@ -5966,7 +6124,7 @@ async def _stream_drs_loop_round(client, model, extra_params, request, source_pr
         request.messages.append(
             {
                 "role": "assistant",
-                "content": full_content,
+                "content": _tcg_neutralize(full_content),  # S183: 泄漏块不落历史
                 "reasoning_content": "",
             }
         )
