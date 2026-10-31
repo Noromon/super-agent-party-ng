@@ -419,6 +419,69 @@
               </div>
             </div>
 
+            <!-- ===== S184 工具输出与检索 ===== -->
+            <div class="tool-item">
+              <div class="tool-header">
+                <span>
+                  <el-icon>
+                    <i class="fa-solid fa-box-archive"></i>
+                  </el-icon>
+                  {{ t('toolOutput') }}
+                </span>
+              </div>
+              <div class="tool-content">
+                <el-form-item :label="t('toolOutputRetentionDesc')" class="form-item-align" label-position="left">
+                  <el-input-number
+                    v-model="toolOutput.retentionDays"
+                    :min="0" :max="90" :step="1"
+                    @change="autoSaveSettings">
+                  </el-input-number>
+                </el-form-item>
+                <el-form-item :label="t('toolOutputLinesDesc')" class="form-item-align" label-position="left">
+                  <el-input-number
+                    v-model="toolOutput.maxOutputLines"
+                    :min="100" :max="5000" :step="100"
+                    @change="autoSaveSettings">
+                  </el-input-number>
+                </el-form-item>
+                <el-form-item :label="t('toolOutputBytesDesc')" class="form-item-align" label-position="left">
+                  <el-input-number
+                    v-model="toolOutput.maxOutputBytes"
+                    :min="5000" :max="200000" :step="5000"
+                    @change="autoSaveSettings">
+                  </el-input-number>
+                </el-form-item>
+                <el-form-item :label="t('toolOutputStoreDesc')" class="form-item-align" label-position="left">
+                  <span style="margin-right: 12px;">
+                    <template v-if="toolOutputStats">
+                      {{ toolOutputStats.all.files }} files · {{ (toolOutputStats.all.bytes / 1048576).toFixed(1) }} MB
+                    </template>
+                    <template v-else>--</template>
+                  </span>
+                  <el-button size="small" :loading="toolOutputBusy" @click="loadToolOutputStats">
+                    {{ t('toolOutputStatsBtn') }}
+                  </el-button>
+                  <el-button size="small" type="danger" plain :loading="toolOutputBusy" @click="cleanupToolOutput">
+                    {{ t('toolOutputCleanupBtn') }}
+                  </el-button>
+                </el-form-item>
+                <el-form-item :label="t('ripgrepEngineDesc')" class="form-item-align" label-position="left">
+                  <span style="margin-right: 12px; word-break: break-all;">
+                    <template v-if="rgStatus && rgStatus.found">
+                      {{ t('ripgrepFound') }} {{ rgStatus.version }} ({{ rgStatus.source }})
+                    </template>
+                    <template v-else-if="rgStatus">{{ t('ripgrepMissing') }}</template>
+                    <template v-else>--</template>
+                  </span>
+                  <el-button size="small" @click="loadRipgrepStatus">{{ t('ripgrepRefresh') }}</el-button>
+                  <el-button size="small" type="primary" plain :loading="rgBusy"
+                    :disabled="rgStatus && rgStatus.found" @click="installRipgrep">
+                    {{ t('ripgrepInstallBtn') }}
+                  </el-button>
+                </el-form-item>
+              </div>
+            </div>
+
             <div class="tool-item" v-if="isElectron">
               <div class="tool-header">
                 <span>

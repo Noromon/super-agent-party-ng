@@ -844,5 +844,61 @@ openEnvPage(menu) {
     changeImgHost(val) {
       this.BotConfig.img_host = val;
       this.autoSaveSettings()
+    },
+
+    // S184：工具输出存量统计 / 手动清理 / ripgrep 状态与一键安装
+    async loadToolOutputStats() {
+      this.toolOutputBusy = true;
+      try {
+        const r = await fetch('/tool_output_stats');
+        const j = await r.json();
+        if (j.ok) this.toolOutputStats = j;
+      } catch (e) {
+        showNotification(this.t('toolOutputOpFail'), 'error');
+      } finally {
+        this.toolOutputBusy = false;
+      }
+    },
+    async cleanupToolOutput() {
+      this.toolOutputBusy = true;
+      try {
+        const r = await fetch('/tool_output_cleanup', { method: 'POST' });
+        const j = await r.json();
+        if (j.ok) {
+          showNotification(this.t('toolOutputCleanupDone') + ': ' + j.removedFiles +
+            ' files / ' + (j.freedBytes / 1048576).toFixed(1) + ' MB');
+          this.loadToolOutputStats();
+        } else {
+          showNotification(this.t('toolOutputOpFail'), 'error');
+        }
+      } catch (e) {
+        showNotification(this.t('toolOutputOpFail'), 'error');
+      } finally {
+        this.toolOutputBusy = false;
+      }
+    },
+    async loadRipgrepStatus() {
+      try {
+        const r = await fetch('/ripgrep_status');
+        const j = await r.json();
+        if (j.ok) this.rgStatus = j;
+      } catch (e) { /* 静默：状态行保持占位 */ }
+    },
+    async installRipgrep() {
+      this.rgBusy = true;
+      try {
+        const r = await fetch('/ripgrep_install', { method: 'POST' });
+        const j = await r.json();
+        if (j.ok) {
+          showNotification(this.t('ripgrepInstallDone') + ': ' + j.version);
+          this.loadRipgrepStatus();
+        } else {
+          showNotification(this.t('ripgrepInstallFail'), 'error');
+        }
+      } catch (e) {
+        showNotification(this.t('ripgrepInstallFail'), 'error');
+      } finally {
+        this.rgBusy = false;
+      }
     }
 });

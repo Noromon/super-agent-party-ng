@@ -161,5 +161,5 @@ class TestPipesAndPins:
         assert '_st["turn_used_todo"] = True' in s
         # DRS 等 raw 落账全部中和（8 处）
         assert s.count('"content": _tcg_neutralize(full_content),') >= 8
-        # 头尾截断
-        assert "保留头 {_head} + 尾 {_tail}" in s
+        # S184 起头尾截断升级为可恢复截断（见 test_tool_output_store_s184）
+        assert "def _bound_tool_output(" in s

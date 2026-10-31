@@ -145,6 +145,18 @@ Object.assign(vue_data, {
       malformedCallRepairMax: 2,
     },
 
+    // S184：工具输出与检索（超限落盘保留天数 0~90，0=关自动清理；截断限额）
+    toolOutput: {
+      retentionDays: 7,
+      maxOutputLines: 800,
+      maxOutputBytes: 20000,
+    },
+    // S184：设置页运行时状态（非设置项，不进 payload）
+    toolOutputStats: null,
+    toolOutputBusy: false,
+    rgStatus: null,
+    rgBusy: false,
+
     // --- 数据安全网（M4-lite 快照备份 UI）---
     backupSnapshots: [],
 

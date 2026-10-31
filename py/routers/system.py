@@ -424,3 +424,83 @@ async def shutdown_server():
     os.kill(os.getpid(), signal.SIGTERM)
     return {"message": "Shutting down..."}
 
+
+
+# ==================== S184: 工具输出事后检索 / ripgrep 基建 ====================
+
+@router.get("/tool_output_stats")
+async def tool_output_stats():
+    """存量统计：当前工作区与全部登记区（文件数/字节）。"""
+    from py import tool_output_store as _tos
+    settings = await load_settings()
+    cur, total = await asyncio.to_thread(_tos.stats_all, settings)
+    return {"ok": True, "current": {"files": cur[0], "bytes": cur[1]},
+            "all": {"files": total[0], "bytes": total[1]}}
+
+
+@router.post("/tool_output_cleanup")
+async def tool_output_cleanup():
+    """手动立即清理（无视保留期，删除全部 tool_* 快照文件）。"""
+    from py import tool_output_store as _tos
+    settings = await load_settings()
+    try:
+        files, size, ws_n = await asyncio.to_thread(_tos.cleanup_all, settings, True)
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+    logging.getLogger("app").info("[ToolOutput] 手动清理: %d 个文件 / %.1f MB", files, size / 1048576.0)
+    return {"ok": True, "removedFiles": files, "freedBytes": size, "workspaces": ws_n}
+
+
+@router.get("/ripgrep_status")
+async def ripgrep_status():
+    from py import tool_output_store as _tos
+    st = await asyncio.to_thread(_tos.ripgrep_status)
+    return {"ok": True, **st}
+
+
+@router.post("/ripgrep_install")
+async def ripgrep_install():
+    """一键安装 pin 版 ripgrep 到 <SAP_DATA_DIR>/bin（失败返回手动方案提示键）。"""
+    from py import tool_output_store as _tos
+    url = _tos.rg_download_url()
+    if not url:
+        return {"ok": False, "error": "unsupported_platform"}
+    try:
+        info = await asyncio.to_thread(_rg_install_download, url)
+    except Exception as e:
+        logging.getLogger("app").warning("[Ripgrep] 安装失败: %r", e)
+        return {"ok": False, "error": "download_failed", "detail": str(e)[:200]}
+    logging.getLogger("app").info("[Ripgrep] 安装成功: %s (%s)", info["path"], info["version"])
+    return {"ok": True, **info}
+
+
+def _rg_install_download(url):
+    """下载 pin 版 zip → 解出 rg 二进制到 <data>/bin → --version 验收（同步，调用方 to_thread）。"""
+    import io
+    import ssl
+    import urllib.request
+    import zipfile
+    from py import tool_output_store as _tos
+    req = urllib.request.Request(url, headers={"User-Agent": "super-agent-party"})
+    with urllib.request.urlopen(req, timeout=120, context=ssl.create_default_context()) as resp:
+        blob = resp.read()
+    if len(blob) < 100000:
+        raise RuntimeError("downloaded file too small")
+    target_dir = _tos.rg_bin_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    rgname = "rg.exe" if os.name == "nt" else "rg"
+    found = None
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        for name in zf.namelist():
+            if name.replace("\\", "/").rsplit("/", 1)[-1] == rgname:
+                with zf.open(name) as src, open(target_dir / rgname, "wb") as dst:
+                    dst.write(src.read())
+                found = target_dir / rgname
+                break
+    if found is None:
+        raise RuntimeError("rg binary not found in archive")
+    os.chmod(found, 0o755)
+    ver = _tos.rg_version(str(found))
+    if not ver:
+        raise RuntimeError("rg --version check failed")
+    return {"path": str(found), "version": ver}

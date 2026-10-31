@@ -1701,80 +1701,186 @@ async def edit_file_tool_local(path: str, content: str) -> str:
     except Exception as e:
         return f"[Error] Edit failed: {str(e)}"
 
-async def search_files_tool_local(pattern: str, path: str = ".") -> str:
-    """[Local] 智能搜索：优先尝试 git grep/grep，回退到优化的 Python 实现"""
+# ---- S184 helpers ----
+_SEARCH_SKIP_DIRS = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', '.env',
+                     'dist', 'build', 'out', 'target', 'coverage', '.tox',
+                     '.mypy_cache', '.pytest_cache', '.ruff_cache', '.next',
+                     '.svelte-kit', '.turbo', '.idea', '.vscode'}
+_SEARCH_SKIP_EXTS = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.zip', '.tar',
+                     '.gz', '.7z', '.rar', '.png', '.jpg', '.jpeg', '.gif', '.webp',
+                     '.ico', '.woff', '.woff2', '.ttf', '.eot', '.pdf', '.mp3',
+                     '.mp4', '.avi', '.mov', '.class', '.jar', '.db', '.sqlite'}
+_SEARCH_MAX_FILE_BYTES = 5 * 1024 * 1024
+_SEARCH_MAX_LINE_CHARS = 200
+_NO_MATCH_HINT = ("No matches for this pattern. This does NOT mean the code is absent: "
+                  "try a shorter substring, a different identifier, or the glob tool by "
+                  "filename before concluding it is missing. Directories like node_modules/"
+                  ".venv/.git are skipped by design.")
+
+
+def _search_include_match(rel_posix: str, include: str) -> bool:
+    """include = 逗号/分号分隔 glob（匹配相对路径或文件名）。空串=全放行。"""
+    pats = [p.strip().replace("\\", "/")
+            for p in (include or "").replace(";", ",").split(",") if p.strip()]
+    if not pats:
+        return True
+    base = rel_posix.rsplit("/", 1)[-1]
+    for p in pats:
+        if fnmatch.fnmatch(rel_posix, p) or fnmatch.fnmatch(base, p):
+            return True
+        if p.startswith("**/") and fnmatch.fnmatch(rel_posix, p[3:]):
+            return True
+    return False
+
+
+def _search_row_key(row: str):
+    m = re.match(r"^(.+?):(\d+):", row)
+    return (m.group(1), int(m.group(2))) if m else (row, 0)
+
+
+def _format_search_rows(rows, skip, limit, capped) -> str:
+    if not rows and skip == 0:
+        return _NO_MATCH_HINT
+    page = rows[skip:skip + limit]
+    if not page:
+        return f"(No more results at offset={skip}; {len(rows)} collected.)"
+    tail = ""
+    if skip + limit < len(rows) or capped:
+        tail = (f"\n... showing {len(page)} of {len(rows)}+ collected (offset={skip}). "
+                f"Continue with offset={skip + limit}, or narrow path/include.")
+    return "\n".join(page) + tail
+
+
+def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want):
+    """ripgrep 子进程收集（同步，调用方 to_thread）。rg 异常/超时返回 (None, False) → 上层降级。"""
+    cmd = [rg, "--line-number", "--no-heading", "--color", "never", "-I",
+           "--max-columns", "240", "--max-columns-preview"]
+    if ignore_case:
+        cmd.append("-i")
+    pats = [p.strip() for p in (include or "").replace(";", ",").split(",") if p.strip()]
+    for p in pats:
+        cmd += ["--glob", p]
+    cmd += ["-e", pattern]
+    try:
+        rel = os.path.relpath(target_str, cwd)
+    except Exception:
+        rel = "."
+    if rel != ".":
+        cmd += ["--", rel]
+    try:
+        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                              errors="replace", timeout=60)
+    except Exception:
+        return None, False
+    if proc.returncode not in (0, 1):  # 1=无匹配（正常）；其余=rg 出错 → 降级
+        return None, False
+    rows = []
+    for line in (proc.stdout or "").splitlines():
+        m = re.match(r"^(.+?):(\d+):(.*)$", line)
+        if not m:
+            continue
+        relp = m.group(1).replace("\\", "/")
+        rows.append(f"{relp}:{m.group(2)}:{m.group(3).strip()[:_SEARCH_MAX_LINE_CHARS]}")
+        if len(rows) >= want:
+            break
+    rows.sort(key=_search_row_key)
+    return rows, len(rows) >= want
+
+
+def _py_search_collect(cwd, target_str, regex, include, want):
+    """并行 Python 扫描回退（同步，调用方 to_thread）。文件序排序保证 offset 分页可重复。"""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    files = []
+    for root, dirs, names in os.walk(target_str, topdown=True):
+        # 剪枝：.agent 为工作区内容目录，放行
+        dirs[:] = [d for d in dirs
+                   if d not in _SEARCH_SKIP_DIRS and (not d.startswith('.') or d == '.agent')]
+        for n in names:
+            if any(n.lower().endswith(e) for e in _SEARCH_SKIP_EXTS):
+                continue
+            full = os.path.join(root, n)
+            rel = os.path.relpath(full, cwd).replace("\\", "/")
+            if _search_include_match(rel, include):
+                files.append((full, rel))
+    files.sort(key=lambda t: t[1])
+
+    lock = threading.Lock()
+    stop = threading.Event()
+    out = []
+
+    def scan(full, rel):
+        if stop.is_set():
+            return
+        try:
+            if os.path.getsize(full) > _SEARCH_MAX_FILE_BYTES:
+                return
+            with open(full, 'rb') as fb:
+                if b'\0' in fb.read(1024):
+                    return
+            local = []
+            with open(full, 'r', encoding='utf-8', errors='replace') as f:
+                for i, line in enumerate(f, 1):
+                    if regex.search(line):
+                        local.append(f"{rel}:{i}:{line.strip()[:_SEARCH_MAX_LINE_CHARS]}")
+                        if len(local) >= want:
+                            break
+            if local:
+                with lock:
+                    out.extend(local)
+                    if len(out) >= want:
+                        stop.set()
+        except (OSError, UnicodeError):
+            return
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(lambda t: scan(*t), files))
+    rows = sorted(out, key=_search_row_key)[:want]
+    return rows, len(out) >= want
+
+
+async def search_files_tool_local(pattern: str, path: str = ".", include: str = "",
+                                  max_results: int = 200, offset: int = 0,
+                                  case_insensitive: bool = False) -> str:
+    """[Local] S184 跨平台内容检索：优先 ripgrep（SAP_RG_PATH → 数据目录 bin → PATH），
+    未安装则走并行 Python 扫描。两引擎统一 Python re 语义（旧 git grep BRE 混用语义已除），
+    统一输出 path:line:text，支持 include 过滤与 offset 分页续查。"""
     try:
         cwd = await _get_current_cwd()
         target_dir = resolve_strict_path(cwd, path, check_symlink=True)
         target_str = str(target_dir)
-        
-        # 1. 尝试使用 git grep (速度最快，且自动尊重 .gitignore)
-        # 只有当在 git 仓库内且安装了 git 时有效
-        if os.path.isdir(os.path.join(cwd, ".git")) and shutil.which("git"):
-            try:
-                # -I: 不搜索二进制, -n: 行号, --full-name: 相对路径
-                cmd = ["git", "grep", "-I", "-n", "--full-name", "-e", pattern]
-                # 如果指定了子目录，限制搜索范围
-                rel_path = os.path.relpath(target_str, cwd)
-                if rel_path != ".":
-                    cmd.extend(["--", rel_path])
-                
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
-                )
-                stdout, _ = await proc.communicate()
-                if proc.returncode == 0 and stdout:
-                    return stdout.decode('utf-8', errors='replace').strip()
-            except Exception:
-                pass # git grep 失败则回退
 
-        # 2. 优化的 Python 实现 (Ripgrep-lite)
-        matches = []
-        regex = re.compile(pattern)
-        MAX_RESULTS = 1000  # 防止结果爆炸
-        
-        # 定义需要跳过的目录和扩展名
-        SKIP_DIRS = {'.git', 'node_modules', '__pycache__', 'venv', '.env', 'dist', 'build', 'coverage'}
-        SKIP_EXTS = {'.pyc', '.pyo', '.so', '.dll', '.exe', '.bin', '.png', '.jpg', '.jpeg', '.gif', '.zip', '.tar', '.gz'}
+        try:
+            limit = int(max_results)
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 1000))
+        try:
+            skip = int(offset)
+        except (TypeError, ValueError):
+            skip = 0
+        skip = max(0, skip)
 
-        # 判断文件是否为二进制 (读取前 1024 字节检查 NULL)
-        def is_binary(file_path):
-            try:
-                with open(file_path, 'rb') as f:
-                    chunk = f.read(1024)
-                    return b'\0' in chunk
-            except:
-                return True
+        flags = re.IGNORECASE if case_insensitive else 0
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as re_err:
+            return (f"[Error] Invalid regex: {re_err}. The pattern uses Python re syntax "
+                    "(a plain substring works too) — escape ( ) [ ] { } * + ? ^ $ | when "
+                    "matching them literally, or search a shorter plain substring.")
 
-        for root, dirs, files in os.walk(target_str, topdown=True):
-            # 剪枝：直接修改 dirs 列表，阻止 os.walk 进入这些目录（.agent 为工作区内容目录，放行）
-            dirs[:] = [d for d in dirs if d not in SKIP_DIRS and (not d.startswith('.') or d == '.agent')]
-            
-            for file in files:
-                if any(file.endswith(ext) for ext in SKIP_EXTS): continue
-                
-                full_path = os.path.join(root, file)
-                # 相对路径用于显示
-                display_path = os.path.relpath(full_path, cwd)
-                
-                if is_binary(full_path): continue
-
-                try:
-                    # 使用 aiofiles 异步读取文本
-                    async with aiofiles.open(full_path, 'r', encoding='utf-8', errors='replace') as f:
-                        content = await f.read()
-                        lines = content.splitlines()
-                        for i, line in enumerate(lines, 1):
-                            if regex.search(line):
-                                # 截断过长的行
-                                clean_line = line.strip()[:200]
-                                matches.append(f"{display_path}:{i}:{clean_line}")
-                                if len(matches) >= MAX_RESULTS:
-                                    return "\n".join(matches) + f"\n... (Truncated at {MAX_RESULTS} matches)"
-                except Exception:
-                    continue
-
-        return "\n".join(matches) if matches else "No matches for this pattern. This does NOT mean the code is absent: try a shorter substring, a different identifier, or the glob tool by filename before concluding it is missing."
+        rows, capped = None, False
+        from py.tool_output_store import find_ripgrep
+        rg = find_ripgrep()
+        if rg:
+            rows, capped = await asyncio.to_thread(
+                _rg_search_collect, rg, cwd, target_str, pattern, include,
+                bool(case_insensitive), skip + limit + 1)
+        if rows is None:
+            rows, capped = await asyncio.to_thread(
+                _py_search_collect, cwd, target_str, regex, include, skip + limit + 1)
+        return _format_search_rows(rows, skip, limit, capped)
     except Exception as e:
         return f"[Error] Search failed: {str(e)}"
 
@@ -2564,14 +2670,18 @@ LOCAL_TOOLS_REGISTRY = {
     },
     "search_files_local": {
          "type": "function", "function": {
-            "name": "search_files_tool_local", 
-            "description": "Regex search over local workspace file contents (re.search semantics). Returns 'path:line_number:line_text' lines, max 1000 matches. Text files only; binary files and build dirs (.git, node_modules, __pycache__, venv, dist, build) are skipped.",
+            "name": "search_files_tool_local",
+            "description": "Cross-platform content search over local workspace files (Python re.search semantics; a plain substring also works). Returns 'path:line_number:line_text' rows, sorted, max 1000 per call with offset pagination. Text files only; binary files and build dirs (.git, node_modules, .venv, __pycache__, dist, build, target, ...) are skipped. Narrow a big search with path= or include=; continue past the cap with offset=.",
             "parameters": {
-                "type": "object", 
+                "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Python regex to search for in file contents"},
-                    "path": {"type": "string", "description": "Optional relative subdirectory of the workspace to restrict the search (default: whole workspace)"}
-                }, 
+                    "pattern": {"type": "string", "description": "Python regex (escape ( ) [ ] { } * + ? ^ $ | to match them literally) or a plain substring"},
+                    "path": {"type": "string", "description": "Optional relative subdirectory of the workspace to restrict the search (default: whole workspace)"},
+                    "include": {"type": "string", "description": "Optional comma-separated glob patterns to restrict searched files, e.g. '*.py,src/**/*.ts'"},
+                    "max_results": {"type": "integer", "default": 200, "description": "Matches to return per call (1-1000, default 200)"},
+                    "offset": {"type": "integer", "default": 0, "description": "Skip this many matches to page through results (continue with the offset suggested in truncated output)"},
+                    "case_insensitive": {"type": "boolean", "default": False, "description": "Case-insensitive search"}
+                },
                 "required": ["pattern"]
             }
         }

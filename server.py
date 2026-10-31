@@ -731,7 +731,7 @@ def get_client_class(config, provider_id):
         return AsyncOpenAI
 
 from py.node_runner import node_mgr
-async def _t10_shutdown(temp_sweep_task):
+async def _t10_shutdown(temp_sweep_task, tool_output_task=None):
     """T-10（D4）：统一关停钩子——bot 渠道 → MCP 长连接 → 周期清扫任务。"""
     try:
         await asyncio.wait_for(asyncio.to_thread(BotContainer.stop_all), timeout=90)
@@ -748,6 +748,8 @@ async def _t10_shutdown(temp_sweep_task):
     app_state.mcp_client_list.clear()
     app_state.HA_client = app_state.ChromeMCP_client = app_state.sql_client = None
     temp_sweep_task.cancel()
+    if tool_output_task is not None:  # S184
+        tool_output_task.cancel()
 
 
 async def _temp_sweep_loop():
@@ -758,6 +760,30 @@ async def _temp_sweep_loop():
             await clean_temp_files_task()
         except Exception as e:
             logging.getLogger("app").warning(f"T-10 周期临时目录清扫失败: {e}")
+
+
+async def _tool_output_sweep_task(first_run):
+    """S184：.agent/tool_output 周期清理。mtime 判龄天然跨重启；启动即扫一次，
+    此后每日一次。retentionDays=0 → 关闭自动清理（手动清理端点不受影响）。"""
+    while True:
+        try:
+            if first_run:
+                await asyncio.sleep(30)  # 让初始化先走
+            else:
+                await asyncio.sleep(24 * 3600)
+            from py import tool_output_store as _tos
+            from py.get_setting import load_settings
+            files, size, ws_n = await asyncio.to_thread(_tos.cleanup_all, await load_settings())
+            if files:
+                logging.getLogger("app").info(
+                    "[ToolOutput] 周期清理: %d 个文件 / %.1f MB（扫描 %d 个工作区）",
+                    files, size / 1048576.0, ws_n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logging.getLogger("app").warning(f"[ToolOutput] 周期清理失败: {e}")
+        finally:
+            first_run = False
 
 
 def _notify_center_startup():
@@ -788,7 +814,7 @@ async def lifespan(app: FastAPI):
     from tzlocal import get_localzone
     
     asyncio.create_task(clean_temp_files_task())
-    temp_sweep_task = asyncio.create_task(_temp_sweep_loop())  # T-10
+    temp_sweep_task, tool_output_task = asyncio.create_task(_temp_sweep_loop()), asyncio.create_task(_tool_output_sweep_task(first_run=True))  # T-10 | S184
     
     # 并行执行耗时操作
     init_db_task = init_db()
@@ -1073,7 +1099,7 @@ async def lifespan(app: FastAPI):
         try: await node_mgr.stop(ext_id)
         except: pass
         
-    await _t10_shutdown(temp_sweep_task)
+    await _t10_shutdown(temp_sweep_task, tool_output_task)
     if app_state.global_http_client:
         await app_state.global_http_client.aclose()
     logging.getLogger("app").info("All processes terminated.")
@@ -3844,7 +3870,8 @@ def parse_tool_arguments(raw):
         )
 
 def truncate_tool_result(text, limit: int = 32000):
-    """截断超长工具结果（头 2/3 + 尾 1/3），仅用于回填 message 历史，UI 展示不受影响。"""
+    """纯截断（头 2/3 + 尾 1/3，不落盘）。S184 后仅用于 reasoner 摘要通道；
+    agent 历史落账统一走 _bound_tool_output（可恢复截断）。"""
     if not isinstance(text, str):
         text = str(text)
     if len(text) <= limit:
@@ -4100,21 +4127,27 @@ async def _run_context_pipeline(request, settings, client, model, extra_params, 
         return None
 
 
-TOOL_RESULT_CHAR_CAP = 15000
+def _bound_tool_output(result, settings):
+    """S184：工具输出落历史单一入口（替代旧 15000 字符盲切）。
+    限额内原样返回（幂等）；超限全文落盘 <工作区>/.agent/tool_output/ 并回
+    头尾预览 + 真实路径 marker，模型可用 search_files_local /
+    read_file_range_local 无损续查——对齐 opencode ToolOutputStore。"""
+    from py.tool_output_store import bound_output
+    try:
+        cwd = (settings or {}).get("CLISettings", {}).get("cc_path") or ""
+    except Exception:
+        cwd = ""
+    text = result if isinstance(result, str) else str(result)
+    out = bound_output(text, cwd, settings)
+    if out is not text:
+        logging.getLogger("app").info("[Context] 工具输出超限已落盘预览: %d -> %d 字符", len(text), len(out))
+    return out
 
 
-def _cap_tool_result(result):
-    """工具输出源头截断（对齐 opencode）：单条结果超长截断并提示分页续读。
-    S183(T-D): 头 11000 + 尾 4000 保两端——旧盲切头部把代码/报错中段
-    （恰是最关键部分）留在盲区，模型只见半截文件（2026-10-31 事故 26700→15000）。"""
-    if not isinstance(result, str) or len(result) <= TOOL_RESULT_CHAR_CAP:
-        return result
-    _head = 11000
-    _tail = TOOL_RESULT_CHAR_CAP - _head
-    logging.getLogger("app").info(f"[Context] 工具输出截断: {len(result)} -> {TOOL_RESULT_CHAR_CAP} 字符（头尾保留）")
-    return (f"{result[:_head]}\n\n==== [输出已截断：共 {len(result)} 字符，保留头 {_head} + 尾 {_tail}，"
-            f"中间 {len(result) - TOOL_RESULT_CHAR_CAP} 字符省略。中段内容请用工具 offset/分页参数续读] ====\n\n"
-            f"{result[-_tail:]}")
+async def _bound_tool_output_async(result):
+    """无 settings 上下文时的变体（异步工具回注等）。"""
+    from py.get_setting import load_settings
+    return _bound_tool_output(result, await load_settings())
 
 
 def _apply_ctx_guardrail(extra, messages, settings):
@@ -4473,7 +4506,7 @@ async def _stream_async_tools(request, async_tools_id):
                         "role": "tool",
                         "tool_call_id": "agentParty",
                         "name": response["name"],
-                        "content": f"之前调用的异步工具（{tid}）的结果：\n\n{_cap_tool_result(str(response['result']))}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
+                        "content": f"之前调用的异步工具（{tid}）的结果：\n\n{await _bound_tool_output_async(response['result'])}\n\n====结果结束====\n\n你必须根据工具结果回复未回复的问题或需求。请不要重复调用该工具！"
                     }
                 )
             if response["status"] == "error":
@@ -5512,7 +5545,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
 
         # 发送结果，带上匹配的 tool_call_id
         if not isinstance(results, AsyncIterator):
-            results = _cap_tool_result(results)
+            results = _bound_tool_output(results, settings)  # S184: 超限落盘+预览
             result_chunk = {
                 "choices": [{
                     "delta": {
@@ -5589,7 +5622,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "name": response_content.name,
-                "content": truncate_tool_result(tool_result_text),
+                "content": _bound_tool_output(tool_result_text, settings),  # S184 (幂等: 上步已 bound 则原样)
             }
         )
 
@@ -7346,7 +7379,7 @@ async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, resp
             "role": "tool",
             "tool_call_id": tool_call_id,
             "name": response_content.name,
-            "content": truncate_tool_result(tool_result_text),
+            "content": _bound_tool_output(tool_result_text, settings),  # S184
         })
         reasoner_messages.append({
             "role": "assistant",

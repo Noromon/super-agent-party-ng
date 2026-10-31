@@ -69,6 +69,7 @@
     ['modelProviders', 'modelProviders'],
     ['systemSettings', 'systemSettings'],
     ['agentRobustness', 'agentRobustness'],
+    ['toolOutput', 'toolOutput'],
     ['largeMoreButtonDict', 'largeMoreButtonDict'],
     ['smallMoreButtonDict', 'smallMoreButtonDict'],
     ['currentLanguage', 'currentLanguage'],
