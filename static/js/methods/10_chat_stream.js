@@ -2,6 +2,8 @@
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
     async sendMessage(role = 'user') {
+        // S188：生成期间输入非空=插话（入队注入，不开并行流；opencode 式三态按钮）
+        if (this.isSending && this.userInput.trim()) { this.interjectSend(); return; }
         // [XMPP Bridge] 扩展注入的图片附件（已上传到 uploaded_files，形如 [{path,name,type}]）
         const hasExtensionImages = Array.isArray(this.extensionImageLinks) && this.extensionImageLinks.length > 0;
         // 基础校验
@@ -567,6 +569,10 @@ Object.assign(vue_methods, {
                         this._resumeSawApproval = true;
                     }
 
+                    if (delta.interject) {
+                        this._ackInterject(delta.interject.content); // S188：插话注入确认
+                    }
+
                     this.sendMessagesToExtension();
             });
 
@@ -575,6 +581,7 @@ Object.assign(vue_methods, {
             this.flushStreamTextBuffer();
             this._flushToolStream(); // S93(F4)
             this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
+            this._ijFinished(); // S188: 插话收尾兜底（停止留区/审批挂起/自动补发）
             if (currentMsg) currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
 
             if (tts_buffer.trim() && this.ttsSettings.enabled) {
@@ -620,6 +627,7 @@ Object.assign(vue_methods, {
                         this.flushStreamTextBuffer();
                         this._flushToolStream(); // S93(F4)
                         this._collapseStaleApprovalCards(currentMsg); // S186: 续传收尾折叠孤儿审批卡
+                        this._ijFinished(); // S188: 插话收尾兜底
                         this._markReasoningDone(currentMsg); // S93(F2)
                         currentMsg.generationFinished = true;
                         if (audioResolve) audioResolve();
@@ -918,6 +926,75 @@ Object.assign(vue_methods, {
         } finally {
             // S185：处理结束后释放幂等锁，允许用户基于结果块继续新的决策
             delete this._approvalInFlight[toolCallId];
+        }
+    },
+
+    // === S188：插话（interject）——生成期消息入队，轮边界注入随下一轮推理处理 ===
+    async interjectSend() {
+        const text = this.userInput.trim();
+        if (!text) return;
+        this.userInput = '';
+        const sid = this._currentStreamId || null;
+        const item = { id: `ij_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, text, state: 'sending', streamId: sid };
+        this.interjectQueue.push(item);
+        if (!sid) { item.state = 'held'; this._flushInterjectsSoon(); return; }
+        try {
+            const res = await fetch(`/v1/streams/${sid}/interject`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: text }),
+            });
+            if (res.ok) { item.state = 'queued'; return; }
+        } catch (e) { /* 网络失败 → 兜底路径 */ }
+        item.state = 'held';
+        if (!this.isSending) this._flushInterjectsSoon();
+    },
+
+    _ackInterject(content) {
+        const i = (this.interjectQueue || []).findIndex(q => q.state !== 'sent' && q.text === content);
+        if (i !== -1) this.interjectQueue.splice(i, 1);
+        // 后端已在轮边界注入本轮历史；前端补 user 气泡保持双端历史一致
+        this.messages.push({
+            id: Date.now() + Math.random(), role: 'user', content,
+            fileLinks: [], fileLinks_content: '', imageLinks: [],
+            hasDesktopVision: false, agentName: this.memorySettings.userName || 'User',
+        });
+        this.requestScrollToBottom();
+    },
+
+    _ijFinished() {
+        // S188 流收尾兜底：用户主动停→留待发区手动处置；审批未决→挂起（批复闭环
+        // 必然重启模型，其流结束时按本规则再判）；其余→自动转普通发送，绝不丢
+        const q = this.interjectQueue || [];
+        if (!q.length) { this._ijUserStopped = false; return; }
+        if (this._ijUserStopped) {
+            this._ijUserStopped = false;
+            q.forEach(it => { it.state = 'held'; });
+            return;
+        }
+        if (this._resumeSawApproval) { q.forEach(it => { it.state = 'held'; }); return; }
+        this._flushInterjectsSoon();
+    },
+
+    _flushInterjectsSoon() { setTimeout(() => { this._flushInterjects(); }, 400); },
+
+    async _flushInterjects() {
+        if (!this.interjectQueue || !this.interjectQueue.length) return;
+        if (this.isSending || this.isTyping) return;
+        const items = this.interjectQueue.slice();
+        for (const it of items) {
+            if (this.isSending || this.isTyping) return;
+            const idx = this.interjectQueue.indexOf(it);
+            if (idx === -1) continue;
+            this.interjectQueue.splice(idx, 1);
+            this.userInput = it.text;
+            try {
+                await this.sendMessage();
+            } catch (e) {
+                if (!this.userInput) this.userInput = it.text;
+                this.interjectQueue.push({ ...it, state: 'held' });
+                break;
+            }
         }
     },
 

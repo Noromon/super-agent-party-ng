@@ -121,6 +121,10 @@ Object.assign(vue_methods, {
                     this._resumeSawApproval = true;
                 }
 
+                if (delta.interject) {
+                    this._ackInterject(delta.interject.content); // S188：插话注入确认
+                }
+
                 this.sendMessagesToExtension();
                 } catch (frameErr) {
                     console.warn('[StreamResume] 帧处理异常，已跳过该帧:', frameErr.message);
@@ -133,6 +137,7 @@ Object.assign(vue_methods, {
                 currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
                 this._flushToolStream(); // S93(F4)
                 this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
+                this._ijFinished(); // S188: 插话收尾兜底
 
                 if (tts_buffer.trim() && this.ttsSettings.enabled) {
                     currentMsg.chunks_voice.push(this.cur_voice);
@@ -363,6 +368,7 @@ Object.assign(vue_methods, {
     },
 
     stopGenerate() {
+      this._ijUserStopped = true; // S188: 主动停止——未消费插话留待发区手动处置
       // 安全围栏：先取消后端生产者流（阻止取消后继续工具调度/后续轮次），再断开本地读取
       let _cancelPromise = null;
       if (this._currentStreamId) {

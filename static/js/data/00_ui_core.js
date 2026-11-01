@@ -248,6 +248,8 @@ Object.assign(vue_data, {
 
     asyncToolsID : [],
 
+    interjectQueue: [], // S188: 生成期插话待发区（排队/挂起/停止残留统一处置）
+
     TTSrunning:false,
 
     ASRrunning:false,

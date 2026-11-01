@@ -99,6 +99,22 @@ async def cancel_all_streams_endpoint():
             "stopped": stopped, "not_stopped": failed}
 
 
+class InterjectRequest(BaseModel):
+    content: str
+
+
+@router.post("/v1/streams/{stream_id}/interject")
+async def interject_stream_endpoint(stream_id: str, req: InterjectRequest):
+    """S188: 生成期插话入队——轮边界注入随下一轮推理处理；
+    流不存在/已终结返回 404（前端转兜底路径，绝不丢消息）。"""
+    from py import interject
+    ok = await interject.web_interject(_active_streams, stream_id, req.content)
+    if not ok:
+        return JSONResponse(status_code=404,
+                            content={"queued": False, "stream_id": stream_id})
+    return {"queued": True, "stream_id": stream_id}
+
+
 @router.post("/v1/chat/resume")
 async def resume_stream_endpoint(req: StreamResumeRequest):
     """

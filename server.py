@@ -1121,6 +1121,8 @@ from py.stream_relay import (
     _stream_ttl_loop, _cleanup_stream,
 )
 
+from py import interject as _interject  # S188：插话队列（轮边界注入/审批挂起区）
+
 # S185：审批执行一次性消费幂等表（锁内读写；FIFO 截断防无界增长）
 _approval_exec_once: set = set()
 _approval_exec_once_lock = asyncio.Lock()
@@ -6551,6 +6553,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                     return
                 if _st.pop("w1_abort", False):
                     break
+                for _ij_c in _interject.drain_inject(_st, request):  # S188：轮边界注入插话+ack
+                    yield _ij_c
                 results = _st.get("results")
             # 如果启用推理模型
             if settings['reasoner']['enabled'] or enable_thinking:
@@ -6830,6 +6834,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                 "consumer_count": 1,
                 "task": None,
             }
+            _interject.register_stream(request, stream_id, _active_streams[stream_id])  # S188
             # 启动生产者后台任务
             # 关键：必须将 task 引用保存到字典中，否则会被 Python GC 回收，
             # 导致 stream_generator 中的 httpx 流式请求中途被中断！
@@ -8183,6 +8188,23 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         f" stream={bool(getattr(request, 'stream', False))} bot={int(bool(getattr(request, 'is_app_bot', False)))}"
         f" plat={getattr(request, 'platform', '') or '-'} ua={_ua}")  # S172：请求来源指纹
     fastapi_base_url = str(fastapi_request.base_url)
+    # S188：IM 渠道插话拦截——同 peer 存在活跃生成流/审批未决 → 入队+静态回执，
+    # 不起新流（消除并发推理；轮边界/批复闭环时并入处理）
+    if (getattr(request, "is_app_bot", False) and getattr(request, "platform", "")
+            and getattr(request, "peer_id", "")):
+        _ij_rep = _interject.im_intercept(request)
+        if _ij_rep is not None:
+            if getattr(request, "stream", False):
+                async def _ij_hold_stream():
+                    _c = {"id": "agentParty", "object": "chat.completion.chunk",
+                          "created": int(time.time()), "model": _ij_rep["model"],
+                          "choices": [{"index": 0, "finish_reason": None,
+                                       "delta": {"role": "assistant",
+                                                 "content": _ij_rep["choices"][0]["message"]["content"]}}]}
+                    yield f"data: {json.dumps(_c, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(_ij_hold_stream(), media_type="text/event-stream")
+            return JSONResponse(content=_ij_rep)
     # S172：尾部=未批复审批 → 静止态直接回执，不进模型（掐灭审批未决期间的自动重放风暴）
     _ap_tail = pending_approval_at_tail(request.messages)
     if _ap_tail is not None:

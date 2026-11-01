@@ -159,6 +159,14 @@ async def _fire(record, decision, note, result_text):
                    "status": "resolved"})
     except Exception:
         pass
+    # S188：批复闭环——释放该会话挂起的插话消息，并入快照随重放续跑（不丢消息）
+    try:
+        from py import interject
+        for _hc in interject.take_held((record["platform"], record["peer_id"])):
+            if isinstance(record.get("messages"), list):
+                record["messages"].append({"role": "user", "content": _hc})
+    except Exception:
+        pass
     resolver = _RESOLVER.get(record["platform"])
     if not resolver:
         logging.getLogger("app").info(

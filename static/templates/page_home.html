@@ -670,9 +670,16 @@
 
 
 
-                      <button type="button" class="el-button is-circle icon-btn send-btn" :title="isSending ? t('stopGenerating') : t('sendMessage')" v-if="!isCapsuleMode" @click="isSending ? stopGenerate() : sendMessage()" :class="['el-button--' + (isSending ? 'danger' : 'primary')]">
-                          <i :class="isSending ? 'fa-solid fa-stop' : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
+                      <button type="button" class="el-button is-circle icon-btn send-btn" :title="isSending ? (userInput.trim() ? t('interject') : t('stopGenerating')) : t('sendMessage')" v-if="!isCapsuleMode" @click="isSending ? (userInput.trim() ? interjectSend() : stopGenerate()) : sendMessage()" :class="['el-button--' + (isSending ? (userInput.trim() ? 'primary' : 'danger') : 'primary')]">
+                          <i :class="isSending ? (userInput.trim() ? 'fa-solid fa-comment-dots' : 'fa-solid fa-stop') : 'fa-solid fa-paper-plane'" aria-hidden="true"></i>
                         </button>
+                    </div>
+
+                    <!-- S188: 插话待发区（排队/挂起/停止残留统一处置） -->
+                    <div v-if="interjectQueue.length" style="display:flex;gap:8px;align-items:center;padding:4px 12px 0;font-size:12px;opacity:.9">
+                      <span>💬 {{ t('interjectQueued') }} ×{{ interjectQueue.length }}</span>
+                      <button type="button" class="sp-btn ghost" @click="_flushInterjectsSoon()">{{ t('interjectSendNow') }}</button>
+                      <button type="button" class="sp-btn ghost" @click="interjectQueue = []">{{ t('interjectClear') }}</button>
                     </div>
 
                     <!-- 1. 附件预览区域 -->
