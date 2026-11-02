@@ -9,7 +9,7 @@ import argparse
 import socket
 import errno
 from py.cli_tool import read_file_tool_local
-from py.context_builder import sanitize_tool_chains
+from py.context_builder import sanitize_tool_chains, sanitize_tool_chains_logged
 from py import auth as sap_auth
 from py.defaults import DEFAULT_SERVER_PORT, GSV_TTS_URL
 from py.guard import load_safety_words, check_content_safety
@@ -4411,7 +4411,7 @@ def _stream_context_compress(request, settings):
             chat_messages = sys_msgs + compressed_dialog
             logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
-    request.messages = sanitize_tool_chains(chat_messages)
+    request.messages = sanitize_tool_chains_logged(chat_messages)
     request.messages = ensure_thinking_fields(request.messages)
 
 
@@ -5317,7 +5317,7 @@ def _stream_round_compress(request, settings, _st):
             logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
 
-    request.messages = sanitize_tool_chains(chat_messages)
+    request.messages = sanitize_tool_chains_logged(chat_messages)
     request.messages = ensure_thinking_fields(request.messages)
 
 def _notify_web_approval_pending(_st):
@@ -6981,7 +6981,7 @@ def _apply_context_compression(request, DRS_STAGE):
                 chat_messages = sys_msgs + compressed_dialog
                 logging.getLogger("app").info(f"[Context] Compressed to {len(chat_messages)} msgs.")
 
-        request.messages = sanitize_tool_chains(chat_messages)
+        request.messages = sanitize_tool_chains_logged(chat_messages)
         request.messages = ensure_thinking_fields(request.messages)
     return DRS_STAGE
 
@@ -8973,20 +8973,43 @@ async def _ws_save_conversations(websocket: WebSocket, data: dict):
 
 
 async def _ws_save_conversations_delta(websocket: WebSocket, data: dict):
-    """S120(上游 guard 族)：增量保存单点——仅 upsert dirty 会话 + 同款净化。"""
+    """S120(上游 guard 族)：增量保存单点——仅 upsert dirty 会话 + 同款净化。
+    S189：失败必须回 save_error+日志（2026-11-01 事故：异常被外层吞，前端白等
+    20s 超时后 2s 间隔无限重试，保存通道瘫痪一夜且零痕迹）。"""
+    import time as _t
+    _m0 = _t.monotonic()
     payload = data.get("data", {}) or {}
     incoming = [c for c in (payload.get("conversations") or []) if isinstance(c, dict) and c.get("id") is not None]
-    await _sanitize_conversations_safety(incoming)
-    covs = await load_covs()
-    existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
-    by_id = {str(c.get("id")): c for c in existing}
-    fresh = [c for c in incoming if str(c.get("id")) not in by_id]
-    for c in incoming:
-        by_id[str(c.get("id"))] = c
-    covs["conversations"] = fresh + list(by_id.values())
-    if payload.get("conversationGroups") is not None:
-        covs["conversationGroups"] = payload["conversationGroups"]
-    await save_covs(covs)
+    try:
+        _sz = len(json.dumps(payload, ensure_ascii=False, default=str))
+    except Exception:
+        _sz = -1
+    try:
+        await _sanitize_conversations_safety(incoming)
+        covs = await load_covs()
+        existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
+        by_id = {str(c.get("id")): c for c in existing}
+        fresh = [c for c in incoming if str(c.get("id")) not in by_id]
+        for c in incoming:
+            by_id[str(c.get("id"))] = c
+        covs["conversations"] = fresh + list(by_id.values())
+        if payload.get("conversationGroups") is not None:
+            covs["conversationGroups"] = payload["conversationGroups"]
+        await save_covs(covs)
+    except Exception as _de:
+        logging.getLogger("app").error(
+            f"[Covs] delta 保存失败 rows={len(incoming)} bytes={_sz} "
+            f"{round((_t.monotonic() - _m0) * 1000)}ms: {_de!r}")
+        await ws_manager.send_json({
+            "type": "save_error",
+            "correlationId": data.get("correlationId"),
+            "success": False,
+            "error": str(_de),
+        }, websocket)
+        return
+    logging.getLogger("app").info(
+        f"[Covs] delta 保存 rows={len(incoming)} bytes={_sz} "
+        f"{round((_t.monotonic() - _m0) * 1000)}ms")
     await ws_manager.send_json({
         "type": "conversations_delta_saved",
         "correlationId": data.get("correlationId"),

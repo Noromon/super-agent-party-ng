@@ -585,11 +585,17 @@ async def _write_settings_row(settings):
     if "conversations" in settings:
         settings = {k: v for k, v in settings.items() if k != "conversations"}
     # M4c/X-12: 敏感字段 DPAPI 封装后落盘（内存对象保持明文）
+    import time as _t
+    _m0 = _t.monotonic()
     data = json.dumps(secret_box.encrypt_settings(settings), ensure_ascii=False, indent=2)
     async with _SETTINGS_LOCK:
         async with aiosqlite.connect(DATABASE_PATH) as db:
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
             await db.commit()
+    # S189：主配置落盘留痕（含每次 autoSaveSettings；异常向上抛由调用方日志化）
+    logging.getLogger(__name__).info(
+        "[Covs] settings 落盘 %dKB %dms", len(data) // 1024,
+        round((_t.monotonic() - _m0) * 1000))
 
 
 async def save_settings(settings, _rmw_held: bool = False):
@@ -672,7 +678,10 @@ async def save_covs(settings):
         raise RuntimeError("covs save refused: 上次读取失败，拒绝用空会话库覆盖（坏数据已隔离备份）")
     await init_covs_db()
     settings = _neutralize_covs(settings)
+    import time as _t
+    _m0 = _t.monotonic()
     data = json.dumps(settings, ensure_ascii=False, indent=2)
+    _rows = len(settings.get("conversations") or [])
     async with _COVS_LOCK:
         async with aiosqlite.connect(COVS_PATH) as db:
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
@@ -684,6 +693,10 @@ async def save_covs(settings):
             except Exception:
                 logging.getLogger(__name__).warning("conversation_rows shadow sync failed (blob unaffected)", exc_info=True)
     _COVS_DEGRADED = False
+    # S189：落盘留痕（2026-11-01 保存通道瘫痪一夜零痕迹的直接教训）
+    logging.getLogger(__name__).info(
+        "[Covs] save_covs 完成 blob=%dKB rows=%d %dms",
+        len(data) // 1024, _rows, round((_t.monotonic() - _m0) * 1000))
 
 # ----------------- 7. bot 渠道会话（"手机"行级存储，bot: 前缀命名空间） -----------------
 # 与主会话 blob 完全隔离：blob 不含 bot 会话，_sync_rows 也不碰 bot: 行。

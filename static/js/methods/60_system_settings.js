@@ -43,12 +43,15 @@ Object.assign(vue_methods, {
           
           // 错误处理（根据后端实现）
           if (response.type === 'save_error') {
+            console.warn('[Covs] settings 保存被拒: ' + (response.error || ''));
             this.ws.removeEventListener('message', handler);
             reject(new Error('保存失败'));
           }
         };
         // 设置 10 秒超时
         const timeout = setTimeout(() => {
+          // S189：超时留痕——保存通道瘫痪不能再度无痕
+          console.warn('[Covs] settings 保存超时 correlationId=' + correlationId);
           this.ws.removeEventListener('message', handler);
           reject(new Error('保存超时'));
         }, 10000);

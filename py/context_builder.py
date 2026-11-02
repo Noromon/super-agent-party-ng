@@ -89,3 +89,31 @@ def sanitize_tool_chains(chat_messages, log=None):
             break
 
     return final_messages
+
+
+def sanitize_tool_chains_logged(chat_messages, logger_name="app"):
+    """S189: sanitize_tool_chains + 单条汇总日志。静默丢链是昨晚"上下文蒸发"
+    事故的观测盲区——任何一次丢弃都必须留下一行可回溯的痕迹。"""
+    counts = {"orphan_tool": 0, "ghost": 0, "wipe_tail": 0, "pop_tail": 0}
+
+    def _count(text):
+        if "孤立的 tool" in text:
+            counts["orphan_tool"] += 1
+        elif "幽灵项" in text:
+            counts["ghost"] += 1
+        elif "抹除末尾" in text:
+            counts["wipe_tail"] += 1
+        elif "弹出末尾" in text:
+            counts["pop_tail"] += 1
+
+    out = sanitize_tool_chains(chat_messages, log=_count)
+    dropped = sum(counts.values())
+    if dropped:
+        import logging
+        logging.getLogger(logger_name).info(
+            "[Context] Sanitizer 丢弃 %d 孤tool/%d 幽灵assistant/%d 尾抹/%d 尾弹，"
+            "%d -> %d 条",
+            counts["orphan_tool"], counts["ghost"],
+            counts["wipe_tail"], counts["pop_tail"],
+            len(chat_messages or []), len(out))
+    return out

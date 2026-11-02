@@ -66,7 +66,11 @@ Object.assign(vue_methods, {
           this._covsFlushing = false;
           try { this.ws.removeEventListener('message', handler); } catch (e) {}
           clearTimeout(timer);
-          if (!acked) ids.forEach(id => this._covsDirty.add(id));
+          if (!acked) {
+            // S189：失败必须留痕（evidence 通道钩 console.warn）——此前静默无限重试
+            console.warn('[Covs] delta flush 未确认 rows=' + ids.length + ' dirty=' + this._covsDirty.size);
+            ids.forEach(id => this._covsDirty.add(id));
+          }
           if (this._covsDirty.size > 0) setTimeout(() => this.flushDirtyConversations(), 2000);
           resolve();
         };
@@ -78,7 +82,10 @@ Object.assign(vue_methods, {
         this.ws.addEventListener('message', handler);
         try {
           this.ws.send(JSON.stringify({ type: 'save_conversations_delta', data: { conversations: payload }, correlationId }));
-        } catch (e) { finish(false); }
+        } catch (e) {
+          console.warn('[Covs] delta send 异常: ' + (e && e.message));
+          finish(false);
+        }
       });
     },
 
