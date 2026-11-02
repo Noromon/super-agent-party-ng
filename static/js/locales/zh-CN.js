@@ -143,6 +143,7 @@ window.lang_zhCN = {
         'conversationRounds': '旧版按轮数截断（启用下方上下文自动管理后失效，仅作兜底）',
         'ctxMgmtEnabled': '上下文自动管理（修剪+压缩）',
         'ctxWindow': '模型上下文窗口 (tokens)',
+        'ctxWindowAuto': '自动探测引擎真实窗口（/props→/models，S192）',
         'ctxCompactRatio': '压缩触发阈值（占窗口比例）',
         'ctxAutoAgentCompact': 'Agent/编程任务自动摘要压缩',
         'netAllowLocalUrls': '网络访问控制：允许图像工具获取本机等价URL（回环/主机名/本机网卡IP）',

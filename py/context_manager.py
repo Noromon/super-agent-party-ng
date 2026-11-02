@@ -137,11 +137,32 @@ def estimate_tokens(messages, tools=None) -> int:
 # ---------------------------------------------------------------- L1 prune
 
 
-def prune_tool_results(messages, keep_recent_tools: int = 4):
-    """把最近 keep_recent_tools 条之外的 tool 消息内容替换为存根。返回 (新messages, 修剪条数)。"""
+def prune_tool_results(messages, keep_recent_tools: int = 4, tool_output_budget: int = 0):
+    """把旧 tool 消息内容替换为存根。返回 (新messages, 修剪条数)。
+
+    tool_output_budget>0（S192，对齐 opencode token 预算制）：从最新往旧累计，
+    工具输出总估算超出预算的部分修剪；keep_recent_tools 退化为保底条数
+    （最新 N 条永不剪，即使超预算）。budget=0 保持旧行为（只按条数保尾）。
+    """
     msgs = list(messages)
     tool_idx = [i for i, m in enumerate(msgs) if _role(m) == "tool"]
-    to_prune = tool_idx[:-keep_recent_tools] if keep_recent_tools > 0 else tool_idx
+    if tool_output_budget > 0:
+        to_prune = []
+        kept = 0
+        seen = 0
+        for i in reversed(tool_idx):
+            seen += 1
+            if seen <= keep_recent_tools:
+                continue
+            m = msgs[i]
+            tok = estimate_text_tokens(_content_text(m.get("content")) if isinstance(m, dict) else "")
+            if kept + tok <= tool_output_budget:
+                kept += tok
+            else:
+                to_prune.append(i)
+        to_prune.reverse()
+    else:
+        to_prune = tool_idx[:-keep_recent_tools] if keep_recent_tools > 0 else tool_idx
     pruned = 0
     for i in to_prune:
         m = msgs[i]
@@ -322,11 +343,21 @@ async def compact_messages(client, model, messages, task_mode=None, focus=None,
 
 def get_context_settings(settings):
     cm = settings.get("contextManagement", {}) or {}
+    raw_win = cm.get("contextWindow", 32000)
+    if str(raw_win).strip().lower() == "auto":  # S192：引擎真实窗口探测（带缓存）
+        from py.ctx_window_probe import resolve_auto_window
+        window = resolve_auto_window(settings)
+    else:
+        try:
+            window = int(raw_win or 32000)
+        except (TypeError, ValueError):
+            window = 32000
     return {
         "enabled": bool(cm.get("enabled", True)),
-        "context_window": int(cm.get("contextWindow", 32000) or 32000),
+        "context_window": window,
         "compact_ratio": float(cm.get("compactRatio", 0.8) or 0.8),
         "keep_recent_tools": int(cm.get("keepRecentTools", 4) or 4),
         "keep_recent_dialog": int(cm.get("keepRecentDialog", 12) or 12),
         "auto_agent_compact": bool(cm.get("autoAgentCompact", True)),
+        "tool_output_budget": int(cm.get("toolOutputBudget", 40000) or 0),
     }

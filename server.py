@@ -4153,7 +4153,7 @@ async def _run_context_pipeline(request, settings, client, model, extra_params, 
         est = estimate_tokens(request.messages, tools)
         if est <= budget:
             return None
-        request.messages, pruned_n = prune_tool_results(request.messages, cm["keep_recent_tools"])
+        request.messages, pruned_n = prune_tool_results(request.messages, cm["keep_recent_tools"], cm["tool_output_budget"])
         est2 = estimate_tokens(request.messages, tools)
         logging.getLogger("app").info(f"[Context] L1 修剪旧工具结果 {pruned_n} 条: est {est} -> {est2} (budget {budget})")
         if est2 <= budget:
@@ -4178,6 +4178,31 @@ async def _run_context_pipeline(request, settings, client, model, extra_params, 
     except Exception as e:
         logging.getLogger("app").info(f"[Context] 上下文管线异常（跳过）: {e}")
         return None
+
+
+def _boundary_l1_recheck(request, settings, tools=None):
+    """S192（对齐 opencode compaction 轮边界复查）：工具轮边界复查预算，超限
+    仅做 L1 修剪（L2 摘要仍只在 turn 入口，避免打断进行中的工具链）。"""
+    try:
+        from py.context_manager import (get_context_settings, estimate_tokens,
+                                        prune_tool_results)
+        cm = get_context_settings(settings)
+        if not cm["enabled"]:
+            return 0
+        budget = int(cm["context_window"] * cm["compact_ratio"])
+        est = estimate_tokens(request.messages, tools)
+        if est <= budget:
+            return 0
+        request.messages, n = prune_tool_results(
+            request.messages, cm["keep_recent_tools"], cm["tool_output_budget"])
+        if n:
+            logging.getLogger("app").info(
+                f"[Context] L1 轮边界复查: 修剪 {n} 条 est {est} -> "
+                f"{estimate_tokens(request.messages, tools)} (budget {budget})")
+        return n
+    except Exception as e:
+        logging.getLogger("app").info(f"[Context] 轮边界复查异常（跳过）: {e}")
+        return 0
 
 
 def _bound_tool_output(result, settings):
@@ -6565,6 +6590,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                     break
                 for _ij_c in _interject.drain_inject(_st, request):  # S188：轮边界注入插话+ack
                     yield _ij_c
+                _boundary_l1_recheck(request, settings, tools)  # S192：轮边界预算复查（仅 L1）
                 if (request.is_app_bot and request.platform and request.peer_id
                         and _tool_loop_count % 5 == 0):  # S191：IM 轮内检查点（回合闭合由客户端清除）
                     try:

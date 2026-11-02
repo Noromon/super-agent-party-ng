@@ -410,7 +410,8 @@
                         <el-switch v-model="settings.contextManagement.enabled" @change="autoSaveSettings" />
                       </el-form-item>
                       <el-form-item :label="t('ctxWindow')" class="form-item-align">
-                        <el-input-number v-model="settings.contextManagement.contextWindow" :min="4096" :max="10485760" :step="1024" controls-position="right" @change="autoSaveSettings" style="width: 100%;" />
+                        <el-input-number :model-value="Number(settings.contextManagement.contextWindow) || undefined" :min="4096" :max="10485760" :step="1024" controls-position="right" :disabled="String(settings.contextManagement.contextWindow) === 'auto'" @update:model-value="v => { settings.contextManagement.contextWindow = v; autoSaveSettings(); }" style="width: 100%;" />
+                        <el-checkbox :model-value="String(settings.contextManagement.contextWindow) === 'auto'" @change="v => { settings.contextManagement.contextWindow = v ? 'auto' : 32000; autoSaveSettings(); }" style="margin-top: 4px;">{{ t('ctxWindowAuto') }}</el-checkbox>
                       </el-form-item>
                       <el-form-item :label="t('ctxCompactRatio')" class="form-item-align">
                         <el-slider v-model="settings.contextManagement.compactRatio" :min="0.4" :max="0.95" :step="0.05" show-input :show-input-controls="false" @input="autoSaveSettings" />

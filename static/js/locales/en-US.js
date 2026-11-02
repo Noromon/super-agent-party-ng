@@ -143,6 +143,7 @@ window.lang_enUS = {
         'conversationRounds': 'Legacy round-based truncation (disabled automatically when auto context management below is on; kept as fallback)',
         'ctxMgmtEnabled': 'Auto context management (prune + compact)',
         'ctxWindow': 'Model context window (tokens)',
+        'ctxWindowAuto': 'Auto-detect real engine context window (/props->/models, S192)',
         'ctxCompactRatio': 'Compact trigger ratio (of window)',
         'ctxAutoAgentCompact': 'Auto-compact agent/coding tasks',
         'netAllowLocalUrls': 'Network access: allow image tools to fetch local-equivalent URLs (loopback/hostname/NIC IPs)',
