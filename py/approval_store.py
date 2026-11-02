@@ -6,16 +6,22 @@
   边界问题；resolve 后由 bot 用快照重放 /v1 实现「原位续流」（与前端
   backend_content 重放同构，属生产已验证路径）。
 - handler 注册表按平台键（一平台一实例；A12 多账户时再引入 bot_id 维度）。
-- 审批记录只在内存存活：进程重启即失效（/y 得到"没有待审批"提示），
-  工具在挂起期从未执行过，无副作用残留。
+- 审批记录快照落盘（S191）：pending 即写 approvals_pending.json，重启后
+  restore_pending 重建，用户仍可批复续跑；工具在挂起期从未执行过，无副作用残留。
 """
 import asyncio
+import json
 import logging
+import os
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 DEFAULT_TTL = 600  # 审批等待超时（秒），超时按 timeout 决策 resolve 并续跑收尾
+_RESTART_GRACE = 120.0  # S191：重启后已过期的审批保留的宽限窗（等 bot 重连接批复）
+
+_SNAP_FILE = "approvals_pending.json"
+_snapshot_dir_override: Optional[str] = None  # 测试注入点
 
 _PENDING: Dict[str, Dict[str, Any]] = {}
 _INDEX: Dict[Tuple[str, str], List[str]] = {}  # (platform, peer_id) -> [approval_id]
@@ -56,6 +62,29 @@ def pending_count() -> int:
     return sum(1 for r in _PENDING.values() if r.get("status") == "pending")
 
 
+def _snap_path() -> str:
+    if _snapshot_dir_override:
+        base = _snapshot_dir_override
+    else:
+        from py.get_setting import USER_DATA_DIR
+        base = USER_DATA_DIR
+    return os.path.join(base, _SNAP_FILE)
+
+
+def _dump():
+    """S191：pending 快照原子落盘（重启后 restore_pending 重建，审批跨重启可批）。"""
+    try:
+        p = _snap_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        data = [r for r in _PENDING.values() if r.get("status") == "pending"]
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, p)
+    except Exception as e:
+        logging.getLogger("app").warning("[Approval] 快照落盘失败: %r", e)
+
+
 async def create(*, platform: str, peer_id: str, tool_name: str,
                  tool_params: Any = None, tool_call_id: str = "",
                  permission_mode: str = "", cwd: str = "",
@@ -81,6 +110,7 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
     }
     _PENDING[aid] = record
     _INDEX.setdefault((platform, peer_id), []).append(aid)
+    _dump()  # S191：登记即落盘，重启不丢审批
     loop = asyncio.get_running_loop()
     # 超时句柄延迟建协程（提前 resolve 时句柄被取消，避免 never-awaited 警告）
     _EXPIRE_TASKS[aid] = loop.call_later(ttl, _spawn_later, _expire, aid)
@@ -190,6 +220,7 @@ def _pop_pending(aid: str) -> Optional[Dict[str, Any]]:
     if lst and aid in lst:
         lst.remove(aid)
     _EXPIRE_TASKS.pop(aid, None)
+    _dump()  # S191：销账同步快照
     return record
 
 
@@ -243,3 +274,41 @@ def clear_all():
     _EXPIRE_TASKS.clear()
     _PENDING.clear()
     _INDEX.clear()
+    try:
+        os.remove(_snap_path())
+    except OSError:
+        pass
+
+
+async def restore_pending() -> int:
+    """S191：服务重启后从快照重建挂起审批。未过期按剩余 TTL 继续等待；
+    已过期给重启宽限窗（等 bot 重连接批复），仍无人批复则按 timeout 收尾。"""
+    try:
+        p = _snap_path()
+        if not os.path.exists(p):
+            return 0
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        logging.getLogger("app").warning("[Approval] 快照读取失败: %r", e)
+        return 0
+    if not isinstance(data, list):
+        return 0
+    now = time.time()
+    loop = asyncio.get_running_loop()
+    n = 0
+    for rec in data:
+        aid = rec.get("approval_id") if isinstance(rec, dict) else None
+        if not aid or aid in _PENDING or rec.get("status") != "pending":
+            continue
+        rec["restored_at"] = now
+        _PENDING[aid] = rec
+        _INDEX.setdefault((rec.get("platform"), rec.get("peer_id")), []).append(aid)
+        remain = float(rec.get("expires_at", now)) - now
+        _EXPIRE_TASKS[aid] = loop.call_later(max(remain, _RESTART_GRACE),
+                                             _spawn_later, _expire, aid)
+        n += 1
+    if n:
+        logging.getLogger("app").info("[Approval] 重启恢复挂起审批 %d 条", n)
+        _dump()
+    return n

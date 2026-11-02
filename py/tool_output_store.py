@@ -226,7 +226,7 @@ def cleanup_workspace(cwd, retention_days, force=False):
             if not (f.is_file() and f.name.startswith("tool_")):
                 continue
             st = f.stat()
-            if st.st_mtime < cutoff:
+            if force or st.st_mtime < cutoff:  # S191：force=无视 mtime 全清（时钟偏斜/时间戳粒度下不漏删）
                 b += st.st_size
                 f.unlink()
                 n += 1

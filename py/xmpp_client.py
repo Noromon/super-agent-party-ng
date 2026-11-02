@@ -28,6 +28,7 @@ from py.behavior_engine import BehaviorItem
 from py import xmpp_trust
 from py.auth import path_under
 from py import get_setting as gs_mod
+from py import im_chain
 from py.get_setting import (KB_DIR, TOOL_TEMP_DIR, UPLOAD_FILES_DIR,
                             get_port, load_settings)
 
@@ -171,6 +172,9 @@ class XmppClient:
         jid = f"{self.bot_username}@{self.domain}"
         host, port, use_ssl = self._parse_service(self.service_url)  # fail before any I/O
         self._bot_loop = asyncio.get_running_loop()  # S155：审批回调桥接的目的地
+        # S191：重启恢复挂起审批（快照落盘重建，用户仍可 /y /n 批复续跑）
+        from py import approval_store as _as
+        _as._spawn(_as.restore_pending())
         # TLS verification is delegated to the application-level TOFU hook
         # (ssl_cert); connector ssl=False lets every request carry its own ssl ctx.
         self._tls_key = f"{host}:{port}"
@@ -375,6 +379,28 @@ class XmppClient:
                                        self.memoryList.get(chat_jid, []))
         except Exception:
             logging.warning("XMPP 会话持久化失败（本回合仅内存）", exc_info=True)
+
+    # S191：轮内 inflight 检查点——server 每 5 工具轮把服务端消息视图写入
+    # "<conv_key>#inflight" 行；正常回合结束即清除；进程崩溃后下一轮并入历史尾
+    # （悬挂未闭合的工具对由服务端 sanitize 天然抹平）。
+    async def _merge_inflight(self, chat_jid: str):
+        try:
+            infl = await gs_mod.load_bot_conv(self._conv_key(chat_jid) + "#inflight")
+            if not infl:
+                return
+            ent = im_chain.merge_inflight(self.memoryList[chat_jid], infl)
+            if ent is not None:
+                logging.info("[XMPP] inflight 检查点并入: %s (%d 条链消息)",
+                             chat_jid, len(ent["backend_content"]))
+            await gs_mod.delete_bot_conv(self._conv_key(chat_jid) + "#inflight")
+        except Exception:
+            logging.warning("[XMPP] inflight 并入失败（跳过）", exc_info=True)
+
+    async def _clear_inflight(self, chat_jid: str):
+        try:
+            await gs_mod.delete_bot_conv(self._conv_key(chat_jid) + "#inflight")
+        except Exception:
+            pass
 
     # -------------------- 收图内联（本地模型不会拉远程 url） --------------------
     @staticmethod
@@ -716,6 +742,7 @@ class XmppClient:
     async def _process_llm(self, chat_jid: str, text: str, extra_content: List[dict]):
         if chat_jid not in self.memoryList:
             self.memoryList[chat_jid] = await self._restore_conv(chat_jid)
+            await self._merge_inflight(chat_jid)
         self.asyncToolsID.setdefault(chat_jid, [])
         self.fileLinks.setdefault(chat_jid, [])
         extra_content = await self._inline_remote_images(extra_content)
@@ -733,7 +760,9 @@ class XmppClient:
                 and _last.get("content") == store_msg.get("content")
                 and _flags.get(chat_jid)):
             self.memoryList[chat_jid].append(store_msg)
-        history = [*self.memoryList[chat_jid][:-1], user_msg]
+        # 当前轮用未脱敏 user_msg（媒体部件模型当轮可见）；历史轮走展平重放
+        history = im_chain.flatten_memory(self.memoryList[chat_jid][:-1])
+        history.append(user_msg)
 
         try:
             res = await self._agent_stream_to_peer(chat_jid, history)
@@ -748,6 +777,12 @@ class XmppClient:
         if approval_store.has_pending("xmpp", chat_jid):
             if res["out_buffer"].strip():
                 await self._send_text(chat_jid, res["out_buffer"].strip())
+            # S191：审批挂起掐断的半轮——已完成的工具对先落链持久化，
+            # 批复续流正常收尾时替换本条；进程重启也不丢中断前进度
+            _pairs = res.get("chain") or []
+            if _pairs:
+                self.memoryList[chat_jid].append(im_chain.finalize_entry(_pairs, ""))
+                await self._persist_conv(chat_jid)
             return
 
         out_buffer = res["out_buffer"]
@@ -756,16 +791,23 @@ class XmppClient:
             log_empty_reply("xmpp", chat_jid, res["reasoning_chars"], res["finish_reason"])
             # S89-B/C：带流内错误摘要如实告知；标记本轮空回复供重发去重
             self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = True
+            # S191：空回复也保留已完成工具轮（重试时模型知道自己做过什么）
+            _pairs = res.get("chain") or []
+            if _pairs:
+                self.memoryList[chat_jid].append(im_chain.finalize_entry(_pairs, ""))
+                await self._persist_conv(chat_jid)
             await self._send_text(chat_jid, empty_reply_msg(res["err_text"]))
             return
         self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = False
-        self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
+        self.memoryList[chat_jid].append(
+            im_chain.finalize_entry(res.get("chain") or [], assistant_text))
         if self.memoryLimit > 0:
             while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:
                 self.memoryList[chat_jid].pop(0)
                 if self.memoryList[chat_jid]:
                     self.memoryList[chat_jid].pop(0)
         await self._persist_conv(chat_jid)
+        await self._clear_inflight(chat_jid)  # S191：回合闭合，检查点作废
 
         if out_buffer.strip():
             await self._send_text(chat_jid, out_buffer.strip())
@@ -783,6 +825,7 @@ class XmppClient:
         reasoning_chars = 0
         finish_reason = ""
         err_text = ""
+        chain = None  # S191：轮内 canonical 链（call/tool_result 帧增量累积）
         from py import stream_stop
         from py.base_bot import ToolProgressLedger
         ledger = ToolProgressLedger(mode=getattr(self, "progress_mode", "off"))
@@ -823,6 +866,8 @@ class XmppClient:
             # S152：块级封口+进度行——正文块被工具打断即封口发出
             tc = getattr(delta, "tool_content", None)
             if tc is not None:
+                chain = im_chain.chain_update(
+                    chain, tc, getattr(delta, "tool_call_id", "") or "")
                 _tt = ToolProgressLedger.field(tc, "type")
                 _tn = ToolProgressLedger.field(tc, "title")
                 if _tt == "call":
@@ -846,7 +891,7 @@ class XmppClient:
             await self._send_text(chat_jid, _summ)
         return {"assistant_text": "".join(full_text), "out_buffer": out_buffer,
                 "reasoning_chars": reasoning_chars, "finish_reason": finish_reason,
-                "err_text": err_text}
+                "err_text": err_text, "chain": chain or []}
 
     # -------------------- S150 审批闭环（通知 / 批复续流 / 排队） --------------------
     def _on_bot_loop(self, coro_factory):
@@ -913,13 +958,26 @@ class XmppClient:
         assistant_text = res["assistant_text"]
         if assistant_text.strip():
             self.memoryList.setdefault(chat_jid, [])
-            self.memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})
+            # S191：审批前快照中的工具对 + 续流新增对，一并挂到收尾条目；
+            # 挂起期已落库的空文本链条目（若有）被本条替换，不重复计入
+            _pairs = (im_chain.pairs_from_snapshot(snapshot)
+                      + (res.get("chain") or []))
+            _entry = im_chain.finalize_entry(_pairs, assistant_text)
+            _lst = self.memoryList[chat_jid]
+            _last = _lst[-1] if _lst else None
+            if (_last and _last.get("role") == "assistant"
+                    and not str(_last.get("content") or "").strip()
+                    and _last.get("backend_content")):
+                _lst[-1] = _entry  # 仅替换挂起期落库的空文本链条目
+            else:
+                _lst.append(_entry)
             if self.memoryLimit > 0:
                 while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:
                     self.memoryList[chat_jid].pop(0)
                     if self.memoryList[chat_jid]:
                         self.memoryList[chat_jid].pop(0)
             await self._persist_conv(chat_jid)
+            await self._clear_inflight(chat_jid)  # S191：续流闭合，检查点作废
             await self._send_local_images(chat_jid, assistant_text)
 
     def _flush_segments(self, buffer: str):

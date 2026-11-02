@@ -243,6 +243,9 @@ class TestWiringS150:
 
     def test_no_duplicate_history_on_pending(self):
         # 挂起轮不闭合回合：assistant 文本仅在续流后落账
+        # （S191：挂起分支新增链持久化，窗口相应放宽；核心钉=不追加文本对即 return）
         s = _read("py/xmpp_client.py")
-        guard = s[s.find("# S150：本轮被审批挂起掐断"):][:400]
+        guard = s[s.find("# S150：本轮被审批挂起掐断"):][:700]
         assert "has_pending" in guard and "return" in guard
+        assert 'memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})' \
+            not in guard.split("return")[0]

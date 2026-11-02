@@ -4876,6 +4876,7 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
 
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
+                user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
@@ -4947,6 +4948,7 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
             reasoner_extra['temperature'] = settings['reasoner']['temperature']
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
+                user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
@@ -5364,6 +5366,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             _st["tc_round_done"] = True
             return
         response = await client.chat.completions.create(
+            user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
             model=model,
             messages=msg,  # 添加图片信息到消息
             stream=True,
@@ -5742,6 +5745,7 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
             reasoner_extra['temperature'] = settings['reasoner']['temperature']
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
+                user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
@@ -5814,6 +5818,7 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
 
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
+                user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
@@ -6243,6 +6248,10 @@ async def _stream_usage_event(request, settings, usage_info, _ctx_peak, tools):
             "budget": int(_cm_u["context_window"] * _cm_u["compact_ratio"]),
             "est_total": _esttok(request.messages, tools),
             "breakdown": _breakdown_tokens(request.messages, tools),
+            # S191-N2：标注本轮是否另有 reasoner 压缩视图流量（引擎历史读数的
+            # 锯齿多来自双通道交错，此字段供前端/排障甄别）
+            "reasoner_enabled": bool(settings.get("reasoner", {}).get("enabled")),
+            "reasoner_model": settings.get("reasoner", {}).get("model", "") if settings.get("reasoner", {}).get("enabled") else "",
         }
         yield f"data: {json.dumps(_usage_evt, ensure_ascii=False)}\n\n"
         logging.getLogger("app").info(f"[Context] usage: prompt={_usage_evt['prompt_tokens']} peak={_usage_evt['peak_prompt_tokens']} est_total={_usage_evt['est_total']} window={_usage_evt['window']}")
@@ -6486,6 +6495,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             return
 
         response = await client.chat.completions.create(
+            user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
             model=model,
             messages=msg,  # 添加图片信息到消息
             stream=True,
@@ -6555,6 +6565,15 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                     break
                 for _ij_c in _interject.drain_inject(_st, request):  # S188：轮边界注入插话+ack
                     yield _ij_c
+                if (request.is_app_bot and request.platform and request.peer_id
+                        and _tool_loop_count % 5 == 0):  # S191：IM 轮内检查点（回合闭合由客户端清除）
+                    try:
+                        from py.get_setting import save_bot_conv
+                        await save_bot_conv(
+                            f"bot:{request.platform}:{request.peer_id}#inflight",
+                            [m for m in request.messages if m.get("role") != "system"])
+                    except Exception as _ik_e:
+                        logging.getLogger("app").warning("[Inflight] 检查点写入失败: %r", _ik_e)
                 results = _st.get("results")
             # 如果启用推理模型
             if settings['reasoner']['enabled'] or enable_thinking:
