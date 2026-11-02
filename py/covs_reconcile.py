@@ -2,6 +2,16 @@
 """M4b three-way reconciliation (READ-ONLY): conversations blob vs
 conversation_rows shadow table vs turn_log presence traces.
 
+S190 note: rows-first went live - conversation_rows is now the authoritative
+store and the blob is a lagging export/checkpoint. Reinterpretation of this
+report under rows-first:
+  - content_mismatch / rows newer than blob  = export not yet refreshed (normal
+    between full saves), NOT data loss;
+  - blob_only ids = conversations deleted from rows but not yet exported away;
+  - rows_only ids = conversations created via delta that no full save has
+    exported into the blob yet.
+Use a full save (frontend save_conversations) to refresh the export baseline.
+
 Usage:
     python py/covs_reconcile.py [--db path/to/conversations.db] [--out report.md]
 Exit code: 0 = fully consistent, 1 = mismatch found, 2 = cannot read.

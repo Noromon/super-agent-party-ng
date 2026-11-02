@@ -8986,16 +8986,9 @@ async def _ws_save_conversations_delta(websocket: WebSocket, data: dict):
         _sz = -1
     try:
         await _sanitize_conversations_safety(incoming)
-        covs = await load_covs()
-        existing = [c for c in (covs.get("conversations") or []) if isinstance(c, dict)]
-        by_id = {str(c.get("id")): c for c in existing}
-        fresh = [c for c in incoming if str(c.get("id")) not in by_id]
-        for c in incoming:
-            by_id[str(c.get("id"))] = c
-        covs["conversations"] = fresh + list(by_id.values())
-        if payload.get("conversationGroups") is not None:
-            covs["conversationGroups"] = payload["conversationGroups"]
-        await save_covs(covs)
+        # S190 rows-first：只写 dirty 行，26MB blob 不再参与增量保存。
+        from py.get_setting import save_covs_delta_rows
+        await save_covs_delta_rows(incoming, payload.get("conversationGroups"))
     except Exception as _de:
         logging.getLogger("app").error(
             f"[Covs] delta 保存失败 rows={len(incoming)} bytes={_sz} "

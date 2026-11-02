@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""M4-B2' pins: blob 损坏时从 conversation_rows 行级影子救援（坏 blob 隔离留证、
+"""M4-B2'/S190 pins: rows-first 下坏 blob 无害旁路；行表+blob 同坏才降级（隔离留证、
 救援成功=DEGRADED 解除+下次 save 自愈回写、行表同坏=原降级零回归、
 bot: 命名空间不混入、半坏行整体放弃、reconcile 工具回归）。"""
 import asyncio
-import glob
 import json
 import sqlite3
 
@@ -26,7 +25,9 @@ def seed(gs, convs):
 
 
 class TestRescue:
-    def test_rescue_from_rows_and_quarantine(self, tmp_path):
+    def test_rows_intact_blob_corrupt_is_bypassed(self, tmp_path):
+        """S190 rows-first：blob 降级为导出快照。blob 损坏而权威行表完好时，
+        load 直接走行表、坏 blob 无害旁路（不降级、不隔离；下次全量保存自愈）。"""
         gs = load_gs(tmp_path)
         seed(gs, [{"id": "c1", "messages": [1, 2]}, {"id": "c2", "messages": []}])
         corrupt_blob(gs)
@@ -35,9 +36,17 @@ class TestRescue:
             return await gs.load_covs()
         out = asyncio.run(scenario())
         assert {c["id"] for c in out["conversations"]} == {"c1", "c2"}
-        assert gs._COVS_DEGRADED is False, "救援成功不得挂降级旗（否则合法回写被拒）"
-        # 坏 blob 隔离留证（D-3 语义保留）
-        assert glob.glob(gs.COVS_PATH + ".covs-corrupt-*.json")
+        assert gs._COVS_DEGRADED is False
+
+        # 全量保存后 blob 自愈
+        async def heal():
+            await gs.save_covs({"conversations": [{"id": "c1", "messages": [1, 2]},
+                                                   {"id": "c2", "messages": []}]})
+            con = sqlite3.connect(gs.COVS_PATH)
+            data = json.loads(con.execute("SELECT data FROM settings WHERE id=1").fetchone()[0])
+            con.close()
+            return data
+        assert {c["id"] for c in asyncio.run(heal())["conversations"]} == {"c1", "c2"}
 
     def test_self_heal_writeback(self, tmp_path):
         gs = load_gs(tmp_path)

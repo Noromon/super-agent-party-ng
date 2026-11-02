@@ -263,11 +263,11 @@ async def _backfill_rows(db):
         blob = json.loads(row[0])
         now = time.time()
         n = 0
-        for conv in (blob.get("conversations") or []):
+        for idx, conv in enumerate(blob.get("conversations") or []):
             if isinstance(conv, dict) and conv.get("id") is not None:
                 await db.execute(
-                    'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
-                    (str(conv["id"]), json.dumps(conv, ensure_ascii=False), now))
+                    'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at, ord) VALUES (?, ?, ?, ?)',
+                    (str(conv["id"]), json.dumps(conv, ensure_ascii=False), now, idx))
                 n += 1
         if n:
             logging.getLogger(__name__).info("conversation_rows backfilled from blob: %d rows", n)
@@ -275,20 +275,66 @@ async def _backfill_rows(db):
         logging.getLogger(__name__).warning("conversation_rows backfill failed (blob remains source of truth)", exc_info=True)
 
 
+async def _ensure_ord(db):
+    """S190: 一次性把既有行的 ord 按 blob 顺序补齐（升级迁移）。全部已赋值或
+    无行 = 直通。中途失败下次 init 重试（幂等）。"""
+    try:
+        async with db.execute(
+                "SELECT COUNT(*) FROM conversation_rows WHERE ord IS NOT NULL") as cur:
+            if (await cur.fetchone())[0]:
+                return
+        async with db.execute("SELECT COUNT(*) FROM conversation_rows") as cur:
+            if not (await cur.fetchone())[0]:
+                return
+        async with db.execute('SELECT data FROM settings WHERE id = 1') as cur:
+            row = await cur.fetchone()
+        blob = json.loads(row[0]) if row else {}
+        order = {}
+        for idx, conv in enumerate(blob.get("conversations") or []):
+            if isinstance(conv, dict) and conv.get("id") is not None:
+                order[str(conv["id"])] = idx
+        nxt = len(order)
+        async with db.execute("SELECT conv_id FROM conversation_rows") as cur:
+            for (cid,) in await cur.fetchall():
+                await db.execute("UPDATE conversation_rows SET ord=? WHERE conv_id=?",
+                                 (order.get(cid, nxt), cid))
+                if cid not in order:
+                    nxt += 1
+        logging.getLogger(__name__).info("[Covs] conversation_rows ord 迁移完成")
+    except Exception:
+        logging.getLogger(__name__).warning("[Covs] ord 迁移失败（行仍可 COALESCE 排序）", exc_info=True)
+
+
+async def _meta_get(db, key):
+    try:
+        async with db.execute("SELECT data FROM covs_meta WHERE key = ?", (key,)) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+    except Exception:
+        return None
+
+
+async def _meta_put(db, key, value):
+    await db.execute("INSERT OR REPLACE INTO covs_meta (key, data) VALUES (?, ?)",
+                     (key, json.dumps(value, ensure_ascii=False)))
+
+
 async def _sync_rows(db, conversations):
-    """Align conversation_rows with the blob snapshot: upsert present ids,
-    delete vanished ones. Shadow-only: callers must not let failures escape."""
+    """Align conversation_rows with the blob snapshot: upsert present ids
+    (ord follows blob order — S190 rows-first: 行序即侧栏序), delete vanished
+    ones. Shadow-only: callers must not let failures escape."""
     snap = {}
+    now = time.time()
+    idx = 0
     for conv in conversations:
         if isinstance(conv, dict) and conv.get("id") is not None:
             snap[str(conv["id"])] = json.dumps(conv, ensure_ascii=False)
+            await db.execute(
+                'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at, ord) VALUES (?, ?, ?, ?)',
+                (str(conv["id"]), snap[str(conv["id"])], now, idx))
+            idx += 1
     async with db.execute("SELECT conv_id FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%'") as cur:
         existing = {r[0] for r in await cur.fetchall()}
-    now = time.time()
-    for cid, blob in snap.items():
-        await db.execute(
-            'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
-            (cid, blob, now))
     for cid in existing - set(snap):
         await db.execute('DELETE FROM conversation_rows WHERE conv_id = ?', (cid,))
     return len(snap), len(existing)
@@ -341,10 +387,22 @@ async def init_covs_db():
                 CREATE TABLE IF NOT EXISTS conversation_rows (
                     conv_id TEXT PRIMARY KEY,
                     data TEXT NOT NULL,
-                    updated_at REAL
+                    updated_at REAL,
+                    ord INTEGER
+                )
+            ''')
+            async with db.execute("PRAGMA table_info(conversation_rows)") as _cur:
+                _cols = [r[1] for r in await _cur.fetchall()]
+            if "ord" not in _cols:
+                await db.execute("ALTER TABLE conversation_rows ADD COLUMN ord INTEGER")
+            await db.execute('''
+                CREATE TABLE IF NOT EXISTS covs_meta (
+                    key TEXT PRIMARY KEY,
+                    data TEXT NOT NULL
                 )
             ''')
             await _backfill_rows(db)
+            await _ensure_ord(db)
             await db.commit()
         _covs_db_init_done = True
 
@@ -629,6 +687,37 @@ async def load_covs():
     try:
         await init_covs_db()
         async with aiosqlite.connect(COVS_PATH) as db:
+            # S190 rows-first：行表为会话权威源（行级写毫秒级）；blob 降级为
+            # 导出快照/回退源。行表为空（极老库首次升级失败等）→ 走 blob 旧路径。
+            raw_rows = None
+            try:
+                async with db.execute(
+                        "SELECT data FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%' "
+                        "ORDER BY COALESCE(ord, 2147483647), conv_id") as cur:
+                    raw_rows = await cur.fetchall()
+            except Exception:
+                # 行表本身不可用（缺表/坏索引）→ 回退 blob，不触发坏数据隔离
+                raw_rows = None
+            if raw_rows:
+                convs = [json.loads(r[0]) for r in raw_rows]
+                out = {"conversations": convs}
+                groups = await _meta_get(db, "conversationGroups")
+                if groups is None:
+                    row = None
+                    async with db.execute('SELECT data FROM settings WHERE id = 1') as cur:
+                        row = await cur.fetchone()
+                    if row:
+                        try:
+                            groups = json.loads(row[0]).get("conversationGroups")
+                        except Exception:
+                            groups = None
+                    if groups is not None:
+                        await _meta_put(db, "conversationGroups", groups)
+                        await db.commit()
+                if groups is not None:
+                    out["conversationGroups"] = groups
+                _COVS_DEGRADED = False
+                return out
             async with db.execute('SELECT data FROM settings WHERE id = 1') as cursor:
                 row = await cursor.fetchone()
         if not row:
@@ -687,8 +776,11 @@ async def save_covs(settings):
             await db.execute('INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)', (data,))
             await db.commit()
             try:
-                # M4b shadow double-write: blob stays source of truth
+                # M4b->S190: blob 与行同步（blob=导出快照/回退源，行=权威）
                 await _sync_rows(db, settings.get("conversations") or [])
+                # S190：全量保存同样同步 groups 到 meta（行优先模式 meta 为权威）
+                if settings.get("conversationGroups") is not None:
+                    await _meta_put(db, "conversationGroups", settings["conversationGroups"])
                 await db.commit()
             except Exception:
                 logging.getLogger(__name__).warning("conversation_rows shadow sync failed (blob unaffected)", exc_info=True)
@@ -697,6 +789,45 @@ async def save_covs(settings):
     logging.getLogger(__name__).info(
         "[Covs] save_covs 完成 blob=%dKB rows=%d %dms",
         len(data) // 1024, _rows, round((_t.monotonic() - _m0) * 1000))
+
+
+async def save_covs_delta_rows(incoming, groups=None):
+    """S190 rows-first delta：仅触碰 dirty 行（毫秒级），不再读/写 26MB blob。
+    新会话按现行语义插队首（min(ord)-1 递减）；已存在会话保持原位仅更新内容。
+    groups 传入时同步落 covs_meta（行优先模式下 meta 是分组权威）。"""
+    await init_covs_db()
+    incoming = _neutralize_covs(incoming)
+    now = time.time()
+    async with _COVS_LOCK:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            async with db.execute(
+                    "SELECT COALESCE(MIN(ord), 1) - 1 FROM conversation_rows") as cur:
+                next_ord = (await cur.fetchone())[0]
+            new_convs = []
+            updates = []
+            for conv in incoming:
+                if not isinstance(conv, dict) or conv.get("id") is None:
+                    continue
+                cid = str(conv["id"])
+                async with db.execute(
+                        "SELECT 1 FROM conversation_rows WHERE conv_id = ?", (cid,)) as cur:
+                    exists = await cur.fetchone()
+                (updates if exists else new_convs).append((cid, conv))
+            # 批量新会话整体插队首，incoming 相对顺序保持不变
+            base = next_ord - len(new_convs)
+            for i, (cid, conv) in enumerate(new_convs):
+                await db.execute(
+                    "INSERT INTO conversation_rows (conv_id, data, updated_at, ord) "
+                    "VALUES (?, ?, ?, ?)",
+                    (cid, json.dumps(conv, ensure_ascii=False), now, base + i))
+            for cid, conv in updates:
+                await db.execute(
+                    "UPDATE conversation_rows SET data = ?, updated_at = ? WHERE conv_id = ?",
+                    (json.dumps(conv, ensure_ascii=False), now, cid))
+            if groups is not None:
+                await _meta_put(db, "conversationGroups", groups)
+            await db.commit()
+    return len(incoming)
 
 # ----------------- 7. bot 渠道会话（"手机"行级存储，bot: 前缀命名空间） -----------------
 # 与主会话 blob 完全隔离：blob 不含 bot 会话，_sync_rows 也不碰 bot: 行。

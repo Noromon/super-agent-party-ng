@@ -54,15 +54,15 @@ async def _noop_safety(covs):
 
 
 def test_delta_failure_returns_save_error_and_logs(monkeypatch, fake_ws, caplog):
-    async def _boom(_covs):
+    async def _boom(incoming, groups=None):
         raise RuntimeError("disk on fire")
 
-    async def _empty():
-        return {"conversations": []}
+    async def _no_blob_load():
+        raise AssertionError("rows-first delta 不应读取 blob(load_covs)")
 
     monkeypatch.setattr(srv(), "_sanitize_conversations_safety", _noop_safety)
-    monkeypatch.setattr(srv(), "load_covs", _empty)
-    monkeypatch.setattr(srv(), "save_covs", _boom)
+    monkeypatch.setattr("py.get_setting.save_covs_delta_rows", _boom)
+    monkeypatch.setattr(srv(), "load_covs", _no_blob_load)
     with caplog.at_level(logging.INFO):
         asyncio.run(srv()._ws_save_conversations_delta(
             object(), {"correlationId": "cid-1",
@@ -76,20 +76,22 @@ def test_delta_failure_returns_save_error_and_logs(monkeypatch, fake_ws, caplog)
 def test_delta_success_returns_ack_and_logs(monkeypatch, fake_ws, caplog):
     saved = {}
 
-    async def _ok(_covs):
-        saved["done"] = True
+    async def _ok(incoming, groups=None):
+        saved["incoming"] = incoming
+        saved["groups"] = groups
+        return len(incoming)
 
-    async def _empty():
-        return {"conversations": []}
+    async def _no_blob_load():
+        raise AssertionError("rows-first delta 不应读取 blob(load_covs)")
 
     monkeypatch.setattr(srv(), "_sanitize_conversations_safety", _noop_safety)
-    monkeypatch.setattr(srv(), "load_covs", _empty)
-    monkeypatch.setattr(srv(), "save_covs", _ok)
+    monkeypatch.setattr("py.get_setting.save_covs_delta_rows", _ok)
+    monkeypatch.setattr(srv(), "load_covs", _no_blob_load)
     with caplog.at_level(logging.INFO):
         asyncio.run(srv()._ws_save_conversations_delta(
             object(), {"correlationId": "cid-2",
                        "data": {"conversations": [{"id": "c1", "messages": []}]}}))
-    assert saved.get("done") is True
+    assert saved["incoming"][0]["id"] == "c1"
     assert fake_ws.sent[-1]["type"] == "conversations_delta_saved"
     assert any("[Covs] delta 保存 rows=1" in r.getMessage() for r in caplog.records)
 

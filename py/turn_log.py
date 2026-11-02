@@ -16,32 +16,52 @@ from py.token_guard import neutralize_deep
 
 
 async def shadow_append(conversation_id, messages, log=None):
-    """Append messages not yet recorded for this conversation. Idempotent per (id, seq)."""
+    """Record the canonical chain for this conversation (prefix diff).
+
+    S190: the old "history only grows" high-water-mark test (`len(messages)
+    <= written`) silently froze the log the first time a chain legitimately
+    shrank (sanitize drops / IM per-turn rebuild) - last write stuck at the
+    longest chain ever seen. Now we compare element-wise against stored rows:
+    common prefix untouched, first divergence onward rewritten (REPLACE) and
+    stale tail removed, so the table always mirrors the live chain.
+    """
     if not conversation_id or not messages:
         return 0
     def _get(msg, key):
         return msg.get(key) if isinstance(msg, dict) else getattr(msg, key, None)
     try:
         async with aiosqlite.connect(COVS_PATH) as db:
-            cur = await db.execute(
-                "SELECT COALESCE(MAX(seq), -1) FROM turn_log WHERE conversation_id = ?",
-                (conversation_id,))
-            written = (await cur.fetchone())[0] + 1
-            if len(messages) <= written:
-                return 0
-            now = time.time()
-            batch = []
-            for offset, msg in enumerate(messages[written:]):
+            async with db.execute(
+                    "SELECT seq, msg FROM turn_log WHERE conversation_id = ? ORDER BY seq",
+                    (conversation_id,)) as cur:
+                stored = await cur.fetchall()
+            cand = []
+            for msg in messages:
                 if _get(msg, "role") is None:
                     continue
-                batch.append((conversation_id, written + offset,
-                              json.dumps(neutralize_deep(msg, "turn-log"), ensure_ascii=False, default=str), now))
+                cand.append(json.dumps(neutralize_deep(msg, "turn-log"),
+                                       ensure_ascii=False, default=str))
+            n_common = 0
+            while (n_common < len(stored) and n_common < len(cand)
+                   and stored[n_common][1] == cand[n_common]):
+                n_common += 1
+            if n_common == len(stored) and n_common == len(cand):
+                return 0
+            now = time.time()
+            changed = 0
+            if n_common < len(stored):
+                await db.execute(
+                    "DELETE FROM turn_log WHERE conversation_id = ? AND seq >= ?",
+                    (conversation_id, stored[n_common][0]))
+                changed += len(stored) - n_common
+            batch = [(conversation_id, i, cand[i], now) for i in range(n_common, len(cand))]
             if batch:
                 await db.executemany(
                     "INSERT OR REPLACE INTO turn_log "
                     "(conversation_id, seq, msg, created_at) VALUES (?, ?, ?, ?)", batch)
-                await db.commit()
-            return len(batch)
+                changed += len(batch)
+            await db.commit()
+            return changed
     except Exception as e:  # shadow must never kill the conversation
         if log:
             log(f"[TurnLog] shadow_append failed: {e}")
