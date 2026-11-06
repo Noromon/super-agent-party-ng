@@ -148,7 +148,10 @@ def _apply_edit(content: str, old: str, new: str, replace_all: bool,
         if len(starts) > 1 and not replace_all:
             return False, None, None, _ambiguity_error("exact match", starts, content, edit_no, False)
         pick = starts if replace_all else starts[:1]
-        return (True, _replace_spans(content, pick, old, new),
+        new_part = new
+        if "\r\n" in content and "\r\n" not in new and "\n" in new:
+            new_part = new.replace("\n", "\r\n")
+        return (True, _replace_spans(content, pick, old, new_part),
                 _line_of(content, pick[0]),
                 f"edit {edit_no}: {len(pick)} replacement(s) (exact match)")
     # 2) CRLF 适配：文件是 CRLF，old 是 LF → old 转 CRLF 后在原文上找
@@ -203,6 +206,28 @@ def _apply_edit(content: str, old: str, new: str, replace_all: bool,
     return False, None, None, _miss_report(content, old, edit_no)
 
 
+def _failure_report(original: str, work: str, old: str, new: str, ra: bool,
+                    edit_no: int, work_msg: str) -> str:
+    """S202：报错回显必须是磁盘真相。单编辑（work==original）原样返回；批内失败时
+    一律对原始内容重探重渲染——若该 edit 在磁盘上本可命中，说明命中区被批内前序
+    edit 覆盖，给出冲突专属文案。"""
+    if original == work:
+        return work_msg
+    ok0, _c0, ln0, msg0 = _apply_edit(original, old, new, ra, edit_no)
+    if ok0:
+        n_lines = len(old.split("\n"))
+        msg = (f"[Error] edit {edit_no}: old_string matches the on-disk file, but an earlier "
+               f"edit in this batch already replaced that region. No changes were written.\n"
+               f"On-disk content at the match:\n--- actual (on disk) ---\n"
+               f"{_snippet(original, ln0, ln0 + n_lines - 1)}\n--- end ---\n"
+               "Reorder the edits so this one runs before the one that consumes its target, "
+               "or write its old_string to match the earlier edit's result.")
+    else:
+        msg = msg0
+    return (msg + "\nNote: edits are applied to an in-memory copy; the file on disk is "
+            "untouched. Retry by resending the WHOLE batch.")
+
+
 def _diff_excerpt(old_content: str, new_content: str) -> str:
     diff = list(difflib.unified_diff(old_content.split("\n"), new_content.split("\n"),
                                      fromfile="before", tofile="after", lineterm="", n=2))
@@ -249,7 +274,7 @@ def apply_edits(content: str, edits: Any) -> PatchResult:
     for i, (old, new, ra) in enumerate(norm, 1):
         ok, newc, ln, msg = _apply_edit(work, old, new, ra, i)
         if not ok:
-            return PatchResult(False, report=msg)
+            return PatchResult(False, report=_failure_report(content, work, old, new, ra, i, msg))
         work = newc
         summaries.append(msg)
         edit_lines.append(ln or 0)
