@@ -157,3 +157,23 @@ class TestTemplateLocaleCssPins:
         assert ".sp-btn:disabled" in CSS
         # CSS 防恶化裁决：新样式入独立文件并由 chat.html 引用
         assert 'href="css/ask_card.css"' in (_ROOT / "static" / "chat.html").read_text(encoding="utf-8")
+
+
+class TestAskCardHostInvariant:
+    """S197 教训：桌面主对话= index.html + page_home 模板，chat.html 只是另一宿主。
+    凡渲染审批卡的模板必须同样渲染提问卡；两个宿主页都必须引用 ask_card.css。"""
+
+    def test_every_approval_template_has_ask_branch(self):
+        tpl_dir = _ROOT / "static" / "templates"
+        hosts = [p for p in tpl_dir.glob("*.html")
+                 if "processToolApproval(block.id" in p.read_text(encoding="utf-8")]
+        assert len(hosts) >= 3, "模板宿主枚举异常（page_chat_main/page_home/page_ai-browser）"
+        for p in hosts:
+            txt = p.read_text(encoding="utf-8")
+            assert "block.type === 'ask'" in txt, f"{p.name} 缺提问卡分支（S197 漏渲染事故）"
+            assert "submitAskAnswer(message, block)" in txt, f"{p.name} 缺提问提交接线"
+
+    def test_both_hosts_link_ask_css(self):
+        for host in ("index.html", "chat.html"):
+            assert 'href="css/ask_card.css"' in \
+                (_ROOT / "static" / host).read_text(encoding="utf-8"), host

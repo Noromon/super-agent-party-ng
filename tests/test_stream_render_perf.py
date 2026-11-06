@@ -344,7 +344,8 @@ def test_s113_pages_vif_and_reasoning_causal():
 
 def test_s114_native_buttons_and_pending_meter():
     lines = _read("static/templates/page_home.html").split("\n")
-    for i in list(range(184, 200)) + list(range(359, 375)) + list(range(1129, 1160)):
+    # S197：提问卡模板插入（1-based 321 起 +22 行）→ 后两段热区区间随动平移
+    for i in list(range(184, 200)) + list(range(381, 397)) + list(range(1151, 1182)):
         assert "<el-button" not in lines[i], i + 1
     home = "\n".join(lines)
     assert home.count('<button type="button" class="el-button') >= 16

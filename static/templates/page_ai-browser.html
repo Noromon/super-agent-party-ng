@@ -325,6 +325,28 @@
                                             </div>
                                         </div>
 
+                                        <!-- 提问卡 (Ask) S197 -->
+                                        <div v-else-if="block.type === 'ask'" class="sap-process-block type-ask" :id="'ask-'+block.id">
+                                            <div class="sp-header"><i class="fa-solid fa-circle-question"></i> {{ t('askCardTitle') }}</div>
+                                            <div class="sp-content">
+                                                <div v-for="(q, qi) in (block.data && block.data.questions) || []" :key="qi" class="sp-ask-q">
+                                                    <div class="sp-ask-qt">{{ qi + 1 }}. {{ q.question }}</div>
+                                                    <div class="sp-ask-opts">
+                                                        <button v-for="(opt, oi) in (q.options || [])" :key="oi" type="button"
+                                                                @click="pickAskOption(block, qi, oi)"
+                                                                class="sp-btn outline sp-ask-opt"
+                                                                :class="{ active: block.sel && block.sel[qi] === oi && !((block.other && block.other[qi]) || '').trim() }">
+                                                            {{ oi + 1 }}. {{ opt }}
+                                                        </button>
+                                                    </div>
+                                                    <input v-if="block.other" v-model="block.other[qi]" class="sp-ask-other" type="text" :placeholder="t('askCardOtherPlaceholder')" @keyup.enter="askCardReady(block) && submitAskAnswer(message, block)" />
+                                                </div>
+                                                <div class="sp-actions">
+                                                    <button @click="submitAskAnswer(message, block)" class="sp-btn primary" :disabled="!askCardReady(block)">{{ t('askCardSubmit') }}</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- 错误 -->
                                         <div v-else-if="block.type === 'error'" class="sap-process-block type-error" :id="'tool-error-'+block.id">
                                             <div class="sp-header"><i class="fa-solid fa-xmark"></i> {{ block.name }}</div>
