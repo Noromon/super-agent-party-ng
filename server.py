@@ -3991,6 +3991,23 @@ def _approval_pending_event_chunk(request):
     return None
 
 
+def _ask_pending_event_chunk(request):
+    """S195：提问卡活卡宣告（仿 S186 审批版）：前端流收尾据此只保留被点名
+    提问卡可操作，其余折叠为已失效——历史里的旧 ask 哨兵不再可点。"""
+    try:
+        for _m in reversed(getattr(request, "messages", None) or []):
+            _c = _m.get("content") if isinstance(_m, dict) else getattr(_m, "content", None)
+            _ak = ask_flow_is_ask_result(_c)
+            if _ak is not None:
+                _tid = _m.get("tool_call_id", "") if isinstance(_m, dict) else getattr(_m, "tool_call_id", "")
+                _chunk = {"choices": [{"delta": {"ask_pending": {
+                    "tool_call_id": _tid, "ask_id": _ak.get("ask_id", "")}}}]}
+                return f"data: {json.dumps(_chunk, ensure_ascii=False)}\n\n"
+    except Exception:
+        return None
+    return None
+
+
 GATE_MAX = 2  # S183 完成闸门注入上限（固定值，非设置项——用户拍板）
 
 
@@ -4074,7 +4091,7 @@ async def _ask_tool_handle(request, args_dict, tool_calls, cur_id, state):
             continue
     state["ask_done"] = True
     state["ask_qs"] = all_q
-    return ask_flow.make_sentinel("pending")
+    return ask_flow.make_sentinel("pending", all_q)
 
 
 async def _stream_ask_hang(request, _st, state):
@@ -5814,6 +5831,11 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
     # S194：提问卡轮末挂起登记（快照已含哨兵+补全对）；ask 轮不走审批登记面
     if pending_abort and _ask_state.get("ask_qs") is not None:
         await _stream_ask_hang(request, _st, _ask_state)
+        # S195：web 渠道宣告活提问卡（IM 走 bot 通知，无前端卡）
+        if _st.get("ask_hit") and _ask_channel(request)[0] == "web":
+            _ask_ev_chunk = _ask_pending_event_chunk(request)
+            if _ask_ev_chunk:
+                yield _ask_ev_chunk
 
     # S150：IM 渠道审批挂起登记（S183-M3：主体抽至 _stream_im_approval_hang）
     if (pending_abort and _ask_state.get("ask_qs") is None

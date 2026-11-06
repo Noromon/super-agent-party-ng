@@ -420,6 +420,8 @@ Object.assign(vue_methods, {
         const _enableStreamResume = this.settings?.enableStreamResume !== false;
             this._resumeSawApproval = false; // S172: 每条新流重置审批刹车标记
             this._pendingApprovalToolCallId = null; // S186: 每条新流重置活卡点名标记
+            this._resumeSawAsk = false; // S195: 提问刹车标记
+            this._pendingAskToolCallId = null; // S195: 活提问卡点名标记
 
         try {
             const response = await fetch(`/v1/chat/completions`, {
@@ -569,6 +571,11 @@ Object.assign(vue_methods, {
                         this._resumeSawApproval = true;
                     }
 
+                    if (delta.ask_pending) {
+                        // S195：后端宣告唯一活提问卡——流收尾时仅该卡保留可操作
+                        this._pendingAskToolCallId = delta.ask_pending.tool_call_id || null;
+                    }
+
                     if (delta.interject) {
                         this._ackInterject(delta.interject.content); // S188：插话注入确认
                     }
@@ -581,6 +588,7 @@ Object.assign(vue_methods, {
             this.flushStreamTextBuffer();
             this._flushToolStream(); // S93(F4)
             this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
+            this._collapseStaleAskCards(currentMsg); // S195: 收尾折叠未点名孤儿提问卡
             this._ijFinished(); // S188: 插话收尾兜底（停止留区/审批挂起/自动补发）
             if (currentMsg) currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
 
@@ -627,6 +635,7 @@ Object.assign(vue_methods, {
                         this.flushStreamTextBuffer();
                         this._flushToolStream(); // S93(F4)
                         this._collapseStaleApprovalCards(currentMsg); // S186: 续传收尾折叠孤儿审批卡
+                        this._collapseStaleAskCards(currentMsg); // S195: 续传收尾折叠孤儿提问卡
                         this._ijFinished(); // S188: 插话收尾兜底
                         this._markReasoningDone(currentMsg); // S93(F2)
                         currentMsg.generationFinished = true;
@@ -701,7 +710,7 @@ Object.assign(vue_methods, {
                 currentMsg.displayBlocks.forEach(block => {
                     // S187：toRaw 原目标 + 未批复审批卡跳过（toast 元凶=冻结后经代理读 .data）
                     const _raw = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(block) : block;
-                    if (_raw.type === 'approval') return;
+                    if (_raw.type === 'approval' || _raw.type === 'ask') return; // S195: 活提问卡同审批不冻结
                     if (!Object.isFrozen(_raw)) {
                         Object.freeze(_raw);
                         if (typeof _raw.content === 'string') Object.freeze(_raw.content);
@@ -972,7 +981,7 @@ Object.assign(vue_methods, {
             q.forEach(it => { it.state = 'held'; });
             return;
         }
-        if (this._resumeSawApproval) { q.forEach(it => { it.state = 'held'; }); return; }
+        if (this._resumeSawApproval || this._resumeSawAsk) { q.forEach(it => { it.state = 'held'; }); return; }
         this._flushInterjectsSoon();
     },
 

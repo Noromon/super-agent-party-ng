@@ -121,6 +121,11 @@ Object.assign(vue_methods, {
                     this._resumeSawApproval = true;
                 }
 
+                if (delta.ask_pending) {
+                    // S195：后端宣告唯一活提问卡——流收尾时仅该卡保留可操作
+                    this._pendingAskToolCallId = delta.ask_pending.tool_call_id || null;
+                }
+
                 if (delta.interject) {
                     this._ackInterject(delta.interject.content); // S188：插话注入确认
                 }
@@ -137,6 +142,7 @@ Object.assign(vue_methods, {
                 currentMsg._rv = (currentMsg._rv || 0) + 1; // S107: 流尾终态兜底 bump
                 this._flushToolStream(); // S93(F4)
                 this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
+                this._collapseStaleAskCards(currentMsg); // S195: 收尾折叠未点名孤儿提问卡
                 this._ijFinished(); // S188: 插话收尾兜底
 
                 if (tts_buffer.trim() && this.ttsSettings.enabled) {
@@ -251,6 +257,15 @@ Object.assign(vue_methods, {
                 if (temp.type === 'approval_required') { isApproval = true; approvalData = temp; }
             } catch (e) { }
         }
+        let isAsk = false;
+        let askData = null;
+        // S195：提问卡嗅探：仅结构哨兵帧触发（与审批哨兵互斥，各自独立判定）
+        if (tool.type === 'tool_result' && typeof tool.content === 'string' && tool.content.startsWith('{"__sap_ask_v1__":1,')) {
+            try {
+                const tempAsk = JSON.parse(tool.content);
+                if (tempAsk.type === 'ask_pending') { isAsk = true; askData = tempAsk; }
+            } catch (e) { }
+        }
         if (isApproval && approvalData) {
             // S187：审批数据拒绝响应式包装——根治冻结后代理 get 不变量违例（toast 元凶）
             if (typeof Vue !== 'undefined' && Vue.markRaw) Vue.markRaw(approvalData);
@@ -264,6 +279,19 @@ Object.assign(vue_methods, {
             this.approvalMap[toolCallId] = approvalData;
             currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: "{}" });
             currentMsg.backend_content.push({ role: 'assistant', content: '' });
+            this.requestScrollToBottom();
+        } else if (isAsk && askData) {
+            // S195：活提问卡——答案经提问卡/输入框以普通消息发出（服务端入口拦截原位续流）；
+            // 哨兵原文入 backend_content 供服务端替换定位，提交成功后由 submitAskAnswer 回写
+            if (typeof Vue !== 'undefined' && Vue.markRaw) Vue.markRaw(askData);
+            this._resumeSawAsk = true; // S172 同型：本流出现待答提问→终态，不得再自动续传/重放
+            this._pendingAskToolCallId = toolCallId || null;
+            this._collapseStaleAskCards(currentMsg, toolCallId);
+            const bAsk = getBlock('ask', toolCallId, toolName);
+            bAsk.data = askData;
+            if (!bAsk.sel) bAsk.sel = {};
+            if (!bAsk.other) bAsk.other = {};
+            currentMsg.backend_content.push({ role: 'tool', tool_call_id: toolCallId, name: toolName, content: tool.content });
             this.requestScrollToBottom();
         } else if (tool.type === 'tool_result_stream' && tool.title === "tool_result_stream") {
             // S93(F4): 流式结果 80ms 合并 + 50K 显示封顶（写满不再改动 block）。

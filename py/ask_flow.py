@@ -24,9 +24,13 @@ MAX_OPTIONS = 6
 
 # ---------------------------------------------------------------- 哨兵
 
-def make_sentinel(ask_id: str) -> str:
-    return _ASK_PREFIX + json.dumps({"type": "ask_pending", "ask_id": ask_id},
-                                    ensure_ascii=False) + "}"
+def make_sentinel(ask_id: str, questions: Optional[list] = None) -> str:
+    """S195：整体合法 JSON（前端 JSON.parse 可建卡）且保持 _ASK_PREFIX 前缀；
+    载荷可携带规范化后的问题列表——web 提问卡渲染直接读哨兵。"""
+    payload: Dict[str, Any] = {"__sap_ask_v1__": 1, "type": "ask_pending", "ask_id": ask_id}
+    if questions:
+        payload["questions"] = questions
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def is_ask_result(res: Any) -> Optional[Dict]:

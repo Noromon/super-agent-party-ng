@@ -36,7 +36,7 @@ class TestMarkRawAndFreezeSafety:
         assert old not in CHAT_JS
 
     def test_streamend_freeze_skips_approval(self):
-        assert "_raw.type === 'approval') return;" in CHAT_JS
+        assert "_raw.type === 'approval' || _raw.type === 'ask') return;" in CHAT_JS
         i = CHAT_JS.index("冻结已完成消息的所有 displayBlocks")
         seg = CHAT_JS[i:i + 900]
         assert "Vue.toRaw(block)" in seg

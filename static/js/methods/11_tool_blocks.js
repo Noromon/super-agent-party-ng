@@ -65,13 +65,96 @@ Object.assign(vue_methods, {
         if (changed) msg._rv = (msg._rv || 0) + 1;
     },
 
+    // S195：孤儿提问卡折叠——流收尾/新提问卡出现时，未被点名活卡的 ask 块
+    // 一律元素替换为已失效结果块（同 S186/S187 纪律：冻结卡经代理改写必失败）
+    _collapseStaleAskCards(msg, keepOverride) {
+        if (!msg || !Array.isArray(msg.displayBlocks)) return;
+        const keep = (keepOverride !== undefined) ? keepOverride : (this._pendingAskToolCallId || null);
+        let changed = false;
+        msg.displayBlocks.forEach((b, idx) => {
+            if (b && b.type === 'ask' && b.id !== keep) {
+                const _src = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(b) : b;
+                const _nb = Object.assign({}, _src, {
+                    type: 'tool_result',
+                    expired: true,
+                    name: '提问卡已失效：流程已继续',
+                });
+                this._setResultDisplay(_nb, '[已失效] 该提问未以此卡答复（可能已在输入框作答、超时或被新提问取代），流程已继续，此卡通道已关闭。');
+                msg.displayBlocks[idx] = _nb;
+                changed = true;
+            }
+        });
+        if (changed) msg._rv = (msg._rv || 0) + 1;
+    },
+
+    // S195：提问卡选项选中（点选不提交，逐题选完后统一提交）
+    pickAskOption(block, qIdx, optIdx) {
+        if (!block || block.type !== 'ask') return;
+        if (!block.sel) block.sel = {};
+        block.sel[qIdx] = optIdx;
+        if (block.other) block.other[qIdx] = '';
+    },
+
+    // S195：提交按钮可用态——至少一题有选中且可解析为选项文本，或任一题有自定义文本
+    askCardReady(block) {
+        const qs = (block && block.data && Array.isArray(block.data.questions)) ? block.data.questions : [];
+        return qs.some((q, i) => {
+            const other = ((block.other && block.other[i]) || '').trim();
+            if (other) return true;
+            const s = block.sel ? block.sel[i] : undefined;
+            return s !== undefined && q.options && q.options[s] !== undefined;
+        });
+    },
+
+    // S195：提交答复——组合「题号. 答案」行、卡原地转结果块（S187 元素替换式）、
+    // 回写 backend_content（历史与模型所见一致），再以普通消息发送触发服务端拦截续流
+    submitAskAnswer(msg, block) {
+        if (!block || block.type !== 'ask') return;
+        if (!this._askInFlight) this._askInFlight = {};
+        if (this._askInFlight[block.id]) return;
+        if (this.isSending || this.isTyping) {
+            if (typeof showNotification === 'function') showNotification('正在生成中，暂无法提交答复', 'warning');
+            return;
+        }
+        const qs = (block.data && Array.isArray(block.data.questions)) ? block.data.questions : [];
+        const lines = [];
+        qs.forEach((q, i) => {
+            const other = ((block.other && block.other[i]) || '').trim();
+            if (other) { lines.push(`${i + 1}. ${other}`); return; }
+            const s = block.sel ? block.sel[i] : undefined;
+            if (s !== undefined && q.options && q.options[s] !== undefined) lines.push(`${i + 1}. ${q.options[s]}`);
+        });
+        if (!lines.length) return;
+        const answerText = lines.join('\n');
+        this._askInFlight[block.id] = true;
+        if (msg && Array.isArray(msg.displayBlocks)) {
+            const _idx = msg.displayBlocks.findIndex(b => b && b.id === block.id && b.type === 'ask');
+            if (_idx !== -1) {
+                const _src = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(msg.displayBlocks[_idx]) : msg.displayBlocks[_idx];
+                const _nb = Object.assign({}, _src, { type: 'tool_result', name: '已提交答复' });
+                this._setResultDisplay(_nb, answerText);
+                msg.displayBlocks[_idx] = _nb;
+                msg._rv = (msg._rv || 0) + 1;
+            }
+        }
+        if (msg && Array.isArray(msg.backend_content)) {
+            for (let i = msg.backend_content.length - 1; i >= 0; i--) {
+                const it = msg.backend_content[i];
+                if (it && it.role === 'tool' && it.tool_call_id === block.id) { it.content = answerText; break; }
+            }
+        }
+        this.userInput = answerText;
+        Promise.resolve(this.sendMessage()).catch(() => { }).finally(() => { delete this._askInFlight[block.id]; });
+    },
+
     // 根据块类型返回对应的图标类名
     getToolBlockIcon(type) {
         const icons = {
             'tool_call': 'fa-solid fa-wrench',
             'tool_result': 'fa-solid fa-check',
             'error': 'fa-solid fa-xmark',
-            'approval': 'fa-solid fa-lock'
+            'approval': 'fa-solid fa-lock',
+            'ask': 'fa-solid fa-circle-question'
         };
         return icons[type] || 'fa-solid fa-file-lines';
     },

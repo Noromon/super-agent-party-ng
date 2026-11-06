@@ -1,0 +1,40 @@
+/* S195 提问卡片（page_chat_main ask 卡专用；styles.css 存量防恶化裁决→独立新文件） */
+.type-ask .sp-header i { color: #6366f1; } /* 柔靛 */
+.type-ask .sp-ask-q { margin-bottom: 10px; }
+.type-ask .sp-ask-qt {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-bottom: 6px;
+    white-space: pre-wrap;
+}
+.type-ask .sp-ask-opts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+.type-ask .sp-ask-opt {
+    text-align: left;
+    white-space: normal;
+    line-height: 1.4;
+}
+.type-ask .sp-ask-opt.active {
+    border-color: #6366f1;
+    color: #6366f1;
+    background-color: rgba(99, 102, 241, 0.08);
+    font-weight: 600;
+}
+.type-ask .sp-ask-other {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--el-border-color);
+    background-color: var(--el-bg-color);
+    color: var(--el-text-color-primary);
+    outline: none;
+}
+.type-ask .sp-ask-other:focus { border-color: #6366f1; }
+.sp-btn:disabled { opacity: 0.45; cursor: not-allowed; }
