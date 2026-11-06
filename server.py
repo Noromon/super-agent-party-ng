@@ -3982,6 +3982,31 @@ def _approval_pending_event_chunk(request):
 
 
 GATE_MAX = 2  # S183 完成闸门注入上限（固定值，非设置项——用户拍板）
+_GATE_ASK_TAIL = 400  # S193 提问识别只看收尾文本尾部窗口
+
+_ASK_RE = None
+
+
+def _gate_looks_like_question(text):
+    """S193：收尾文本呈提问/征询形态（等待用户拍板的合法收尾）。
+
+    闸门因此放行——「todo 未清」与「向用户要选择题」并非矛盾（工作流
+    存在合法暂停点，如 ai-painter Step1 场景确认）。宁纵勿枉：漏拦一次
+    真烂尾只损失一次提醒，误拦提问则用户端表现为 AI 自我循环重复作答。
+    """
+    global _ASK_RE
+    t = (text or "").strip()
+    if not t:
+        return False
+    tail = t[-_GATE_ASK_TAIL:]
+    if "？" in tail or "?" in tail:
+        return True
+    if _ASK_RE is None:
+        import re as _re
+        _ASK_RE = _re.compile(
+            r"(选哪|请选择|选\s*[一二三四1-4ABCD]|告诉(我|哪)|"
+            r"确认(一下|哪个|哪)|由你(定|选)|要哪个|哪一?个|指个方向)")
+    return bool(_ASK_RE.search(tail))
 
 
 def _gate_note_text(open_items, nth):
@@ -3989,6 +4014,7 @@ def _gate_note_text(open_items, nth):
     ids = ", ".join(f"#{t.get('id')}[{t.get('status', '?')}]" for t in open_items[:8])
     return (f"【完成闸门 {nth}/{GATE_MAX}】todo 列表仍有 {len(open_items)} 项未完成：{ids}。"
             "若确有未做完的步骤：立即继续调用工具执行；若某项实际已完成：现在更新其状态。"
+            "若在等主人选择/拍板：重申一次问题即算完成本轮（提问式收尾闸门会放行）。"
             "本轮回复只针对当前任务，不得复述已回答过的旧话题。")
 
 
@@ -4051,10 +4077,11 @@ async def _stream_im_approval_hang(request, _st):
         logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
 
 
-async def _stream_gate_check(_st, tools_now):
+async def _stream_gate_check(_st, tools_now, full_content=""):
     """S183(T-C) 完成闸门判定（M3：纯决策，注记/放行由调用方执行）。
     返回 ("pass"|"block"|"exhaust", payload)。放行条件：无声明工具、todo 空、
-    无未完成项、或本轮既未用 todo 也无 in_progress 佐证。"""
+    无未完成项、本轮既未用 todo 也无 in_progress 佐证、或收尾呈提问形态
+    （S193：等待用户拍板是合法暂停点）。"""
     if not tools_now or _st_cancelled(_st):
         return "pass", None
     from py.cli_tool import read_todo_snapshot
@@ -4064,6 +4091,9 @@ async def _stream_gate_check(_st, tools_now):
         return "pass", None
     if not open_items or not (any(_t.get("status") == "in_progress" for _t in open_items)
                               or _st.get("turn_used_todo")):
+        return "pass", None
+    if _gate_looks_like_question(full_content):
+        logging.getLogger("app").info("[Gate] 收尾为提问式（等待用户拍板），放行不打回")
         return "pass", None
     nth = _st.get("gate_retries", 0) + 1
     if nth > GATE_MAX:
@@ -5450,7 +5480,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             content_append(request.messages, 'assistant', full_content)
             # S183(T-C) 完成闸门：todo 未清即收尾 → 打回续跑（上限 GATE_MAX）
             if not _leaked:
-                _g_act, _g_payload = await _stream_gate_check(_st, _tools_now)
+                _g_act, _g_payload = await _stream_gate_check(_st, _tools_now, full_content)
                 if _g_act == "block":
                     request.messages.append({"role": "user", "content": _g_payload,
                                              "name": "system_note"})
