@@ -180,7 +180,7 @@ def _run_second_round(rounds, cancelled=False, tools=None, retries_pre=0):
             content = neutralize_leaked_blocks(content)
         messages.append({"role": role, "content": content})
 
-    async def _gate_pass(_st, _tools_now, *_a):  # S193：新增 full_content 形参，桩容忍
+    async def _gate_pass(_st, _tools_now):
         return ("pass", None)
 
     ns_local = {"_st_cancelled": _cancelled, "_stream_gate_check": _gate_pass,
