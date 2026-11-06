@@ -691,6 +691,22 @@ class XmppClient:
         if self.wakeWord and self.wakeWord not in text:
             return
 
+        # S194：提问卡待答——本条文本消息即答案（逐题解析，解不全则追问不销账）
+        _ask_rec = approval_store.latest_pending_ask("xmpp", frm)
+        if _ask_rec and text:
+            from py import ask_flow
+            _ans, _missing = ask_flow.parse_answers(_ask_rec, text)
+            if _missing:
+                await self._send_text(frm, ask_flow.build_reask_notice(_ask_rec, _missing))
+                return
+            _popped, _e = await approval_store.resolve("xmpp", frm, "answers", kind="ask")
+            if _popped is None:
+                await self._send_text(frm, "ℹ️ 提问卡已失效，请直接重新发送消息。")
+                return
+            asyncio.create_task(approval_store._fire(
+                _popped, "answers", "", ask_flow.format_result_text(_ask_rec, _ans)))
+            return
+
         images, text = self._extract_incoming_images(msg, text)
         if images:
             content = [{"type": "image_url", "image_url": {"url": uri}} for uri in images]
@@ -911,6 +927,12 @@ class XmppClient:
 
     async def _on_approval_notify(self, record: Dict):
         from py import approval_im
+        if record.get("kind") == "ask":  # S194：提问卡（纯文本系统卡，与正文区分）
+            from py import ask_flow
+            await self._on_bot_loop(
+                lambda: self._send_text(record["peer_id"],
+                                        ask_flow.build_notice(record)))
+            return
         await self._on_bot_loop(
             lambda: self._send_text(record["peer_id"],
                                     approval_im.build_notice(record, "zh")))
@@ -924,6 +946,15 @@ class XmppClient:
                                       note: str, result_text: str):
         from py import approval_store
         jid = record["peer_id"]
+        if record.get("kind") == "ask":  # S194：提问卡续流——答案/超时/作废三条路
+            from py import ask_flow
+            if decision == "stop":
+                await self._send_text(jid, "🚫 未答复的提问卡已作废。")
+                return
+            if decision == "timeout":
+                await self._send_text(jid, "⌛ 提问超时未获答复，按未答复继续任务…")
+            await self._resume_llm(jid, record.get("messages") or [], result_text)
+            return
         if decision == "stop":
             self._approval_queue.pop(jid, None)
             await self._send_text(jid, "⏹ 任务与待审批已取消。")

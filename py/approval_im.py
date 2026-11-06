@@ -93,8 +93,9 @@ def humanize_sentinel(payload: dict) -> str:
 
 
 def sanitize_incoming(messages: list) -> int:
-    """历史回灌防线：把 tool 消息里的审批哨兵 JSON 换成人类可读说明。
+    """历史回灌防线：把 tool 消息里的审批/提问哨兵 JSON 换成人类可读说明。
     返回替换条数。前端/续跑重放都以替换后内容发送，这里只兜底第三方/迟到路径。"""
+    from py.ask_flow import _ASK_PREFIX, is_ask_result, humanize_sentinel as ask_humanize
     n = 0
     if not isinstance(messages, list):
         return 0
@@ -102,6 +103,11 @@ def sanitize_incoming(messages: list) -> int:
         if not isinstance(m, dict) or m.get("role") != "tool":
             continue
         c = m.get("content")
+        if isinstance(c, str) and c.startswith(_ASK_PREFIX):  # S194 提问哨兵
+            if is_ask_result(c) is not None:
+                m["content"] = ask_humanize({})
+                n += 1
+            continue
         if isinstance(c, str) and c.startswith(_APPROVAL_PREFIX):
             try:
                 payload = json.loads(c)

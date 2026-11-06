@@ -466,6 +466,7 @@ from py.get_setting import EXT_DIR, IS_DOCKER, SKILLS_DIR, _copy_default_skills,
 from py.llm_tool import get_image_base64,get_image_media_type
 from py.tool_dispatch import (_APPROVAL_PREFIX, _approval_payload,
                               _is_approval_result, pending_approval_at_tail)
+from py.ask_flow import is_ask_result as ask_flow_is_ask_result
 from py.tool_dispatch import (dispatch_external_tool as _dispatch_external_tool,
                               dispatch_task_center_tool as _dispatch_task_center_tool,
                               dispatch_unknown_tool as _dispatch_unknown_tool)
@@ -1702,6 +1703,7 @@ def _build_tool_hooks():
         edit_file_patch_tool_local,# 本地精确替换
         glob_files_tool_local,     # 本地 glob 查找
         todo_write_tool_local,     # 本地任务管理
+        ask_user_question_tool,    # S194 结构化提问（主流内被拦截挂起）
         local_net_tool,            # 本地网络工具
         read_skill_tool_local,
     )
@@ -1841,6 +1843,7 @@ def _build_tool_hooks():
         "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
         "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
+        "ask_user_question_tool": ask_user_question_tool,        # S194 提问兜底（主流在工具轮已挂起，不会走到）
         "local_net_tool": local_net_tool,                       # 本地网络工具
         "read_skill_tool_local": read_skill_tool_local,         # 本地技能读取
 
@@ -3443,6 +3446,13 @@ def _inject_task_checkpoint(request, cli_settings, engine):
             logging.getLogger("app").info(f"[Context] 检查点注入失败: {e}")
 
 async def tools_change_messages(request: ChatRequest, settings: dict):
+    # S194：web 主对话答案拦截——本会话有挂起提问卡时，本条消息即答案，
+    # 就地替换哨兵后原位续跑（bot 重放不受影响）
+    try:
+        from py import ask_flow
+        await ask_flow.web_resolve_incoming(request)
+    except Exception as _ask_e:
+        logging.getLogger("app").info(f"[Ask] web 答案拦截异常（跳过）: {_ask_e!r}")
     # S150：模型面人话化——历史中残留的审批哨兵 JSON 换成人类可读说明
     # （事故根因之一：哨兵原文随历史回灌诱发本地底模泄漏漂移；
     # 前端审批卡嗅探的是实时流帧，不经过此处，不受影响）
@@ -4028,6 +4038,70 @@ async def _stream_anchor_inject(request, settings, _st, pending_abort):
         })
 
 
+def _ask_channel(request):
+    """提问卡挂起的会话键：IM 用 (platform, peer_id)，其余归一为 web+conversation。"""
+    if (getattr(request, "is_app_bot", False) and getattr(request, "platform", "")
+            and getattr(request, "peer_id", "")):
+        return request.platform, request.peer_id
+    return "web", str(getattr(request, "conversation_id", None) or "web-default")
+
+
+async def _ask_tool_handle(request, args_dict, tool_calls, cur_id, state):
+    """S194：ask_user_question_tool 在工具轮内的处理——校验+同轮合并，产占位哨兵。
+    挂起记录在轮末 _stream_ask_hang 落账（那时快照才含完整 tool 结果链）。"""
+    from py import ask_flow
+    qs, err = ask_flow.normalize_questions(args_dict)
+    if err:
+        return err  # 参数不合法：不挂起，模型按错误文本自纠
+    if state.get("ask_done"):
+        return "（本题已并入本轮提问卡，无需重复发出；等待主人答复后继续。）"
+    all_q = list(qs)
+    for tc in tool_calls:
+        try:
+            fn = getattr(tc, "function", None)
+            if getattr(fn, "name", "") != ask_flow.ASK_TOOL_NAME:
+                continue
+            if (getattr(tc, "id", "") or "") == (cur_id or ""):
+                continue
+            more, err2 = ask_flow.normalize_questions(json.loads(fn.arguments or "{}"))
+            if not err2:
+                for q in more:
+                    if len(all_q) >= ask_flow.MAX_QUESTIONS:
+                        break
+                    if q not in all_q:
+                        all_q.append(q)
+        except Exception:
+            continue
+    state["ask_done"] = True
+    state["ask_qs"] = all_q
+    return ask_flow.make_sentinel("pending")
+
+
+async def _stream_ask_hang(request, _st, state):
+    """S194：轮末提问卡挂起登记——快照此刻已含哨兵与补全的 tool 结果对；
+    同会话旧提问卡作废旧卡；通知/续跑复用 approval_store 生命周期（kind=ask）。"""
+    from py import approval_store, approval_im, ask_flow
+    plat, key = _ask_channel(request)
+    try:
+        old = approval_store.latest_pending_ask(plat, key)
+        if old is not None:
+            popped, _e = await approval_store.resolve(plat, key, "stop", kind="ask")
+            if popped is not None:
+                logging.getLogger("app").info("[Ask] 旧提问卡被新提问取代: %s/%s id=%s",
+                                              plat, key, old.get("approval_id"))
+                asyncio.create_task(approval_store._fire(popped, "stop", "", ""))
+        snap = approval_im.strip_system_messages(copy.deepcopy(request.messages))
+        await approval_store.create(
+            platform=plat, peer_id=key, tool_name=ask_flow.ASK_TOOL_NAME,
+            tool_params={"questions": state["ask_qs"]}, messages=snap,
+            kind="ask", questions=state["ask_qs"], ttl=ask_flow.ASK_TTL)
+        _st["ask_hit"] = True
+        logging.getLogger("app").info("[Ask] 提问卡挂起: %s/%s（%d 问）",
+                                      plat, key, len(state["ask_qs"]))
+    except Exception as e:
+        logging.getLogger("app").warning("[Ask] 提问卡挂起登记失败（降级为文本结果）: %r", e)
+
+
 async def _stream_im_approval_hang(request, _st):
     """S150：IM 渠道审批挂起——快照内部 messages（tool_calls 成对闭合后）登记挂起表，
     由 bot 通知对端斜杠批复并「原位续流」；前端哨兵帧与审批卡流程原样不动。
@@ -4064,6 +4138,10 @@ async def _stream_gate_check(_st, tools_now):
         return "pass", None
     if not open_items or not (any(_t.get("status") == "in_progress" for _t in open_items)
                               or _st.get("turn_used_todo")):
+        return "pass", None
+    if _st.get("ask_hit"):
+        # S194：本轮已挂起提问卡——todo 未开是「等主人拍板」的合法暂停态，结构放行
+        logging.getLogger("app").info("[Gate] 提问卡挂起中，完成闸门结构放行")
         return "pass", None
     nth = _st.get("gate_retries", 0) + 1
     if nth > GATE_MAX:
@@ -5466,6 +5544,22 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
         return
 
 
+async def _todo_stats_event_chunk():
+    """S183：todo 记账后推送 todo_stats 事件供前端画进度条。返回 SSE 字符串或
+    None。S194 从 _stream_tool_round 抽出（守 M-3 300 行线，逻辑不变）。"""
+    try:
+        from py.cli_tool import read_todo_snapshot
+        _td = await read_todo_snapshot()
+        _td_done = sum(1 for _t in _td if isinstance(_t, dict) and _t.get("status") == "done")
+        _td_evt = {"type": "todo_stats",
+                   "items": [{k: _t.get(k) for k in ("id", "content", "status", "priority")} for _t in _td if isinstance(_t, dict)],
+                   "done": _td_done, "total": len(_td)}
+        return f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
+    except Exception as _te:
+        logging.getLogger("app").info(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
+        return None
+
+
 async def _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
     """While-loop tool round: ack, dispatch, SSE results, abort/cancel signals.
 
@@ -5492,6 +5586,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
         "reasoning_content": "",
     })
     pending_abort = False
+    _ask_state = {}  # S194：本轮提问卡状态（同轮多调用合并、轮末挂起登记）
     acked_ids = set()
     reasoner_tool_events = []
     for _ti, _tc in enumerate(tool_calls):
@@ -5539,7 +5634,11 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
         }
         yield f"data: {json.dumps(call_confirm_chunk)}\n\n"
 
-        if settings['tools']['asyncTools']['enabled']:
+        if response_content.name == "ask_user_question_tool":
+            # S194：结构化提问——在审批预检/异步管道之前拦截，产占位哨兵，
+            # 轮末 _stream_ask_hang 落挂起记录并断流等待主人答复
+            results = await _ask_tool_handle(request, args_dict, tool_calls, tool_call_id, _ask_state)
+        elif settings['tools']['asyncTools']['enabled']:
             # S172：审批/路径门同步预检——命中则本轮直接产哨兵走既有审批编排，
             # 绝不进异步管道（哨兵一旦被吞进结果表，断流/登记/送审全部失联）
             _pre_ap = _approval_precheck(response_content.name, args_dict, settings)
@@ -5641,16 +5740,9 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
             }
             yield f"data: {json.dumps(result_chunk)}\n\n"
             if str(response_content.name).startswith("todo_write_tool"):
-                try:
-                    from py.cli_tool import read_todo_snapshot
-                    _td = await read_todo_snapshot()
-                    _td_done = sum(1 for _t in _td if isinstance(_t, dict) and _t.get("status") == "done")
-                    _td_evt = {"type": "todo_stats",
-                               "items": [{k: _t.get(k) for k in ("id", "content", "status", "priority")} for _t in _td if isinstance(_t, dict)],
-                               "done": _td_done, "total": len(_td)}
-                    yield f"data: {json.dumps(_td_evt, ensure_ascii=False)}\n\n"
-                except Exception as _te:
-                    logging.getLogger("app").info(f"[Todo] todo_stats 事件推送异常（跳过）: {_te}")
+                _ts_chunk = await _todo_stats_event_chunk()  # S183（S194：抽 helper 守 300 行线）
+                if _ts_chunk:
+                    yield _ts_chunk
         else:
             # 流式工具结果处理 (AsyncIterator)
             buffer = []
@@ -5711,19 +5803,26 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
             _st["turn_used_todo"] = True
         # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
         # T-9: 结构化哨兵判定（非子串嗅探），命中即断
-        if _is_approval_result(results) is not None:
+        if _is_approval_result(results) is not None or ask_flow_is_ask_result(results) is not None:
+            # S194：提问哨兵与审批哨兵同构断流（ask 记录在轮末登记）
             pending_abort = True
             break
 
     # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
     append_missing_results(request.messages, assistant_tool_calls, acked_ids)
 
+    # S194：提问卡轮末挂起登记（快照已含哨兵+补全对）；ask 轮不走审批登记面
+    if pending_abort and _ask_state.get("ask_qs") is not None:
+        await _stream_ask_hang(request, _st, _ask_state)
+
     # S150：IM 渠道审批挂起登记（S183-M3：主体抽至 _stream_im_approval_hang）
-    if pending_abort and request.is_app_bot and request.platform and request.peer_id:
+    if (pending_abort and _ask_state.get("ask_qs") is None
+            and request.is_app_bot and request.platform and request.peer_id):
         await _stream_im_approval_hang(request, _st)
 
     # S151：web 侧审批挂起落通知中心（面板引导回会话卡处理）；IM 来源已经 approval_store 登记
-    if pending_abort and not (request.is_app_bot and request.platform and request.peer_id):
+    if (pending_abort and _ask_state.get("ask_qs") is None
+            and not (request.is_app_bot and request.platform and request.peer_id)):
         _notify_web_approval_pending(_st)
         _ap_ev_chunk = _approval_pending_event_chunk(request)  # S186：真-pending 活卡宣告
         if _ap_ev_chunk:
@@ -7987,7 +8086,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         edit_file_tool_local,      # 本地文件写入
         edit_file_patch_tool_local,# 本地精确替换
         glob_files_tool_local,     # 本地 glob 查找
-        todo_write_tool_local,     # 本地任务管理
+        todo_write_tool_local, ask_user_question_tool,  # 本地任务管理 + S194 提问兜底
         local_net_tool,            # 本地网络工具
         read_skill_tool_local,
     )
@@ -8126,7 +8225,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         "edit_file_tool_local": edit_file_tool_local,           # 本地文件写入
         "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
-        "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
+        "todo_write_tool_local": todo_write_tool_local, "ask_user_question_tool": ask_user_question_tool,  # 本地任务管理 + S194 提问兜底
         "local_net_tool": local_net_tool,                       # 本地网络工具
         "read_skill_tool_local": read_skill_tool_local,         # 本地技能读取
 

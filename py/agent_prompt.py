@@ -25,6 +25,7 @@ This contract governs TASK behavior only. The character persona, tone, speaking 
 
 ## Task tracking
 - For multi-step work (3+ steps) maintain a todo list with {todo_tool}: exactly one item in_progress at a time; mark an item done only after its work is actually finished and verified, never merely planned.
+- When you need the user's decision, choice, or missing information to proceed: call {ask_tool} with ALL related questions in ONE call (1-4 questions, numbered options when possible) — this pauses the task cleanly and the answer comes back as the tool result. Do NOT end the turn with a plain-text question as the pause point, and do not re-ask what the card already asked. (S194)
 
 ## Communication
 - In TASK contexts be concise and factual: no preamble or postamble narration ("I will now...", "Let me...") — act instead. Answer directly.
@@ -79,10 +80,12 @@ def build_agent_core_prompt(permission_mode: str, engine: str = "local", is_cowo
         return _COWORK_CORE
     if engine == "ds":
         names = dict(patch_tool="edit_file_patch_tool", write_tool="edit_file_tool",
-                     shell_tool="docker_sandbox", todo_tool="todo_write_tool")
+                     shell_tool="docker_sandbox", todo_tool="todo_write_tool",
+                     ask_tool="ask_user_question_tool")
     else:
         names = dict(patch_tool="edit_file_patch_tool_local", write_tool="edit_file_tool_local",
-                     shell_tool="shell_tool_local", todo_tool="todo_write_tool_local")
+                     shell_tool="shell_tool_local", todo_tool="todo_write_tool_local",
+                     ask_tool="ask_user_question_tool")
     core = _CORE_HEAD.format(**names)
     if permission_mode == "plan":
         core += _PLAN_SECTION

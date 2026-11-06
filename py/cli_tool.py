@@ -2061,6 +2061,14 @@ async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
 
+async def ask_user_question_tool(questions=None) -> str:
+    """S194: 结构化提问工具。正常路径在 server 工具轮被拦截挂起（见 ask_flow），
+    走到这里说明发生在非主流通道（子代理/直调）——不做挂起，提示模型改用文本。"""
+    return ("[Info] ask_user_question_tool is only honored in the main chat stream, "
+            "where it pauses the task and presents the questions to the user. "
+            "In this context, put the questions directly in your visible reply instead.")
+
+
 async def todo_write_tool_local(action: str, id: str = None, content: str = None, 
                                 priority: str = "medium", status: str = None) -> str:
     """本地待办任务管理工具 - 使用3位数字有序ID"""
@@ -2791,6 +2799,44 @@ LOCAL_TOOLS_REGISTRY = {
             }
         }
     },
+    # S194：结构化提问（与审批同构的挂起-续流；任何权限模式都可用，含 plan）
+    "ask_user_question": {
+        "type": "function",
+        "function": {
+            "name": "ask_user_question_tool",
+            "description": (
+                "[Interaction] Pause the task and ask the user to decide. Use whenever you need "
+                "the user's choice, confirmation, or missing info to proceed - instead of ending "
+                "the turn with a plain-text question. Put ALL related questions in ONE call "
+                "(1-4). The turn pauses cleanly (todo stays open); the user's reply comes back "
+                "as this tool's result, then the task continues."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "description": "Questions to ask at once (1-4). One call per batch - do not split related questions into multiple calls.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question": {"type": "string", "description": "The question, self-contained."},
+                                "options": {
+                                    "type": "array",
+                                    "maxItems": 6,
+                                    "description": "Numbered suggested answers (0-6; omit for open questions). The user may always answer something else.",
+                                    "items": {"type": "string"}
+                                }
+                            },
+                            "required": ["question"]
+                        }
+                    }
+                },
+                "required": ["questions"]
+            }
+        }
+    },
     # --- 基础设施 ---
     "bash_local": {
         "type": "function", "function": {
@@ -2903,7 +2949,8 @@ def get_local_tools_for_mode(mode: str) -> list:
         LOCAL_TOOLS_REGISTRY["tail_file_local"],    
         LOCAL_TOOLS_REGISTRY["search_files_local"], 
         LOCAL_TOOLS_REGISTRY["glob_files_local"],
-        LOCAL_TOOLS_REGISTRY["read_skill_local"] 
+        LOCAL_TOOLS_REGISTRY["read_skill_local"],
+        LOCAL_TOOLS_REGISTRY["ask_user_question"]  # S194：提问是只读交互，全模式可用
     ]
     edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     infra = [
@@ -2956,7 +3003,8 @@ def get_local_tools_for_permission(permission_mode: str) -> list:
             LOCAL_TOOLS_REGISTRY["tail_file_local"],
             LOCAL_TOOLS_REGISTRY["search_files_local"],
             LOCAL_TOOLS_REGISTRY["glob_files_local"],
-            LOCAL_TOOLS_REGISTRY["read_skill_local"]]
+            LOCAL_TOOLS_REGISTRY["read_skill_local"],
+            LOCAL_TOOLS_REGISTRY["ask_user_question"]]  # S194：提问是只读交互，全模式可用
     edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     infra = [LOCAL_TOOLS_REGISTRY["bash_local"],
              LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"],

@@ -43,19 +43,28 @@ def has_handlers(platform: str) -> bool:
     return platform in _RESOLVER
 
 
-def has_pending(platform: str, peer_id: str) -> bool:
+def has_pending(platform: str, peer_id: str, kind: str = "approval") -> bool:
     return any(
         aid in _PENDING and _PENDING[aid].get("status") == "pending"
+        and _PENDING[aid].get("kind", "approval") == kind
         for aid in _INDEX.get((platform, peer_id), [])
     )
 
 
-def latest_pending(platform: str, peer_id: str) -> Optional[Dict[str, Any]]:
+def latest_pending(platform: str, peer_id: str,
+                   kind: str = "approval") -> Optional[Dict[str, Any]]:
+    """kind=None 表示不限类型。"""
     for aid in reversed(_INDEX.get((platform, peer_id), [])):
         rec = _PENDING.get(aid)
-        if rec and rec.get("status") == "pending":
+        if rec and rec.get("status") == "pending" \
+                and (kind is None or rec.get("kind", "approval") == kind):
             return rec
     return None
+
+
+def latest_pending_ask(platform: str, peer_id: str) -> Optional[Dict[str, Any]]:
+    """S194：本对端待答提问卡（同一时刻至多一张）。"""
+    return latest_pending(platform, peer_id, kind="ask")
 
 
 def pending_count() -> int:
@@ -89,12 +98,14 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
                  tool_params: Any = None, tool_call_id: str = "",
                  permission_mode: str = "", cwd: str = "",
                  messages: Optional[list] = None, ttl: float = DEFAULT_TTL,
-                 stream_id: Optional[str] = None) -> Dict[str, Any]:
-    """登记挂起审批；同步入库（此后 has_pending 立即可见），随后异步通知。"""
+                 stream_id: Optional[str] = None,
+                 kind: str = "approval", questions: Optional[list] = None) -> Dict[str, Any]:
+    """登记挂起记录（审批/提问卡）；同步入库（此后 has_pending 立即可见），随后异步通知。"""
     aid = uuid.uuid4().hex[:12]
     now = time.time()
     record = {
         "approval_id": aid,
+        "kind": kind,
         "platform": platform,
         "peer_id": peer_id,
         "tool_name": tool_name,
@@ -108,6 +119,8 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
         "expires_at": now + ttl,
         "status": "pending",
     }
+    if questions is not None:
+        record["questions"] = questions
     _PENDING[aid] = record
     _INDEX.setdefault((platform, peer_id), []).append(aid)
     _dump()  # S191：登记即落盘，重启不丢审批
@@ -118,17 +131,35 @@ async def create(*, platform: str, peer_id: str, tool_name: str,
     if notify:
         _spawn(_safe_notify(notify, record))
     # S151：通知中心（IM 来源 pending，面板双向审批入口）
+    # S194：ask 记录只收 web 来源（IM 提问直发对端，不堆面板）
     try:
+        if kind == "ask" and platform != "web":
+            raise _SkipPanelEmit()
         from py import notification_center
-        notification_center.emit("approval", f"工具 {tool_name} 等待审批（{platform} · {peer_id}）", level="warn",
-                                 extra={"pending_key": aid, "source": "im",
-                                        "approval_id": aid, "platform": platform,
-                                        "peer_id": peer_id, "tool_name": tool_name,
-                                        "tool_params": tool_params or {},
-                                        "status": "pending"})
+        if kind == "ask":
+            notification_center.emit(
+                "approval",
+                f"AI 提问等待回答（web 会话 {peer_id}：{len(questions or [])} 问）",
+                extra={"pending_key": aid, "source": "im",
+                       "approval_id": aid, "platform": platform,
+                       "peer_id": peer_id, "tool_name": tool_name,
+                       "kind": "ask", "status": "pending"})
+        else:
+            notification_center.emit("approval", f"工具 {tool_name} 等待审批（{platform} · {peer_id}）", level="warn",
+                                     extra={"pending_key": aid, "source": "im",
+                                            "approval_id": aid, "platform": platform,
+                                            "peer_id": peer_id, "tool_name": tool_name,
+                                            "tool_params": tool_params or {},
+                                            "status": "pending"})
+    except _SkipPanelEmit:
+        pass
     except Exception:
         pass
     return record
+
+
+class _SkipPanelEmit(Exception):
+    pass
 
 
 def _spawn(coro):
@@ -171,22 +202,32 @@ async def _expire(aid: str):
     record = _pop_pending(aid)
     if record is None:
         return
+    if record.get("kind") == "ask":  # S194：提问卡超时=逐题按未答复结算续流
+        from py import ask_flow
+        await _fire(record, "timeout", "", ask_flow.timeout_result_text(record))
+        return
     from py import approval_im
     await _fire(record, "timeout", "", approval_im.timeout_text(record["tool_name"]))
 
 
 async def _fire(record, decision, note, result_text):
     # S151：决策事件回落通知中心（面板销账 + 审计留痕）
+    # S194：ask 记录仅 web 来源进面板（与 create 侧对称）
     try:
-        from py import notification_center
-        label = {"approve": "已批准", "always": "已批准并加白名单", "deny": "已拒绝",
-                 "timeout": "超时未批", "stop": "已取消"}.get(decision, decision)
-        notification_center.emit(
-            "approval", f"审批{label}：{record.get('tool_name')}（{record.get('platform')}）",
-            extra={"pending_key": record.get("approval_id"), "source": "im",
-                   "approval_id": record.get("approval_id"),
-                   "tool_name": record.get("tool_name"), "decision": decision,
-                   "status": "resolved"})
+        _is_ask = record.get("kind") == "ask"
+        if not (_is_ask and record.get("platform") != "web"):
+            from py import notification_center
+            label = {"approve": "已批准", "always": "已批准并加白名单", "deny": "已拒绝",
+                     "timeout": "超时未批", "stop": "已取消",
+                     "answers": "已答复"}.get(decision, decision)
+            _subject = (f"提问卡{label}（{record.get('platform')}）" if _is_ask
+                        else f"审批{label}：{record.get('tool_name')}（{record.get('platform')}）")
+            notification_center.emit(
+                "approval", _subject,
+                extra={"pending_key": record.get("approval_id"), "source": "im",
+                       "approval_id": record.get("approval_id"),
+                       "tool_name": record.get("tool_name"), "decision": decision,
+                       "status": "resolved"})
     except Exception:
         pass
     # S188：批复闭环——释放该会话挂起的插话消息，并入快照随重放续跑（不丢消息）
@@ -225,9 +266,11 @@ def _pop_pending(aid: str) -> Optional[Dict[str, Any]]:
 
 
 async def resolve(platform: str, peer_id: str, decision: str,
-                  note: str = "", result_text: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
-    """摘除该 peer 最新一条挂起审批；不执行工具、不调续跑器（编排归 approval_im）。"""
-    record = latest_pending(platform, peer_id)
+                  note: str = "", result_text: str = "",
+                  kind: str = "approval") -> Tuple[Optional[Dict[str, Any]], str]:
+    """摘除该 peer 最新一条挂起记录（kind 缺省仅审批）；不执行工具、不调续跑器
+    （编排归 approval_im / ask 路径）。"""
+    record = latest_pending(platform, peer_id, kind=kind)
     if record is None:
         return None, "没有待审批的任务"
     aid = record["approval_id"]
@@ -238,10 +281,12 @@ async def resolve(platform: str, peer_id: str, decision: str,
 
 
 async def resolve_by_id(aid: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    """S151：按 approval_id 原子摘除（通知中心面板审批用）。"""
+    """S151：按 approval_id 原子摘除（通知中心面板审批用）。提问卡不走面板批复。"""
     record = _PENDING.get(aid)
     if record is None or record.get("status") != "pending":
         return None, "该审批已失效或不存在"
+    if record.get("kind") == "ask":  # S194：提问卡在会话里直接回答，面板只读
+        return None, "该记录是 AI 提问卡，请在原会话中直接回复答案"
     th = _EXPIRE_TASKS.pop(aid, None)
     if th:
         th.cancel()
@@ -249,10 +294,11 @@ async def resolve_by_id(aid: str) -> Tuple[Optional[Dict[str, Any]], str]:
 
 
 async def cancel_all(platform: str, peer_id: str) -> int:
-    """清空该 peer 全部挂起（/stop 围栏）：按 stop 决策 fire，由续跑器做本地清理。"""
+    """清空该 peer 全部挂起（/stop 围栏，S194 起含提问卡）：按 stop 决策 fire，
+    由续跑器做本地清理。"""
     n = 0
     while True:
-        record = latest_pending(platform, peer_id)
+        record = latest_pending(platform, peer_id, kind=None)
         if record is None:
             break
         aid = record["approval_id"]
