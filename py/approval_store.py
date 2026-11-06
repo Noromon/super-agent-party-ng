@@ -43,10 +43,11 @@ def has_handlers(platform: str) -> bool:
     return platform in _RESOLVER
 
 
-def has_pending(platform: str, peer_id: str, kind: str = "approval") -> bool:
+def has_pending(platform: str, peer_id: str, kind: Optional[str] = "approval") -> bool:
+    """kind=None 表示不限类型（S200：与 latest_pending 家族语义对齐）。"""
     return any(
         aid in _PENDING and _PENDING[aid].get("status") == "pending"
-        and _PENDING[aid].get("kind", "approval") == kind
+        and (kind is None or _PENDING[aid].get("kind", "approval") == kind)
         for aid in _INDEX.get((platform, peer_id), [])
     )
 

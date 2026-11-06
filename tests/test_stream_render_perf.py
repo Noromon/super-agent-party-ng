@@ -178,7 +178,7 @@ def test_s103_settimeout_attribution_probe():
     src = _read("static/js/renderer.js")
     assert "window.__lateTimers" in src
     assert "timers[' + window.__lateTimers.slice(-2)" in src
-    assert "[Probe] renderer build=S1" in src  # 版本号随升级变，前缀恒定
+    assert "[Probe] renderer build=S" in src  # 版本号随升级变，前缀恒定
 # ===== S104: 显示窗口切片 + 饥饿自报抓栈 + 探针 v2 帧相位 =====
 
 def test_s104_message_window():
@@ -204,7 +204,7 @@ def test_s104_probe_v2_phases():
     rd = _read("static/js/renderer.js")
     assert "phases[script=" in rd
     assert "forcedStyleAndLayoutDuration" in rd
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 # ===== S105: 抓取双通道铁证 + 证据全镜像 + 探针 v3 + 泵耗时帽 =====
 
 def test_s105_capture_and_evidence():
@@ -267,13 +267,13 @@ def test_s107_sidebar_memo_and_bump_throttle():
     assert "S107: 流尾终态兜底 bump" in _read("static/js/methods/10_chat_stream.js")
     rd = _read("static/js/renderer.js")
     assert "updates/5s=" in rd
-    assert "renderer build=S1" in rd  # 版本戳前缀断言（升版不误炸）
+    assert "renderer build=S" in rd  # 版本戳前缀断言（升版不误炸）
 # ===== S108: root 自激侦测+抓栈 / 流式期下线行操作 popper 链 / 翻译流批量 send =====
 
 def test_s108_root_loop_detector_and_batching():
     rd = _read("static/js/renderer.js")
     assert "rootCount > 150" in rd and "root=' + rootCount" in rd
-    assert "renderer build=S1" in rd  # 前缀断言（升版不误炸）
+    assert "renderer build=S" in rd  # 前缀断言（升版不误炸）
     for tpl in ("page_chat_main", "page_home"):
         assert 'class="item-actions" v-if="!isTyping"' in _read(f"static/templates/{tpl}.html"), tpl
     bt = _read("static/js/methods/98_browser_tabs.js")
@@ -287,7 +287,7 @@ def test_s109_native_title_and_backlog_mode():
         assert not _re.search(r"<el-tooltip[^>]*>\s*<el-button", s), tpl
     assert ':title="t(\'copy\')"' in _read("static/templates/page_chat_main.html")
     rd = _read("static/js/renderer.js")
-    assert "loop-suspect" in rd and "renderer build=S1" in rd
+    assert "loop-suspect" in rd and "renderer build=S" in rd
     cs = _read("static/js/methods/10_chat_stream.js")
     assert "streamBacklog()" in cs and "return 240" in cs
     assert "_streamRecvChars = (this._streamRecvChars || 0) + delta.content.length" in cs
@@ -304,7 +304,7 @@ def test_s110_storage_page_destroy_when_hidden():
     assert "v-show=\"activeMenu === 'storage'\"" not in st
     mj = _read("main.js")
     assert "hold: 120000" not in mj  # S119 拆除流式常开采样
-    assert "renderer build=S1" in _read("static/js/renderer.js")
+    assert "renderer build=S" in _read("static/js/renderer.js")
 # ===== S111: 全库 el-tooltip 归零 + loop-suspect 组件链点名 =====
 
 def test_s111_zero_popper_chains():
@@ -314,7 +314,7 @@ def test_s111_zero_popper_chains():
     home = _read("static/templates/page_home.html")
     assert "clickToSwitchModel" in home and home.count(':title="t(') >= 4
     rd = _read("static/js/renderer.js")
-    assert "compChain" in rd and "renderer build=S1" in rd
+    assert "compChain" in rd and "renderer build=S" in rd
 # ===== S112: 弹层常驻通用解药（persistent=false + destroy-on-close 全量） =====
 
 def test_s112_persistent_off_and_dialog_destroy():
@@ -336,7 +336,7 @@ def test_s113_pages_vif_and_reasoning_causal():
         assert f"v-if=\"activeMenu === '{p}'\"" in s, p
         assert "v-show" not in s, p
     rd = _read("static/js/renderer.js")
-    assert "outerHTML" in rd and "renderer build=S1" in rd
+    assert "outerHTML" in rd and "renderer build=S" in rd
     tb = _read("static/js/methods/11_tool_blocks.js")
     assert "b.done = false; return b;" in tb
     assert "b.type === 'text' || b.type === 'tool_result' || b.type === 'error'" in tb
@@ -351,7 +351,7 @@ def test_s114_native_buttons_and_pending_meter():
     assert home.count('<button type="button" class="el-button') >= 16
     rd = _read("static/js/renderer.js")
     assert "pending=" in rd and "_streamRecvChars || 0) - (this.$root._streamFlushChars" in rd
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S115: chat_main 原生刀镜像 + 扩展卡 el-card→原生 div + LoAF 400ms =====
@@ -368,7 +368,7 @@ def test_s115_chat_main_native_hotzone_and_card_div():
     rd = _read("static/js/renderer.js")
     assert "durationThreshold: 400" in rd
     assert "typing=" in rd
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S116: 第三聊天宿主 ai-browser 消息区原生刀（三宿主收口） =====
@@ -379,7 +379,7 @@ def test_s116_ai_browser_native_message_row():
     assert "<el-button :title=\"t('pause')" not in ab
     assert ab.count('<button type="button" class="el-button') >= 12
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S117: 组头下拉流式离树 + composer/quick-tool 第四轮原生刀 =====
@@ -396,7 +396,7 @@ def test_s117_group_dropdown_typing_gate_and_composer_native():
     assert home.count('class="el-button is-circle icon-btn send-btn"') >= 1
     assert "el-button--' + (isSending" in ab
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S118: 三页 composer textarea v-memo + dashboard 页根 v-if =====
@@ -413,7 +413,7 @@ def test_s118_textarea_memo_and_dashboard_vif():
     assert 'v-if="activeMenu === \'dashboard\'"' in dash
     assert 'v-show="activeMenu === \'dashboard\'"' not in dash
     rd = _read("static/js/renderer.js")
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S119: 收尾票——探针转哨兵模式（默认静默，超阈才声） =====
@@ -426,7 +426,7 @@ def test_s119_sentinel_mode_probes():
     mj = _read("main.js")
     assert "requestCapture('console')" in mj  # 按需抓栈通道保留
     assert "evidenceAppend" in mj  # 证据通道保留
-    assert "renderer build=S1" in rd
+    assert "renderer build=S" in rd
 
 
 # ===== S121: TTFB 分账+供给缺口+rAF 帧距探针（掉帧体感取证轮） =====

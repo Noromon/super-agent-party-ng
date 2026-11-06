@@ -790,10 +790,11 @@ class XmppClient:
             await self._send_text(chat_jid, f"⚠️ Agent 调用失败: {e}")
             return
 
-        # S150：本轮被审批挂起掐断——不写历史、不闭合回合（批复续流后补 assistant），
-        # 仅把已流出的半句先发出去
+        # S150/S200：本轮被挂起掐断（审批或提问卡，kind=None 不限型）——不写历史、
+        # 不闭合回合（批复/作答续流后补 assistant），仅把已流出的半句先发出去。
+        # S200：提问卡轮本就无正文是合规形态，走空回复兜底会秒发误报警告
         from py import approval_store
-        if approval_store.has_pending("xmpp", chat_jid):
+        if approval_store.has_pending("xmpp", chat_jid, kind=None):
             if res["out_buffer"].strip():
                 await self._send_text(chat_jid, res["out_buffer"].strip())
             # S191：审批挂起掐断的半轮——已完成的工具对先落链持久化，

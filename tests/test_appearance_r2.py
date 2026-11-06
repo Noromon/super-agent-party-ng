@@ -62,7 +62,7 @@ def test_renderer_appearance_watches_and_computed():
         "codeFontPxModel:",
         "fontSizeOptions()",
         "codeFontSizeOptions()",
-        "build=S1",
+        "build=S",
     ):
         assert needle in rjs, f"renderer.js missing: {needle}"
 

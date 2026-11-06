@@ -239,13 +239,13 @@ class TestWiringS150:
         assert "self._approval_queue.setdefault" in s
         assert "async def _resume_llm(" in s and "approval_im.replace_sentinel_content" in s
         assert s.count("_agent_stream_to_peer") >= 3  # 定义 + 两处共用
-        assert 'if approval_store.has_pending("xmpp", chat_jid):' in s
+        assert 'if approval_store.has_pending("xmpp", chat_jid, kind=None):' in s  # S200 起含提问卡
 
     def test_no_duplicate_history_on_pending(self):
         # 挂起轮不闭合回合：assistant 文本仅在续流后落账
         # （S191：挂起分支新增链持久化，窗口相应放宽；核心钉=不追加文本对即 return）
         s = _read("py/xmpp_client.py")
-        guard = s[s.find("# S150：本轮被审批挂起掐断"):][:700]
+        guard = s[s.find("# S150/S200：本轮被挂起掐断"):][:700]
         assert "has_pending" in guard and "return" in guard
         assert 'memoryList[chat_jid].append({"role": "assistant", "content": assistant_text})' \
             not in guard.split("return")[0]
