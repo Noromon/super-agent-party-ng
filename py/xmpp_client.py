@@ -688,14 +688,14 @@ class XmppClient:
                 elif _act == "mode":
                     await self._send_text(frm, await shortcut_commands.build_mode_info_text("zh"))
                 return
-        if self.wakeWord and self.wakeWord not in text:
-            return
-
-        # S194：提问卡待答——本条文本消息即答案（逐题解析，解不全则追问不销账）
+        # S194/S196：提问卡待答——本条文本消息即答案（逐题解析，解不全则追问不销账）。
+        # 置于 wakeWord 门禁之前：挂起期间的作答消息天然面向提问者，无需唤醒词。
         _ask_rec = approval_store.latest_pending_ask("xmpp", frm)
         if _ask_rec and text:
             from py import ask_flow
             _ans, _missing = ask_flow.parse_answers(_ask_rec, text)
+            logging.info("[Ask] IM 收到作答 xmpp:%s 已解=%s 缺=%s",
+                         frm, sorted(_ans.keys()), _missing)
             if _missing:
                 await self._send_text(frm, ask_flow.build_reask_notice(_ask_rec, _missing))
                 return
@@ -705,6 +705,9 @@ class XmppClient:
                 return
             asyncio.create_task(approval_store._fire(
                 _popped, "answers", "", ask_flow.format_result_text(_ask_rec, _ans)))
+            return
+
+        if self.wakeWord and self.wakeWord not in text:
             return
 
         images, text = self._extract_incoming_images(msg, text)
@@ -948,6 +951,7 @@ class XmppClient:
         jid = record["peer_id"]
         if record.get("kind") == "ask":  # S194：提问卡续流——答案/超时/作废三条路
             from py import ask_flow
+            logging.info("[Ask] IM 续流触发 kind=ask decision=%s jid=%s", decision, jid)
             if decision == "stop":
                 await self._send_text(jid, "🚫 未答复的提问卡已作废。")
                 return
@@ -975,7 +979,13 @@ class XmppClient:
         self.asyncToolsID.setdefault(chat_jid, [])
         self.fileLinks.setdefault(chat_jid, [])
         messages = [dict(m) for m in snapshot]
-        approval_im.replace_sentinel_content(messages, result_text)
+        # S196：两类哨兵前缀互斥——先按审批替换，未命中回落 ask 替换。
+        # 原实现只有审批替换器，ask 续流的答复 result_text 被静默丢弃
+        # （11-06 XMPP「答复后卡手/模型多嘴再问」根因，见 ledger）。
+        if not approval_im.replace_sentinel_content(messages, result_text):
+            from py import ask_flow
+            if not ask_flow.replace_ask_sentinel(messages, result_text):
+                logging.warning("[Ask] 续流快照内未找到任何哨兵，结果文本未注入（按原样继续）")
         try:
             res = await self._agent_stream_to_peer(chat_jid, messages)
         except Exception as e:

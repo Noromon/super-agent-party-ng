@@ -67,14 +67,19 @@ def normalize_questions(args: Any) -> Tuple[List[Dict], str]:
     if not isinstance(args, dict):
         return [], "[Error] ask_user_question_tool expects an object with 'questions'."
     raw = args.get("questions")
+    _bad_json = False
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
         except Exception:
             raw = None
+            _bad_json = True  # S196：模型把 questions 传成 JSON 字符串但串本身非法
     # 容错：模型常见单问平铺 {"question": ..., "options": [...]}
     if raw is None and isinstance(args.get("question"), str):
         raw = [{"question": args.get("question"), "options": args.get("options") or []}]
+    if _bad_json:
+        return [], ("[Error] 'questions' was given as a string that is not valid JSON; "
+                    "pass a real JSON array: [{\"question\": \"...\", \"options\": [\"...\"]}].")
     if not isinstance(raw, list) or not raw:
         return [], ("[Error] 'questions' must be a non-empty array of "
                     "{question, options?} objects (1-4 questions per call).")
