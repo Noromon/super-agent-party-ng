@@ -691,40 +691,46 @@ async def docker_sandbox(command: str, background: bool = False, timeout: int = 
     except Exception as e:
         yield f"[Error] Could not start the command in the sandbox: {e}. Verify the sandbox is up (run 'echo ok') and retry - this is not a task failure."
 
-async def edit_file_patch_tool(path: str, old_string: str, new_string: str) -> str:
-    """[Docker] 精确字符串替换"""
+def _patch_edit_list(old_string: str, new_string: str, edits, replace_all: bool):
+    """S201：统一补丁入参——edits 数组优先，退化为单发 old/new。None=入参不合法。"""
+    if edits:
+        if isinstance(edits, str):
+            import json as _json
+            try:
+                edits = _json.loads(edits)
+            except Exception:
+                return None
+        return edits if isinstance(edits, list) and edits else None
+    if old_string:
+        return [{"old_string": old_string, "new_string": new_string or "",
+                 "replace_all": bool(replace_all)}]
+    return None
+
+
+async def edit_file_patch_tool(path: str, old_string: str = "", new_string: str = "",
+                               edits=None, replace_all: bool = False) -> str:
+    """[Docker] S201 补丁工具：分级匹配+歧义报错+多点编辑+诊断回显（内核 py/patch_match）"""
     try:
+        from py import patch_match
+        edit_list = _patch_edit_list(old_string, new_string, edits, replace_all)
+        if not edit_list:
+            return "[Error] Provide old_string/new_string or a non-empty edits array of {old_string, new_string, replace_all?}."
         real_cwd = await _get_current_cwd()
         container_name = await get_or_create_docker_sandbox(real_cwd)
-        
         content = await _exec_docker_cmd_simple(real_cwd, ["cat", path])
-        
-        normalized_content = "\n".join(line.rstrip() for line in content.split("\n"))
-        normalized_old = "\n".join(line.rstrip() for line in old_string.split("\n"))
-        
-        if normalized_old not in normalized_content:
-            lines = content.split("\n")
-            first_line = old_string.split("\n")[0] if "\n" in old_string else old_string
-            similar_lines = [f"Line {i+1}: {line[:80]}" for i, line in enumerate(lines) if first_line.strip() in line]
-            error_msg = f"[Error] Old string not found in file '{path}'.\n"
-            if similar_lines:
-                error_msg += f"\nFound similar lines:\n" + "\n".join(similar_lines[:5])
-            return error_msg
-        
-        new_content = content.replace(old_string, new_string, 1)
-        
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8') as tmp:
-            tmp.write(new_content)
+        res = patch_match.apply_edits(content, edit_list)
+        if not res.ok:
+            return res.report
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='') as tmp:
+            tmp.write(res.content)
             tmp_path = tmp.name
-        
         dest_path = f"{container_name}:/workspace/{path}"
         cp_proc = await asyncio.create_subprocess_exec("docker", "cp", tmp_path, dest_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await cp_proc.communicate()
         os.unlink(tmp_path)
-        
-        if cp_proc.returncode != 0: return "[Error] Patch copy failed."
-        return f"[Success] Patched '{path}' (1 replacement).{_EDIT_CONTINUE_HINT}"
-        
+        if cp_proc.returncode != 0:
+            return "[Error] Patch copy failed."
+        return f"[Success] Patched '{path}' (sandbox).\n{res.report}{_EDIT_CONTINUE_HINT}"
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
 
@@ -1960,104 +1966,26 @@ _EDIT_CONTINUE_HINT = (
     "only summarize as completed after everything is verified."
 )
 
-async def edit_file_patch_tool_local(path: str, old_string: str, new_string: str) -> str:
-    """[Local] 精确替换：自动处理换行符差异 (CRLF/LF) 与空白字符容错"""
+async def edit_file_patch_tool_local(path: str, old_string: str = "", new_string: str = "",
+                                     edits=None, replace_all: bool = False) -> str:
+    """[Local] S201 补丁工具：分级匹配+歧义报错+多点编辑+诊断回显（内核 py/patch_match；WSL 共用本对象）"""
     try:
+        from py import patch_match
+        edit_list = _patch_edit_list(old_string, new_string, edits, replace_all)
+        if not edit_list:
+            return "[Error] Provide old_string/new_string or a non-empty edits array of {old_string, new_string, replace_all?}."
         cwd = await _get_current_cwd()
         target = resolve_strict_path(cwd, path, check_symlink=True)
-        
         if not target.exists():
             return f"[Error] File not found: {path}"
-
-        # 读取文件内容 (newline='' 保留原始换行符，读写全程不做隐式转换)
         async with aiofiles.open(target, 'r', encoding='utf-8', newline='') as f:
             content = await f.read()
-
-        # --- 策略 1: 直接替换 (最快) ---
-        if old_string in content:
-            # 文件是 CRLF 而 new_string 带裸 LF 换行时，把 new_string 转成 CRLF，避免混入异体换行
-            new_part = new_string
-            if '\r\n' in content and '\r\n' not in new_string and '\n' in new_string:
-                new_part = new_string.replace('\n', '\r\n')
-            new_content = content.replace(old_string, new_part, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
-                await f.write(new_content)
-            return f"Patched '{path}' successfully (exact match, 1 replacement).{_EDIT_CONTINUE_HINT}"
-
-        # --- 策略 2: 换行符风格适配替换 (不破坏原文件其余部分的换行风格) ---
-        old_normalized = old_string.replace('\r\n', '\n')
-        new_normalized = new_string.replace('\r\n', '\n')
-
-        # 2a: 文件是 CRLF，把 old/new 转成 CRLF 后在原始内容上替换，原文件换行风格保持不变
-        if '\r\n' in content and '\r\n' not in old_string:
-            old_crlf = old_normalized.replace('\n', '\r\n')
-            new_crlf = new_normalized.replace('\n', '\r\n')
-            if old_crlf in content:
-                new_content = content.replace(old_crlf, new_crlf, 1)
-                async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
-                    await f.write(new_content)
-                return f"Patched '{path}' successfully (CRLF line endings matched, original style preserved, 1 replacement).{_EDIT_CONTINUE_HINT}"
-
-        # 2b: old_string 带 CRLF 而文件是 LF（或混合换行），归一化后替换
-        content_normalized = content.replace('\r\n', '\n')
-        if old_normalized in content_normalized:
-            new_content_normalized = content_normalized.replace(old_normalized, new_normalized, 1)
-            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
-                await f.write(new_content_normalized)
-            how = "line endings normalized to LF for match, whole file now LF" if '\r\n' in content else "exact match after whitespace/line-ending normalization"
-            return f"Patched '{path}' successfully ({how}, 1 replacement).{_EDIT_CONTINUE_HINT}"
-
-        # --- 策略 3: 容错匹配 (忽略行尾空格与缩进差异) ---
-        # 逐行对比，忽略 strip() 后的差异；替换时保留文件其余部分的原样与首尾完整性
-        lines_kept = content.splitlines(keepends=True)
-        old_lines = old_string.splitlines()
-        
-        if not old_lines: return "[Error] old_string is empty."
-
-        # 简单的滑动窗口匹配
-        match_index = -1
-        for i in range(len(lines_kept) - len(old_lines) + 1):
-            match = True
-            for j in range(len(old_lines)):
-                if lines_kept[i+j].strip() != old_lines[j].strip():
-                    match = False
-                    break
-            if match:
-                match_index = i
-                break
-        
-        if match_index != -1:
-            # 找到了逻辑上匹配的块：只替换该块，前后内容按 keepends 原样保留，不做任何 strip
-            end_index = match_index + len(old_lines)
-            replaced_text = "".join(lines_kept[match_index:end_index])
-            # 新块沿用被替换块所在处的换行风格
-            ref_line = lines_kept[match_index]
-            eol = '\r\n' if ref_line.endswith('\r\n') else '\n'
-            new_block = new_normalized.replace('\n', eol)
-            if replaced_text.endswith(('\n', '\r')) and not new_block.endswith(('\n', '\r')):
-                new_block += eol
-            final_content = "".join(lines_kept[:match_index]) + new_block + "".join(lines_kept[end_index:])
-            
-            async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
-                await f.write(final_content)
-            return f"Patched '{path}' successfully (fuzzy match: whitespace/indentation differences ignored, 1 replacement).{_EDIT_CONTINUE_HINT}"
-
-        # --- 失败：提供详细诊断信息 ---
-        # 帮助 AI 找到它可能想改的地方
-        first_line = old_lines[0].strip()[:50]
-        candidates = []
-        for i, line in enumerate(lines_kept):
-            if first_line and first_line in line.strip():
-                candidates.append(f"Line {i+1}: {line.strip()[:80]}")
-        
-        error_msg = f"[Error] Patch NOT applied: old_string not found in '{path}'. No changes were made.\n"
-        error_msg += "Check line endings or indentation.\n"
-        if candidates:
-            error_msg += "Did you mean one of these locations?\n" + "\n".join(candidates[:3]) + "\n"
-        error_msg += "Re-read the file to get the exact current content, then retry the patch."
-            
-        return error_msg
-
+        res = patch_match.apply_edits(content, edit_list)
+        if not res.ok:
+            return res.report
+        async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
+            await f.write(res.content)
+        return f"Patched '{path}'.\n{res.report}{_EDIT_CONTINUE_HINT}"
     except Exception as e:
         return f"[Error] Patch failed: {str(e)}"
 
@@ -2477,7 +2405,7 @@ TOOLS_REGISTRY = {
     "edit_file_patch": {
         "type": "function", "function": {
             "name": "edit_file_patch_tool", 
-            "description": "Replace one exact occurrence of old_string with new_string in a file. One call patches one spot only: a successful patch does NOT mean the overall task is done - continue remaining steps and verify (re-read or test) before summarizing.",
+            "description": "Apply precise string replacement(s) to a file: single old_string/new_string, or edits=[{old_string, new_string, replace_all?}, ...] applied in order (atomic: if any edit fails to match, NOTHING is written). Tiered matching tolerates line-ending and indentation differences. Multiple hits are an ERROR unless replace_all=true (locations are listed). On mismatch the tool echoes the closest actual snippet with line numbers - retry the patch from that echo instead of re-reading and rewriting the whole file; on success it echoes a diff, so no re-read is needed to confirm. A successful patch does NOT mean the overall task is done - continue remaining steps and verify (test) before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2485,10 +2413,24 @@ TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from workspace root)."
                     }, 
-                    "old_string": {"type": "string", "description": "Exact existing text to be replaced (must occur in the file)"}, 
-                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}
+                    "old_string": {"type": "string", "description": "Existing text to be replaced (single-shot form; omit if edits is used)"}, 
+                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}, 
+                    "edits": {
+                        "type": "array",
+                        "description": "Optional multi-edit batch applied in order; each item {old_string, new_string, replace_all?}. Preferred for several changes to one file.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": {"type": "string"},
+                                "new_string": {"type": "string"},
+                                "replace_all": {"type": "boolean"}
+                            },
+                            "required": ["old_string", "new_string"]
+                        }
+                    }, 
+                    "replace_all": {"type": "boolean", "description": "Replace EVERY occurrence (default false: multiple hits abort with an error listing their lines)"}
                 }, 
-                "required": ["path", "old_string", "new_string"]
+                "required": ["path"]
             }
         }
     },
@@ -2748,7 +2690,7 @@ LOCAL_TOOLS_REGISTRY = {
     "edit_file_patch_local": {
         "type": "function", "function": {
             "name": "edit_file_patch_tool_local", 
-            "description": "Replace one exact occurrence of old_string with new_string in a local file. One call patches one spot only: a successful patch does NOT mean the overall task is done - continue remaining steps and verify (re-read or test) before summarizing.",
+            "description": "Apply precise string replacement(s) to a file: single old_string/new_string, or edits=[{old_string, new_string, replace_all?}, ...] applied in order (atomic: if any edit fails to match, NOTHING is written). Tiered matching tolerates line-ending and indentation differences. Multiple hits are an ERROR unless replace_all=true (locations are listed). On mismatch the tool echoes the closest actual snippet with line numbers - retry the patch from that echo instead of re-reading and rewriting the whole file; on success it echoes a diff, so no re-read is needed to confirm. A successful patch does NOT mean the overall task is done - continue remaining steps and verify (test) before summarizing.",
             "parameters": {
                 "type": "object", 
                 "properties": {
@@ -2756,10 +2698,24 @@ LOCAL_TOOLS_REGISTRY = {
                         "type": "string",
                         "description": "Relative path to file (from current working directory)."
                     }, 
-                    "old_string": {"type": "string", "description": "Exact existing text to be replaced (must occur in the file)"}, 
-                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}
+                    "old_string": {"type": "string", "description": "Existing text to be replaced (single-shot form; omit if edits is used)"}, 
+                    "new_string": {"type": "string", "description": "Replacement text (use empty string to delete old_string)"}, 
+                    "edits": {
+                        "type": "array",
+                        "description": "Optional multi-edit batch applied in order; each item {old_string, new_string, replace_all?}. Preferred for several changes to one file.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": {"type": "string"},
+                                "new_string": {"type": "string"},
+                                "replace_all": {"type": "boolean"}
+                            },
+                            "required": ["old_string", "new_string"]
+                        }
+                    }, 
+                    "replace_all": {"type": "boolean", "description": "Replace EVERY occurrence (default false: multiple hits abort with an error listing their lines)"}
                 }, 
-                "required": ["path", "old_string", "new_string"]
+                "required": ["path"]
             }
         }
     },

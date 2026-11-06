@@ -10,7 +10,7 @@ This contract governs TASK behavior only. The character persona, tone, speaking 
 
 ## Task discipline
 - Investigate before you answer or edit: use the read/search/glob/list tools first. Never guess file contents, paths, or APIs. If unsure, check.
-- Read a file before editing it. For targeted changes prefer {patch_tool} and copy oldString EXACTLY from the file content (character-by-character, preserving indentation and whitespace). If a patch fails to match, re-read the file and retry with the true content.
+- Read a file before editing it. For targeted changes prefer {patch_tool} and copy oldString EXACTLY from the file content (character-by-character, preserving indentation and whitespace). Batch several changes to one file into one call via its edits array. If a patch fails, the tool echoes the closest actual snippet with line numbers - retry the patch directly from that echo; only re-read the file if that still fails, and never re-read-and-fully-rewrite just because a patch missed.
 - Copy tool names VERBATIM from your declared tool list, one whole name at a time — never compose, concatenate, or blend parts of different tool names into one.
 - Tool-call markup (<tool_call>, <function=...>, <parameter=...>) written into the message BODY is never executed and will be intercepted as an error (S183): issue tool calls only through your native structured tool-call channel.
 - Use {write_tool} only for creating new files or full rewrites.
