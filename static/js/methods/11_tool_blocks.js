@@ -106,9 +106,11 @@ Object.assign(vue_methods, {
         });
     },
 
-    // S195：提交答复——组合「题号. 答案」行、卡原地转结果块（S187 元素替换式）、
-    // 回写 backend_content（历史与模型所见一致），再以普通消息发送触发服务端拦截续流
-    submitAskAnswer(msg, block) {
+    // S195/S198：提交答复——组合「题号. 答案」行交 /ask_card_answer 服务端结算，
+    // 卡原地转结果块、backend_content 回写服务端格式化结果（模型所见=历史），
+    // 再走审批同款无 user 消息重放续跑（答案不再以工具结果+用户消息双份出现）。
+    // 卡已失效/请求失败 → 降级为普通消息发送（输入路径的拦截兜底不变）。
+    async submitAskAnswer(msg, block) {
         if (!block || block.type !== 'ask') return;
         if (!this._askInFlight) this._askInFlight = {};
         if (this._askInFlight[block.id]) return;
@@ -127,6 +129,26 @@ Object.assign(vue_methods, {
         if (!lines.length) return;
         const answerText = lines.join('\n');
         this._askInFlight[block.id] = true;
+        let resp = null;
+        try {
+            const res = await fetch('/ask_card_answer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversation_id: this.stringifyEntityId ? this.stringifyEntityId(this.conversationId) : this.conversationId,
+                    answer_text: answerText,
+                }),
+            });
+            resp = await res.json();
+        } catch (e) { resp = null; }
+        if (!resp || !resp.ok) {
+            delete this._askInFlight[block.id];
+            if (typeof showNotification === 'function') showNotification('提问卡已失效，答复将作为普通消息发送', 'warning');
+            this.userInput = answerText;
+            Promise.resolve(this.sendMessage()).catch(() => { });
+            return;
+        }
+        const resultText = resp.result_text || answerText;
         if (msg && Array.isArray(msg.displayBlocks)) {
             const _idx = msg.displayBlocks.findIndex(b => b && b.id === block.id && b.type === 'ask');
             if (_idx !== -1) {
@@ -140,11 +162,17 @@ Object.assign(vue_methods, {
         if (msg && Array.isArray(msg.backend_content)) {
             for (let i = msg.backend_content.length - 1; i >= 0; i--) {
                 const it = msg.backend_content[i];
-                if (it && it.role === 'tool' && it.tool_call_id === block.id) { it.content = answerText; break; }
+                if (it && it.role === 'tool' && it.tool_call_id === block.id) { it.content = resultText; break; }
             }
         }
-        this.userInput = answerText;
-        Promise.resolve(this.sendMessage()).catch(() => { }).finally(() => { delete this._askInFlight[block.id]; });
+        this.markConvDirty && this.conversationId && this.markConvDirty(this.conversationId);
+        try {
+            await this.generateAIResponse(this.mainAgent, (msg && msg.agentName) || undefined, true);
+        } catch (e) {
+            console.error('[AskCard] 续跑失败:', e);
+        } finally {
+            delete this._askInFlight[block.id];
+        }
     },
 
     // 根据块类型返回对应的图标类名

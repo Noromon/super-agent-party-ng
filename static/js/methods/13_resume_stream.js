@@ -389,7 +389,20 @@ Object.assign(vue_methods, {
         if (target) {
           if (!String(target.content ?? '').trim()) target.content = body;
         } else {
-          msg.backend_content.push({ role: 'assistant', content: body });
+          // S198：回合以工具条目收尾（提问/审批挂起、中断）时不再尾挂文本——
+          // 并入本轮最近的 assistant(tool_calls) 条目 content（OpenAI 合规形态），
+          // 否则提问开场白会排在工具结果之后成为"事后胡话"，诱导模型 confabulate
+          let tcEntry = null;
+          for (let i = msg.backend_content.length - 1; i >= 0; i--) {
+            const it = msg.backend_content[i];
+            if (it.role === 'user') break;
+            if (it.role === 'assistant' && it.tool_calls && it.tool_calls.length) { tcEntry = it; break; }
+          }
+          if (tcEntry && !String(tcEntry.content ?? '').trim()) {
+            tcEntry.content = body;
+          } else {
+            msg.backend_content.push({ role: 'assistant', content: body });
+          }
         }
       }
       if (!String(msg.content ?? '').trim()) msg.content = body;

@@ -127,9 +127,12 @@ class TestCardMethodsPins:
         assert "showNotification('正在生成中，暂无法提交答复', 'warning')" in body
         assert "${i + 1}. ${other}" in body and "${i + 1}. ${q.options[s]}" in body
         assert "type: 'tool_result', name: '已提交答复'" in body
-        assert "it.content = answerText" in body  # backend_content 回写
-        assert "this.userInput = answerText" in body
-        assert "this.sendMessage()" in body
+        # S198：审批模式——服务端结算回写格式化结果，无 user 消息重放续跑；
+        # 失效时降级 userInput+sendMessage（fallback 保留）
+        assert "it.content = resultText" in body
+        assert "await this.generateAIResponse(this.mainAgent" in body
+        assert "'/ask_card_answer'" in body
+        assert "this.userInput = answerText" in body  # 降级路径仍在
         assert "this._askInFlight" in body
 
     def test_pick_and_ready(self):

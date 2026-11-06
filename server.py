@@ -8332,6 +8332,34 @@ async def execute_tool_manually(request: Request):
     return result
 
 
+@app.post("/ask_card_answer")
+async def ask_card_answer(request: Request):
+    """S198：web 提问卡提交——服务端解析并结算，返回格式化结果文本；前端回写
+    tool 条目后走审批式无 user 消息重放续跑，答案不再以工具结果+用户消息双份
+    出现。缺选项题按「（未答复）」结算（与手输拦截的 web-v1 语义一致）。
+    无挂起卡 → ok=False（前端降级为普通消息发送，不丢答案）。"""
+    from py import approval_store, ask_flow
+    data = await request.json()
+    conv = str(data.get("conversation_id") or "") or "web-default"
+    text = str(data.get("answer_text") or "")
+    rec = approval_store.latest_pending_ask("web", conv)
+    if rec is None:
+        return {"ok": False, "reason": "no_pending"}
+    ans, _missing = ask_flow.parse_answers(rec, text)
+    popped, _e = await approval_store.resolve("web", conv, "answers", kind="ask")
+    if popped is None:
+        return {"ok": False, "reason": "no_pending"}
+    result_text = ask_flow.format_result_text(rec, ans)
+    try:
+        asyncio.create_task(approval_store._fire(popped, "answers", "", result_text))
+    except Exception:
+        pass
+    logging.getLogger("app").info("[Ask] web 卡片提交: conv=%s id=%s 已答=%d 未答=%d",
+                                  conv, rec.get("approval_id"), len(ans),
+                                  len(rec.get("questions") or []) - len(ans))
+    return {"ok": True, "result_text": result_text}
+
+
 # S150：IM 审批闭环——把审批执行器交给编排模块（bot 侧 /y /a 批复经此执行工具）
 from py import approval_im as _approval_im
 _approval_im.set_executor(execute_approved_tool)
