@@ -166,10 +166,17 @@ Object.assign(vue_methods, {
             }
         }
         this.markConvDirty && this.conversationId && this.markConvDirty(this.conversationId);
+        // S199：generateAIResponse 的 fetch 读 this.abortController.signal，独立调用时
+        // 它为 null（sendMessage finally 已置空）——续跑前自备 controller 与 busy 标志（同 processToolApproval）
+        this.isSending = true;
+        this.isTyping = true;
+        this.abortController = new AbortController();
         try {
             await this.generateAIResponse(this.mainAgent, (msg && msg.agentName) || undefined, true);
         } catch (e) {
             console.error('[AskCard] 续跑失败:', e);
+            this.isSending = false;
+            this.isTyping = false;
         } finally {
             delete this._askInFlight[block.id];
         }
