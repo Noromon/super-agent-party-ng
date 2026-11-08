@@ -2124,6 +2124,7 @@ class ChatRequest(BaseModel):
     reasoning_effort: str = None
     is_app_bot: bool = False
     platform: str = None
+    behavior_trigger: bool = False  # S203：IM 行为/主动外发轮（ns 通道原样送文本，强制无工具+尸块中和）
     is_sub_agent: bool = False
     is_quarantined: bool = False  # S160：受污染话题会话——跳过 mem0/日记/总结等一切持久化写入，保留读侧
     recall_query: str = None
@@ -7724,6 +7725,26 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
     except Exception as _tle:
         logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
     return response_dict
+def _ns_behavior_sanitize(response_dict):
+    """S203 兜底：行为/主动外发轮正文漏网调用块——中和剥除后直发文本不得残留
+    尸块与占位符（该通道无拦截展示语义，剥空则空串，各 IM manager 空回复不发）。"""
+    try:
+        from py.tool_call_guard import REDACTION, detect_leaked_calls, neutralize_leaked_blocks
+        message = response_dict["choices"][0]["message"]
+        content = message.get("content") or ""
+        leaked = detect_leaked_calls(content)
+        if leaked:
+            cleaned = neutralize_leaked_blocks(content).replace(REDACTION, " ")
+            cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+            logging.getLogger("app").info(
+                "[TCG] 行为轮正文泄漏调用块已中和剥除: %s（剩余 %d 字符）",
+                leaked, len(cleaned))
+            message["content"] = cleaned
+    except Exception:
+        pass
+    return response_dict
+
+
 async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
     # (global decl cleared: migrated to py/app_state.py)
     
@@ -7907,6 +7928,17 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
         # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式；非流式通道不下发事件） =====
         await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
+        # S203：行为/主动外发轮（8 个 IM manager 的 execute_behavior_event 通道）——产出
+        # 将原样送 IM 对端，声明工具只会诱导模型把调用块写进正文被整块发出（ns 尸块事故）。
+        # 此轮强制零工具并注记只输出 plain 文本；_ns_behavior_sanitize 兜底中和漏网尸块。
+        if getattr(request, "behavior_trigger", False):
+            tools = []
+            request.messages.append({
+                "role": "user", "name": "system_note",
+                "content": ("本轮为计划外主动外发：你的输出会被原样转达给 IM 对端，"
+                            "只输出要对 TA 说的 plain 文本，不要调用任何工具，"
+                            "也不要在正文里书写任何形式的工具调用标记。"),
+            })
         msg = await images_add_in_messages(request.messages, images,settings)
         if request.top_p != 1 or settings['top_p'] != 1:
             extra['top_p'] = request.top_p or settings['top_p']
@@ -7987,6 +8019,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=False)
        # 处理响应内容
         response_dict = await _complete_finalize(request, settings, response, m0, memoryId, cur_memory, user_prompt, open_tag, close_tag)
+        if getattr(request, "behavior_trigger", False):  # S203 兜底：行为轮尸块剥除
+            response_dict = _ns_behavior_sanitize(response_dict)
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(

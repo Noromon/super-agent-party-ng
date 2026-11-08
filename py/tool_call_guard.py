@@ -31,6 +31,11 @@ _BLOCK_FULL = re.compile(
 _BLOCK_UNCLOSED = re.compile(
     r"(?:<tool_call>|<\|tool_call\|>|<function_call>|<function=|<invoke=)[\s\S]*$",
     re.IGNORECASE)
+# S203: 孤立闭合尾标——外层 <tool_call><function=..></function></tool_call> 嵌套形态下
+# _BLOCK_FULL 非贪婪止于内层 </function>，须再清一层尾标（正文不会出现这些标记）
+_STRAY_END = re.compile(
+    r"</tool_call>|</function_call>|</invoke>|</function>|<\|tool_call\|>",
+    re.IGNORECASE)
 _HAS_MARKER = re.compile(_BLOCK_START)
 # 名字抽取：XML 属性/等号形态与 JSON 形态；仅在存在调用块标记时启用
 _NAME_XML = re.compile(r"<(?:function|invoke)[= ](?:name=\")?([A-Za-z0-9_.:\-]{2,})\"?(?=[>\s]|$)")
@@ -56,6 +61,7 @@ def neutralize_leaked_blocks(text):
         return text
     out = _BLOCK_FULL.sub(REDACTION, text)
     out = _BLOCK_UNCLOSED.sub(REDACTION, out)
+    out = _STRAY_END.sub("", out)
     return out
 
 
