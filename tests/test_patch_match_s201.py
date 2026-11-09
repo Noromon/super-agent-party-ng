@@ -168,6 +168,7 @@ class TestSchemaUpgrade:
         assert WSL_TOOLS_REGISTRY["edit_file_patch_wsl"] is LOCAL_TOOLS_REGISTRY["edit_file_patch_local"]
 
     def test_prompt_contract_updated(self):
-        src = (_ROOT / "py" / "agent_prompt.py").read_text(encoding="utf-8")
+        # S204：补丁纪律移入能力索引注入层（py/tool_discipline.py，随声明集常驻）
+        src = (_ROOT / "py" / "tool_discipline.py").read_text(encoding="utf-8")
         assert "retry the patch directly from that echo" in src
         assert "edits array" in src

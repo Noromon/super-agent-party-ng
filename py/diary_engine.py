@@ -630,6 +630,12 @@ class DiaryEngine:
         if persona:
             sys_parts.append(persona)
         sys_parts.append(f"当前时间：{now_str}（星期{weekday}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。日夜晨昏的判断只以当前时间为准，旧日记或记忆里的夜晚场景与此刻无关。")
+        # S204 通道语义：本通道输出文本本身即被归档/转达的内容——「写日记/发消息」的正确
+        # 动作是写正文，不是发起调用（历史事故：正文尸块 write_diary/mimic_human 直落日记与 IM）
+        sys_parts.append(
+            "本通道语义：你直接输出的文本本身就是要归档的日记正文、或要转达给用户的话。"
+            "想记录或转达什么，写进正文即可。可调用能力以系统注入的「当前能力索引」为准，"
+            "索引之外的工具在本轮不存在；严禁在正文书写任何形式的调用标记。")
         system_prompt = "\n\n".join(sys_parts)
         user_prompt = ACTION_DEFAULT_PROMPTS.get(action, ACTION_DEFAULT_PROMPTS["think"])
         # S83：思绪种子——让每次检索 query 变化，长期记忆召回不再恒为同一条
@@ -687,6 +693,7 @@ class DiaryEngine:
             "stream": False,
             "is_app_bot": True,
             "platform": "diary",
+            "sanitize_plain_output": True,  # S204：正文尸块端点剥除（纯块→空→未生成内容出口）
             "enable_web_search": action == "webSearch",
             "recall_query": recall_seed,
         }

@@ -137,9 +137,10 @@ class TestPipesAndPins:
                 assert f"'{k}'" in src, (loc, k)
 
     def test_contract_clauses(self):
-        p = _read("py", "agent_prompt.py")
-        assert "written into the message BODY is never executed" in p
-        assert "Topic anchor (hard rule, S183)" in p
+        # S204：调用块纪律随能力索引常驻（py/tool_discipline.py），契约只留任务纪律
+        d = _read("py", "tool_discipline.py")
+        assert "written into the message BODY is never executed" in d
+        assert "Topic anchor (hard rule, S183)" in _read("py", "agent_prompt.py")
 
     def test_stream_wiring_pins(self):
         s = _read("server.py")

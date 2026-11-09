@@ -2125,6 +2125,7 @@ class ChatRequest(BaseModel):
     is_app_bot: bool = False
     platform: str = None
     behavior_trigger: bool = False  # S203：IM 行为/主动外发轮（ns 通道原样送文本，强制无工具+尸块中和）
+    sanitize_plain_output: bool = False  # S204：输出会被原样归档/转达的自动化轮（diary 等）——正文尸块剥除兜底
     is_sub_agent: bool = False
     is_quarantined: bool = False  # S160：受污染话题会话——跳过 mem0/日记/总结等一切持久化写入，保留读侧
     recall_query: str = None
@@ -6896,6 +6897,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         close_tag = "</think>"
 
         tools = await build_llm_tools(request, settings, _assemble_toolkit())
+        _inject_tool_discipline(request, tools)  # S204: 纪律随有效声明集（stream/ns 两处）
         
         source_prompt = ""
         if request.fileLinks:
@@ -7725,6 +7727,27 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
     except Exception as _tle:
         logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
     return response_dict
+def _inject_tool_discipline(request, tools):
+    """S204：工具纪律+能力索引按本轮有效声明集注入（不受 CLISettings 开关支配；
+    授权链 enable_tools→tools 参数不动，此处只让提示词跟随能力世界）。"""
+    try:
+        from py.tool_discipline import MARKER, render_tool_discipline
+        if request.messages and request.messages[0].get("role") == "system" \
+                and MARKER in (request.messages[0].get("content") or ""):
+            return
+        names = []
+        for t in tools or []:
+            try:
+                n = t.get("function", {}).get("name") or t.get("name")
+            except Exception:
+                n = None
+            if n:
+                names.append(n)
+        content_prepend(request.messages, 'system', "\n\n" + render_tool_discipline(names) + "\n\n")
+    except Exception:
+        logging.getLogger("app").warning("[Discipline] 能力索引注入失败（跳过）", exc_info=True)
+
+
 def _ns_behavior_sanitize(response_dict):
     """S203 兜底：行为/主动外发轮正文漏网调用块——中和剥除后直发文本不得残留
     尸块与占位符（该通道无拦截展示语义，剥空则空串，各 IM manager 空回复不发）。"""
@@ -7737,7 +7760,7 @@ def _ns_behavior_sanitize(response_dict):
             cleaned = neutralize_leaked_blocks(content).replace(REDACTION, " ")
             cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
             logging.getLogger("app").info(
-                "[TCG] 行为轮正文泄漏调用块已中和剥除: %s（剩余 %d 字符）",
+                "[TCG] 直发/行为轮正文泄漏调用块已中和剥除: %s（剩余 %d 字符）",
                 leaked, len(cleaned))
             message["content"] = cleaned
     except Exception:
@@ -7825,6 +7848,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
     open_tag = "<think>"
     close_tag = "</think>"
     tools = await build_llm_tools(request, settings, _assemble_toolkit())
+    _inject_tool_discipline(request, tools)  # S204: 纪律随有效声明集（stream/ns 两处）
     extra = {}
     reasoner_extra = {}
     # S160 L0a：本地推理引擎软压制（eosGuard.enabled 且 base_url 为回环时生效）
@@ -8019,8 +8043,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=False)
        # 处理响应内容
         response_dict = await _complete_finalize(request, settings, response, m0, memoryId, cur_memory, user_prompt, open_tag, close_tag)
-        if getattr(request, "behavior_trigger", False):  # S203 兜底：行为轮尸块剥除
-            response_dict = _ns_behavior_sanitize(response_dict)
+        if getattr(request, "behavior_trigger", False) or getattr(request, "sanitize_plain_output", False):
+            response_dict = _ns_behavior_sanitize(response_dict)  # S203/S204 兜底：尸块剥除
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(

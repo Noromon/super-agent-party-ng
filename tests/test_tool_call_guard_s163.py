@@ -274,5 +274,6 @@ class TestWiringPins:
         assert "tc_round_done" in SRC
 
     def test_prompt_anticoncat_clause(self):
-        p = (_ROOT / "py" / "agent_prompt.py").read_text(encoding="utf-8")
+        # S204：防拼名条款常驻于工具纪律（能力索引注入层），不再依赖 CLI 契约开关
+        p = (_ROOT / "py" / "tool_discipline.py").read_text(encoding="utf-8")
         assert "never compose, concatenate, or blend" in p

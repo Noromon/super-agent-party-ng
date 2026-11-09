@@ -9,13 +9,10 @@ TASK mode (tool calls, code, file edits, command execution) and CHARACTER mode (
 This contract governs TASK behavior only. The character persona, tone, speaking style and roleplay rules are defined elsewhere in this prompt and take FULL precedence for dialogue — never suppress or alter them because of this contract.
 
 ## Task discipline
-- Investigate before you answer or edit: use the read/search/glob/list tools first. Never guess file contents, paths, or APIs. If unsure, check.
-- Read a file before editing it. For targeted changes prefer {patch_tool} and copy oldString EXACTLY from the file content (character-by-character, preserving indentation and whitespace). Batch several changes to one file into one call via its edits array. If a patch fails, the tool echoes the closest actual snippet with line numbers - retry the patch directly from that echo; only re-read the file if that still fails, and never re-read-and-fully-rewrite just because a patch missed.
-- Copy tool names VERBATIM from your declared tool list, one whole name at a time — never compose, concatenate, or blend parts of different tool names into one.
-- Tool-call markup (<tool_call>, <function=...>, <parameter=...>) written into the message BODY is never executed and will be intercepted as an error (S183): issue tool calls only through your native structured tool-call channel.
-- Use {write_tool} only for creating new files or full rewrites.
+- Investigate before you answer or edit: use read/search/list capabilities first. Never guess file contents, paths, or APIs. If unsure, check.
+- Read a file before editing it. Tool usage discipline and the FULL list of capabilities you have this turn are injected by the system as the "Capability index" section — that index, not memory or history, is the authority on what you may call.
 - After changes, verify: read back the modified region; run tests / lint / typecheck when the project defines them. Never claim success without verification.
-- Use {shell_tool} for builds, tests, installs and other commands; prefer a dedicated tool whenever one exists. For long-running commands start them in the background.
+- Prefer dedicated tools over raw shell for structured operations; long-running commands belong in the background.
 - Independent tool calls may be issued together in one turn (all of them will be executed); calls that depend on earlier results must wait for those results.
 - On tool failure: inspect the error, correct arguments/paths, retry ONCE; if it still fails, report the failure honestly and continue with what is possible.
 - Persistence (hard rule): never end your turn while the user's requested deliverable is missing. After EVERY tool result, re-check the original request and the todo list, then immediately continue the next unfinished step with another tool call or the final answer. Stopping right after a partial step (creating a task, saving one file, launching a process, an empty search result) without verifying the deliverable is a contract violation. For background/async work, poll its status until done or the user cancels — "started" is not "finished".
@@ -24,8 +21,7 @@ This contract governs TASK behavior only. The character persona, tone, speaking 
 - When referencing code, cite path with line number (e.g. src/app.py:42).
 
 ## Task tracking
-- For multi-step work (3+ steps) maintain a todo list with {todo_tool}: exactly one item in_progress at a time; mark an item done only after its work is actually finished and verified, never merely planned.
-- When you need the user's decision, choice, or missing information to proceed: call {ask_tool} with ALL related questions in ONE call (1-4 questions, numbered options when possible) — this pauses the task cleanly and the answer comes back as the tool result. Do NOT end the turn with a plain-text question as the pause point, and do not re-ask what the card already asked. (S194)
+- For multi-step work (3+ steps) maintain a todo list if a todo capability is in the index: exactly one item in_progress at a time; mark an item done only after its work is actually finished and verified, never merely planned. If absent, track steps in your reasoning and report.
 
 ## Communication
 - In TASK contexts be concise and factual: no preamble or postamble narration ("I will now...", "Let me...") — act instead. Answer directly.
@@ -78,15 +74,8 @@ _MODE_LABEL = {
 def build_agent_core_prompt(permission_mode: str, engine: str = "local", is_cowork_main: bool = False) -> str:
     if is_cowork_main:
         return _COWORK_CORE
-    if engine == "ds":
-        names = dict(patch_tool="edit_file_patch_tool", write_tool="edit_file_tool",
-                     shell_tool="docker_sandbox", todo_tool="todo_write_tool",
-                     ask_tool="ask_user_question_tool")
-    else:
-        names = dict(patch_tool="edit_file_patch_tool_local", write_tool="edit_file_tool_local",
-                     shell_tool="shell_tool_local", todo_tool="todo_write_tool_local",
-                     ask_tool="ask_user_question_tool")
-    core = _CORE_HEAD.format(**names)
+    # S204: 契约不再硬编码具体工具名——能力索引/指引按本轮声明集注入（py/tool_discipline.py）
+    core = _CORE_HEAD
     if permission_mode == "plan":
         core += _PLAN_SECTION
     elif permission_mode == "auto-approve":

@@ -249,10 +249,16 @@ class TestMisc:
             assert _has(get_local_tools_for_permission(p)), p
 
     def test_contract_has_ask_clause(self):
+        # S204：ask 纪律随声明集注入——声明了 ask 工具才有该指引与点名
+        from py.tool_discipline import render_tool_discipline
+        with_ask = render_tool_discipline(["ask_user_question_tool", "time"])
+        assert "ask_user_question_tool" in with_ask and "plain-text question" in with_ask
+        without = render_tool_discipline(["time"])
+        assert "ask_user_question_tool" not in without  # 不可用类别零出现
         from py.agent_prompt import build_agent_core_prompt
         core = build_agent_core_prompt(engine="local", permission_mode="default",
                                        is_cowork_main=False)
-        assert "ask_user_question_tool" in core and "plain-text question" in core
+        assert "Capability index" in core  # 契约指向能力索引层
 
 
 class TestSourcePins:
