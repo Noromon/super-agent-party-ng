@@ -88,6 +88,16 @@
                     </div>
 
                     <div class="input-group">
+                      <!-- S206：友好名（选择器/主界面显示用，缺省回退 vendor - modelId） -->
+                      <div class="input-item">
+                        <label>{{ t('displayName') }}</label>
+                        <el-input
+                          v-model="provider.displayName"
+                          :placeholder="t('displayNamePlaceholder')"
+                          @change="autoSaveSettings"
+                        />
+                      </div>
+
                       <!-- 添加输入框标签 -->
                       <div class="input-item">
                         <label>
@@ -162,6 +172,85 @@
                         </el-select>
                       </div>
                     </div>
+                    <!-- S206：每模型推理参数（卡片级覆盖 > 角色默认；勾选继承=用该角色页的默认值） -->
+                    <el-collapse class="card-params-collapse">
+                      <el-collapse-item :title="t('providerParams')">
+                        <div class="param-row card-param-row" v-for="row in [
+                          { key: 'temperature', label: t('temperature'), min: 0, max: 2, step: 0.01 },
+                          { key: 'top_p', label: t('top_p'), min: 0, max: 1, step: 0.01 },
+                          { key: 'max_tokens', label: t('outputLength'), min: 1024, max: 1048576, step: 1024 }
+                        ]" :key="row.key">
+                          <span class="card-param-name">{{ row.label }}</span>
+                          <el-checkbox
+                            :model-value="paramInherited(provider, row.key)"
+                            @change="v => setParamInherit(provider, row.key, v)"
+                            size="small"
+                          >{{ t('inheritDefault') }}</el-checkbox>
+                          <el-input-number
+                            v-if="!paramInherited(provider, row.key)"
+                            :model-value="cardParams(provider)[row.key]"
+                            :min="row.min" :max="row.max" :step="row.step"
+                            size="small" controls-position="right"
+                            @update:model-value="v => { cardParams(provider)[row.key] = v; autoSaveSettings(); }"
+                          />
+                        </div>
+                        <div class="param-row card-param-row">
+                          <span class="card-param-name">{{ t('reasoningEffort') }}</span>
+                          <el-checkbox
+                            :model-value="paramInherited(provider, 'reasoning_effort')"
+                            @change="v => setParamInherit(provider, 'reasoning_effort', v)"
+                            size="small"
+                          >{{ t('inheritDefault') }}</el-checkbox>
+                          <el-select
+                            v-if="!paramInherited(provider, 'reasoning_effort')"
+                            :model-value="cardParams(provider).reasoning_effort || ''"
+                            clearable
+                            :placeholder="t('selectProvider')"
+                            size="small" class="full-width-input"
+                            @update:model-value="v => { cardParams(provider).reasoning_effort = v || null; autoSaveSettings(); }"
+                          >
+                            <el-option v-for="effort in reasoningEfforts" :key="effort.value" :label="t(effort.label)" :value="effort.value"></el-option>
+                          </el-select>
+                        </div>
+                        <div class="param-row card-param-row">
+                          <span class="card-param-name">{{ t('ctxWindow') }}</span>
+                          <el-checkbox
+                            :model-value="paramInherited(provider, 'contextWindow')"
+                            @change="v => setParamInherit(provider, 'contextWindow', v)"
+                            size="small"
+                          >{{ t('inheritDefault') }}</el-checkbox>
+                          <el-input-number
+                            v-if="!paramInherited(provider, 'contextWindow')"
+                            :model-value="cardParams(provider).contextWindow"
+                            :min="4096" :max="10485760" :step="1024"
+                            size="small" controls-position="right"
+                            @update:model-value="v => { cardParams(provider).contextWindow = v; autoSaveSettings(); }"
+                          />
+                        </div>
+                        <div class="param-header">
+                          <span>{{ t('extraParams') }}</span>
+                          <el-button @click="addCardParam(provider)" type="primary" circle size="small" class="header-add-btn">
+                            <i class="fa-solid fa-plus"></i>
+                          </el-button>
+                        </div>
+                        <div v-for="(param, index) in (cardParams(provider).extra_params || [])" :key="index" class="param-row">
+                          <el-input v-model="param.name" :placeholder="t('paramName')" class="param-input" @input="autoSaveSettings"></el-input>
+                          <el-select :persistent="false" v-model="param.type" :placeholder="t('paramType')" @change="updateCardParamType(provider, index)" class="type-select">
+                            <el-option v-for="type in paramTypes" :key="type.value" :label="t(type.label)" :value="type.value"></el-option>
+                          </el-select>
+                          <div class="value-input">
+                            <el-input v-if="param.type === 'string'" v-model="param.value" :placeholder="t('paramValue')" @input="autoSaveSettings"></el-input>
+                            <el-input-number v-if="param.type === 'integer'" v-model="param.value" :step="1" :precision="0" @input="autoSaveSettings"></el-input-number>
+                            <el-input-number v-if="param.type === 'float'" v-model="param.value" :step="0.5" :precision="2" @input="autoSaveSettings"></el-input-number>
+                            <el-switch v-if="param.type === 'boolean'" v-model="param.value" @change="autoSaveSettings"></el-switch>
+                            <el-input v-if="param.type === 'json'" v-model="param.value" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" placeholder='eg: {"type": "enabled"}' @input="autoSaveSettings" :class="{ 'json-error': isInvalidJson(param) }"></el-input>
+                          </div>
+                          <el-button @click="removeCardParam(provider, index)" type="danger" circle size="small" class="remove-btn">
+                            <i class="fa-solid fa-trash"></i>
+                          </el-button>
+                        </div>
+                      </el-collapse-item>
+                    </el-collapse>
                   </div>
                   <!-- 添加新磁贴 -->
                   <div id="add-provider-card" class="provider-card add-tile" @click="showAddDialog = true">
@@ -335,7 +424,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -647,7 +736,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -977,7 +1066,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -1113,7 +1202,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -1305,7 +1394,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -1361,7 +1450,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -1620,7 +1709,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">
@@ -2072,7 +2161,7 @@
                           <el-option
                             v-for="provider in modelProviders"
                             :key="provider.id"
-                            :label="provider.vendor+' - '+provider.modelId"
+                            :label="providerLabel(provider)"
                             :value="provider.id"
                           >
                             <div class="provider-option">

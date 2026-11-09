@@ -98,7 +98,7 @@
                     <!-- 桌面端：显示胶囊 Pill -->
                     <div v-if="!isMobile" class="status-pill hero-model-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                       <i class="fa-solid fa-microchip"></i>
-                      <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                      <span class="pill-text">{{ currentMainModelLabel() !== '' ? currentMainModelLabel() : t('noModelSelected') }}</span>
                     </div>
                     
                     <!-- 移动端：显示图标按钮，与旁边按钮样式一致 -->

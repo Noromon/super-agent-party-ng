@@ -19,6 +19,7 @@ from py.prompt_assembly import (
     AUTO_BEHAVIOR_HINT, DOCKER_ENV_INFO, INFERENCE_THINK_HINT, LATEX_DELIM_HINT,
     STICKER_IMAGE_RULE, TEXT2IMG_IMAGE_RULE, WSL_ENV_INFO,
 )
+from py.model_params import effective_main_params, effective_role_params  # S206 每模型推理参数
 
 from py.tool_assembly import build_llm_tools
 
@@ -1390,8 +1391,8 @@ async def get_image_content(image_url: str) -> str:
             
             extra = {}
 
-            if settings['vision']['temperature'] !=1:
-                extra['temperature'] = settings['vision']['temperature']
+            if _role_param(settings, 'vision', 'temperature') !=1:
+                extra['temperature'] = _role_param(settings, 'vision', 'temperature')
             
             response = await client.chat.completions.create(
                 model=settings['vision']['model'],
@@ -1412,8 +1413,8 @@ async def get_image_content(image_url: str) -> str:
             
             extra = {}
 
-            if settings['temperature'] !=1:
-                extra['temperature'] = settings['temperature']
+            if _main_param(settings, 'temperature') != 1:
+                extra['temperature'] = _main_param(settings, 'temperature')
             
             response = await client.chat.completions.create(
                 model=settings['model'],
@@ -1435,8 +1436,8 @@ async def analyze_image(image_url: str, prompt: str) -> str:
     if settings['vision']['enabled']:
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
-        if settings['vision']['temperature'] != 1:
-            extra['temperature'] = settings['vision']['temperature']
+        if _role_param(settings, 'vision', 'temperature') != 1:
+            extra['temperature'] = _role_param(settings, 'vision', 'temperature')
         
         response = await client.chat.completions.create(
             model=settings['vision']['model'],
@@ -1447,8 +1448,8 @@ async def analyze_image(image_url: str, prompt: str) -> str:
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
-        if settings['temperature'] != 1:
-            extra['temperature'] = settings['temperature']
+        if _main_param(settings, 'temperature') != 1:
+            extra['temperature'] = _main_param(settings, 'temperature')
         response = await client.chat.completions.create(
             model=settings['model'],
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
@@ -1471,8 +1472,8 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
     if settings['vision']['enabled']:
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
-        if settings['vision']['temperature'] != 1:
-            extra['temperature'] = settings['vision']['temperature']
+        if _role_param(settings, 'vision', 'temperature') != 1:
+            extra['temperature'] = _role_param(settings, 'vision', 'temperature')
         response = await client.chat.completions.create(
             model=settings['vision']['model'],
             messages=[{"role": "user", "content": content}],
@@ -1482,8 +1483,8 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
-        if settings['temperature'] != 1:
-            extra['temperature'] = settings['temperature']
+        if _main_param(settings, 'temperature') != 1:
+            extra['temperature'] = _main_param(settings, 'temperature')
         response = await client.chat.completions.create(
             model=settings['model'],
             messages=[{"role": "user", "content": content}],
@@ -1574,8 +1575,8 @@ async def review_image(image_url: str, prompt: str) -> str:
     if settings['vision']['enabled']:
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
-        if settings['vision']['temperature'] != 1:
-            extra['temperature'] = settings['vision']['temperature']
+        if _role_param(settings, 'vision', 'temperature') != 1:
+            extra['temperature'] = _role_param(settings, 'vision', 'temperature')
         response = await client.chat.completions.create(
             model=settings['vision']['model'],
             messages=context_messages,
@@ -1585,8 +1586,8 @@ async def review_image(image_url: str, prompt: str) -> str:
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
-        if settings['temperature'] != 1:
-            extra['temperature'] = settings['temperature']
+        if _main_param(settings, 'temperature') != 1:
+            extra['temperature'] = _main_param(settings, 'temperature')
         response = await client.chat.completions.create(
             model=settings['model'],
             messages=context_messages,
@@ -2587,8 +2588,8 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                             
                             extra = {}
 
-                            if settings['vision']['temperature'] !=1:
-                                extra['temperature'] = settings['vision']['temperature']
+                            if _role_param(settings, 'vision', 'temperature') !=1:
+                                extra['temperature'] = _role_param(settings, 'vision', 'temperature')
 
                             response = await client.chat.completions.create(
                                 model=settings['vision']['model'],
@@ -4916,8 +4917,8 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
             break
     msg = await images_add_in_messages(reasoner_messages, images,settings)
     if vendor == 'Ollama':
-        if settings['reasoner']['temperature'] !=1:
-            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        if _role_param(settings, 'reasoner', 'temperature') !=1:
+            reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
 
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
@@ -4989,8 +4990,8 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
                                 buffer = ""
                             break  # 等待更多内容
     else:
-        if settings['reasoner']['temperature'] !=1:
-            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        if _role_param(settings, 'reasoner', 'temperature') !=1:
+            reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
@@ -5812,8 +5813,8 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
             break
     msg = await images_add_in_messages(reasoner_messages, images,settings)
     if vendor == 'Ollama':
-        if settings['reasoner']['temperature'] !=1:
-            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        if _role_param(settings, 'reasoner', 'temperature') !=1:
+            reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
@@ -5884,8 +5885,8 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
                                 buffer = ""
                             break  # 等待更多内容
     else:
-        if settings['reasoner']['temperature'] !=1:
-            reasoner_extra['temperature'] = settings['reasoner']['temperature']
+        if _role_param(settings, 'reasoner', 'temperature') !=1:
+            reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
 
         # 流式调用推理模型
         reasoner_stream = await reasoner_client.chat.completions.create(
@@ -6459,21 +6460,24 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         _ctx_peak = 0
         extra = {}
         reasoner_extra = {}
+        # S206：每模型推理参数（卡片覆盖 > 角色默认；请求级仍由 request.* 优先）
+        _eff_main = effective_main_params(settings)
+        _eff_reasoner = effective_role_params(settings, settings.get('reasoner') or {})
         if chat_vendor == 'OpenAI':
-            extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
+            extra['max_completion_tokens'] = request.max_tokens or _eff_main.get('max_tokens')
         else:
-            extra['max_tokens'] = request.max_tokens or settings['max_tokens']
+            extra['max_tokens'] = request.max_tokens or _eff_main.get('max_tokens')
         if settings.get('enableOmniTTS',False) and not request.is_sub_agent:
             extra['modalities'] = ["text", "audio"]
             extra['audio'] ={"voice": settings.get('omniVoice',"Cherry"), "format": "wav"}
         if reasoner_vendor == 'OpenAI':
-            reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
+            reasoner_extra['max_completion_tokens'] = _eff_reasoner.get('max_tokens') or settings['reasoner']['max_tokens']
         else:
-            reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
-        if request.reasoning_effort or settings['reasoning_effort']:
-            extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
-        if settings['reasoner']['reasoning_effort'] is not None:
-            reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort']
+            reasoner_extra['max_tokens'] = _eff_reasoner.get('max_tokens') or settings['reasoner']['max_tokens']
+        if request.reasoning_effort or _eff_main.get('reasoning_effort'):
+            extra['reasoning_effort'] = request.reasoning_effort or _eff_main.get('reasoning_effort')
+        if _eff_reasoner.get('reasoning_effort') is not None:
+            reasoner_extra['reasoning_effort'] = _eff_reasoner.get('reasoning_effort')
         # S160 L0a：本地推理引擎软压制（eosGuard.enabled 且 base_url 为回环时生效）
         apply_eos_guard(reasoner_extra, settings, str(getattr(reasoner_client, "base_url", "") or ""))
         # 处理传入的异步工具ID查询
@@ -6551,11 +6555,11 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         if _compact_event_payload:
             yield f"data: {json.dumps(_compact_event_payload, ensure_ascii=False)}\n\n"
         msg = await images_add_in_messages(request.messages, images,settings)
-        if request.top_p != 1 or settings['top_p'] != 1:
-            extra['top_p'] = request.top_p or settings['top_p']
+        if request.top_p != 1 or _eff_main.get('top_p') != 1:
+            extra['top_p'] = request.top_p or _eff_main.get('top_p')
 
-        if settings['temperature'] !=1:
-            extra['temperature'] = settings['temperature']
+        if _eff_main.get('temperature') != 1:
+            extra['temperature'] = _eff_main.get('temperature')
 
         if tools:
             extra['tools'] = tools
@@ -6657,11 +6661,11 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             if vision_control_enabled and (results =='[Getting screenshot]' or settings.get('visionControlSettings', {}).get('desktopVision', False)):
                 images = await _stream_regrab(request, settings, results, images, fastapi_base_url)
             msg = await images_add_in_messages(request.messages, images, settings)
-            if request.top_p != 1 or settings['top_p'] != 1:
-                extra['top_p'] = request.top_p or settings['top_p']
+            if request.top_p != 1 or _eff_main.get('top_p') != 1:
+                extra['top_p'] = request.top_p or _eff_main.get('top_p')
 
-            if settings['temperature'] !=1:
-                extra['temperature'] = settings['temperature']
+            if _eff_main.get('temperature') != 1:
+                extra['temperature'] = _eff_main.get('temperature')
 
             async for _c in _stream_second_round(_st, client, model, msg, extra, extra_params, settings, request, tools, force_no_tools, usage_info, _ctx_peak, in_reasoning, content_buffer, reasoning_buffer, open_tag, close_tag):
                 yield _c
@@ -6899,7 +6903,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
             except Exception as e:
                 logging.getLogger("app").warning(f"Dify error: {e}")
         model = settings['model']
-        extra_params = settings['extra_params']
+        extra_params = effective_main_params(settings).get('extra_params') or []  # S206：卡片级覆盖（整体替换角色级）
         # 移除extra_params这个list中"name"不包含非空白符的键值对
         if extra_params:
             for extra_param in extra_params:
@@ -7299,24 +7303,27 @@ async def _complete_reasoner_prep(request, reasoner_client, settings, chat_vendo
             vendor = modelProvider['vendor']
             break
     msg = await images_add_in_messages(reasoner_messages, images,settings)   
+    # S206：每模型推理参数（卡片覆盖 > 角色默认）
+    _eff_main = effective_main_params(settings)
+    _eff_reasoner = effective_role_params(settings, settings.get('reasoner') or {})
     if chat_vendor == 'OpenAI':
-        extra['max_completion_tokens'] = request.max_tokens or settings['max_tokens']
+        extra['max_completion_tokens'] = request.max_tokens or _eff_main.get('max_tokens')
     else:
-        extra['max_tokens'] = request.max_tokens or settings['max_tokens']
+        extra['max_tokens'] = request.max_tokens or _eff_main.get('max_tokens')
     if reasoner_vendor == 'OpenAI':
-        reasoner_extra['max_completion_tokens'] = settings['reasoner']['max_tokens']
+        reasoner_extra['max_completion_tokens'] = _eff_reasoner.get('max_tokens') or settings['reasoner']['max_tokens']
     else:
-        reasoner_extra['max_tokens'] = settings['reasoner']['max_tokens']
-    if request.reasoning_effort or settings['reasoning_effort']:
-        extra['reasoning_effort'] = request.reasoning_effort or settings['reasoning_effort']
-    if settings['reasoner']['reasoning_effort'] is not None:
-        reasoner_extra['reasoning_effort'] = settings['reasoner']['reasoning_effort'] 
+        reasoner_extra['max_tokens'] = _eff_reasoner.get('max_tokens') or settings['reasoner']['max_tokens']
+    if request.reasoning_effort or _eff_main.get('reasoning_effort'):
+        extra['reasoning_effort'] = request.reasoning_effort or _eff_main.get('reasoning_effort')
+    if _eff_reasoner.get('reasoning_effort') is not None:
+        reasoner_extra['reasoning_effort'] = _eff_reasoner.get('reasoning_effort') 
     if vendor == 'Ollama':
         reasoner_response = await reasoner_client.chat.completions.create(
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
-            temperature=settings['reasoner']['temperature'],
+            temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
         )
         reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
@@ -7343,7 +7350,7 @@ async def _complete_reasoner_prep(request, reasoner_client, settings, chat_vendo
             messages=msg,
             stream=False,
             stop=settings['reasoner']['stop_words'],
-            temperature=settings['reasoner']['temperature'],
+            temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
         )
         reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
@@ -7584,7 +7591,7 @@ async def _ns_reasoner_pass(request, reasoner_client, reasoner_messages, setting
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
-            temperature=settings['reasoner']['temperature'],
+            temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
         )
         # 将推理结果中的思考内容提取出来
@@ -7603,7 +7610,7 @@ async def _ns_reasoner_pass(request, reasoner_client, reasoner_messages, setting
             messages=msg,
             stream=False,
             stop=settings['reasoner']['stop_words'],
-            temperature=settings['reasoner']['temperature'],
+            temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
         )
         content_prepend(request.messages, 'assistant', reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']) # 可参考的推理过程
@@ -7650,6 +7657,20 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
     except Exception as _tle:
         logging.getLogger("app").info(f"[TurnLog] complete shadow skip: {_tle}")
     return response_dict
+def _role_param(settings, role_key, key):
+    """S206：角色参数有效值（模型卡片覆盖 > 角色默认）。"""
+    eff = effective_role_params(settings, settings.get(role_key) or {})
+    v = eff.get(key)
+    if v is None:
+        return (settings.get(role_key) or {}).get(key)
+    return v
+
+
+def _main_param(settings, key):
+    """S206：主角色参数有效值（模型卡片覆盖 > 角色默认）。"""
+    return effective_main_params(settings).get(key)
+
+
 def _inject_tool_discipline(request, tools):
     """S204：工具纪律+能力索引按本轮有效声明集注入（不受 CLISettings 开关支配；
     授权链 enable_tools→tools 参数不动，此处只让提示词跟随能力世界）。"""
@@ -7780,7 +7801,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
     search_task = ""
     try:
         model = settings['model']
-        extra_params = settings['extra_params']
+        _eff_main = effective_main_params(settings)  # S206：每模型推理参数（卡片覆盖 > 角色默认）
+        extra_params = _eff_main.get('extra_params') or []
         # 移除extra_params这个list中"name"不包含非空白符的键值对
         if extra_params:
             for extra_param in extra_params:
@@ -7887,13 +7909,13 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                             "也不要在正文里书写任何形式的工具调用标记。"),
             })
         msg = await images_add_in_messages(request.messages, images,settings)
-        if request.top_p != 1 or settings['top_p'] != 1:
-            extra['top_p'] = request.top_p or settings['top_p']
+        if request.top_p != 1 or _eff_main.get('top_p') != 1:
+            extra['top_p'] = request.top_p or _eff_main.get('top_p')
         if tools:
             response = await client.chat.completions.create(
                 model=model,
                 messages=msg,  # 添加图片信息到消息
-                temperature=request.temperature or settings['temperature'],
+                temperature=request.temperature or _eff_main.get('temperature'),
                 tools=tools,
                 stream=False,
                 extra_body = extra_params, # 其他参数
@@ -7903,7 +7925,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             response = await client.chat.completions.create(
                 model=model,
                 messages=msg,  # 添加图片信息到消息
-                temperature=request.temperature or settings['temperature'],
+                temperature=request.temperature or _eff_main.get('temperature'),
                 stream=False,
                 extra_body = extra_params, # 其他参数
                 **extra
@@ -7939,13 +7961,13 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             if settings['reasoner']['enabled'] or enable_thinking:
                 vendor = await _ns_reasoner_pass(request, reasoner_client, reasoner_messages, settings, images, reasoner_extra, open_tag, close_tag, tools, vendor)
             msg = await images_add_in_messages(request.messages, images,settings)
-            if request.top_p != 1 or settings['top_p'] != 1:
-                extra['top_p'] = request.top_p or settings['top_p']
+            if request.top_p != 1 or _eff_main.get('top_p') != 1:
+                extra['top_p'] = request.top_p or _eff_main.get('top_p')
             if tools and not ns_force_no_tools:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
-                    temperature=request.temperature or settings['temperature'],
+                    temperature=request.temperature or _eff_main.get('temperature'),
                     tools=tools,
                     stream=False,
                     extra_body = extra_params, # 其他参数
@@ -7955,7 +7977,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 response = await client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
-                    temperature=request.temperature or settings['temperature'],
+                    temperature=request.temperature or _eff_main.get('temperature'),
                     stream=False,
                     extra_body = extra_params, # 其他参数
                     **extra
@@ -8705,6 +8727,11 @@ async def simple_chat_endpoint(request: ChatRequest):
         fast_config = {k: v for k, v in fast_cfg.items() if k not in exclude_keys}
         for key, value in fast_config.items():
             current_settings[key] = value
+        # S206：每模型推理参数（卡片级覆盖 > 角色默认）
+        _f_eff = effective_role_params(current_settings, fast_cfg)
+        for _k in ('temperature', 'top_p', 'max_tokens'):
+            if _f_eff.get(_k) is not None:
+                current_settings[_k] = _f_eff[_k]
 
     # --------------- 调用大模型（T-5: 入 llm_gate 闸门，mem0 防撞不再失明） ---------------
     llm_gate.enter()

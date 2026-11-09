@@ -800,7 +800,7 @@
                         <!-- 模型指示器 -->
                           <div class="status-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                             <i class="fa-solid fa-microchip"></i>
-                            <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                            <span class="pill-text">{{ currentMainModelLabel() !== '' ? currentMainModelLabel() : t('noModelSelected') }}</span>
                           </div>
 
                         <!-- ✨ 3. 将原有的桌面端状态胶囊包裹在一个 template 中，并在这里加 !isMobile 限制 -->
@@ -886,7 +886,7 @@
                       <div class="input-status-bar" v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile">
                         <div class="status-pill compact-status-pill" @click.stop="showModelDialog = true" :title="t('clickToSwitchModel')">
                           <i class="fa-solid fa-microchip"></i>
-                          <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                          <span class="pill-text">{{ currentMainModelLabel() !== '' ? currentMainModelLabel() : t('noModelSelected') }}</span>
                         </div>
                         <div class="status-pill compact-status-pill" v-if="currentViewName" @click.stop="openExtensionsDialog" :title="t('clickToSwitchExtensions')">
                           <i class="fa-solid fa-puzzle-piece"></i>

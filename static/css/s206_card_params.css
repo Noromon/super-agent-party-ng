@@ -1,0 +1,4 @@
+/* S206 模型卡片级推理参数（styles.css 防恶化裁决：新样式入新文件） */
+.card-params-collapse { margin-top: 8px; }
+.card-param-row { align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-param-name { min-width: 96px; font-size: 13px; color: var(--el-text-color-regular); }

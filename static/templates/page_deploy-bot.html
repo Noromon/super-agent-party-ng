@@ -1994,7 +1994,7 @@
                             <el-option
                               v-for="provider in modelProviders"
                               :key="provider.id"
-                              :label="provider.vendor+' - '+provider.modelId"
+                              :label="providerLabel(provider)"
                               :value="provider.id"
                             >
                               <div class="provider-option">

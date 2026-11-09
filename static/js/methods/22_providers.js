@@ -490,9 +490,83 @@ Object.assign(vue_methods, {
         })
     },
 
+    // S206：友好名——displayName 优先，缺省回退 vendor - modelId（全选择器统一入口）
+    providerLabel(provider) {
+      if (!provider) return '';
+      const name = (provider.displayName || '').trim();
+      if (name) return name;
+      const mid = provider.modelId ? ' - ' + provider.modelId : '';
+      return `${provider.vendor}${mid}`;
+    },
+
+    // S206：主界面当前模型 pill——选中卡片有友好名时显示友好名，否则回退原始 model id
+    currentMainModelLabel() {
+      if (this.settings.selectedProvider) {
+        const p = this.modelProviders.find(x => x.id === this.settings.selectedProvider);
+        if (p && (p.displayName || '').trim()) return this.providerLabel(p);
+      }
+      return this.settings.model;
+    },
+
     copyProvider(provider,index){
-      // 在this.modelProviders的index之后插入一个复制版本
-      this.modelProviders.splice(index + 1, 0, { ...provider, id: Date.now() });
+      // 在this.modelProviders的index之后插入一个复制版本（S206：id防碰撞+深拷贝params/models+自动命名）
+      let newId = Date.now();
+      while (this.modelProviders.some(p => p.id === newId)) newId += 1;
+      const copy = { ...provider, id: newId };
+      if (Array.isArray(provider.models)) copy.models = [...provider.models];
+      if (provider.params && typeof provider.params === 'object') {
+        copy.params = JSON.parse(JSON.stringify(provider.params));
+      }
+      const baseName = this.providerLabel(provider);
+      copy.displayName = `${baseName} ${this.t('copySuffix')}`;
+      delete copy.isNew;
+      this.modelProviders.splice(index + 1, 0, copy);
+      this.autoSaveSettings();
+    },
+
+    // S206：卡片级推理参数（每模型一份；缺省=继承角色默认）
+    cardParams(provider) {
+      if (!provider.params || typeof provider.params !== 'object') {
+        provider.params = {};
+      }
+      return provider.params;
+    },
+
+    paramInherited(provider, key) {
+      const v = (this.cardParams(provider))[key];
+      return v === undefined || v === null || v === '';
+    },
+
+    setParamInherit(provider, key, inherit) {
+      const p = this.cardParams(provider);
+      if (inherit) {
+        delete p[key];
+      } else {
+        const defaults = { temperature: 1, top_p: 1, max_tokens: 8192, reasoning_effort: null, contextWindow: 32000 };
+        p[key] = defaults[key];
+      }
+      this.autoSaveSettings();
+    },
+
+    addCardParam(provider) {
+      const p = this.cardParams(provider);
+      if (!Array.isArray(p.extra_params)) p.extra_params = [];
+      p.extra_params.push({ name: '', type: 'string', value: '' });
+      this.autoSaveSettings();
+    },
+
+    removeCardParam(provider, index) {
+      const p = this.cardParams(provider);
+      if (Array.isArray(p.extra_params)) p.extra_params.splice(index, 1);
+      this.autoSaveSettings();
+    },
+
+    updateCardParamType(provider, index) {
+      const list = this.cardParams(provider).extra_params;
+      if (!list || !list[index]) return;
+      const param = list[index];
+      const defaults = { string: '', integer: 0, float: 0.5, boolean: false, json: '{}' };
+      param.value = defaults[param.type] !== undefined ? defaults[param.type] : '';
       this.autoSaveSettings();
     }
 });

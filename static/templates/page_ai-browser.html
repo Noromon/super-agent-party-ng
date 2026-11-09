@@ -544,7 +544,7 @@
                             <!-- 模型指示器 -->
                               <div class="status-pill" @click="showModelDialog = true" :title="t('clickToSwitchModel')">
                                 <i class="fa-solid fa-microchip"></i>
-                                <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                                <span class="pill-text">{{ currentMainModelLabel() !== '' ? currentMainModelLabel() : t('noModelSelected') }}</span>
                               </div>
 
                           </div>
@@ -553,7 +553,7 @@
                           <div class="input-status-bar" v-if="systemSettings.autoCollapseInput && !isChatInputActive && !isAssistantMode && !isMobile">
                             <div class="status-pill compact-status-pill" @click.stop="showModelDialog = true" :title="t('clickToSwitchModel')">
                               <i class="fa-solid fa-microchip"></i>
-                              <span class="pill-text">{{ settings?.model !== '' ? settings.model : t('noModelSelected') }}</span>
+                              <span class="pill-text">{{ currentMainModelLabel() !== '' ? currentMainModelLabel() : t('noModelSelected') }}</span>
                             </div>
                           </div>
 

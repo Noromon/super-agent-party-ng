@@ -344,6 +344,14 @@ async def compact_messages(client, model, messages, task_mode=None, focus=None,
 def get_context_settings(settings):
     cm = settings.get("contextManagement", {}) or {}
     raw_win = cm.get("contextWindow", 32000)
+    # S206：每模型上下文窗口覆盖（卡片级数值优先；auto/缺失走角色默认解析）
+    try:
+        from py.model_params import provider_overrides
+        ov_win = provider_overrides(settings, settings.get("selectedProvider")).get("contextWindow")
+        if isinstance(ov_win, (int, float)):
+            raw_win = int(ov_win)
+    except Exception:
+        pass
     if str(raw_win).strip().lower() == "auto":  # S192：引擎真实窗口探测（带缓存）
         from py.ctx_window_probe import resolve_auto_window
         window = resolve_auto_window(settings)

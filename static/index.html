@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="css/appearance.css">
   <link rel="stylesheet" href="css/transition.css">
   <link rel="stylesheet" href="css/notifications.css">
+  <link rel="stylesheet" href="css/s206_card_params.css">
   <!-- GitHub Markdown CSS for styling -->
   <link rel="stylesheet" href="css/github-markdown.min.css">
   <!-- Highlight.js CSS for code highlighting -->
@@ -674,7 +675,7 @@ function updateElement(el, rawMarkdown, formatFn) {
               :src="getVendorLogo(provider.vendor)"
               class="mini-vendor-logo"
             />
-            <span>{{ provider.modelId }}</span>
+            <span>{{ providerLabel(provider) }}</span>
           </div>
           <div v-if="Object.keys(modelProviders).length === 0" class="empty-tip">
               {{ t('firstTimeUse') }}
