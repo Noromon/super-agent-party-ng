@@ -86,7 +86,9 @@ class TestServerWiring:
 
     def test_wsl_system_context(self):
         assert 'elif engine == "wsl":' in self.src
-        assert "Linux (WSL2) | Shell：bash" in self.src
+        # S205：环境文本迁入提示词注册表（golden 字节钉在 tests/data/s205_prompt_literals.json）
+        assert "WSL_ENV_INFO" in self.src
+        assert "Linux (WSL2) | Shell：bash" in _read("py/prompt_assembly.py")
 
 
 class TestModeChangeAndAssembly:
