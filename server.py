@@ -13,6 +13,10 @@ from py.context_builder import sanitize_tool_chains, sanitize_tool_chains_logged
 from py import auth as sap_auth
 from py.defaults import DEFAULT_SERVER_PORT, GSV_TTS_URL
 from py.guard import load_safety_words, check_content_safety
+from py.llm_recovery import (  # S207：瞬断故障恢复
+    is_transient_transport_error, llm_retry_cfg, acreate,
+    backoff_sleep as llm_backoff, stream_retry_chunk, stream_reset_chunk,
+    retry_suffix, attach_retry_note as llm_attach)
 from py.token_guard import neutralize as _neutralize, neutralize_deep, apply_eos_guard
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 from py.prompt_assembly import (
@@ -1394,11 +1398,12 @@ async def get_image_content(image_url: str) -> str:
             if _role_param(settings, 'vision', 'temperature') !=1:
                 extra['temperature'] = _role_param(settings, 'vision', 'temperature')
             
-            response = await client.chat.completions.create(
+            response = await acreate(
+                lambda: client.chat.completions.create(
                 model=settings['vision']['model'],
                 messages = [{"role": "user", "content": images_content}],
                 **extra
-            )
+            ), attempts=2, base_delay=1.0, label="s207-get_image_content")
             content = f"\n\n图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "w", encoding='utf-8') as f:
                 f.write(str(response.choices[0].message.content))
@@ -1416,11 +1421,12 @@ async def get_image_content(image_url: str) -> str:
             if _main_param(settings, 'temperature') != 1:
                 extra['temperature'] = _main_param(settings, 'temperature')
             
-            response = await client.chat.completions.create(
+            response = await acreate(
+                lambda: client.chat.completions.create(
                 model=settings['model'],
                 messages = [{"role": "user", "content": images_content}],
                 **extra
-            )
+            ), attempts=2, base_delay=1.0, label="s207-get_image_content")
             content = f"\n\n图片(URL:{image_url} 哈希值：{image_hash})信息如下：\n\n"+str(response.choices[0].message.content)+"\n\n"
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "w", encoding='utf-8') as f:
                 f.write(str(response.choices[0].message.content))
@@ -1439,22 +1445,24 @@ async def analyze_image(image_url: str, prompt: str) -> str:
         if _role_param(settings, 'vision', 'temperature') != 1:
             extra['temperature'] = _role_param(settings, 'vision', 'temperature')
         
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['vision']['model'],
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-analyze_image")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
         if _main_param(settings, 'temperature') != 1:
             extra['temperature'] = _main_param(settings, 'temperature')
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['model'],
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-analyze_image")
         return response.choices[0].message.content
 
 async def analyze_images(image_urls: list, prompt: str) -> str:
@@ -1474,22 +1482,24 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
         extra = {}
         if _role_param(settings, 'vision', 'temperature') != 1:
             extra['temperature'] = _role_param(settings, 'vision', 'temperature')
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['vision']['model'],
             messages=[{"role": "user", "content": content}],
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-analyze_images")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
         if _main_param(settings, 'temperature') != 1:
             extra['temperature'] = _main_param(settings, 'temperature')
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['model'],
             messages=[{"role": "user", "content": content}],
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-analyze_images")
         return response.choices[0].message.content
 
 async def review_image(image_url: str, prompt: str) -> str:
@@ -1577,22 +1587,24 @@ async def review_image(image_url: str, prompt: str) -> str:
         extra = {}
         if _role_param(settings, 'vision', 'temperature') != 1:
             extra['temperature'] = _role_param(settings, 'vision', 'temperature')
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['vision']['model'],
             messages=context_messages,
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-review_image")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
         extra = {}
         if _main_param(settings, 'temperature') != 1:
             extra['temperature'] = _main_param(settings, 'temperature')
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['model'],
             messages=context_messages,
             **extra
-        )
+        ), attempts=2, base_delay=1.0, label="s207-review_image")
         return response.choices[0].message.content
 
 # 存储等待中的MCP调用结果
@@ -2349,7 +2361,8 @@ async def _extract_group_memories(client, settings: dict, payload: dict) -> list
     try:
         extra_params = settings.get('extra_params') or []
         extra_body = process_extra_params(extra_params)
-        response = await client.chat.completions.create(
+        response = await acreate(
+            lambda: client.chat.completions.create(
             model=settings['model'],
             messages=[
                 {"role": "system", "content": extraction_prompt},
@@ -2358,7 +2371,7 @@ async def _extract_group_memories(client, settings: dict, payload: dict) -> list
             temperature=0.1,
             stream=False,
             extra_body=extra_body,
-        )
+        ), attempts=2, base_delay=1.0, label="s207-fallback_memories")
         content = response.choices[0].message.content or "[]"
         if "```json" in content:
             match = re.search(r'```json(.*?)```', content, re.DOTALL)
@@ -2591,11 +2604,12 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                             if _role_param(settings, 'vision', 'temperature') !=1:
                                 extra['temperature'] = _role_param(settings, 'vision', 'temperature')
 
-                            response = await client.chat.completions.create(
+                            response = await acreate(
+                                lambda: client.chat.completions.create(
                                 model=settings['vision']['model'],
                                 messages=[{"role": "user", "content": media_content}],
                                 **extra
-                            )
+                            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-images_add_in_messages")
                             result_text = str(response.choices[0].message.content)
                             messages[index]['content'] = _append_note(
                                 messages[index]['content'],
@@ -4857,12 +4871,13 @@ async def _stream_deepsearch_pre(_st, client, model, extra_params, request):
     content_append(deepsearch_messages, 'user',  "\n\n将用户提出的问题或给出的当前任务拆分成多个步骤，每一个步骤用一句简短的话概括即可，无需回答或执行这些内容，直接返回总结即可，但不能省略问题或任务的细节。如果用户输入的只是闲聊或者不包含任务和问题，直接把用户输入重复输出一遍即可。如果是非常简单的问题，也可以只给出一个步骤即可。一般情况下都是需要拆分成多个步骤的。")
                     
     # 1. 开启 stream=True 进行流式请求
-    response = await client.chat.completions.create(
+    response = await acreate(
+        lambda: client.chat.completions.create(
         model=model,
         messages=deepsearch_messages,
         stream=True,  # 新增
         extra_body = extra_params, # 其他参数
-    )
+    ), attempts=2, base_delay=1.0, label="s207-_stream_deepsearch_pre")
                     
     user_prompt = ""
     # 生成一个唯一的 ID，用于让前端锁定同一个 UI 块进行内容更新
@@ -4921,13 +4936,14 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
             reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
 
         # 流式调用推理模型
-        reasoner_stream = await reasoner_client.chat.completions.create(
+        reasoner_stream = await acreate(
+            lambda: reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_stream_reasoner_prep")
         full_reasoning = ""
         buffer = ""  # 跨chunk的内容缓冲区
         in_reasoning = False  # 是否在标签内
@@ -4993,14 +5009,15 @@ async def _stream_reasoner_prep(_st, request, reasoner_client, settings, images,
         if _role_param(settings, 'reasoner', 'temperature') !=1:
             reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
         # 流式调用推理模型
-        reasoner_stream = await reasoner_client.chat.completions.create(
+        reasoner_stream = await acreate(
+            lambda: reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
             stop=settings['reasoner']['stop_words'],
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_stream_reasoner_prep")
         full_reasoning = ""
         # 处理推理模型的流式响应
         async for chunk in reasoner_stream:
@@ -5158,7 +5175,8 @@ async def _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usa
 async def _stream_drs_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
     """Post-first-pass deep-research status machine with per-status SSE notices."""
     search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
-    response = await client.chat.completions.create(
+    response = await acreate(
+        lambda: client.chat.completions.create(
         model=model,
         messages=[
             {
@@ -5171,7 +5189,7 @@ async def _stream_drs_round(client, model, extra_params, request, source_prompt,
             }
         ],
         extra_body = extra_params, # 其他参数
-    )
+    ), attempts=2, base_delay=1.0, label="s207-_stream_drs_round")
     response_content = response.choices[0].message.content
     # 用re 提取```json 包裹json字符串 ```
     if "```json" in response_content:
@@ -5386,6 +5404,59 @@ def _notify_web_approval_pending(_st):
         pass
 
 
+async def _stream_first_round_with_recovery(_st, client, model, msg, extra, extra_params,
+                                            settings, open_tag, close_tag, tool_calls,
+                                            usage_info, _ctx_peak, in_reasoning,
+                                            content_buffer, reasoning_buffer):
+    """S207：首轮 create+读流，瞬断则同 messages 原样重发本轮推理。
+
+    重试边界不含工具执行——断流时本轮工具零执行、半截正文未落历史，重发
+    零环境副作用；已流出半截时下发 stream_reset（前端保留前 keep_text_chars
+    个已落账字符，新输出到达才替换）+ stream_retry 状态帧。写回协议同
+    _stream_first_pass（累加器经 _st）。
+    """
+    _lr_max, _lr_delay, _lr_mid = llm_retry_cfg(settings)
+    _lr_attempt = 0
+    while True:
+        _lr_delivered = False  # 累加器轮末才写回，以实际下发帧判定半截产出
+        try:
+            response = await client.chat.completions.create(
+                user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
+                model=model,
+                messages=msg,  # 添加图片信息到消息
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body=extra_params,  # 其他参数
+                **_apply_ctx_guardrail(extra, msg, settings)
+            )
+            full_content = ""
+            is_tool_call = False
+            _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
+            async for _c in _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
+                if isinstance(_c, str) and '"delta"' in _c:
+                    _lr_delivered = True
+                yield _c
+            return
+        except Exception as _lr_e:
+            if (_lr_attempt >= _lr_max or _st_cancelled(_st)
+                    or not is_transient_transport_error(_lr_e)):
+                raise llm_attach(_lr_e, _lr_attempt) from None
+            _lr_partial = _lr_delivered or bool(tool_calls)
+            logging.getLogger("app").warning(
+                "[LLMRetry] 主流首轮瞬断重试 %d/%d: %s",
+                _lr_attempt + 1, _lr_max, str(_lr_e)[:200])
+            if _lr_partial and _lr_mid:
+                yield stream_reset_chunk(_st.get("_lr_keep_chars", 0))
+            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, str(_lr_e))
+            _st["full_content"] = ""
+            _st["content_buffer"] = []
+            _st["reasoning_buffer"] = []
+            _st["in_reasoning"] = False
+            await llm_backoff(_lr_delay, _lr_attempt,
+                              cancelled=lambda: _st_cancelled(_st))
+            _lr_attempt += 1
+
+
 async def _stream_second_round(_st, client, model, msg, extra, extra_params, settings, request,
                                tools, force_no_tools, usage_info, _ctx_peak, in_reasoning,
                                content_buffer, reasoning_buffer, open_tag, close_tag):
@@ -5403,6 +5474,8 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
     if tools and not force_no_tools:
         extra['tools'] = tools
         _tools_now = tools
+    _lr_max, _lr_delay, _lr_mid = llm_retry_cfg(settings)  # S207
+    _lr_attempt = 0
     while True:
         full_content = ""
         if _st_cancelled(_st):
@@ -5411,19 +5484,48 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             _st["tc_round"] = []
             _st["tc_round_done"] = True
             return
-        response = await client.chat.completions.create(
-            user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
-            model=model,
-            messages=msg,  # 添加图片信息到消息
-            stream=True,
-            stream_options={"include_usage": True},
-            extra_body=extra_params,  # 其他参数
-            **_apply_ctx_guardrail(extra, msg, settings)
-        )
         tool_calls = []
         _chunk_count2 = 0  # 流式让出计数器（工具调用循环内）
-        async for _c in _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
-            yield _c
+        _lr_delivered = False  # 累加器轮末才写回，以实际下发帧判定半截产出
+        try:
+            response = await client.chat.completions.create(
+                user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
+                model=model,
+                messages=msg,  # 添加图片信息到消息
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_body=extra_params,  # 其他参数
+                **_apply_ctx_guardrail(extra, msg, settings)
+            )
+            async for _c in _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
+                if isinstance(_c, str) and '"delta"' in _c:
+                    _lr_delivered = True
+                yield _c
+            _lr_attempt = 0
+        except Exception as _lr_e:
+            # S207：本轮瞬断→同 messages 重发本轮推理（工具执行在边界外，
+            # 已执行副作用永不重放）；半截轮正文/思考从未落账，清后重生成
+            if (_lr_attempt >= _lr_max or _st_cancelled(_st)
+                    or not is_transient_transport_error(_lr_e)):
+                raise llm_attach(_lr_e, _lr_attempt) from None
+            _lr_partial = _lr_delivered or bool(tool_calls)
+            logging.getLogger("app").warning(
+                "[LLMRetry] 工具轮瞬断重试 %d/%d: %s",
+                _lr_attempt + 1, _lr_max, str(_lr_e)[:200])
+            if _lr_partial and _lr_mid:
+                yield stream_reset_chunk(_st.get("_lr_keep_chars", 0))
+            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, str(_lr_e))
+            content_buffer = []
+            reasoning_buffer = []
+            in_reasoning = False
+            _st["full_content"] = ""
+            _st["content_buffer"] = []
+            _st["reasoning_buffer"] = []
+            _st["in_reasoning"] = False
+            await llm_backoff(_lr_delay, _lr_attempt,
+                              cancelled=lambda: _st_cancelled(_st))
+            _lr_attempt += 1
+            continue
         usage_info = _st["usage_info"]
         _ctx_peak = _st["_ctx_peak"]
         full_content = _st["full_content"]
@@ -5453,6 +5555,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             if _will_retry:
                 _st["tcg_retries"] = _retries + 1
                 content_append(request.messages, 'assistant', full_content)  # 已含 S163 中和
+                _st["_lr_keep_chars"] = _st.get("_lr_keep_chars", 0) + len(full_content)  # S207
                 request.messages.append({
                     "role": "user",
                     "content": build_correction_message(_leaked, _declared),
@@ -5469,6 +5572,7 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             # 将响应添加到消息列表（S68：空生成不写历史；S163：泄漏块经
             # content_append 中和后落账，防 few-shot 污染）
             content_append(request.messages, 'assistant', full_content)
+            _st["_lr_keep_chars"] = _st.get("_lr_keep_chars", 0) + len(full_content)  # S207
             # S183(T-C) 完成闸门：todo 未清即收尾 → 打回续跑（上限 GATE_MAX）
             if not _leaked:
                 _g_act, _g_payload = await _stream_gate_check(_st, _tools_now)
@@ -5816,13 +5920,14 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
         if _role_param(settings, 'reasoner', 'temperature') !=1:
             reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
         # 流式调用推理模型
-        reasoner_stream = await reasoner_client.chat.completions.create(
+        reasoner_stream = await acreate(
+            lambda: reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_stream_reasoner_update")
         full_reasoning = ""
         buffer = ""  # 跨chunk的内容缓冲区
         in_reasoning = False  # 是否在标签内
@@ -5889,14 +5994,15 @@ async def _stream_reasoner_update(_st, request, reasoner_client, settings, reaso
             reasoner_extra['temperature'] = _role_param(settings, 'reasoner', 'temperature')
 
         # 流式调用推理模型
-        reasoner_stream = await reasoner_client.chat.completions.create(
+        reasoner_stream = await acreate(
+            lambda: reasoner_client.chat.completions.create(
                 user="sap-reasoner",  # S191-N2：压缩视图流量标记
             model=settings['reasoner']['model'],
             messages=msg,
             stream=True,
             stop=settings['reasoner']['stop_words'],
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_stream_reasoner_update")
         full_reasoning = ""
         # 处理推理模型的流式响应
         async for chunk in reasoner_stream:
@@ -6143,7 +6249,8 @@ async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usag
 async def _stream_drs_loop_round(client, model, extra_params, request, source_prompt, user_prompt, full_content, DRS_STAGE, search_not_done, search_task, _st):
     """While-loop deep-research status machine (stream SSE notices)."""
     search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,full_content)
-    response = await client.chat.completions.create(
+    response = await acreate(
+        lambda: client.chat.completions.create(
         model=model,
         messages=[                        
             {
@@ -6156,7 +6263,7 @@ async def _stream_drs_loop_round(client, model, extra_params, request, source_pr
             }
         ],
         extra_body = extra_params, # 其他参数
-    )
+    ), attempts=2, base_delay=1.0, label="s207-_stream_drs_loop_round")
     response_content = response.choices[0].message.content
     if response_content is None:
         response_content = ""
@@ -6569,23 +6676,13 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             yield "data: [DONE]\n\n"
             return
 
-        response = await client.chat.completions.create(
-            user="sap-main",  # S191-N2：主通道流量标记（引擎侧与 reasoner 区分）
-            model=model,
-            messages=msg,  # 添加图片信息到消息
-            stream=True,
-            stream_options={"include_usage": True},
-            extra_body = extra_params, # 其他参数
-            **_apply_ctx_guardrail(extra, msg, settings)
-        )
-
+        # S207：瞬断恢复→_stream_first_round_with_recovery（同 messages 重发同
+        # 一轮推理；重试边界不含工具执行，重发零环境副作用）
+        _st["_lr_keep_chars"] = 0
         tool_calls = []
-        full_content = ""
         search_not_done = False
         search_task = ""
-        is_tool_call = False
-        _chunk_count = 0  # 流式让出计数器，防止事件循环饥饿
-        async for _c in _stream_first_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, is_tool_call, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count):
+        async for _c in _stream_first_round_with_recovery(_st, client, model, msg, extra, extra_params, settings, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, in_reasoning, content_buffer, reasoning_buffer):
             yield _c
         usage_info = _st["usage_info"]
         _ctx_peak = _st["_ctx_peak"]
@@ -6596,6 +6693,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         reasoning_buffer = _st["reasoning_buffer"]
         _chunk_count = _st["_chunk_count"]
         _st["fc"] = full_content
+        _st["_lr_keep_chars"] = len(full_content)  # S207：已落账正文基线
         if _st.pop("w1_cancel", False):
             yield "data: [DONE]\n\n"
             return
@@ -6704,7 +6802,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                 "delta": {
                     "tool_content": {
                         "title": "❎ Error", # 统一标题
-                        "content": str(e),   # 错误详情
+                        "content": str(e) + retry_suffix(e),   # 错误详情（S207：自动重试标注）
                         "type": "error"      # 标记类型，方便前端切换样式
                     }
                 }
@@ -7319,13 +7417,14 @@ async def _complete_reasoner_prep(request, reasoner_client, settings, chat_vendo
     if _eff_reasoner.get('reasoning_effort') is not None:
         reasoner_extra['reasoning_effort'] = _eff_reasoner.get('reasoning_effort') 
     if vendor == 'Ollama':
-        reasoner_response = await reasoner_client.chat.completions.create(
+        reasoner_response = await acreate(
+            lambda: reasoner_client.chat.completions.create(
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
             temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_complete_reasoner_prep")
         reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
         if reasoning_buffer:
             content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
@@ -7345,14 +7444,15 @@ async def _complete_reasoner_prep(request, reasoner_client, settings, chat_vendo
                     reasoning_content = ""
                 content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
     else:
-        reasoner_response = await reasoner_client.chat.completions.create(
+        reasoner_response = await acreate(
+            lambda: reasoner_client.chat.completions.create(
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
             stop=settings['reasoner']['stop_words'],
             temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_complete_reasoner_prep")
         reasoning_buffer = reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']
         if reasoning_buffer:
             content_prepend(request.messages, 'assistant', reasoning_buffer) # 可参考的推理过程
@@ -7371,7 +7471,8 @@ async def _complete_drs_step(client, model, extra_params, request, user_prompt, 
     none_to_empty=True preserves the pre-loop copy's None guard; the in-loop
     copy never had one (raw behaviour kept)."""
     search_prompt = get_drs_stage_system_message(DRS_STAGE,user_prompt,response.choices[0].message.content)
-    research_response = await client.chat.completions.create(
+    research_response = await acreate(
+        lambda: client.chat.completions.create(
         model=model,
         messages=[
             {
@@ -7381,7 +7482,7 @@ async def _complete_drs_step(client, model, extra_params, request, user_prompt, 
         ],
         temperature=0.5,
         extra_body = extra_params, # 其他参数
-    )
+    ), attempts=2, base_delay=1.0, label="s207-_complete_drs_step")
     response_content = research_response.choices[0].message.content
     if none_to_empty and response_content is None:
         response_content = ""
@@ -7587,13 +7688,14 @@ async def _ns_reasoner_pass(request, reasoner_client, reasoner_messages, setting
             break
     msg = await images_add_in_messages(reasoner_messages, images,settings)
     if vendor == 'Ollama':
-        reasoner_response = await reasoner_client.chat.completions.create(
+        reasoner_response = await acreate(
+            lambda: reasoner_client.chat.completions.create(
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
             temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_ns_reasoner_pass")
         # 将推理结果中的思考内容提取出来
         reasoning_content = reasoner_response.model_dump()['choices'][0]['message']['content']
         # open_tag和close_tag之间的内容
@@ -7605,14 +7707,15 @@ async def _ns_reasoner_pass(request, reasoner_client, reasoner_messages, setting
             reasoning_content = ""
         content_prepend(request.messages, 'assistant', reasoning_content) # 可参考的推理过程
     else:
-        reasoner_response = await reasoner_client.chat.completions.create(
+        reasoner_response = await acreate(
+            lambda: reasoner_client.chat.completions.create(
             model=settings['reasoner']['model'],
             messages=msg,
             stream=False,
             stop=settings['reasoner']['stop_words'],
             temperature=_role_param(settings, 'reasoner', 'temperature'),
             **reasoner_extra
-        )
+        ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_ns_reasoner_pass")
         content_prepend(request.messages, 'assistant', reasoner_response.model_dump()['choices'][0]['message']['reasoning_content']) # 可参考的推理过程
     return vendor
 
@@ -7880,12 +7983,13 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
             deepsearch_messages = copy.deepcopy(request.messages)
             content_append(deepsearch_messages, 'user',  "\n\n将用户提出的问题或给出的当前任务拆分成多个步骤，每一个步骤用一句简短的话概括即可，无需回答或执行这些内容，直接返回总结即可，但不能省略问题或任务的细节。如果用户输入的只是闲聊或者不包含任务和问题，直接把用户输入重复输出一遍即可。如果是非常简单的问题，也可以只给出一个步骤即可。一般情况下都是需要拆分成多个步骤的。")
-            response = await client.chat.completions.create(
+            response = await acreate(
+                lambda: client.chat.completions.create(
                 model=model,
                 messages=deepsearch_messages,
                 temperature=0.5, 
                 extra_body = extra_params, # 其他参数
-            )
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
             user_prompt = response.choices[0].message.content
             content_append(request.messages, 'user',  f"\n\n如果用户没有提出问题或者任务，直接闲聊即可，如果用户提出了问题或者任务，任务描述不清晰或者你需要进一步了解用户的真实需求，你可以暂时不完成任务，而是分析需要让用户进一步明确哪些需求。")
         if settings['reasoner']['enabled'] or enable_thinking:
@@ -7912,7 +8016,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         if request.top_p != 1 or _eff_main.get('top_p') != 1:
             extra['top_p'] = request.top_p or _eff_main.get('top_p')
         if tools:
-            response = await client.chat.completions.create(
+            response = await acreate(
+                lambda: client.chat.completions.create(
                 model=model,
                 messages=msg,  # 添加图片信息到消息
                 temperature=request.temperature or _eff_main.get('temperature'),
@@ -7920,16 +8025,17 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 stream=False,
                 extra_body = extra_params, # 其他参数
                 **extra
-            )
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
         else:
-            response = await client.chat.completions.create(
+            response = await acreate(
+                lambda: client.chat.completions.create(
                 model=model,
                 messages=msg,  # 添加图片信息到消息
                 temperature=request.temperature or _eff_main.get('temperature'),
                 stream=False,
                 extra_body = extra_params, # 其他参数
                 **extra
-            )
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
         if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: message 可能为 None
             pass
         elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
@@ -7964,7 +8070,8 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             if request.top_p != 1 or _eff_main.get('top_p') != 1:
                 extra['top_p'] = request.top_p or _eff_main.get('top_p')
             if tools and not ns_force_no_tools:
-                response = await client.chat.completions.create(
+                response = await acreate(
+                    lambda: client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
                     temperature=request.temperature or _eff_main.get('temperature'),
@@ -7972,16 +8079,17 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                     stream=False,
                     extra_body = extra_params, # 其他参数
                     **extra
-                )
+                ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
             else:
-                response = await client.chat.completions.create(
+                response = await acreate(
+                    lambda: client.chat.completions.create(
                     model=model,
                     messages=msg,  # 添加图片信息到消息
                     temperature=request.temperature or _eff_main.get('temperature'),
                     stream=False,
                     extra_body = extra_params, # 其他参数
                     **extra
-                )
+                ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
             if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: 再生成后 message 可能为 None
                 pass
             elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
@@ -7993,7 +8101,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         return JSONResponse(content=response_dict)
     except Exception as e:
         return JSONResponse(
-            content={"error": {"message": str(e), "type": "api_error"}}
+            content={"error": {"message": str(e) + retry_suffix(e), "type": "api_error"}}
         )
 
 async def execute_approved_tool(tool_name, tool_params, approval_type="once", stream_id=None):
@@ -8736,12 +8844,15 @@ async def simple_chat_endpoint(request: ChatRequest):
     # --------------- 调用大模型（T-5: 入 llm_gate 闸门，mem0 防撞不再失明） ---------------
     llm_gate.enter()
     try:
-        response = await fast_client.chat.completions.create(
-            model=current_settings['model'],
-            messages=request.messages,
-            stream=request.stream,
-            temperature=request.temperature or settings.get('temperature', 0.7),
-        )
+        # S207：瞬断重试仅覆盖 create 本身（首字节前）；流式消费出错照旧透传
+        response = await acreate(
+            lambda: fast_client.chat.completions.create(
+                model=current_settings['model'],
+                messages=request.messages,
+                stream=request.stream,
+                temperature=request.temperature or settings.get('temperature', 0.7),
+            ), attempts=llm_retry_cfg(settings)[0],
+            base_delay=llm_retry_cfg(settings)[1], label="fast")
     except BaseException:
         llm_gate.leave()
         raise

@@ -195,6 +195,13 @@ def _run_second_round(rounds, cancelled=False, tools=None, retries_pre=0):
                     t for t in (todos or [])
                     if isinstance(t, dict) and t.get("status") in ("pending", "in_progress")],
                 "_gate_note_text": lambda items, nth: f"gate {nth}",
+                # S207 新依赖桩（测试 create 不抛瞬断，重试环直通；退避不真等）
+                "llm_retry_cfg": lambda settings: (2, 0.01, True),
+                "is_transient_transport_error": lambda exc: False,
+                "llm_attach": lambda exc, n: exc,
+                "stream_reset_chunk": lambda keep: "data: {}\n\n",
+                "stream_retry_chunk": lambda a, b, c: "data: {}\n\n",
+                "llm_backoff": lambda *a, **k: asyncio.sleep(0),
                 "GATE_MAX": 2}
     src_node = next(n for n in ast.walk(ast.parse(SRC))
                     if isinstance(n, ast.AsyncFunctionDef) and n.name == "_stream_second_round")

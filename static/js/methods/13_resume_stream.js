@@ -63,9 +63,14 @@ Object.assign(vue_methods, {
                 const delta = parsed.choices?.[0]?.delta;
                 if (!delta) return;
 
+                // S207：瞬断恢复控制帧（与主流消费同一语义，重放天然有序）
+                if (delta.stream_retry) { this._showStreamRetryNote(delta.stream_retry); return; }
+                if (delta.stream_reset) { this._armStreamReset(delta.stream_reset); return; }
+
                 chunkIndex++;
 
                 if (delta.reasoning_content) {
+                    this._consumeStreamReset(currentMsg, toolCallStack); // S207: 半截气泡在此刻替换
                     // S92: reasoning 与文本同款 80ms 缓冲（flush 由共享 flushStreamTextBuffer 处理）
                     this._streamTargetMsg = currentMsg;
                     this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
@@ -77,6 +82,7 @@ Object.assign(vue_methods, {
                 }
 
                 if (delta.content) {
+                    this._consumeStreamReset(currentMsg, toolCallStack); // S207: 半截气泡在此刻替换
                     this._streamTargetMsg = currentMsg;
                     this._streamTextBuffer = (this._streamTextBuffer || '') + delta.content;
                     this._streamRecvChars = (this._streamRecvChars || 0) + delta.content.length;
@@ -100,6 +106,7 @@ Object.assign(vue_methods, {
                 }
 
                 if (delta.tool_progress) {
+                    this._consumeStreamReset(currentMsg, toolCallStack); // S207: 新轮调用参数到达=替换时刻
                     this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack, currentMsg);
                     return;
                 }

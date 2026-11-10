@@ -495,6 +495,10 @@ Object.assign(vue_methods, {
                         this._currentStreamId = _streamId;
                         return;
                     }
+                    // S207：瞬断恢复控制帧——重试提示 + 整轮重发预备（保留半截
+                    // 气泡，直到新输出到达才替换；重试边界不含工具执行）
+                    if (delta.stream_retry) { this._showStreamRetryNote(delta.stream_retry); return; }
+                    if (delta.stream_reset) { this._armStreamReset(delta.stream_reset); return; }
                     _chunkIndex++;
 
                     if (currentMsg.content === '' && !isResume) {
@@ -505,6 +509,7 @@ Object.assign(vue_methods, {
 
                     // A. 处理思考 (Reasoning) —— S92: 与文本同款 80ms 缓冲，杜绝每 token 触发渲染
                     if (delta.reasoning_content) {
+                        this._consumeStreamReset(currentMsg, toolCallStack); // S207: 半截气泡在此刻替换
                         this._streamTargetMsg = currentMsg;
                         this._streamReasoningBuffer = (this._streamReasoningBuffer || '') + delta.reasoning_content;
                         this._streamRecvChars = (this._streamRecvChars || 0) + delta.reasoning_content.length;
@@ -516,6 +521,7 @@ Object.assign(vue_methods, {
 
                     // B. 处理文本 (Content) —— 流式防抖更新
                     if (delta.content) {
+                        this._consumeStreamReset(currentMsg, toolCallStack); // S207: 半截气泡在此刻替换
                         // 缓冲文本，不再直接操作 DOM
                         this._streamTextBuffer += delta.content;
                         this._streamRecvChars = (this._streamRecvChars || 0) + delta.content.length;
@@ -543,6 +549,7 @@ Object.assign(vue_methods, {
 
                     // C. 工具 Loading 状态 (tool_progress) —— 只更新 displayBlocks
                     if (delta.tool_progress) {
+                        this._consumeStreamReset(currentMsg, toolCallStack); // S207: 新轮调用参数到达=替换时刻
                         this._ingestToolProgress(delta.tool_progress, getBlock, toolCallStack, currentMsg);
                         return;
                     }
@@ -1121,6 +1128,63 @@ Object.assign(vue_methods, {
             this.requestScrollToBottom();
         }
         if (__m) __m._rv = (__m._rv || 0) + 1;
+    },
+
+    // ===== S207：瞬断整轮重发（后端只重发 create+读流，工具执行永不重放） =====
+    _showStreamRetryNote(info) {
+        const n = (info && info.attempt) || 1;
+        const m = (info && info.attempts) || 1;
+        let text = this.t('streamRetrying') || 'Model connection lost, retrying…';
+        text = text.replace('{n}', n).replace('{m}', m);
+        showNotification(text, 'warning');
+    },
+
+    _armStreamReset(info) {
+        // 仅挂起：保留半截气泡原样展示，直到重试的新输出真正到达才替换
+        this._streamResetPending = { keep: Math.max(0, Number((info && info.keep_text_chars)) || 0) };
+    },
+
+    _consumeStreamReset(currentMsg, toolCallStack) {
+        const r = this._streamResetPending;
+        if (!r) return false;
+        this._streamResetPending = null;
+        if (this._streamUpdateTimer) { clearTimeout(this._streamUpdateTimer); this._streamUpdateTimer = null; }
+        this._streamTextBuffer = '';
+        this._streamReasoningBuffer = '';
+        this._streamRecvChars = 0;
+        const m = this._streamTargetMsg || currentMsg;
+        if (!m) return true;
+        const keep = r.keep;
+        if (Array.isArray(m.displayBlocks)) {
+            // 块可能被 S187 冻结——越限/在途块整块剔除，跨界文本块换新对象
+            let used = 0;
+            const pendingIds = new Set(Array.isArray(toolCallStack)
+                ? toolCallStack.filter(c => !c.resolved).map(c => c.id) : []);
+            const out = [];
+            for (const b of m.displayBlocks) {
+                const raw = (typeof Vue !== 'undefined' && Vue.toRaw) ? Vue.toRaw(b) : b;
+                if (raw.type === 'reasoning') continue; // 思考面板属易失展示，失败轮整段丢弃
+                if (raw.type === 'text') {
+                    const c = String(raw.content || '');
+                    if (used >= keep) continue;
+                    if (used + c.length <= keep) { used += c.length; out.push(b); continue; }
+                    out.push(Object.assign({}, raw, { content: c.slice(0, keep - used) }));
+                    used = keep;
+                    continue;
+                }
+                if (raw.type === 'tool_call' && pendingIds.has(raw.id)) continue; // 失败轮在途块
+                out.push(b);
+            }
+            m.displayBlocks = out;
+        }
+        m.content = String(m.content || '').slice(0, keep);
+        m.pure_content = String(m.pure_content || '').slice(0, keep);
+        if (Array.isArray(toolCallStack)) {
+            for (let i = toolCallStack.length - 1; i >= 0; i--) { if (!toolCallStack[i].resolved) toolCallStack.splice(i, 1); }
+        }
+        if (this.toolArgsAccumulator) this.toolArgsAccumulator = {};
+        m._rv = (m._rv || 0) + 1;
+        return true;
     },
 
     async translateMessage(index) {

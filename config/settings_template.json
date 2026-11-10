@@ -18,7 +18,10 @@
     "extra_params":[],
     "agentRobustness": {
         "reanchorEveryToolRounds": 6,
-        "malformedCallRepairMax": 2
+        "malformedCallRepairMax": 2,
+        "llmRetryMax": 2,
+        "llmRetryBaseDelayMs": 1000,
+        "llmRetryMidStream": true
     },
     "toolOutput": {
         "retentionDays": 7,

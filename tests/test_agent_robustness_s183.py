@@ -127,7 +127,12 @@ class TestPipesAndPins:
         assert "reanchorEveryToolRounds: 6" in defaults
         assert "malformedCallRepairMax: 2," in defaults
         tpl = json.loads(_read("config", "settings_template.json"))
-        assert tpl["agentRobustness"] == {"reanchorEveryToolRounds": 6, "malformedCallRepairMax": 2}
+        ar = tpl["agentRobustness"]
+        assert ar["reanchorEveryToolRounds"] == 6
+        assert ar["malformedCallRepairMax"] == 2
+        # S207：瞬断重试键（后端 llm_recovery 兜底默认，UI 后续故事接入）
+        assert ar["llmRetryMax"] == 2 and ar["llmRetryBaseDelayMs"] == 1000
+        assert ar["llmRetryMidStream"] is True
         page = _read("static", "templates", "page_system.html")
         assert 'v-model="agentRobustness.reanchorEveryToolRounds"' in page
         assert 'v-model="agentRobustness.malformedCallRepairMax"' in page

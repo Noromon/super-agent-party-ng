@@ -206,8 +206,10 @@
   "NextPage",
   "PrevPage",
   "_ackInterject",
+  "_armStreamReset",
   "_collapseStaleApprovalCards",
   "_collapseStaleAskCards",
+  "_consumeStreamReset",
   "_flushInterjects",
   "_flushInterjectsSoon",
   "_flushToolStream",
@@ -223,6 +225,7 @@
   "_sanitizeCardText",
   "_setResultDisplay",
   "_setToolArgs",
+  "_showStreamRetryNote",
   "_syncAssistantBody",
   "_toggleHighlight",
   "_wvExec",
@@ -1875,5 +1878,5 @@
   "vrm.js": 41
  },
  "console_log_total": 199,
- "styles_css_lines": 12872
+ "styles_css_lines": 12871
 }
