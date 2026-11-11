@@ -8,7 +8,7 @@ import datetime
 import httpx
 
 from py.get_setting import get_port, load_settings, save_settings
-from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAULT_BOOK_ID
+from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAULT_BOOK_ID, cn_clock_time
 from py.diary_chat_integration import summarize_and_save_buffers
 from py.token_guard import neutralize as _neutralize
 
@@ -97,16 +97,36 @@ RECALL_SEEDS = [
 ]
 
 
+# S208：日记首行时间头（「11月11日晚，快11点半了。」/「2026-11-11 星期三 · 晨间独白」）。
+# 种子引子曾把这类（可能写错的）时刻行喂回下一篇造成自复制——引子前剥离。
+_TIME_HEAD_RE = re.compile(
+    r"(凌晨|清晨|早上|上午|正午|中午|下午|傍晚|晚上|深夜|午夜|晨间|午后|夜间"
+    r"|\d{1,2}月\d{1,2}日)")
+
+
+def _looks_like_time_head(line: str) -> bool:
+    line = (line or "").strip()
+    if not line or len(line) > 40:
+        return False
+    if line.endswith(("，", ",", "、", "；")):
+        return False
+    return bool(_TIME_HEAD_RE.search(line))
+
+
 async def build_recall_seed(book_id: str = DEFAULT_BOOK_ID, prev_ratio: float = 0.5):
     """S83：生成本次日记的思绪种子（约半数概率引用上一篇开头作引子）。"""
     if random.random() < prev_ratio:
         try:
             recent = await get_recent_diary_entries(book_id, n=1)
             if recent:
-                head = _strip_injection_traces(
-                    (recent[-1].get("content") or "").strip().replace("\n", " "))
+                raw = (recent[-1].get("content") or "").strip()
+                _lines = raw.splitlines()
+                if len(_lines) > 1 and _looks_like_time_head(_lines[0]):
+                    raw = "\n".join(_lines[1:]).strip()  # S208
+                head = _strip_injection_traces(raw.replace("\n", " "))
                 if len(head) >= 8:  # S165：剥痕后残壳过短则退回词池种子，不引用残句
-                    return f"上一篇日记你写到「{head[:40]}」，可以顺着往下想，也可以彻底想点别的"
+                    return (f"上一篇日记你写到「{head[:40]}」，可以顺着往下想，也可以彻底想点别的"
+                            "（引子里若出现时刻，那是旧篇当时的记录，不是现在；此刻只以系统注入的当前时间为准）")
         except Exception as e:
             logging.debug(f"[DiaryEngine] 读取上一篇日记失败，退回词池种子: {e}")
     return random.choice(RECALL_SEEDS)
@@ -629,7 +649,7 @@ class DiaryEngine:
         sys_parts = []
         if persona:
             sys_parts.append(persona)
-        sys_parts.append(f"当前时间：{now_str}（星期{weekday}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。日夜晨昏的判断只以当前时间为准，旧日记或记忆里的夜晚场景与此刻无关。")
+        sys_parts.append(f"当前时间：{now_str}（星期{weekday}，{cn_clock_time(now)}）。这是一次系统自动触发的「自主日记」时刻，用户并没有主动与你说话。日夜晨昏的判断只以当前时间为准，旧日记或记忆里的夜晚场景与此刻无关。写具体时刻请沿用括号内的中文时刻表述，不要自行换算。")
         # S204 通道语义：本通道输出文本本身即被归档/转达的内容——「写日记/发消息」的正确
         # 动作是写正文，不是发起调用（历史事故：正文尸块 write_diary/mimic_human 直落日记与 IM）
         sys_parts.append(

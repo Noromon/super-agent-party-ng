@@ -34,6 +34,55 @@ def _book_file(book_id) -> str:
     return os.path.join(DIARY_DIR, f'{_safe_book_id(book_id)}.json')
 
 
+# S208：日记/摘要注入时刻的中文 12 小时制（配 24h 字符串双格式下发，防本地模型
+# 换算失守——实锤：11-11 当天 21:29 被写成「快11点半」、22:46 写成「11点快四十五分」）
+_CN_DIGITS = "零一二三四五六七八九"
+
+
+def _cn_minutes(m: int) -> str:
+    if m == 0:
+        return "整"
+    if m == 15:
+        return "一刻"
+    if m == 30:
+        return "半"
+    tens, ones = divmod(m, 10)
+    if tens == 0:
+        return _CN_DIGITS[ones] + "分"
+    if tens == 1:  # 十八分 / 十一分（不归并成一十八分）
+        return "十" + (_CN_DIGITS[ones] if ones else "") + "分"
+    if ones == 0:
+        return _CN_DIGITS[tens] + "十分"
+    return _CN_DIGITS[tens] + "十" + _CN_DIGITS[ones] + "分"
+
+
+def cn_clock_time(now=None) -> str:
+    """中文时刻，如「晚上九点二十九分 / 凌晨十二点半 / 下午一点整」。"""
+    now = now or datetime.now()
+    h, m = now.hour, now.minute
+    if h < 5:
+        period, hh = "凌晨", (h % 12) or 12
+    elif h < 8:
+        period, hh = "早上", h
+    elif h < 11:
+        period, hh = "上午", h
+    elif h < 13:
+        period, hh = "中午", (h % 12) or 12
+    elif h < 17:
+        period, hh = "下午", h - 12
+    elif h < 19:
+        period, hh = "傍晚", h - 12
+    else:
+        period, hh = "晚上", h - 12
+    if hh <= 9:
+        hs = _CN_DIGITS[hh]
+    elif hh == 10:
+        hs = "十"
+    else:
+        hs = "十" + _CN_DIGITS[hh - 10]
+    return f"{period}{hs}点{_cn_minutes(m)}"
+
+
 def _empty_book(character_id=None, character_name=""):
     return {
         "characterId": character_id,

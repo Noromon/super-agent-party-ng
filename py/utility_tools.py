@@ -6,6 +6,7 @@ import aiohttp
 import requests
 from tzlocal import get_localzone
 from py.get_setting import load_settings
+from py.diary_system import cn_clock_time  # S208：双格式时刻
 import wikipediaapi
 import arxiv
 from typing import Dict, List, Optional
@@ -20,7 +21,7 @@ async def time(timezone: str = None):
     now = datetime.now(tz=tz)
     
     # 格式化输出
-    time_message = f"当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，时区：{tz}"
+    time_message = f"当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}（{cn_clock_time(now)}），时区：{tz}"
     return time_message
 
 time_tool = {
