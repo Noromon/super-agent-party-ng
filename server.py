@@ -2026,6 +2026,25 @@ async def _im_approval_hangup(request, messages, results):
         logging.getLogger("app").warning("[Approval] 挂起审批登记失败（降级为仅前端流程）: %r", _ape)
 
 
+_UNEXPECTED_KW_RE = re.compile(r"unexpected keyword argument '(\w+)'")
+
+
+async def _invoke_tool_hook(tool_name: str, tool_call, params: dict):
+    """单次 hook 调用（S212：由 dispatch 的自愈环反复调用，丢弃脏参后重试）。"""
+    if tool_name in ("shell_tool_local", "docker_sandbox", "shell_tool_wsl"):
+        # 异步生成器：调用即返回 AsyncIterator，无需 await
+        return tool_call(**params)
+    if tool_name == "acpx_agent":
+        # 常规异步函数：必须 await 才能获得实际结果
+        return await tool_call(**params)
+
+    ret_out = await tool_call(**params)
+    if tool_name == "auto_behavior":
+        await ws_manager.broadcast_settings_update(ret_out)
+        ret_out = "任务设置成功！"
+    return ret_out
+
+
 async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> str | List | AsyncIterator[str] | None :
     global _TOOL_HOOKS, node_ext_mcp_clients, node_ext_mcp_tools
     logging.getLogger("app").debug(f"[dispatch] {tool_name} {str(tool_params)[:500]}")
@@ -2082,23 +2101,29 @@ async def dispatch_tool(tool_name: str, tool_params: dict, settings: dict) -> st
                                             call_node_extension_tool, settings)
         
     tool_call = _TOOL_HOOKS[tool_name]
-    try:
-        if tool_name in ("shell_tool_local", "docker_sandbox", "shell_tool_wsl"):
-            # 异步生成器：调用即返回 AsyncIterator，无需 await
-            return tool_call(**tool_params)
-        if tool_name == "acpx_agent":
-            # 常规异步函数：必须 await 才能获得实际结果
-            return await tool_call(**tool_params)
-
-        ret_out = await tool_call(**tool_params)
-        if tool_name == "auto_behavior":
-            settings = ret_out
-            await ws_manager.broadcast_settings_update(settings)
-            ret_out = "任务设置成功！"
-        return ret_out
-    except Exception as e:
-        logger.error(f"Error calling tool {tool_name}: {e}")
-        return f"Error calling tool {tool_name}: {e}{net_error_hint(e)}"
+    params = dict(tool_params or {})
+    # S212：模型串味多传未声明参数（日志实证 2026-11-12 19:24：CDP 的 script_code
+    # 灌进 read_file_range）时静默丢弃重试，缺参返回结构化可自纠错误，
+    # 不再把裸 Python TypeError 甩给模型。审批/路径门在环外只过一次。
+    for _attempt in range(4):
+        try:
+            return await _invoke_tool_hook(tool_name, tool_call, params)
+        except TypeError as e:
+            _msg = str(e)
+            m = _UNEXPECTED_KW_RE.search(_msg)
+            if m and m.group(1) in params and _attempt < 3:
+                params.pop(m.group(1))
+                logger.warning(f"[dispatch] {tool_name} 忽略未声明多余参数 '{m.group(1)}'（模型多传）后重试")
+                continue
+            if "required" in _msg and "argument" in _msg:
+                logger.error(f"Error calling tool {tool_name}: {e}")
+                return (f"[Error] Invalid arguments for {tool_name}: {e}. "
+                        "Supply all required arguments per the tool schema and retry.")
+            logger.error(f"Error calling tool {tool_name}: {e}")
+            return f"Error calling tool {tool_name}: {e}{net_error_hint(e)}"
+        except Exception as e:
+            logger.error(f"Error calling tool {tool_name}: {e}")
+            return f"Error calling tool {tool_name}: {e}{net_error_hint(e)}"
 
 def process_extra_params(extra_params_list):
     extra_body = {}

@@ -267,3 +267,57 @@ class TestToolkitContract:
                 f"CLI 关必须公告 read_skill_tool_local，实到: {sorted(names)[:25]}")
         finally:
             _restore_settings(sap.data_dir, original)
+
+    def test_announced_schema_signature_contract(self):
+        # S212 契约：公告 schema 与执行 hook 签名不得互相说谎——
+        # ①schema 声明参数函数必须有；②函数无默认值的参数 schema 必须 required
+        # （否则模型照 schema 省略参数必炸裸 TypeError，read_file_range/end_line 潜伏雷）；
+        # ③schema required 的参数函数必须有。动态 hook（**kwargs 兜底/不可内省）跳过。
+        import inspect
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+            del sys.modules["py"]
+        import server
+        server._build_tool_hooks()
+        tk = server._assemble_toolkit()
+        schemas = []
+        for value in tk.values():
+            if isinstance(value, dict) and value.get("type") == "function":
+                schemas.append(value["function"])
+            elif isinstance(value, list):
+                schemas += [i["function"] for i in value
+                            if isinstance(i, dict) and i.get("type") == "function"]
+        assert len(schemas) >= 40, f"公告 schema 数异常（{len(schemas)}），扫描前提破坏"
+        checked = 0
+        for fn in schemas:
+            name = fn.get("name", "?")
+            hook = server._TOOL_HOOKS.get(name)
+            if hook is None:
+                continue
+            try:
+                sig = inspect.signature(hook)
+            except (TypeError, ValueError):
+                continue
+            plist = [p for p in sig.parameters.values() if p.name != "self"]
+            if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in plist):
+                continue
+            names = {p.name for p in plist}
+            spec = fn.get("parameters") or {}
+            props = set(spec.get("properties", {}))
+            req = set(spec.get("required", []))
+            assert props <= names, (
+                f"{name}: schema 声明了函数签名没有的参数: {sorted(props - names)}"
+                "（模型照 schema 传参必 TypeError）")
+            silent_required = {p.name for p in plist
+                               if p.default is inspect.Parameter.empty
+                               and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                              inspect.Parameter.KEYWORD_ONLY)
+                               and p.name not in req}
+            assert not silent_required, (
+                f"{name}: 函数强制但 schema 未标 required 的参数: {sorted(silent_required)}"
+                "（模型照 schema 省略必 TypeError——S212 read_file_range 教训）")
+            assert req <= names, f"{name}: schema required 但函数无此参数: {sorted(req - names)}"
+            checked += 1
+        assert checked >= 40, f"可内省契约覆盖仅 {checked} 个 schema，覆盖面异常"

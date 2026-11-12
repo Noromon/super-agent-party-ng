@@ -251,7 +251,9 @@ def sanitize_url(input_url: str, default_base: str = "", endpoint: str = "",forc
         final_url = safe_base_url
 
     # 可选：如果是内网 IP，打印审计日志（无需拦截）
-    if is_private_ip(parsed.hostname):
+    # S212：仅字面 IP 才打——fake-ip 代理把域名解析进私网段时，本日志曾把
+    # huggingface.co 误报成 "internal service"（日志审计 2026-11-12；S85-D4 同口径）
+    if parsed.hostname and is_literal_ip(parsed.hostname) and is_private_ip(parsed.hostname):
         logger.info(f"Open-source Logic: Accessing internal service -> {final_url}")
 
     return final_url

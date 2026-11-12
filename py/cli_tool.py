@@ -16,7 +16,7 @@ import socket
 import glob as std_glob
 import fnmatch
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 from datetime import datetime
 from collections import deque
 import aiofiles
@@ -1016,20 +1016,21 @@ async def read_file_tool(path: str) -> str:
     except Exception as e: 
         return f"[Error] Read failed: {str(e)}"
 
-async def read_file_range_tool(path: str, start_line: int, end_line: int) -> str:
+async def read_file_range_tool(path: str, start_line: int, end_line: Optional[int] = None) -> str:
     """[Docker] 精准读取文件指定行范围，利用 awk 进行服务端截断"""
     try:
-        if start_line < 1 or end_line < start_line:
+        if start_line < 1 or (end_line is not None and end_line < start_line):
             return "[Error] Invalid line range."
         
         real_cwd = await _get_current_cwd()
         # awk 逻辑说明：
-        # 1. 指定行范围 NR>=start && NR<=end
+        # 1. 指定行范围 NR>=start && NR<=end；end_line 缺省=读到文件尾（S212，与 schema 描述对齐）
         # 2. 如果行长度 > 1000，使用 substr 截断
         # 3. 格式化输出 行号 | 内容
         max_line_len = 1000
+        _awk_range = f"NR>={start_line} && NR<={end_line}" if end_line is not None else f"NR>={start_line}"
         script = (
-            f"awk 'NR>={start_line} && NR<={end_line} {{"
+            f"awk '{_awk_range} {{"
             f"  line=$0; "
             f"  if (length(line) > {max_line_len}) "
             f"    line = substr(line, 1, {max_line_len}) \"... [Truncated]\"; "
@@ -1607,13 +1608,13 @@ async def read_file_tool_local(path: str) -> str:
     except Exception as e: 
         return f"[Error] Read failed: {str(e)}"  
 
-async def read_file_range_tool_local(path: str, start_line: int, end_line: int) -> str:
+async def read_file_range_tool_local(path: str, start_line: int, end_line: Optional[int] = None) -> str:
     """[Local] 精准读取文件指定行范围，增加溢出保护"""
     try:
         MAX_TOTAL_CHARS = 30000  # 单次返回最大字符数，防止上下文爆炸
         MAX_LINE_CHARS = 1000    # 单行最大显示长度
         
-        if start_line < 1 or end_line < start_line:
+        if start_line < 1 or (end_line is not None and end_line < start_line):
             return "[Error] Invalid line range."
             
         cwd = await _get_current_cwd()
@@ -1636,7 +1637,7 @@ async def read_file_range_tool_local(path: str, start_line: int, end_line: int) 
                         output.append(f"--- [Warning] Output stopped: Reached limit of {MAX_TOTAL_CHARS} chars ---")
                         break
                 
-                if line_idx >= end_line:
+                if end_line is not None and line_idx >= end_line:
                     break
                 line_idx += 1
             
@@ -2339,7 +2340,7 @@ TOOLS_REGISTRY = {
                     "start_line": {"type": "integer", "description": "1-based first line to read"},
                     "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"}
                 }, 
-                "required": ["path", "start_line", "end_line"]
+                "required": ["path", "start_line"]
             }
         }
     },
@@ -2620,7 +2621,7 @@ LOCAL_TOOLS_REGISTRY = {
                     "start_line": {"type": "integer", "description": "1-based first line to read"},
                     "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"}
                 }, 
-                "required": ["path", "start_line", "end_line"]
+                "required": ["path", "start_line"]
             }
         }
     },
