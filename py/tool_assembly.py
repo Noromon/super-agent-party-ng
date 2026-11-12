@@ -16,6 +16,15 @@ import logging
 import json
 
 
+def _ensure_read_skill_local(tools, tk):
+    """S209：知识 skill 读取与 CLI 执行权限解耦——列表无 read_skill* 变体时
+    恒定公告本地版（CLI 关=无工作区只读全局；CLI 开=工作区→全局）。纯只读零副作用。"""
+    for t in tools:
+        if str(t.get("function", {}).get("name", "")).startswith("read_skill"):
+            return
+    tools.append(tk["read_skill_tool_local"])
+
+
 async def build_llm_tools(request, settings, tk):
     """Assemble the OpenAI-format tool list announced to the LLM.
 
@@ -101,6 +110,7 @@ async def build_llm_tools(request, settings, tk):
                 tools.append(tk["acp_agent_tool"])
     if settings['CLISettings']['mode_change'] and tk["cli_permission_mode_for"](settings) != "plan":
         tools.append(tk["mode_change_tool"])
+    _ensure_read_skill_local(tools, tk)
     if settings['visionControlSettings']['enabled']:
         tools.extend(tk["computer_use_tools"])
         if settings['visionControlSettings']['mouse']:

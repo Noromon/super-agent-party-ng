@@ -88,6 +88,11 @@ def _fake_tk(mcp_status):
         "get_llm_tool": none_tool,
         "get_agent_tool": none_tool,
         "get_a2a_tool": none_tool,
+        # S209：build_llm_tools 恒定补发 read_skill_local（真实 toolkit 恒带该键）
+        "read_skill_tool_local": {"type": "function",
+                                  "function": {"name": "read_skill_tool_local",
+                                               "description": "d",
+                                               "parameters": {}}},
     }
 
 

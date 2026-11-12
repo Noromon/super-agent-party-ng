@@ -2149,12 +2149,37 @@ async def todo_write_tool_local(action: str, id: str = None, content: str = None
     
 # ==================== [新增] Skill 专用读取工具 ====================
 
+async def _skill_cwd_or_none() -> str:
+    """S209：技能查找的工作区语义跟随 CLI 开关——CLI 关=无工作区（只读全局）。"""
+    settings = await load_settings()
+    cli = settings.get("CLISettings", {}) or {}
+    if not cli.get("enabled", False):
+        return ""
+    return cli.get("cc_path") or ""
+
+
+def _build_skill_tree(base_path: Path, skill_id: str) -> str:
+    """S209：技能目录文件树（深度 ≤2）。"""
+    tree_lines = [f"{skill_id}/"]
+    for p in base_path.rglob("*"):
+        if p.name.startswith("."):
+            continue
+        depth = len(p.relative_to(base_path).parts)
+        if depth > 2:
+            continue
+        indent = "  " * depth
+        tree_lines.append(f"{indent}{p.name}{'/' if p.is_dir() else ''}")
+    return "\n".join(tree_lines)
+
+
 async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True) -> str:
     """
     内部通用逻辑：读取 Skill 文件夹结构和说明文档。
     若工作区不存在该技能，且全局技能目录可用，则自动复制到工作区（Docker/Local 均支持）。
+    S209：本地路径 cwd 为空=CLI 关=无工作区→只读全局；工作区缺失时直接回落全局读取。
     """
     skill_rel_path = f".agent/skills/{skill_id}"
+    skill_label = skill_rel_path
     workspace_skill_path = f"/workspace/.agent/skills/{skill_id}" if is_docker else str(Path(cwd) / ".agent" / "skills" / skill_id)
 
     # ----- 复制逻辑：工作区缺失时，从全局复制 -----
@@ -2186,28 +2211,38 @@ async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True)
                 # 复制失败或全局技能不存在，继续尝试读取工作区（若不存在则后续报错）
                 pass
     else:
-        # Local 环境：使用 shutil 复制（已实现，但整合到 logic 中统一管理）
-        workspace_path = Path(cwd) / ".agent" / "skills" / skill_id
-        if not workspace_path.exists():
+        # ----- Local（S209）：工作区（仅 CLI 开）→ 全局回落；CLI 关=无工作区只读全局 -----
+        base_path = None
+        if cwd:
+            ws_path = Path(cwd) / ".agent" / "skills" / skill_id
+            if ws_path.is_dir():
+                base_path = ws_path
+            else:
+                global_path = Path(SKILLS_DIR) / skill_id
+                if global_path.is_dir():
+                    try:
+                        ws_path.parent.mkdir(parents=True, exist_ok=True)
+                        await asyncio.to_thread(
+                            shutil.copytree,
+                            global_path,
+                            ws_path,
+                            dirs_exist_ok=True
+                        )
+                        logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copied global skill '{skill_id}' to workspace.")
+                        base_path = ws_path
+                    except Exception as e:
+                        logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copy failed: {e}. Will fallback to global read.")
+        if base_path is None:
             global_path = Path(SKILLS_DIR) / skill_id
-            if global_path.exists() and global_path.is_dir():
-                try:
-                    workspace_path.parent.mkdir(parents=True, exist_ok=True)
-                    await asyncio.to_thread(
-                        shutil.copytree,
-                        global_path,
-                        workspace_path,
-                        dirs_exist_ok=True
-                    )
-                    logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copied global skill '{skill_id}' to workspace.")
-                except Exception as e:
-                    logging.getLogger("app").info(f"[Skill AutoCopy][Local] Copy failed: {e}. Will fallback to global read.")
-                    # 降级读取已由主流程处理
+            if global_path.is_dir():
+                base_path = global_path
+                skill_label = f".agents/skills/{skill_id}"
+        if base_path is None:
+            return f"[Error] Skill '{skill_id}' not found in workspace or global skills dir."
 
-    # ----- 原有读取逻辑保持不变（读取工作区技能）-----
+    # ----- 读取逻辑（Docker 走容器内命令；Local 读上方解析出的目录）-----
     tree_str = ""
     doc_content = ""
-
     if is_docker:
         try:
             tree_str = await _exec_docker_cmd_simple(cwd, ["find", skill_rel_path, "-maxdepth", "2", "-not", "-path", '*/.*'])
@@ -2216,32 +2251,17 @@ async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True)
                     doc_path = f"{skill_rel_path}/{name}"
                     doc_content = await _exec_docker_cmd_simple(cwd, ["cat", doc_path])
                     break
-                except:
+                except Exception:
                     continue
         except Exception as e:
             return f"[Error] Skill '{skill_id}' not found or inaccessible in Docker: {str(e)}"
     else:
         try:
-            base_path = Path(cwd) / ".agent" / "skills" / skill_id
-            if not base_path.exists():
-                return f"[Error] Skill '{skill_id}' folder does not exist in workspace and auto-copy failed or global skill unavailable."
-
-            # 生成本地文件树（深度 ≤2）
-            tree_lines = [f"{skill_id}/"]
-            for p in base_path.rglob("*"):
-                if p.name.startswith("."): continue
-                depth = len(p.relative_to(base_path).parts)
-                if depth > 2: continue
-                indent = "  " * depth
-                tree_lines.append(f"{indent}{p.name}{'/' if p.is_dir() else ''}")
-            tree_str = "\n".join(tree_lines)
-
-            # 读取本地说明文档
+            tree_str = _build_skill_tree(base_path, skill_id)
             for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
                 doc_path = base_path / name
                 if doc_path.exists():
-                    async with aiofiles.open(doc_path, 'r', encoding='utf-8', errors='replace') as f:
-                        doc_content = await f.read()
+                    doc_content = doc_path.read_text(encoding="utf-8", errors="replace")
                     break
         except Exception as e:
             return f"[Error] Skill '{skill_id}' read failed: {str(e)}"
@@ -2251,7 +2271,7 @@ async def read_skill_tool_logic(cwd: str, skill_id: str, is_docker: bool = True)
 
     res = f"--- Skill Details: {skill_id} ---\n"
     res += f"\n📂 **Folder Structure:**\n```\n{tree_str}\n```\n"
-    res += f"\n📖 **Documentation ({skill_rel_path}):**\n\n{doc_content or '(No SKILL.md found)'}"
+    res += f"\n📖 **Documentation ({skill_label}):**\n\n{doc_content or '(No SKILL.md found)'}"
     return res
 
 async def read_skill_tool(skill_id: str) -> str:
@@ -2260,8 +2280,8 @@ async def read_skill_tool(skill_id: str) -> str:
     return await read_skill_tool_logic(cwd, skill_id, is_docker=True)
 
 async def read_skill_tool_local(skill_id: str) -> str:
-    """[Local] 读取特定技能的完整文档和文件树"""
-    cwd = await _get_current_cwd()
+    """[Local] 读取特定技能的完整文档和文件树（S209：CLI 关=无工作区只读全局）"""
+    cwd = await _skill_cwd_or_none()
     return await read_skill_tool_logic(cwd, skill_id, is_docker=False)
 
 COMMON_BASH_DESC = (
@@ -2374,11 +2394,11 @@ TOOLS_REGISTRY = {
     "read_skill": {
         "type": "function", "function": {
             "name": "read_skill_tool", 
-            "description": "Read full documentation and file tree for a project-specific skill from .agent/skills/.",
+            "description": "Read the full documentation and file tree of a skill (operational guide / convention / prompt-writing guide, etc.). Lookup order: workspace .agent/skills/ first, then the global skills dir (auto-copied into the workspace on first use). Knowledge skills can be consulted at any time.",
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "skill_id": {"type": "string", "description": "Skill directory name under .agent/skills/"}
+                    "skill_id": {"type": "string", "description": "Skill directory name (under workspace .agent/skills/ or the global skills dir)"}
                 }, 
                 "required": ["skill_id"]
             }
@@ -2659,11 +2679,11 @@ LOCAL_TOOLS_REGISTRY = {
     "read_skill_local": {
         "type": "function", "function": {
             "name": "read_skill_tool_local", 
-            "description": "Read full documentation and file tree for a project-specific skill from .agent/skills/ (Local).",
+            "description": "Read the full documentation and file tree of a skill (operational guide / convention / prompt-writing guide, etc.). Lookup order: workspace .agent/skills/ first, then the global skills dir (auto-copied into the workspace on first use). When CLI/workspace is disabled only global skills are available. Knowledge skills can be consulted at any time.",
             "parameters": {
                 "type": "object", 
                 "properties": {
-                    "skill_id": {"type": "string", "description": "Skill directory name under .agent/skills/"}
+                    "skill_id": {"type": "string", "description": "Skill directory name (under workspace .agent/skills/ or the global skills dir)"}
                 }, 
                 "required": ["skill_id"]
             }

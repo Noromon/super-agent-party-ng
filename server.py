@@ -2843,28 +2843,68 @@ async def _inject_workspace_memory(request, cwd, cli_settings):
                     except Exception as e:
                         logging.getLogger("app").info(f"保存 MEMORY.md 失败: {e}")
 
-            # --- (2) 处理 '/' : 注入特定技能 ---
-            elif user_text_trimmed.startswith('/'):
-                parts = user_text_trimmed[1:].split()
-                if parts:
-                    skill_name = parts[0]
-                    skill_dir = Path(cwd) / ".agent" / "skills" / skill_name
-                    if skill_dir.exists() and skill_dir.is_dir():
-                        doc_file_path = None
-                        # 尝试匹配常见的技能说明文档命名
-                        for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
-                            if (skill_dir / name).exists():
-                                doc_file_path = skill_dir / name
-                                break
-                            
-                        if doc_file_path:
-                            try:
-                                import aiofiles
-                                async with aiofiles.open(doc_file_path, 'r', encoding='utf-8') as f:
-                                    skill_content = await f.read()
-                                content_append(request.messages, 'system', f"\n\n🛠️ **The user actively triggered the workspace skill. [{skill_name}]**:\n\n{skill_content}\n\nPlease strictly follow the above skill instructions to handle the user's current request.\n\n")
-                            except Exception as e:
-                                logging.getLogger("app").info(f"读取技能文档失败: {e}")
+            # --- (2) 处理 '/' : 由 _inject_triggered_skill 承担（S209：与 CLI 总开关解绑）---
+
+
+def _resolve_skill_dir(cwd, skill_name, workspace_active):
+    """S209：/<skill> 查找顺序——工作区（仅 workspace_active=CLI 开且有 cwd）→ 全局。
+
+    返回技能目录 Path 或 None。CLI 关=无工作区，只看全局。
+    """
+    if workspace_active and cwd:
+        ws = Path(cwd) / ".agent" / "skills" / skill_name
+        if ws.exists() and ws.is_dir():
+            return ws
+    gl = Path(SKILLS_DIR) / skill_name
+    if gl.exists() and gl.is_dir():
+        return gl
+    return None
+
+
+async def _inject_triggered_skill(request, cwd, cli_settings):
+    """S209：/<skill> 触发注入——只认 shortcut 双开关（A11），与 CLI.enabled 解绑。
+
+    CLI 开：工作区→全局回退；CLI 关（=无工作区）：仅全局。纯知识注入零副作用。
+    """
+    from py.shortcut_commands import im_shortcuts_enabled as _im_shortcuts_enabled
+    if not (cli_settings.get("shortcut", False) and await _im_shortcuts_enabled()):
+        return
+    user_text = ""
+    if request.messages and request.messages[-1]['role'] == 'user':
+        user_msg_content = request.messages[-1].get('content', '')
+        if isinstance(user_msg_content, str):
+            user_text = user_msg_content
+        elif isinstance(user_msg_content, list):
+            user_text = "".join([item.get('text', '') for item in user_msg_content
+                                 if item.get('type') == 'text'])
+    user_text_trimmed = user_text.strip()
+    if not user_text_trimmed.startswith('/'):
+        return
+    parts = user_text_trimmed[1:].split()
+    if not parts:
+        return
+    skill_name = parts[0]
+    workspace_active = bool(cwd and Path(cwd).exists() and cli_settings.get("enabled", False))
+    skill_dir = _resolve_skill_dir(cwd, skill_name, workspace_active)
+    if not skill_dir:
+        return
+    doc_file_path = None
+    for name in ["SKILL.md", "skill.md", "SKILLS.md", "skills.md"]:
+        if (skill_dir / name).exists():
+            doc_file_path = skill_dir / name
+            break
+    if not doc_file_path:
+        return
+    try:
+        import aiofiles
+        async with aiofiles.open(doc_file_path, 'r', encoding='utf-8') as f:
+            skill_content = await f.read()
+        content_append(request.messages, 'system',
+                       f"\n\n🛠️ **The user actively triggered the skill. [{skill_name}]**:\n\n"
+                       f"{skill_content}\n\nPlease strictly follow the above skill instructions "
+                       f"to handle the user's current request.\n\n")
+    except Exception as e:
+        logging.getLogger("app").info(f"读取技能文档失败: {e}")
 
 
 def _append_permission_mode_message(request, permissionMode):
@@ -2960,17 +3000,33 @@ async def _append_agents_md(request, cwd):
         pass
 
 
-async def _append_project_skills(request, cwd, visibilityScope):
-    """project skills summary injection. (M-3 split)"""
-    try:
-        # 无论是在 docker 还是 local，逻辑路径通常是一致的（通过挂载）
-        # 如果是 Docker 环境且 backend 无法直接访问 cwd，则需通过 docker exec ls 扫描，
-        # 但通常项目路径是共享的。
-        skills_message = await get_project_skills_summary(cwd, visibilityScope)
-        if skills_message:
-            content_append(request.messages, 'system', skills_message)
-    except Exception as e:
-        logging.getLogger("app").info(f"[Skill Loader] 扫描技能失败: {e}")
+async def _append_project_skills(request, cwd, cli_settings, visibilityScope):
+    """S209 skill index injection (M-3 split, 语义升级).
+
+    visibilityScope: "workspace"=并集(工作区+全局, 默认) / "global"=仅全局 / "none"=隐藏。
+    全局块恒定可见（不受 CLI 开关约束）；工作区块要求 cwd 存在且 CLI 开启
+    （CLI 关=直觉「无工作区」）。
+    """
+    scope = str(visibilityScope or "workspace").lower()
+    if scope == "none":
+        return
+    cli_on = bool(cli_settings.get("enabled", False))
+    show_workspace = scope == "workspace" and cwd and Path(cwd).exists() and cli_on
+    show_global = scope in ("workspace", "global")
+    if show_workspace:
+        try:
+            skills_message = await get_project_skills_summary(cwd, "workspace")
+            if skills_message:
+                content_append(request.messages, 'system', skills_message)
+        except Exception as e:
+            logging.getLogger("app").info(f"[Skill Loader] 扫描工作区技能失败: {e}")
+    if show_global:
+        try:
+            skills_message = await get_project_skills_summary(cwd, "global")
+            if skills_message:
+                content_append(request.messages, 'system', skills_message)
+        except Exception as e:
+            logging.getLogger("app").info(f"[Skill Loader] 扫描全局技能失败: {e}")
 
 
 def _resolve_agent_name(raw_model, settings):
@@ -3508,6 +3564,9 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
         
         await _inject_workspace_memory(request, cwd, cli_settings)
 
+    # S209：/<skill> 只认 shortcut 双开关、与 CLI.enabled 解绑（CLI 关=无工作区仅全局）
+    await _inject_triggered_skill(request, cwd, cli_settings)
+
     if request.is_app_bot and request.platform and request.platform != "diary":
         # S145：对端名录——来源行升级（别名+ID）+ 身份/名录注入 + seen 登记
         # S165：diary 独处书写非对话语境，「用户正在使用 diary 软件与你交流」
@@ -3551,7 +3610,8 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 
         await _append_agents_md(request, cwd)
 
-        await _append_project_skills(request, cwd, visibilityScope)
+    # S209：技能索引与 CLI/engine 门槛解绑——全局块恒定，工作区块=cwd 存在+CLI 开
+    await _append_project_skills(request, cwd, cli_settings, visibilityScope)
 
     if request.messages[-1]['role'] == 'system' and settings['tools']['autoBehavior']['enabled'] and not request.is_app_bot and not request.is_sub_agent:
         language_message = AUTO_BEHAVIOR_HINT

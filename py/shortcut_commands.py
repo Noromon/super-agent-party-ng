@@ -438,7 +438,7 @@ async def build_skills_text(lang="zh"):
         settings = await _load_settings_safe()
         cwd = (settings.get("CLISettings", {}) or {}).get("cc_path")
         if cwd:
-            for name, desc in _scan_skills_dir(Path(cwd) / ".agents" / "skills"):
+            for name, desc in _scan_skills_dir(Path(cwd) / ".agent" / "skills"):
                 skills.setdefault(name, desc)
     except Exception:
         pass
@@ -447,8 +447,8 @@ async def build_skills_text(lang="zh"):
     lines = ["可用技能：" if zh else "Available skills:"]
     for name, desc in skills.items():
         lines.append(f"/{name}" + (f" - {desc}" if desc else ""))
-    lines.append("（发送 /技能名 + 你的需求 即可调用，需开启电脑命令行控制并配置工作区）" if zh
-                 else "(Send /skill-name + your request to use it; requires CLI control + a workspace.)")
+    lines.append("（发送 /技能名 + 你的需求 即可调用；CLI 关闭时仅全局技能可见）" if zh
+                 else "(Send /skill-name + your request to use it. With CLI off, only global skills are visible.)")
     return "\n".join(lines)
 
 
