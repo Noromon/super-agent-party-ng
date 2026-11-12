@@ -6,6 +6,7 @@ Phase 1 printed the drift; E-1b aligned the engines (node-extension tools are
 announced on both paths per the S43 decision) and this file now enforces
 strict set equality plus the single-source structure itself.
 """
+import ast
 import json
 import os
 import sqlite3
@@ -157,3 +158,56 @@ class TestNonDefaultConfigDrift:
         _td = open(os.path.join(ROOT, "py", "tool_dispatch.py"),
                    encoding="utf-8-sig").read()
         assert _td.count("for ext_id, tools in ext_mcp_tools.items()") == 1
+
+
+class TestToolkitContract:
+    """S210：tool_assembly 引用的全部 tk["X"] ⊆ _assemble_toolkit 键集。
+
+    S210 事故：S209 给 tool_assembly 加了严格 tk["read_skill_tool_local"] 引用，
+    但 _assemble_toolkit() 构建的真 tk 与 _TOOL_HOOKS 执行调度表是两个字典，
+    漏注册前者——单测假 tk 自带键全绿，线上 CLI 关/acp 每条消息 KeyError→500。
+    本契约钉让漏注册在提交期直接红（tk.get 可选引用不算，天然排除）。
+    """
+
+    def _tk_referenced_keys(self):
+        tree = ast.parse(open(os.path.join(ROOT, "py", "tool_assembly.py"),
+                              encoding="utf-8").read())
+        keys = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Name) and node.value.id == "tk"
+                    and isinstance(node.slice, ast.Constant)
+                    and isinstance(node.slice.value, str)):
+                keys.add(node.slice.value)
+        return keys
+
+    def _toolkit_keys(self):
+        tree = ast.parse(SERVER_SRC)
+        fn = next(n for n in tree.body
+                  if isinstance(n, ast.FunctionDef) and n.name == "_assemble_toolkit")
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
+                return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+        raise AssertionError("_assemble_toolkit must return a dict literal")
+
+    def test_tk_references_registered_in_toolkit(self):
+        referenced = self._tk_referenced_keys()
+        assert referenced, "tool_assembly must reference tk['...'] at all"
+        missing = referenced - self._toolkit_keys()
+        assert not missing, (
+            "tool_assembly 引用而 _assemble_toolkit 未注册的 tk 键: "
+            f"{sorted(missing)} —— 线上命中即 KeyError→500（S210 教训）")
+
+    def test_read_skill_local_key_present(self):
+        assert "read_skill_tool_local" in self._toolkit_keys()
+
+    def test_assemble_toolkit_runtime_has_key(self):
+        # 运行时兜底：函数体内 import 缺失会让 dict 字面量在调用处 NameError，
+        # 静态键集测试查不到，这里真调一次 _assemble_toolkit()
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+            del sys.modules["py"]
+        import server
+        assert "read_skill_tool_local" in server._assemble_toolkit()

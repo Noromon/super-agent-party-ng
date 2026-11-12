@@ -38,6 +38,7 @@ def _assemble_toolkit():
     from py.agent_tool import get_agent_tool
     from py.a2a_tool import get_a2a_tool
     from py.cli_tool import get_tools_for_permission, get_local_tools_for_permission, get_wsl_tools_for_permission
+    from py.cli_tool import read_skill_tool_local
     from py.load_files import file_tool, image_tool, analyze_image_tool, review_image_tool, analyze_images_tool
     from py.pollinations import pollinations_image_tool, openai_image_tool, openai_chat_image_tool
     from py.code_interpreter import e2b_code_tool, local_run_code_tool
@@ -91,6 +92,9 @@ def _assemble_toolkit():
         "auto_behavior_tool": auto_behavior_tool,
         "e2b_code_tool": e2b_code_tool,
         "local_run_code_tool": local_run_code_tool,
+        # S210：S209 恒定公告依赖此键（真 tk 缺键=CLI 关/acp 每条消息 KeyError→500，
+        # 事故实证 2026-11-12；契约钉见 test_tool_assembly_parity）
+        "read_skill_tool_local": read_skill_tool_local,
     }
 
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
