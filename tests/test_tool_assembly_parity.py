@@ -211,3 +211,59 @@ class TestToolkitContract:
             del sys.modules["py"]
         import server
         assert "read_skill_tool_local" in server._assemble_toolkit()
+
+    def _append_extend_tk_keys(self):
+        """tool_assembly 里直接 tools.append(tk["X"]) / tools.extend(tk["X"]) 的键。"""
+        tree = ast.parse(open(os.path.join(ROOT, "py", "tool_assembly.py"),
+                              encoding="utf-8").read())
+        append_keys, extend_keys = set(), set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("append", "extend")
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "tools" and len(node.args) == 1):
+                arg = node.args[0]
+                if (isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name)
+                        and arg.value.id == "tk" and isinstance(arg.slice, ast.Constant)
+                        and isinstance(arg.slice.value, str)):
+                    (append_keys if node.func.attr == "append" else extend_keys).add(arg.slice.value)
+        return append_keys, extend_keys
+
+    def test_announced_tk_values_are_schemas(self):
+        # S211 事故：键已注册但绑了函数本体，公告列表混入裸 callable →
+        # openai 客户端 json.dumps TypeError。键存在性钉抓不到值类型错，
+        # 这里按 append/extend 公告位逐一断言运行时值类型。
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+            del sys.modules["py"]
+        import server
+        tk = server._assemble_toolkit()
+        append_keys, extend_keys = self._append_extend_tk_keys()
+        assert append_keys and extend_keys
+        for key in sorted(append_keys):
+            assert isinstance(tk[key], dict), (
+                f"tk[{key!r}] 公告位（tools.append）必须是 schema dict，"
+                f"实为 {type(tk[key]).__name__}")
+        for key in sorted(extend_keys):
+            value = tk[key]
+            assert isinstance(value, list) and all(isinstance(i, dict) for i in value), (
+                f"tk[{key!r}] 公告位（tools.extend）必须是 list[dict]，"
+                f"实为 {type(value).__name__}")
+
+    def test_cli_off_announces_read_skill_e2e(self, sap, mock_llm):
+        # S210/S211 线上路径端到端钉：CLI 关真实走一遍端点（SAP→LLM 的
+        # json.dumps 序列化即两起事故的炸点），公告必须含 read_skill_tool_local
+        original = _mutate_settings(
+            sap.data_dir, lambda d: d["CLISettings"].update({"enabled": False}))
+        try:
+            mock_llm.script([{"kind": "text", "content": "ok"}])
+            r = post_chat(sap, {"messages": [{"role": "user", "content": "hi"}]})
+            assert r.status_code == 200
+            collect(sse(r))
+            names = _tool_names(mock_llm.history)
+            assert "read_skill_tool_local" in names, (
+                f"CLI 关必须公告 read_skill_tool_local，实到: {sorted(names)[:25]}")
+        finally:
+            _restore_settings(sap.data_dir, original)
