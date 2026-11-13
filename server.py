@@ -4196,6 +4196,23 @@ async def _stream_gate_check(_st, tools_now):
     _st["gate_retries"] = nth
     return "block", _gate_note_text(open_items, nth)
 
+def _stream_first_round_leak_note(_st, request, tools, full_content):
+    """S213：首轮正文泄漏工具调用（还没进过工具循环）→通知体+自纠注记+预算记账。
+    注入时返回通知 chunk（调用方 yield 并做自纠重入），否则 None。"""
+    from py.tool_call_guard import (build_correction_message,
+                                    declared_tool_names, detect_leaked_calls)
+    _fl, _fd = detect_leaked_calls(full_content), declared_tool_names(tools)
+    if not (_fl and _fd) or _st_cancelled(_st):
+        return None
+    request.messages.append({"role": "user", "content": build_correction_message(_fl, _fd),
+                             "name": "system_note"})
+    _st["tcg_retries"] = _st.get("tcg_retries", 0) + 1
+    logging.getLogger("app").info("[TCG] 首轮正文泄漏未声明工具调用，自纠重入: %s", _fl)
+    return _tool_notice_chunk(
+        "⚠️ 畸形工具调用（已拦截，未执行）",
+        "模型把调用块以纯文本写入正文：%s。已要求改用结构化调用重发。" % ", ".join(map(str, _fl[:6])))
+
+
 RESUME_NUDGE_TEXT = (
     "【系统提示】上面的工具结果已收到。工具的“成功”仅代表这一处操作完成，"
     "不代表用户的原始任务已全部完成。如果任务仍有未完成的步骤（继续修改、读回验证、运行测试等），"
@@ -5651,6 +5668,10 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
                     "content": build_correction_message(_leaked, _declared),
                     "name": "system_note",  # S166：元频道注记
                 })
+                # S213：重发轮必须携带刚注入的自纠注记。旧版 create 用的 msg 是
+                # 本轮入口处的 deepcopy——注记只落了 request.messages，重试请求
+                # 永远看不见 did-you-mean（S163 安慰剂缺陷，e2e 实锤 2026-11-13）
+                msg = request.messages
                 logging.getLogger("app").info(
                     "[TCG] 正文泄漏未声明工具调用，自纠重试 %d/%d: %s",
                     _retries + 1, _repair_max, _leaked)
@@ -5664,19 +5685,32 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             content_append(request.messages, 'assistant', full_content)
             _st["_lr_keep_chars"] = _st.get("_lr_keep_chars", 0) + len(full_content)  # S207
             # S183(T-C) 完成闸门：todo 未清即收尾 → 打回续跑（上限 GATE_MAX）
-            if not _leaked:
-                _g_act, _g_payload = await _stream_gate_check(_st, _tools_now)
-                if _g_act == "block":
-                    request.messages.append({"role": "user", "content": _g_payload,
-                                             "name": "system_note"})
-                    logging.getLogger("app").info("[Gate] todo 未清即收尾，完成闸门打回: %s", _g_payload[:40])
-                    continue
-                if _g_act == "exhaust":
-                    yield _tool_notice_chunk(
-                        "⚠️ 任务未完结即收尾",
-                        f"todo 仍有 {len(_g_payload)} 项未收口，闸门返工上限已达，按收尾放行。")
-                    logging.getLogger("app").warning(
-                        "[Gate] todo 未清收尾放行（闸门 %d 用尽）：%d 项", GATE_MAX, len(_g_payload))
+            # S213：泄漏终结也过闸门——旧版 if not _leaked 让泄漏成为唯一绕过闸门的
+            # 收尾路径：todo 未清照样静默终结（长任务事故实证 2026-11-13 20:48）。
+            # 打回时把 did-you-mean 一并附上，模型重发时手里就有正确名。
+            _g_act, _g_payload = await _stream_gate_check(_st, _tools_now)
+            if _g_act == "block":
+                if _leaked:
+                    _g_payload = build_correction_message(_leaked, _declared) + "\n" + _g_payload
+                request.messages.append({"role": "user", "content": _g_payload,
+                                         "name": "system_note"})
+                msg = request.messages  # S213：闸门注记必须进重发轮（同上）
+                logging.getLogger("app").info("[Gate] todo 未清即收尾，完成闸门打回: %s (leaked=%s)",
+                                              _g_payload[:40], bool(_leaked))
+                continue
+            if _g_act == "exhaust":
+                yield _tool_notice_chunk(
+                    "⚠️ 任务未完结即收尾",
+                    f"todo 仍有 {len(_g_payload)} 项未收口，闸门返工上限已达，按收尾放行。"
+                    + ("（工具调用连续畸形后最终收尾；回复「继续」可再推进。）" if _leaked else ""))
+                logging.getLogger("app").warning(
+                    "[Gate] todo 未清收尾放行（闸门 %d 用尽, leaked=%s）：%d 项",
+                    GATE_MAX, bool(_leaked), len(_g_payload))
+        if tool_calls and _st.get("tcg_retries"):
+            # S213：泄漏后经结构化调用恢复推进，旧账减一——只惩罚连续泄漏，
+            # 不惩罚隔了长时间正常推进后的新事故（20:48 事故：额度被 4 分钟前的
+            # 两次泄漏烧光，期间几十次成功调用视而不见）
+            _st["tcg_retries"] = _st["tcg_retries"] - 1
         _st["tc_round"] = tool_calls
         return
 
@@ -6804,11 +6838,22 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             search_not_done = _st["snot"]
             search_task = _st["stask"]
 
+        # S213：首轮正文泄漏（还没进过工具循环）旧版完全没有 TCG——通知、自纠、
+        # 闸门三缺，静默终结与 20:48 事故同族。补通知+自纠注记，并借一轮重入
+        # 交 second_round 走同一套自纠/闸门（计入同一预算，上限不变）。
+        _tcg_reentry = False
+        if not tool_calls and full_content and not _st_cancelled(_st):
+            _tcg_not = _stream_first_round_leak_note(_st, request, tools, full_content)
+            if _tcg_not:
+                yield _tcg_not
+                _tcg_reentry = True
         reasoner_messages = copy.deepcopy(request.messages)
         _tool_loop_count = 0
         _max_tool_iterations = int(settings.get("max_tool_iterations", 100) or 100)
         force_no_tools = False
-        while tool_calls or search_not_done:
+        results = None  # S213：重入轮/纯 DRS 轮不进 tool 分支，先置空（原为潜在未定义引用）
+        while tool_calls or search_not_done or _tcg_reentry:
+            _tcg_reentry = False
             _tool_loop_count += 1
             if not _drs_round_cap(_tool_loop_count, _max_tool_iterations, search_not_done, tool_calls, "流式"):
                 search_not_done, tool_calls = False, []

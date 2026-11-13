@@ -229,7 +229,9 @@ class TestSecondRoundSelfCorrect:
         rounds = [(LEAKED, []), ("", [{"id": "c1"}])]
         _st, client, request, frames = _run_second_round(rounds, tools=self.TOOLS)
         assert len(client.calls) == 2                      # 重发一次
-        assert _st["tcg_retries"] == 1
+        # 本 harness 的轮末返回即成功轮，S213 衰减规则把预算计数扣回 0；
+        # 重发次数与注记内容仍由上一行与下面的断言覆盖。
+        assert _st["tcg_retries"] == 0
         roles = [m.get("role") for m in request.messages]
         assert roles == ["user", "assistant", "user"]      # 中和版+纠正消息
         assert "edit_file_tool_patch_tool_local" not in request.messages[1]["content"]
