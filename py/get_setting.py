@@ -57,6 +57,7 @@ EXT_DIR = os.path.join(USER_DATA_DIR, "ext")
 DEFAULT_ASR_DIR = os.path.join(USER_DATA_DIR, 'asr')
 DEFAULT_TTS_DIR = os.path.join(USER_DATA_DIR, 'tts')
 DEFAULT_EBD_DIR = os.path.join(USER_DATA_DIR, 'ebd')
+SCREEN_WATCH_DIR = os.path.join(USER_DATA_DIR, 'screen_watch')
 
 # --- 跨平台全局Skills路径 ---
 def get_global_skills_dir():

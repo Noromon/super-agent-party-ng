@@ -52,6 +52,7 @@
     ['visionControlSettings', 'visionControlSettings'],
     ['loveSettings', 'loveSettings'],
     ['diarySettings', 'diarySettings'],
+    ['screenWatchSettings', 'screenWatchSettings'],
     ['ccSettings', 'ccSettings'],
     ['qcSettings', 'qcSettings'],
     ['dsSettings', 'dsSettings'],

@@ -503,6 +503,7 @@ locales = {}
 sleep_guard = None
 scheduler_task = None
 diary_engine_task = None
+screen_watcher_task = None
 _TOOL_HOOKS = {}
 # 1. 先清空系统可能给错的条目
 for ext in ("js", "mjs", "css", "html", "htm", "json", "xml", "map", "svg"):
@@ -808,6 +809,43 @@ def _notify_center_startup():
     _notifc.emit("system", "后端启动完成")
 
 
+def _boot_background_engines(settings):
+    """M3(S215)：日记+旁观者后台引擎启动（自 lifespan 抽出，保持 lifespan 只减不涨）。
+    循环常驻、未启用时空转；保存设置经 update_config 热更新。返回 (diary, watcher) task。"""
+    diary_task = watcher_task = None
+    try:
+        from py.diary_engine import global_diary_engine
+        global_diary_engine.update_config((settings or {}).get("diarySettings"))
+        diary_task = asyncio.create_task(global_diary_engine.start())
+    except Exception as e:
+        logging.getLogger("app").error(f"日记引擎启动异常: {e}")
+    try:
+        from py.screen_watcher import global_screen_watcher
+        global_screen_watcher.update_config((settings or {}).get("screenWatchSettings"))
+        watcher_task = asyncio.create_task(global_screen_watcher.start())
+    except Exception as e:
+        logging.getLogger("app").error(f"旁观引擎启动异常: {e}")
+    return diary_task, watcher_task
+
+
+def _shutdown_background_engines(diary_task, watcher_task):
+    """M3(S215)：日记+旁观者后台引擎停止（自 lifespan 抽出，保持 lifespan 只减不涨）。"""
+    try:
+        if diary_task:
+            from py.diary_engine import global_diary_engine
+            global_diary_engine.stop()
+            diary_task.cancel()
+    except Exception as e:
+        logging.getLogger("app").info(f"日记引擎停止异常: {e}")
+    try:
+        if watcher_task:
+            from py.screen_watcher import global_screen_watcher
+            global_screen_watcher.stop()
+            watcher_task.cancel()
+    except Exception as e:
+        logging.getLogger("app").info(f"旁观引擎停止异常: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     sap_auth.write_token_file(USER_DATA_DIR)
@@ -847,7 +885,7 @@ async def lifespan(app: FastAPI):
     )
     
     # 2. 解包结果
-    global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard, diary_engine_task
+    global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard, diary_engine_task, screen_watcher_task
     _, _, locales, settings, local_timezone = results
     
     # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
@@ -903,15 +941,8 @@ async def lifespan(app: FastAPI):
     scheduler = AgentScheduler(settings)
     scheduler_task = asyncio.create_task(scheduler.start_loop())
 
-    # --- [日记系统引擎初始化] ---
-    # 引擎循环常驻，未启用时空转；保存设置时通过 update_config 热更新。
-    try:
-        from py.diary_engine import global_diary_engine
-        global_diary_engine.update_config((settings or {}).get("diarySettings"))
-        diary_engine_task = asyncio.create_task(global_diary_engine.start())
-    except Exception as e:
-        logging.getLogger("app").error(f"日记引擎启动异常: {e}")
-        diary_engine_task = None
+    # --- [后台引擎：日记 + S215 旁观者] ---
+    diary_engine_task, screen_watcher_task = _boot_background_engines(settings)
 
     # --- [日志系统初始化] ---
     from py.log_setup import setup_logger
@@ -1102,13 +1133,7 @@ async def lifespan(app: FastAPI):
 
     if scheduler_task:
         scheduler_task.cancel()
-    try:
-        if diary_engine_task:
-            from py.diary_engine import global_diary_engine
-            global_diary_engine.stop()
-            diary_engine_task.cancel()
-    except Exception as e:
-        logging.getLogger("app").info(f"日记引擎停止异常: {e}")
+    _shutdown_background_engines(diary_engine_task, screen_watcher_task)
     ext_ids = list(node_mgr.exts.keys())
     for ext_id in ext_ids:
         try: await node_mgr.stop(ext_id)
@@ -9492,6 +9517,11 @@ async def _ws_save_settings(websocket: WebSocket, data: dict):
             global_diary_engine.update_config(current.get("diarySettings"))
         except Exception as _de:
             logger.info(f"日记引擎配置同步异常: {_de}")
+        try:
+            from py.screen_watcher import global_screen_watcher
+            global_screen_watcher.update_config(current.get("screenWatchSettings"))
+        except Exception as _swe:
+            logger.info(f"旁观引擎配置同步异常: {_swe}")
         try:
             from py.token_guard import apply_setting as _tg_apply_setting
             _tg_apply_setting(current.get("eosGuard"))  # S160：净化总开关热更新
