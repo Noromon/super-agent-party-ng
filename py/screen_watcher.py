@@ -21,6 +21,7 @@ from typing import Optional
 
 from py import llm_gate
 from py import screen_memory
+from py import screen_speak
 from py.get_setting import SCREEN_WATCH_DIR, load_settings
 from py.llm_recovery import acreate
 
@@ -239,9 +240,14 @@ class ScreenWatcher:
             self._last_hash, self._last_rgb = h, cur_rgb
             data_uri = encode_jpeg_data_uri(shot, self._cfg_int("maxImageWidth", 768))
             t0 = time.time()
-            ev = parse_vlm_json(await self._vlm(vision, data_uri))
+            parsed = parse_vlm_json(await self._vlm(vision, data_uri))
             self._cooldown_until = 0.0
-            await asyncio.to_thread(self._append_event, title, ev, round(time.time() - t0, 1))
+            now = time.time()
+            ev = {"ts": round(now, 1),
+                  "iso": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "title": (title or "")[:120], "took_s": round(now - t0, 1), **parsed}
+            await asyncio.to_thread(self._append_event, ev)
+            await self._maybe_speak(ev)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -258,14 +264,41 @@ class ScreenWatcher:
                 "[ScreenWatcher] vision 角色未启用/未配置，旁观已退避"
                 "（请在设置→视觉模型 配置后自动恢复）")
 
-    def _append_event(self, title, ev, took_s):
+    def _append_event(self, ev):
         os.makedirs(SCREEN_WATCH_DIR, exist_ok=True)
-        rec = {"ts": round(time.time(), 1),
-               "iso": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-               "title": (title or "")[:120], "took_s": took_s, **ev}
         with open(os.path.join(SCREEN_WATCH_DIR, "screen_log.jsonl"), "a",
                   encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+
+    async def _maybe_speak(self, ev):
+        """S218：高重要度事件主动发言——防骚扰闸门为 screen_speak 纯函数；发送
+        复用 behavior 平台 handler 契约（空 chat_id=平台展开用户配置的行为目标，
+        频道配置体验与行为系统一致）。发言失败绝不影响观察主链路。"""
+        cfg = self.config.get("speak")
+        if not isinstance(cfg, dict) or not cfg.get("enabled", False):
+            return
+        try:
+            from py.behavior_engine import global_behavior_engine
+            state = await asyncio.to_thread(screen_speak.load_state)
+            ok, reason = screen_speak.should_speak(cfg, ev, state, time.time())
+            if not ok:
+                if screen_speak.is_busy_reason(reason):
+                    logging.getLogger("app").info(f"[旁观发言] 本次不发: {reason}")
+                return
+            platforms = screen_speak.target_platforms(
+                cfg, list(global_behavior_engine.handlers.keys()))
+            if not platforms:
+                logging.getLogger("app").warning(
+                    "[旁观发言] 无可用平台 handler（对应 bot 未启用？）")
+                return
+            item = screen_speak.build_behavior_item(ev)
+            for p in platforms:
+                asyncio.create_task(global_behavior_engine.handlers[p]("", item))
+            screen_speak.record_sent(state, time.time())
+            await asyncio.to_thread(screen_speak.save_state, state)
+            logging.getLogger("app").info(f"[旁观发言] 已投递行为通道: {platforms}")
+        except Exception as e:
+            logging.getLogger("app").warning(f"[旁观发言] 投递失败: {e}")
 
     # ---------------- 真机接缝（单测整体替换，零真机依赖） ----------------
 
