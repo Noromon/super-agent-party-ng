@@ -594,6 +594,11 @@
                           <i class="fa-solid fa-person-running"></i>
                         </el-button>
 
+                      <!-- S220 屏幕旁观模式快捷开关（可选列表 screenWatchButton 控制可见性；开关即存即热更新引擎） -->
+                      <el-button :title="t('screenWatchButton')" @click="screenWatchSettings.enabled=!screenWatchSettings.enabled; autoSaveSettings();" class="icon-btn screen-watch-btn" :type="screenWatchSettings.enabled ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'screenWatchButton')?.enabled&&!isCapsuleMode" circle>
+                          <i class="fa-solid fa-video"></i>
+                        </el-button>
+
                       <!-- 1. 群聊模式开关 -->
                       <el-button :title="t('groupChatSettings')" v-if="MoreButtonDict.find(b => b.name === 'groupChatBotton')?.enabled && !isCapsuleMode" @click="showGroupSettingsDialog = true" class="icon-btn group-chat-btn" :type="isGroupMode ? 'primary' : 'default'" circle>
                           <i class="fa-solid fa-users"></i>

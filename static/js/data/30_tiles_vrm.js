@@ -123,6 +123,7 @@ Object.assign(vue_data, {
       {"name": "thaButton", "enabled": true},
       {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
+      {"name": "screenWatchButton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
 
@@ -161,6 +162,7 @@ Object.assign(vue_data, {
       {"name": "thaButton", "enabled": true},
       {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
+      {"name": "screenWatchButton", "enabled": false},
       {"name": "groupChatBotton", "enabled": true},
     ],
 
@@ -199,6 +201,7 @@ Object.assign(vue_data, {
       {"name": "thaButton", "enabled": true},
       {"name": "soulxButton", "enabled": true},
       {"name": "behaviorBotton", "enabled": false},
+      {"name": "screenWatchButton", "enabled": false},
       {"name": "groupChatBotton", "enabled": false},
     ],
 

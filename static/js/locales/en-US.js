@@ -447,6 +447,7 @@ window.lang_enUS = {
     'contentSafety': 'Content Safety Filter',
     'contentSafetyNotice': 'Automatically filters sensitive content from AI conversations using local keyword lists. No internet required, no data uploaded.',
     // S219 Screen Observer
+    'screenWatchButton': 'Screen Observer',
     'ScreenWatchSystem': 'Screen Observer',
     'screenWatchSystemNotice': 'When enabled, the AI observes your screen at a near-real-time pace via the vision model and builds text-based episodic memory (screenshots themselves are never stored). Observation runs entirely on this machine; with proactive messages on, it may gently reach out through configured channels when something notable happens. Requires a vision model (Model Config → Vision); observation backs off automatically when it is not configured.',
     'screenWatchCapture': 'Capture & Privacy',

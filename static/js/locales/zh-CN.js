@@ -447,6 +447,7 @@ window.lang_zhCN = {
     'contentSafety': '内容安全过滤',
     'contentSafetyNotice': '启用后将自动拦截AI对话中的敏感内容。本功能使用本地关键词列表，无需联网，不会上传任何数据。',
     // S219 屏幕旁观系统
+    'screenWatchButton': '屏幕旁观模式',
     'ScreenWatchSystem': '屏幕旁观系统',
     'screenWatchSystemNotice': '开启后，AI 以亚实时节奏借助视觉模型观察屏幕内容并生成文字化情景记忆（截图本身不落盘）。观察完全在本机进行；配合主动发言，可在值得关注的时刻经配置频道轻声提醒。需先配置视觉模型（模型配置→Vision），未配置时观察自动退避。',
     'screenWatchCapture': '采集与隐私',
