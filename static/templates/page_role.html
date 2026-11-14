@@ -3201,6 +3201,160 @@
                   </template>
                 </el-dialog>
               </div>
+              <!-- S219 屏幕旁观系统界面 -->
+              <div v-show="subMenu === 'screenWatch'" class="page mcp-container">
+
+                <!-- 顶部全局 Banner -->
+                <div class="market-link-banner behavior-banner">
+                  <div class="banner-main" style="justify-content: space-between; padding: 0 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                      <div class="banner-icon-box">
+                        <i class="fa-solid fa-video"></i>
+                      </div>
+                      <div class="banner-text">
+                        <h3>{{ t('ScreenWatchSystem') || '屏幕旁观系统' }}</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px;">
+                          {{ t('screenWatchSystemNotice') || '开启后，AI 以亚实时节奏借助视觉模型观察屏幕内容并生成文字化情景记忆（截图本身不落盘）。观察完全在本机进行；配合主动发言，可在值得关注的时刻经配置频道轻声提醒。需先配置视觉模型（模型配置→Vision），未配置时观察自动退避。' }}
+                        </p>
+                      </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <span style="font-weight: bold;">{{ t('enable') }}</span>
+                      <el-switch v-model="screenWatchSettings.enabled" @change="autoSaveSettings"
+                        style="--el-switch-on-color: #13ce66;"></el-switch>
+                    </div>
+                  </div>
+                </div>
+
+                <el-form :model="screenWatchSettings" class="settings-form" label-position="top">
+
+                  <!-- 采集与隐私 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-camera"></i></el-icon>
+                          {{ t('screenWatchCapture') || '采集与隐私' }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <div class="sub-config-box">
+                        <el-form-item :label="t('screenWatchInterval') || '截图观察间隔（秒）'" class="form-item-align" label-position="left">
+                          <el-slider v-model="screenWatchSettings.intervalSeconds" :min="2" :max="60" :step="1"
+                            show-input style="width: 100%;" @change="autoSaveSettings"></el-slider>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchPrivacyKeywords') || '隐私黑名单窗口关键词'">
+                          <el-select v-model="screenWatchSettings.privacyKeywords" multiple filterable
+                            allow-create default-first-option :reserve-keyword="false" style="width: 100%;"
+                            :placeholder="t('screenWatchPrivacyPlaceholder') || '输入关键词回车添加（如 1Password、密码管理器）'"
+                            @change="autoSaveSettings">
+                            <el-option v-for="k in ['1Password','KeePass','LastPass','Bitwarden','Dashlane','密码管理器','凭据管理']"
+                              :key="k" :label="k" :value="k"></el-option>
+                          </el-select>
+                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                            {{ t('screenWatchPrivacyNotice') || '前台窗口标题命中任一关键词时该帧直接跳过、不进入视觉模型；留空表示沿用内置密码管理器黑名单。' }}
+                          </div>
+                        </el-form-item>
+                        <el-alert type="info" :closable="false" class="mb-2">
+                          <div class="alert-content">
+                            {{ t('screenWatchDataNotice') || '截图仅即时分析、不落盘；只保存文字化摘要（screen_watch 目录，到期自动清理）。' }}
+                          </div>
+                        </el-alert>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 记忆保留 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-database"></i></el-icon>
+                          {{ t('screenWatchMemory') || '记忆保留' }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <div class="sub-config-box">
+                        <el-form-item :label="t('screenWatchRetention') || '事件明细保留（小时）'" class="form-item-align" label-position="left">
+                          <el-slider v-model="screenWatchSettings.retentionHours" :min="12" :max="168" :step="12"
+                            show-input style="width: 100%;" @change="autoSaveSettings"></el-slider>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchDigestDays') || '每日摘要保留（天）'" class="form-item-align" label-position="left">
+                          <el-input-number v-model="screenWatchSettings.digestRetentionDays" :min="7" :max="90"
+                            controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchDigestHour') || '每日摘要生成时刻（点）'" class="form-item-align" label-position="left">
+                          <el-input-number v-model="screenWatchSettings.digestHour" :min="0" :max="23"
+                            controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
+                        </el-form-item>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 主动发言 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-comment-dots"></i></el-icon>
+                          {{ t('screenWatchSpeak') || '主动发言' }}
+                        </span>
+                        <el-switch v-model="screenWatchSettings.speak.enabled" @change="autoSaveSettings"
+                          style="margin-left: 12px;"></el-switch>
+                      </div>
+                    </div>
+                    <div class="tool-content">
+                      <div class="sub-config-box">
+                        <el-alert v-if="screenWatchSettings.speak.enabled" type="warning" :closable="false" class="mb-2">
+                          <div class="alert-content">
+                            {{ t('screenWatchSpeakNotice') || '观察到高重要度事件时经行为系统投递；由角色卡自主决定要不要提一句，判断不值得打扰时会保持沉默（空消息自动吞掉）。' }}
+                          </div>
+                        </el-alert>
+                        <el-form-item :label="t('screenWatchMinImportance') || '触发重要度阈值（1-5）'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
+                          <el-slider v-model="screenWatchSettings.speak.minImportance" :min="1" :max="5" :step="1"
+                            show-input style="width: 100%;" @change="autoSaveSettings"></el-slider>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchPlatforms') || '发言通道'" v-if="screenWatchSettings.speak.enabled">
+                          <el-checkbox-group v-model="screenWatchSettings.speak.platforms" @change="autoSaveSettings">
+                            <el-checkbox label="all" value="all" border>all</el-checkbox>
+                            <el-checkbox v-for="p in ['xmpp','telegram','discord','qq','feishu','slack','dingtalk']"
+                              :key="p" :label="p" :value="p" border>{{ p }}</el-checkbox>
+                          </el-checkbox-group>
+                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                            {{ t('screenWatchPlatformsNotice') || 'all = 所有已启用的 bot 通道；未启用的通道自动跳过。冷却与每日上限防打扰。' }}
+                          </div>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchCooldown') || '发言冷却（秒）'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
+                          <el-input-number v-model="screenWatchSettings.speak.cooldownSeconds" :min="60" :max="7200" :step="60"
+                            controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchDailyLimit') || '每日发言上限'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
+                          <el-input-number v-model="screenWatchSettings.speak.dailyLimit" :min="1" :max="20"
+                            controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
+                        </el-form-item>
+                        <el-form-item :label="t('screenWatchSpeakQuiet') || '发言静默时段（点）'" v-if="screenWatchSettings.speak.enabled">
+                          <el-row :gutter="12" style="width: 100%;">
+                            <el-col :span="12">
+                              <el-input-number v-model="screenWatchSettings.speak.quietStart" :min="0" :max="23"
+                                controls-position="right" style="width: 100%;" @change="autoSaveSettings"></el-input-number>
+                            </el-col>
+                            <el-col :span="12">
+                              <el-input-number v-model="screenWatchSettings.speak.quietEnd" :min="0" :max="23"
+                                controls-position="right" style="width: 100%;" @change="autoSaveSettings"></el-input-number>
+                            </el-col>
+                          </el-row>
+                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                            {{ t('screenWatchSpeakQuietHint') || '此时间段内不主动发言（起止相同表示不静默）。' }}
+                          </div>
+                        </el-form-item>
+                      </div>
+                    </div>
+                  </div>
+
+                </el-form>
+              </div>
             </div>
           </div>
         </div>
