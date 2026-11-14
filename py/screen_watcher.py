@@ -20,6 +20,7 @@ import time
 from typing import Optional
 
 from py import llm_gate
+from py import screen_memory
 from py.get_setting import SCREEN_WATCH_DIR, load_settings
 from py.llm_recovery import acreate
 
@@ -149,6 +150,7 @@ class ScreenWatcher:
         self._last_hash = None
         self._last_rgb = None
         self._cooldown_until = 0.0
+        self._last_maintain = 0.0
         self._vlm_missing_warned = False
 
     def update_config(self, cfg):
@@ -197,9 +199,17 @@ class ScreenWatcher:
     # ---------------- 循环 ----------------
 
     async def _tick(self):
+        # S216：记忆层维护（48h 明细清理/30 天摘要清理/昨日摘要）——不受 enabled
+        # 支配：旁观停用后存量数据仍照常到期清理。每小时节流，失败仅告警。
+        now = time.time()
+        if now - self._last_maintain >= self._cfg_int("maintainSeconds", 3600):
+            self._last_maintain = now
+            try:
+                await asyncio.to_thread(screen_memory.maintain, self.config)
+            except Exception as e:
+                logging.getLogger("app").warning(f"[ScreenWatcher] 记忆层维护异常: {e}")
         if not self.config.get("enabled", False) or not GUI_AVAILABLE:
             return
-        now = time.time()
         if now < self._cooldown_until or now - self._last_capture < self._interval():
             return
         if self._observe_task is not None and not self._observe_task.done():
