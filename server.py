@@ -3557,6 +3557,24 @@ Assistant: 表格如下：
         content_append(request.messages, 'system', A2UI_messages)
 
 
+async def _inject_screen_context(request, settings, user_prompt):
+    """S217：旁观模式屏幕上下文注入。仅旁观启用+意图词命中触发（保守门控）；
+    事件摘要来自 VLM 观察屏幕，屏幕文字属外部不可信源，注入前必须 neutralize。
+    形态与日记回忆同构：追加 system 块，非 user 消息，不落库、前端无感。"""
+    try:
+        cfg = (settings or {}).get("screenWatchSettings", {}) or {}
+        if not cfg.get("enabled", False) or request.is_sub_agent:
+            return
+        from py import screen_memory
+        block = await asyncio.to_thread(screen_memory.build_context_block, user_prompt)
+        if not block:
+            return
+        content_append(request.messages, 'system', _neutralize(block, store="screen-context"))
+        logging.getLogger("app").info("👁 [旁观注入] 本轮已注入屏幕观察上下文")
+    except Exception as e:
+        logging.getLogger("app").info(f"[旁观注入] 失败: {e}")
+
+
 def _inject_task_checkpoint(request, cli_settings, engine):
     """L3 checkpoint: replay task state compressed within 7 days. (M-3 split)"""
     if cli_settings.get("enabled", False) and engine in ("local", "ds"):
@@ -7118,6 +7136,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
                     logging.getLogger("app").info(f"📔 [日记集成] 已注入 {len(recent)} 条日记到对话上下文")
             except Exception as e:
                 logging.getLogger("app").info(f"[日记集成] 提取日记失败: {e}")
+        # ========== S217 旁观模式：意图命中 → 屏幕观察上下文注入 ==========
+        await _inject_screen_context(request, settings, _extract_text_content(user_prompt))
         request = await tools_change_messages(request, settings)
         # ========== 对话缓冲：记录用户消息用于闲时自动总结 ==========
         try:

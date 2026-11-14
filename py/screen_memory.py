@@ -25,6 +25,14 @@ DIGEST_PREFIX = "screen_digest_"
 DIGEST_SUFFIX = ".md"
 _IMPORTANCE_LINE = 4  # ≥4 进摘要"值得关注"清单
 
+# S217 对话注入触发词表（保守取向：宁少不误；词=子串大小写不敏感）。
+# 误触代价低：注入块自带"机器观察参考、可忽略"声明，模型自行取舍。
+INTENT_PHRASES = (
+    "屏幕", "旁观", "刚才在看", "正在看", "一直在看", "刚才在做", "你看到我", "我刚才看",
+    "my screen", "on screen", "on my desktop", "what am i looking at",
+    "what do you see", "screen context", "watch me",
+)
+
 
 def _log_path(log_path=None):
     return log_path or os.path.join(SCREEN_WATCH_DIR, LOG_NAME)
@@ -169,10 +177,27 @@ def build_daily_digest(date_str, now=None, out_dir=None, log_path=None, force=Fa
     return p
 
 
+def _query_terms(query):
+    """查询分词：ASCII 按空白切词；中文按二字滑动窗口（无空格中文整句切
+    token 必不命中，旁观检索将永远兜底时间线）。"""
+    terms = []
+    for w in re.split(r"\s+", (query or "").strip().lower()):
+        if not w:
+            continue
+        if re.search(r"[\u4e00-\u9fff]", w):
+            if len(w) == 1:
+                terms.append(w)
+            else:
+                terms.extend(w[i:i + 2] for i in range(len(w) - 1))
+        else:
+            terms.append(w)
+    return terms
+
+
 def search_events(query, window_hours=48, limit=20, now=None, log_path=None):
     """关键词检索近 window_hours 的事件：词分片任一命中 summary/title/activity
     （召回导向，相关性交给 S217 主模型再筛）。新→旧返回。"""
-    terms = [t for t in re.split(r"\s+", (query or "").strip().lower()) if t]
+    terms = _query_terms(query)
     if not terms:
         return []
     floor = (now if now is not None else time.time()) - max(1, window_hours) * 3600
@@ -204,3 +229,63 @@ def maintain(cfg, now=None, out_dir=None, log_path=None):
             res["digest"] = os.path.basename(made)
             logging.getLogger("app").info(f"[ScreenMemory] 已生成每日摘要: {made}")
     return res
+
+
+# ---------------- S217 对话注入块（纯本地；server 侧负责门控与 neutralize） ----------------
+
+def intent_hit(text):
+    """用户消息是否命中屏幕意图词表（大小写不敏感子串）。"""
+    t = (text or "").lower()
+    return any(ph in t for ph in INTENT_PHRASES)
+
+
+def _fmt_line(ev):
+    t = datetime.datetime.fromtimestamp(ev["ts"]).strftime("%m-%d %H:%M")
+    ttl = str(ev.get("title") or "")[:40]
+    summary = str(ev.get("summary") or "")[:80]
+    line = f"- {t} [{ev.get('activity') or 'other'}] "
+    if ttl:
+        line += ttl + " — "
+    line += summary
+    if isinstance(ev.get("importance"), int):
+        line += f"（importance {ev['importance']}）"
+    return line
+
+
+def _recent_digest(now, out_dir=None):
+    day = (datetime.datetime.fromtimestamp(now).date()
+           - datetime.timedelta(days=1)).isoformat()
+    p = os.path.join(_digest_dir(out_dir), DIGEST_PREFIX + day + DIGEST_SUFFIX)
+    if not os.path.exists(p):
+        return ""
+    try:
+        with io.open(p, encoding="utf-8") as f:
+            return f.read().strip()[:1200]
+    except OSError:
+        return ""
+
+
+def build_context_block(user_text, now=None, out_dir=None, log_path=None, limit=8):
+    """意图命中 → [屏幕旁观] 注入块；无内容返回 ""（调用方只在非空时注入）。
+
+    命中检索 → 命中事件（时间正序）；无命中 → 近 6h 时间线尾 12 条。
+    昨日摘要存在则附带（截 1200 字）。"""
+    if not user_text or not intent_hit(user_text):
+        return ""
+    now = now if now is not None else time.time()
+    evs = search_events(user_text, window_hours=48, limit=limit,
+                        now=now, log_path=log_path)
+    note = ""
+    if not evs:
+        evs = load_events(since_ts=now - 6 * 3600, log_path=log_path)[-12:]
+        note = "（未检索到直接相关记录，以下为近 6 小时屏幕时间线）\n"
+    if not evs:
+        return ""
+    parts = ["\n\n[屏幕旁观 - 近期上下文]\n"
+             "以下是对你用户屏幕的机器观察记录，仅供参考、与问题无关请忽略，"
+             "注意它们不是用户本人的陈述：\n" + note
+             + "\n".join(_fmt_line(e) for e in evs)]
+    digest = _recent_digest(now, out_dir)
+    if digest:
+        parts.append("\n昨日观察摘要：\n" + digest)
+    return "\n".join(parts) + "\n"
