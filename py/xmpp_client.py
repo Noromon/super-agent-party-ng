@@ -44,6 +44,20 @@ NO_SERVICE = frozenset(("service-unavailable", "remote-server-not-found",
                         "item-not-found", "feature-not-implemented"))
 
 
+def resolve_workspace_rel(target, workspace):
+    """S214: markdown 图片的工作区相对路径 → (绝对路径, "")；失败 ("", 原因)。
+    仅解析到工作区 cc_path 内：realpath 严格包含挡 ../ 逃逸与符号链接外指，
+    且必须实存。工作区未启用 / 围栏外 / 文件不存在 三类失败原因进 S164 反馈。"""
+    if not workspace:
+        return "", "工作区未启用（相对路径需启用工作区）"
+    cand = os.path.normpath(os.path.join(workspace, target))
+    if not path_under(cand, [workspace]):
+        return "", "围栏外"
+    if not os.path.isfile(cand):
+        return "", "文件不存在"
+    return cand, ""
+
+
 def pick_upload_services(items, domain):
     """S72: ordered XEP-0363 service candidates. items = [(jid, name), ...]
     disco hits first (in disco order), then the three conventional names."""
@@ -1070,10 +1084,21 @@ class XmppClient:
             pass
         return roots
 
+    async def _workspace_root(self):
+        """S214: markdown 相对路径图片的解析基准——仅工作区 cc_path（不含服务器 cwd）。"""
+        try:
+            settings = await load_settings()
+            return str(((settings.get("CLISettings") or {}).get("cc_path") or "")).strip()
+        except Exception:
+            return ""
+
     async def _send_local_images(self, chat_jid: str, full_text: str):
         roots = await self._fence_roots()
         blocked = []  # S164：(原因, 路径) 收集——静默拦截会让模型以为图已发出
-        for m in re.finditer(r"([A-Za-z]:[\\/][^\s|\"'<>\[\]]+|/[^\s|\"'<>\[\]]+)"
+        # S214：ASCII lookbehind 断头——旧版会把 http://x/a.png 抓成 "p://x/a.png"、
+        # 把 markdown 相对目标 out/a.png 抓成 "/a.png" 造成误拦与误报；仅允许词首的
+        # 真绝对路径（盘符或 / 开头且前面不是 ASCII 词字符/./:/斜杠）进入本管道。
+        for m in re.finditer(r"(?<![A-Za-z0-9_.:/\\-])([A-Za-z]:[\\/][^\s|\"'<>\[\]]+|/[^\s|\"'<>\[\]]+)"
                              r"(" + "|".join(re.escape(e) for e in IMAGE_EXTS) + r")",
                              full_text, re.IGNORECASE):
             raw = m.group(0)
@@ -1096,6 +1121,39 @@ class XmppClient:
             except Exception as e:
                 logging.getLogger("app").error("[XMPP] 图片外发失败: %r", e, exc_info=True)
                 await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(raw)}，{e}）")
+        # S214：markdown 图片的工作区相对路径（![图](output/a.png)）——旧版只扫绝对
+        # 路径，相对目标连管道都不进、静默丢图无反馈。仅解析到工作区 cc_path 内
+        # （realpath 严格包含），成功走同一上传流水线，失败进 blocked 走 S164 闭环。
+        # URL 与绝对路径目标跳过：URL 本就要么直发要么非本管道；绝对路径由上一遍覆盖，避免双发。
+        md_targets = []
+        for m in re.finditer(r"!\[[^\]]*\]\(\s*([^()\s]+)\s*\)", full_text):
+            target = m.group(1)
+            if (re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://", target)
+                    or target.startswith(("/", "\\"))
+                    or re.match(r"^[A-Za-z]:[\\/]", target)):
+                continue
+            if not target.lower().endswith(tuple(IMAGE_EXTS)):
+                continue
+            md_targets.append(target)
+        if md_targets:
+            ws = await self._workspace_root()
+            for target in md_targets:
+                resolved, why = resolve_workspace_rel(target, ws)
+                if not resolved:
+                    logging.getLogger("app").warning("[XMPP] 拒绝相对路径图片: %s（%s）", target, why)
+                    blocked.append((why, target))
+                    continue
+                if not self._xep0363_supported:
+                    await self._send_text(chat_jid, f"（图片暂无法上传：{os.path.basename(resolved)}，"
+                                                    "服务器 XEP-0363 不可用）")
+                    continue
+                try:
+                    url = await self._upload_and_share(chat_jid, resolved)
+                    if not url:
+                        pass  # 具体原因已由 _upload_and_share 发文字并记 app 日志
+                except Exception as e:
+                    logging.getLogger("app").error("[XMPP] 相对路径图片外发失败: %r", e, exc_info=True)
+                    await self._send_text(chat_jid, f"（图片上传失败：{os.path.basename(resolved)}，{e}）")
         if not blocked:
             return
         # S164 外发闭环：拦截必须反馈——注入提醒让下一轮模型自愈重发，
@@ -1112,14 +1170,15 @@ class XmppClient:
             "name": "system_note",  # S166：元频道注记（会话卡渲染过滤，模型上下文保留）
             "content": ("【系统提示】你上一条回复中的图片路径被拦截，图片没有发出（"
                         + detail + ("；另有若干" if len(uniq) > 4 else "") + "）。"
-                        "这些文件不存在或位于允许外发目录之外。若图片交付尚未完成："
-                        "先用 list_files 等工具确认文件的真实绝对路径"
+                        "这些文件不存在或位于允许外发目录之外。"
+                        "工作区内的文件可直接用工作区相对路径外发（如 ![图](output/a.png)）；"
+                        "区外文件请先用 list_files 等工具确认文件的真实绝对路径"
                         "（必须指向实际存在的文件），再以 markdown 图片语法重新发送；"
                         "若本就不需要发图则忽略本提示。"),
         })
         await self._persist_conv(chat_jid)
         await self._send_text(chat_jid, f"⚠ 有 {len(uniq)} 个图片路径被拦截（{names}），"
-                                        "已提醒模型确认真实绝对路径后重发。")
+                                        "已提醒模型修正路径后重发（工作区内图片可用相对路径）。")
 
     async def _upload_and_share(self, chat_jid: str, file_path: str) -> Optional[str]:
         size = os.path.getsize(file_path)
