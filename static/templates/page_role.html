@@ -3226,7 +3226,7 @@
                   </div>
                 </div>
 
-                <el-alert v-if="screenWatchSettings.enabled && !visionSettings.enabled"
+                <el-alert v-if="screenWatchSettings.enabled && !visionSettings.enabled && !settings.unifiedModel"
                   type="warning" show-icon :closable="false" class="mb-2">
                   <div class="alert-content" style="font-weight: bold;">
                     {{ t('screenWatchVisionWarn') || 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。' }}

@@ -595,7 +595,7 @@
                         </el-button>
 
                       <!-- S220 屏幕旁观模式快捷开关（可选列表 screenWatchButton 控制可见性；开关即存即热更新引擎） -->
-                      <el-button :title="(screenWatchSettings.enabled && !visionSettings.enabled) ? t('screenWatchVisionWarn') : t('screenWatchButton')" @click="screenWatchSettings.enabled=!screenWatchSettings.enabled; autoSaveSettings();" class="icon-btn screen-watch-btn" :type="screenWatchSettings.enabled ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'screenWatchButton')?.enabled&&!isCapsuleMode" circle>
+                      <el-button :title="(screenWatchSettings.enabled && !visionSettings.enabled && !settings.unifiedModel) ? t('screenWatchVisionWarn') : t('screenWatchButton')" @click="screenWatchSettings.enabled=!screenWatchSettings.enabled; autoSaveSettings();" class="icon-btn screen-watch-btn" :type="screenWatchSettings.enabled ? 'primary' : 'default'" v-if="MoreButtonDict.find(b => b.name === 'screenWatchButton')?.enabled&&!isCapsuleMode" circle>
                           <i class="fa-solid fa-video"></i>
                         </el-button>
 

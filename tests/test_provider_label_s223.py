@@ -46,7 +46,7 @@ class TestVisionWarnAlert:
     def test_independent_alert_replaces_inline_note(self):
         role = _read("static/templates/page_role.html")
         # 独立 alert 形态
-        i = role.index('v-if="screenWatchSettings.enabled && !visionSettings.enabled"')
+        i = role.index('screenWatchSettings.enabled && !visionSettings.enabled && !settings.unifiedModel')
         seg = role[max(0, i - 160):i + 240]
         assert "el-alert" in seg and 'type="warning"' in seg
         assert ":closable=\"false\"" in seg
@@ -56,4 +56,4 @@ class TestVisionWarnAlert:
     def test_quick_buttons_tooltip_kept(self):
         for page in ("static/templates/page_chat_main.html",
                      "static/templates/page_home.html"):
-            assert "(screenWatchSettings.enabled && !visionSettings.enabled) ? t('screenWatchVisionWarn')" in _read(page), page
+            assert "(screenWatchSettings.enabled && !visionSettings.enabled && !settings.unifiedModel) ? t('screenWatchVisionWarn')" in _read(page), page

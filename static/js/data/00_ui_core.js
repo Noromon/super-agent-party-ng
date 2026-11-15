@@ -69,6 +69,7 @@ Object.assign(vue_data, {
       max_tokens: 8192,    // 默认最大输出长度
       max_rounds: 0,    // 默认最大轮数
       selectedProvider: null,
+      unifiedModel: false, // S224：统一交给主模型（视觉+推理不再用独立角色）
       top_p: 1,
       reasoning_effort: null,
       enableOmniTTS: false,// 是否启用omniTTS

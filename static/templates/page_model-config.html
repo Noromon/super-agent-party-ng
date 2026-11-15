@@ -1042,6 +1042,19 @@
                     </div>
                   </div>
                 </div>
+                <div class="market-link-banner model-config-banner" style="margin-top: -6px; margin-bottom: 14px;">
+                  <div class="banner-main" style="justify-content: space-between; align-items: center; padding: 0 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
+                      <div class="banner-icon-box"><i class="fa-solid fa-link"></i></div>
+                      <div class="banner-text">
+                        <h3 style="margin: 0">{{ t('unifiedModelConfig') }}</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px; line-height: 1.5;">{{ t('unifiedModelHint') }}</p>
+                        <p v-if="settings.unifiedModel" style="margin: 5px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('unifiedModelNeedsVision') }}</p>
+                      </div>
+                    </div>
+                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"/>
+                  </div>
+                </div>
                 <el-form :model="settings" class="settings-form" label-position="top">
                   <div class="tool-item">
                     <div class="tool-header">
@@ -1053,12 +1066,13 @@
                           {{ t('reasonerConfig') }}
                         </span>
                       </div>
-                      <el-switch v-model="reasonerSettings.enabled" @click.stop @change="autoSaveSettings"/>
+                      <el-switch v-model="reasonerSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="autoSaveSettings"/>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('reasoningProvider')" class="form-item-align">
                         <el-select :persistent="false"
                           v-model="reasonerSettings.selectedProvider"
+                          :disabled="settings.unifiedModel"
                           :placeholder="t('selectProvider')"
                           filterable
                           @change="selectReasonerProvider"
@@ -1181,6 +1195,19 @@
                     </div>
                   </div>
                 </div>
+                <div class="market-link-banner model-config-banner" style="margin-top: -6px; margin-bottom: 14px;">
+                  <div class="banner-main" style="justify-content: space-between; align-items: center; padding: 0 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex: 1;">
+                      <div class="banner-icon-box"><i class="fa-solid fa-link"></i></div>
+                      <div class="banner-text">
+                        <h3 style="margin: 0">{{ t('unifiedModelConfig') }}</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px; line-height: 1.5;">{{ t('unifiedModelHint') }}</p>
+                        <p v-if="settings.unifiedModel" style="margin: 5px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('unifiedModelNeedsVision') }}</p>
+                      </div>
+                    </div>
+                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"/>
+                  </div>
+                </div>
                 <el-form :model="settings" class="settings-form" label-position="top">
                   <div class="tool-item">
                     <div class="tool-header">
@@ -1190,12 +1217,13 @@
                           {{ t('visionSettings') }}
                         </span>
                       </div>
-                      <el-switch v-model="visionSettings.enabled" @click.stop @change="handleVisionEnableToggle(visionSettings.enabled)"/>
+                      <el-switch v-model="visionSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="handleVisionEnableToggle(visionSettings.enabled)"/>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('visionProvider')" class="form-item-align">
                         <el-select :persistent="false"
                           v-model="visionSettings.selectedProvider"
+                          :disabled="settings.unifiedModel"
                           :placeholder="t('selectProvider')"
                           filterable
                           @change="selectVisionProvider"

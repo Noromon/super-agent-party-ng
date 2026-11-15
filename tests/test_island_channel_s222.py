@@ -146,7 +146,7 @@ class TestFrontendPins:
         for page in ("static/templates/page_chat_main.html",
                      "static/templates/page_home.html"):
             src = self._read(page)
-            assert "(screenWatchSettings.enabled && !visionSettings.enabled) ? t('screenWatchVisionWarn')" in src, page
+            assert "(screenWatchSettings.enabled && !visionSettings.enabled && !settings.unifiedModel) ? t('screenWatchVisionWarn')" in src, page
 
     def test_locale_keys(self):
         for loc in ("zh-CN", "en-US"):

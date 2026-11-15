@@ -22,7 +22,7 @@ from typing import Optional
 from py import llm_gate
 from py import screen_memory
 from py import screen_speak
-from py.get_setting import SCREEN_WATCH_DIR, load_settings
+from py.get_setting import SCREEN_WATCH_DIR, load_settings, vision_model_cfg
 from py.llm_recovery import acreate
 
 GUI_AVAILABLE = False
@@ -221,7 +221,9 @@ class ScreenWatcher:
     async def _observe_once(self):
         try:
             settings = await load_settings()
-            vision = (settings or {}).get("vision") or {}
+            # S224 统一交给主模型：开启观察用主模型做一手观察（vision_model_cfg 在 unified
+            # 时返回主模型 cfg 且 enabled=True），否则用独立 vision 角色。
+            vision = vision_model_cfg(settings)
             if not vision.get("enabled"):
                 self._warn_vlm_missing()
                 return

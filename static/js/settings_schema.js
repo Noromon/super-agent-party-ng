@@ -129,6 +129,7 @@
       };
     },
     selectedProvider: '',
+    unifiedModel: false,
     top_p: 1,
     reasoning_effort: null,
     enableOmniTTS: false,

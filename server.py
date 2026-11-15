@@ -1420,7 +1420,7 @@ async def get_image_content(image_url: str) -> str:
     url= f"data:{media_type};base64,{base64_image}"
     image_hash = hashlib.md5(image_url.encode()).hexdigest()
     content = ""
-    if settings['vision']['enabled']:
+    if settings['vision']['enabled'] and not settings.get('unifiedModel'):
         # 如果uploaded_files/{item['image_url']['hash']}.txt存在，则读取文件内容，否则调用vision api
         if os.path.exists(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt")):
             with open(os.path.join(UPLOAD_FILES_DIR, f"{image_hash}.txt"), "r", encoding='utf-8') as f:
@@ -1475,7 +1475,7 @@ async def analyze_image(image_url: str, prompt: str) -> str:
     media_type = await get_image_media_type(image_url, base64_image)
     url = f"data:{media_type};base64,{base64_image}"
     
-    if settings['vision']['enabled']:
+    if settings['vision']['enabled'] and not settings.get('unifiedModel'):
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
         if _role_param(settings, 'vision', 'temperature') != 1:
@@ -1513,7 +1513,7 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
         content.append({"type": "text", "text": f"【第{index}张图】"})
         content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{base64_image}"}})
 
-    if settings['vision']['enabled']:
+    if settings['vision']['enabled'] and not settings.get('unifiedModel'):
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
         if _role_param(settings, 'vision', 'temperature') != 1:
@@ -1618,7 +1618,7 @@ async def review_image(image_url: str, prompt: str) -> str:
     })
     
     # 调用VLM
-    if settings['vision']['enabled']:
+    if settings['vision']['enabled'] and not settings.get('unifiedModel'):
         client = AsyncOpenAI(api_key=settings['vision']['api_key'], base_url=settings['vision']['base_url'])
         extra = {}
         if _role_param(settings, 'vision', 'temperature') != 1:
@@ -2633,7 +2633,7 @@ async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> Lis
 async def images_add_in_messages(request_messages: List[Dict], images: List[Dict], settings: dict) -> List[Dict]:
     messages = copy.deepcopy(request_messages)
     
-    if settings['vision']['enabled']:
+    if settings['vision']['enabled'] and not settings.get('unifiedModel'):
         for image in images:
             index = image['index']
             if index < len(messages):
@@ -8764,6 +8764,9 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
         
         # 【修改点1】创建当前请求的专属配置，避免污染全局
         request_settings = current_settings.copy()
+        # S224 统一交给主模型：推理走主模型——请求期副本关闭独立 reasoner（新嵌套 dict 不污染 global，complete+stream 两路均以此为准）
+        if current_settings.get('unifiedModel'):
+            request_settings['reasoner'] = {**current_settings['reasoner'], 'enabled': False}
         active_client = client  # 默认使用主模型
         
         if current_settings['fast']['enabled'] and not request.is_sub_agent:

@@ -586,6 +586,22 @@ def deep_update(target: dict, updates: dict) -> dict:
     return target
 
 
+def vision_model_cfg(settings: dict) -> dict:
+    """S224 统一交给主模型：unifiedModel 开启时，所有\"看图/推理\"的认知角色一律解析到主
+    模型端点/密钥（返回与 vision 角色同形的 dict，enabled 恒 True）；否则原样返回独立
+    vision 角色。非破坏——不回写 settings，仅供读取。主模型须原生多模态（一手前提）。
+    """
+    settings = settings or {}
+    v = settings.get("vision") or {}
+    if not settings.get("unifiedModel"):
+        return v
+    return {**v, "enabled": True,
+            "api_key": settings.get("api_key"),
+            "base_url": settings.get("base_url"),
+            "model": settings.get("model"),
+            "selectedProvider": settings.get("selectedProvider")}
+
+
 async def load_settings():
     await init_db()
     defaults = get_default_settings_sync().copy()

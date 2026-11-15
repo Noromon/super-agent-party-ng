@@ -212,8 +212,30 @@ Object.assign(vue_methods, {
         this.settings.model = provider.modelId;
         this.settings.base_url = provider.url;
         this.settings.api_key = provider.apiKey;
+        if (this.settings.unifiedModel) this.mirrorRolesToMain(provider);
         await this.autoSaveSettings();
       }
+    },
+
+    // S224 统一交给主模型：把主模型端点/密钥/供应商镜像进视觉、推理角色（这两页选择器此时置灰），
+    // 实现"切换主模型时视觉/推理跟着一起切"。仅用于显示与持久化一致；后端 unifiedModel 已忽略这些 role。
+    mirrorRolesToMain(provider) {
+      provider = provider || this.modelProviders.find(p => p.id === this.settings.selectedProvider);
+      const sp = this.settings.selectedProvider;
+      [this.visionSettings, this.reasonerSettings].forEach(function (role) {
+        if (!role) return;
+        role.selectedProvider = sp;
+        if (provider) {
+          role.model = provider.modelId;
+          role.base_url = provider.url;
+          role.api_key = provider.apiKey;
+        }
+      });
+    },
+
+    async handleUnifiedModelToggle() {
+      if (this.settings.unifiedModel) this.mirrorRolesToMain();
+      await this.autoSaveSettings();
     },
 
     async selectFastProvider(providerId) {
