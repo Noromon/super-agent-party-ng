@@ -241,6 +241,11 @@ class ScreenWatcher:
                 return  # 场景未变：跳过 VLM——成本命门，画面不动零调用
             self._last_hash, self._last_rgb = h, cur_rgb
             data_uri = encode_jpeg_data_uri(shot, self._cfg_int("maxImageWidth", 768))
+            # S225：附截图开关 + unifiedModel 双开时复用本次观察帧（VLM 已编码，零额外编码）取裸
+            # base64，否则 None；局部变量随调用结束释放，内存≤1帧、绝不落盘。server 端二次门控兜底。
+            _sp = self.config.get("speak")
+            attach_on = isinstance(_sp, dict) and bool(_sp.get("attachScreenshot")) and bool(settings.get("unifiedModel"))
+            attach_b64 = data_uri.split(",", 1)[1] if attach_on else None
             t0 = time.time()
             parsed = parse_vlm_json(await self._vlm(vision, data_uri))
             self._cooldown_until = 0.0
@@ -249,7 +254,7 @@ class ScreenWatcher:
                   "iso": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   "title": (title or "")[:120], "took_s": round(now - t0, 1), **parsed}
             await asyncio.to_thread(self._append_event, ev)
-            await self._maybe_speak(ev)
+            await self._maybe_speak(ev, attach_b64)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -272,10 +277,12 @@ class ScreenWatcher:
                   encoding="utf-8") as f:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
-    async def _maybe_speak(self, ev):
+    async def _maybe_speak(self, ev, attach_b64=None):
         """S218：高重要度事件主动发言——防骚扰闸门为 screen_speak 纯函数；发送
         复用 behavior 平台 handler 契约（空 chat_id=平台展开用户配置的行为目标，
-        频道配置体验与行为系统一致）。发言失败绝不影响观察主链路。"""
+        频道配置体验与行为系统一致）。发言失败绝不影响观察主链路。
+        S225：attach_b64 非空（attachScreenshot+unifiedModel 双开且本帧可用）时随发言项附帧，
+        仅注入本次发言生成调用，绝不进输出/记忆/落盘。"""
         cfg = self.config.get("speak")
         if not isinstance(cfg, dict) or not cfg.get("enabled", False):
             return
@@ -294,6 +301,8 @@ class ScreenWatcher:
                     "[旁观发言] 无可用平台 handler（对应 bot 未启用？）")
                 return
             item = screen_speak.build_behavior_item(ev)
+            if attach_b64:
+                item.screen_image = attach_b64
             for p in platforms:
                 asyncio.create_task(global_behavior_engine.handlers[p]("", item))
             screen_speak.record_sent(state, time.time())

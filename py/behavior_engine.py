@@ -50,18 +50,26 @@ class BehaviorItem(BaseModel):
     # S222: 旁观发言的观察事实原文（title—summary）。仅 island HUD 通道在生成失败时
     # 回退直发用；其余平台不读此字段，零影响。
     screen_fact: str = ""
+    # S225: 旁观发言附截图——观察帧 jpeg base64（无 data: 前缀）。仅 attachScreenshot 且
+    # unifiedModel 均开启且本次事件帧可用时由 watcher 填入；经 tools_override 透传 extra_body，
+    # 中央在生成发言时把该帧注入本次模型调用消息（deepcopy，不入 request.messages/记忆/落盘）。
+    screen_image: str = ""
 
     def tools_override(self) -> dict:
-        """转成 /v1 请求 extra_body 的工具过滤字段。"""
+        """转成 /v1 请求 extra_body 的字段（工具过滤；S225 附带发言附截图 screen_image）。"""
         mode = (self.tools_mode or "none").lower()
         lst = [t for t in (self.tools_list or []) if t]
         if mode == "whitelist":
-            return {"enable_tools": lst}
-        if mode == "blacklist":
-            return {"disable_tools": lst}
-        if mode == "inherit":
-            return {}
-        return {"enable_tools": []}
+            out = {"enable_tools": lst}
+        elif mode == "blacklist":
+            out = {"disable_tools": lst}
+        elif mode == "inherit":
+            out = {}
+        else:
+            out = {"enable_tools": []}
+        if (self.screen_image or "").strip():
+            out["screen_image"] = self.screen_image
+        return out
 
 class BehaviorSettings(BaseModel):
     enabled: bool

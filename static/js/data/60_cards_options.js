@@ -370,6 +370,7 @@ main();`,
             digestHour: 4,
             speak: {
                 enabled: false,
+                attachScreenshot: false,
                 minImportance: 4,
                 cooldownSeconds: 600,
                 dailyLimit: 5,

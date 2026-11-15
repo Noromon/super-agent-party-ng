@@ -3319,6 +3319,12 @@
                             {{ t('screenWatchSpeakNotice') || '观察到高重要度事件时经行为系统投递；由角色卡自主决定要不要提一句，判断不值得打扰时会保持沉默（空消息自动吞掉）。' }}
                           </div>
                         </el-alert>
+                        <el-form-item :label="t('screenWatchAttach') || '随发言附上当前屏幕画面'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
+                          <el-switch v-model="screenWatchSettings.speak.attachScreenshot" :disabled="!settings.unifiedModel" @change="autoSaveSettings"></el-switch>
+                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                            {{ t('screenWatchAttachHint') || '开启后，主动发言时把当下屏幕画面（已压缩）一并交给主模型“亲眼看过”再决定怎么说；画面仅用于生成，不会出现在发出的消息里，也不写入任何记录。需先在“设置→模型”开启“全部交给主模型处理”，且主模型支持视觉。' }}
+                          </div>
+                        </el-form-item>
                         <el-form-item :label="t('screenWatchMinImportance') || '触发重要度阈值（1-5）'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
                           <el-slider v-model="screenWatchSettings.speak.minImportance" :min="1" :max="5" :step="1"
                             show-input style="width: 100%;" @change="autoSaveSettings"></el-slider>

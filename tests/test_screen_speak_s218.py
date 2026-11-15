@@ -171,7 +171,8 @@ class TestWatcherDispatch:
 
 class TestPins:
     def test_watcher_wired(self):
-        assert "await self._maybe_speak(ev)" in _WATCHER_SRC
+        # S225：附截图后调用带 attach_b64 形参；钉死观察链路仍接线发言
+        assert "await self._maybe_speak(ev, attach_b64)" in _WATCHER_SRC
 
     def test_state_persisted_survives_restart(self):
         src = (_ROOT / "py" / "screen_speak.py").read_text(encoding="utf-8-sig")

@@ -125,7 +125,7 @@
       return {
         enabled: false, intervalSeconds: 5, retentionHours: 48,
         digestRetentionDays: 30, digestHour: 4,
-        speak: { enabled: false, minImportance: 4, cooldownSeconds: 600, dailyLimit: 5, quietStart: 0, quietEnd: 8, platforms: ['all'] }
+        speak: { enabled: false, attachScreenshot: false, minImportance: 4, cooldownSeconds: 600, dailyLimit: 5, quietStart: 0, quietEnd: 8, platforms: ['all'] }
       };
     },
     selectedProvider: '',

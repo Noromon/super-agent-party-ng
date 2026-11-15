@@ -2215,6 +2215,7 @@ class ChatRequest(BaseModel):
     group_id: Optional[Union[str, int, float]] = None
     user_message_id: Optional[Union[str, int, float]] = None
     peer_id: Optional[str] = None  # S145：bot 频道对端平台 id（xmpp jid 等），身份注入用
+    screen_image: Optional[str] = None  # S225：旁观发言附截图（jpeg base64，无 data: 前缀）；仅行为轮附帧经 extra_body 透传，中央注入本次模型调用消息，不入库/落盘
 
 GROUP_MEMORY_TYPES = {"fact", "decision", "preference", "todo", "constraint", "glossary"}
 GROUP_MEMORY_DONE_HINTS = ("完成", "已完成", "done", "resolved", "fixed", "closed")
@@ -2704,6 +2705,28 @@ async def images_add_in_messages(request_messages: List[Dict], images: List[Dict
                             messages[index]['content'].append({"type": media_key, media_key: {"url": item[media_key]['url']}})
                             
     return messages
+
+
+def _attach_screen_image_for_behavior(msg: List[Dict], request, settings: dict) -> None:
+    """S225：旁观发言附截图。unifiedModel 开启 + 行为轮 + 带 screen_image 时，把观察帧以原生
+    image_url 注入本次发言**生成调用**的消息。msg 为 images_add_in_messages 的 deepcopy，只改它
+    → 主模型原生读图（一手），不触碰 request.messages，故截图不入 mem0(user_prompt)/turn-log
+    (request.messages)/DB/输出消息。仅 unified 生效：非 unified=独立视觉二手，按设计不附图。"""
+    if not getattr(request, "behavior_trigger", False):
+        return
+    b64 = (getattr(request, "screen_image", "") or "").strip()
+    if not b64 or not (settings or {}).get("unifiedModel"):
+        return
+    if not msg:
+        return
+    last = msg[-1]
+    text = last.get("content")
+    if isinstance(text, str):
+        last["content"] = [{"type": "text", "text": text}]
+    if isinstance(last.get("content"), list):
+        last["content"].append(
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
 
 async def read_todos_local(cwd: str) -> list:
     """读取本地待办事项（跨平台）"""
@@ -8201,6 +8224,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                             "也不要在正文里书写任何形式的工具调用标记。"),
             })
         msg = await images_add_in_messages(request.messages, images,settings)
+        _attach_screen_image_for_behavior(msg, request, settings)  # S225：旁观发言附截图（仅改 deepcopy，主模型原生读图，不入 request.messages/落盘）
         if request.top_p != 1 or _eff_main.get('top_p') != 1:
             extra['top_p'] = request.top_p or _eff_main.get('top_p')
         if tools:
