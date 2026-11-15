@@ -814,6 +814,12 @@ def _boot_background_engines(settings):
     循环常驻、未启用时空转；保存设置经 update_config 热更新。返回 (diary, watcher) task。"""
     diary_task = watcher_task = None
     try:
+        # S222：island HUD 行为频道注册（本地伪平台恒可用，幂等覆盖安全）
+        from py.island_channel import register_island_channel
+        register_island_channel()
+    except Exception as e:
+        logging.getLogger("app").error(f"IslandHUD 频道注册异常: {e}")
+    try:
         from py.diary_engine import global_diary_engine
         global_diary_engine.update_config((settings or {}).get("diarySettings"))
         diary_task = asyncio.create_task(global_diary_engine.start())

@@ -465,6 +465,8 @@ window.lang_zhCN = {
     'screenWatchMinImportance': '触发重要度阈值（1-5）',
     'screenWatchPlatforms': '发言通道',
     'screenWatchPlatformsNotice': 'all = 所有已启用的 bot 通道；未启用的通道自动跳过。冷却与每日上限防打扰。',
+    'screenWatchIslandNotice': 'island = 本机灵动岛 HUD 与通知中心（开启即始终可收，无需 bot）。',
+    'screenWatchVisionWarn': 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。',
     'screenWatchCooldown': '发言冷却（秒）',
     'screenWatchDailyLimit': '每日发言上限',
     'screenWatchSpeakQuiet': '发言静默时段（点）',

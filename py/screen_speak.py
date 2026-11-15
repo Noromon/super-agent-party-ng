@@ -113,7 +113,7 @@ def build_behavior_item(ev):
     )
     return BehaviorItem(enabled=True, trigger=BehaviorTrigger(type="screenEvent"),
                         action=BehaviorAction(type="prompt", prompt=prompt),
-                        platforms=[])
+                        platforms=[], screen_fact=fact)
 
 
 def is_busy_reason(reason):

@@ -3216,6 +3216,11 @@
                         <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px;">
                           {{ t('screenWatchSystemNotice') || '开启后，AI 以亚实时节奏借助视觉模型观察屏幕内容并生成文字化情景记忆（截图本身不落盘）。观察完全在本机进行；配合主动发言，可在值得关注的时刻经配置频道轻声提醒。需先配置视觉模型（模型配置→Vision），未配置时观察自动退避。' }}
                         </p>
+                        <p v-if="screenWatchSettings.enabled && !visionSettings.enabled"
+                          style="margin: 4px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;">
+                          <i class="fa-solid fa-triangle-exclamation"></i>
+                          {{ t('screenWatchVisionWarn') || 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。' }}
+                        </p>
                       </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -3319,11 +3324,12 @@
                         <el-form-item :label="t('screenWatchPlatforms') || '发言通道'" v-if="screenWatchSettings.speak.enabled">
                           <el-checkbox-group v-model="screenWatchSettings.speak.platforms" @change="autoSaveSettings">
                             <el-checkbox label="all" value="all" border>all</el-checkbox>
-                            <el-checkbox v-for="p in ['xmpp','telegram','discord','qq','feishu','slack','dingtalk']"
+                            <el-checkbox v-for="p in ['island','xmpp','telegram','discord','qq','feishu','slack','dingtalk']"
                               :key="p" :label="p" :value="p" border>{{ p }}</el-checkbox>
                           </el-checkbox-group>
                           <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
                             {{ t('screenWatchPlatformsNotice') || 'all = 所有已启用的 bot 通道；未启用的通道自动跳过。冷却与每日上限防打扰。' }}
+                            {{ t('screenWatchIslandNotice') || 'island = 本机灵动岛 HUD 与通知中心（开启即始终可收，无需 bot）。' }}
                           </div>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchCooldown') || '发言冷却（秒）'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">

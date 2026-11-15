@@ -47,6 +47,9 @@ class BehaviorItem(BaseModel):
     # 需要工具的事件由用户显式改为 inherit/whitelist/blacklist。
     tools_mode: str = "none"            # none | inherit | whitelist | blacklist
     tools_list: List[str] = []
+    # S222: 旁观发言的观察事实原文（title—summary）。仅 island HUD 通道在生成失败时
+    # 回退直发用；其余平台不读此字段，零影响。
+    screen_fact: str = ""
 
     def tools_override(self) -> dict:
         """转成 /v1 请求 extra_body 的工具过滤字段。"""

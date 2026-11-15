@@ -465,6 +465,8 @@ window.lang_enUS = {
     'screenWatchMinImportance': 'Importance threshold (1-5)',
     'screenWatchPlatforms': 'Message channels',
     'screenWatchPlatformsNotice': 'all = every enabled bot channel; disabled channels are skipped automatically. Cooldown and daily limit prevent spam.',
+    'screenWatchIslandNotice': 'island = local Dynamic Island HUD and notification center (always reachable once enabled, no bot required).',
+    'screenWatchVisionWarn': 'Vision model not enabled: the observer is backing off automatically. Enable it under Model Config → Vision to start observing.',
     'screenWatchCooldown': 'Message cooldown (seconds)',
     'screenWatchDailyLimit': 'Daily message limit',
     'screenWatchSpeakQuiet': 'Quiet hours (hour)',
