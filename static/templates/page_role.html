@@ -3216,11 +3216,6 @@
                         <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 12px;">
                           {{ t('screenWatchSystemNotice') || '开启后，AI 以亚实时节奏借助视觉模型观察屏幕内容并生成文字化情景记忆（截图本身不落盘）。观察完全在本机进行；配合主动发言，可在值得关注的时刻经配置频道轻声提醒。需先配置视觉模型（模型配置→Vision），未配置时观察自动退避。' }}
                         </p>
-                        <p v-if="screenWatchSettings.enabled && !visionSettings.enabled"
-                          style="margin: 4px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;">
-                          <i class="fa-solid fa-triangle-exclamation"></i>
-                          {{ t('screenWatchVisionWarn') || 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。' }}
-                        </p>
                       </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -3230,6 +3225,13 @@
                     </div>
                   </div>
                 </div>
+
+                <el-alert v-if="screenWatchSettings.enabled && !visionSettings.enabled"
+                  type="warning" show-icon :closable="false" class="mb-2">
+                  <div class="alert-content" style="font-weight: bold;">
+                    {{ t('screenWatchVisionWarn') || 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。' }}
+                  </div>
+                </el-alert>
 
                 <el-form :model="screenWatchSettings" class="settings-form" label-position="top">
 

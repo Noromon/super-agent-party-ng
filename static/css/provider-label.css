@@ -1,0 +1,11 @@
+/* S223: 模型服务下拉项——主行=友好名（providerLabel 单源，displayName 优先），
+ * modelId 仅作右侧灰字溯源行（styles.css 棘轮裁决：新样式入新文件）。 */
+.provider-option-name {
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

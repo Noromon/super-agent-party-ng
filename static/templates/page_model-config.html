@@ -432,7 +432,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -744,7 +745,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -1074,7 +1076,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -1210,7 +1213,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -1402,7 +1406,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -1458,7 +1463,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -1717,7 +1723,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
@@ -2169,7 +2176,8 @@
                                 :src="getVendorLogo(provider.vendor)" 
                                 class="mini-vendor-logo"
                               />
-                              <span class="model-id">{{ provider.modelId }}</span>
+                              <span class="provider-option-name">{{ providerLabel(provider) }}</span>
+                              <span v-if="(provider.displayName || '').trim()" class="model-id">{{ provider.modelId }}</span>
                             </div>
                           </el-option>
                         </el-select>
