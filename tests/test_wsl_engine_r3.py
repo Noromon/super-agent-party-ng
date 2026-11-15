@@ -23,9 +23,11 @@ def _read(rel):
 
 class TestWslToolsPermission:
     def test_plan_readonly(self):
+        # S221: plan=read(7)+todo_write(1)——todo 允许用于计划可视化（对齐 opencode）
         tools = get_wsl_tools_for_permission("plan")
-        assert len(tools) == 7
+        assert len(tools) == 8
         assert WSL_TOOLS_REGISTRY["bash_wsl"] not in tools
+        assert WSL_TOOLS_REGISTRY["todo_write_wsl"] in tools
 
     def test_auto_approve_no_exec(self):
         tools = get_wsl_tools_for_permission("auto-approve")

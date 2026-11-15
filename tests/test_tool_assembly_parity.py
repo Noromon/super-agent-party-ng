@@ -91,7 +91,12 @@ class TestPermissionListsSingleSource:
         assert "shell_tool_local" in reg.SENSITIVE_TOOLS
         assert "docker_sandbox" in reg.SENSITIVE_TOOLS
         assert reg.PLAN_BLOCKED_TOOLS >= set(reg.SENSITIVE_TOOLS)
-        assert "todo_write_tool" in reg.PLAN_BLOCKED_TOOLS
+        # S221: todo 属计划可视化工具，plan 允许（对齐 opencode）；桌面控制执行类纳入拦截
+        assert "todo_write_tool" not in reg.PLAN_BLOCKED_TOOLS
+        assert "todo_write_tool_local" not in reg.PLAN_BLOCKED_TOOLS
+        assert "mouse_click" in reg.PLAN_BLOCKED_TOOLS
+        assert "keyboard_press" in reg.PLAN_BLOCKED_TOOLS
+        assert "screenshot" not in reg.PLAN_BLOCKED_TOOLS
 
 
 def _capture_tool_sets(sap, mock_llm):

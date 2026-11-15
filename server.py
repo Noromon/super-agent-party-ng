@@ -1936,7 +1936,9 @@ def _plan_mode_block(tool_name, settings):
             _env0 = settings.get("acpSettings", {})
         if normalize_permission_mode(_env0.get("permissionMode", "default")) == "plan":
             logging.getLogger("app").info(f"[Permission] plan mode blocked '{tool_name}'")
-            return "[Blocked] 你当前处于计划模式（只读），该工具不可用。请使用只读工具完成分析，用自然语言输出执行计划，并等待用户确认后再执行。"
+            return ("[Blocked] 你当前处于计划模式（只读），该工具本回合对你不可见、不可调用。"
+                    "请把拟执行的改动写进计划正文（文件、步骤、验证方式）交给用户确认，"
+                    "用只读工具继续调研；用户确认并切换模式后再执行。")
 
     return None
 

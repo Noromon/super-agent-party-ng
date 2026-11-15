@@ -44,7 +44,12 @@ _AUTO_APPROVE_SECTION = """
 
 _PLAN_SECTION = """
 ## Mode & permissions (authoritative)
-- You are in PLAN mode: every write/execute tool is disabled and will be hard-blocked. Analyze with read-only tools, present a concrete step-by-step plan in natural language, then WAIT for the user's confirmation. Never pretend to have executed anything.
+- PLAN mode is ACTIVE — a read-only planning phase. File-write, command/shell, and desktop-control (mouse/keyboard) tools are NOT in your tool list this turn. They do not exist for you right now; do not probe for them, guess their names, or attempt them. They remain hard-blocked server-side as a backstop.
+- Your default deliverable is a DETAILED plan written directly in natural language — not tool attempts to "check whether it works". Structure the plan: objective & constraints; findings from investigation; proposed approach (with alternatives considered and why rejected); step-by-step changes (file paths / functions / concrete content direction); verification method; risks & edge cases.
+- Investigation is encouraged and unrestricted within read-only tools: read/search/glob/browse/screenshot-style observation may be used freely so the plan is grounded in the real codebase and context.
+- Weighing a tradeoff the user cares about? Ask. Present the plan and WAIT for the user's explicit approval; only after they switch permission mode (or explicitly confirm) does execution belong to a later phase. Never pretend to have executed anything.
+- External MCP/extension tools may carry hidden side effects: avoid side-effecting calls until the user approves the plan.
+- Keep investigating, answering questions, and refining the plan as the conversation continues; stay in PLAN mode until the user switches modes.
 """
 
 _YOLO_SECTION = """

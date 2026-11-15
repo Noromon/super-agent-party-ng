@@ -20,7 +20,15 @@ SENSITIVE_TOOLS = [
     "local_net_tool",
 ]
 
-# 计划模式（只读）硬拦截集合：敏感工具 + 显式追加的写/执行类工具
-PLAN_BLOCKED_TOOLS = frozenset(SENSITIVE_TOOLS) | {
-    "todo_write_tool", "todo_write_tool_local", "acpx_agent", "update_workspace_settings",
+# 计划模式（只读）硬拦截集合：敏感工具 + 桌面控制执行类（S221）。
+# S221 对齐 opencode：todo_write_tool(_local) 移出——plan 模式允许 todo 做计划可视化，
+# 它是任务态呈现而非文件写入；screenshot/wait 只读无副作用不拦截。
+# 声明层同集合隐藏（py/tool_assembly._plan_hide_blocked_tools），本集仍为 dispatch 兜底。
+COMPUTER_USE_EXEC_TOOLS = frozenset({
+    "mouse_move", "mouse_click", "mouse_double_click", "mouse_drag",
+    "mouse_hold", "mouse_scroll", "copy_to_input_box",
+    "keyboard_press", "keyboard_sequence", "keyboard_hotkey", "keyboard_hold",
+})
+PLAN_BLOCKED_TOOLS = frozenset(SENSITIVE_TOOLS) | COMPUTER_USE_EXEC_TOOLS | {
+    "acpx_agent", "update_workspace_settings",
 }

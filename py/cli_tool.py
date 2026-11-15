@@ -2964,7 +2964,7 @@ def get_tools_for_permission(permission_mode: str) -> list:
     infra = [TOOLS_REGISTRY["bash"], TOOLS_REGISTRY["list_processes"], TOOLS_REGISTRY["get_process_logs"],
              TOOLS_REGISTRY["kill_process"], TOOLS_REGISTRY["manage_ports"]]
     if permission_mode == "plan":
-        return read
+        return read + [TOOLS_REGISTRY["todo_write"]]
     if permission_mode == "auto-approve":
         return read + edit
     return read + edit + infra
@@ -2987,7 +2987,7 @@ def get_local_tools_for_permission(permission_mode: str) -> list:
              LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"],
              LOCAL_TOOLS_REGISTRY["kill_process"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]
     if permission_mode == "plan":
-        return read
+        return read + [LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     if permission_mode == "auto-approve":
         return read + edit
     return read + edit + infra
@@ -3051,7 +3051,7 @@ def get_wsl_tools_for_permission(permission_mode: str) -> list:
              WSL_TOOLS_REGISTRY["list_processes"], WSL_TOOLS_REGISTRY["get_process_logs"],
              WSL_TOOLS_REGISTRY["kill_process"], WSL_TOOLS_REGISTRY["local_net_tool"]]
     if permission_mode == "plan":
-        return read
+        return read + [WSL_TOOLS_REGISTRY["todo_write_wsl"]]
     if permission_mode == "auto-approve":
         return read + edit
     return read + edit + infra

@@ -15,6 +15,23 @@ rebuilds per request (fresh global references, no staleness).
 import logging
 import json
 
+from py.tool_registry import PLAN_BLOCKED_TOOLS
+
+
+def _plan_hide_blocked_tools(tools, is_plan):
+    """S221: plan 模式声明层隐藏——写/执行类工具对模型直接不可见（对齐 opencode
+    permission-deny-invisible），根治「看得见却调用被拦」的多轮蛮干。
+    非 plan 原样返回（同引用零漂移）；plan 时返回新列表，不改调用方原列表。"""
+    if not is_plan:
+        return tools
+    kept = [t for t in tools
+            if t.get("function", {}).get("name") not in PLAN_BLOCKED_TOOLS]
+    hidden = len(tools) - len(kept)
+    if hidden:
+        logging.getLogger("app").info(
+            f"[Plan Mode] 声明层隐藏 {hidden} 个写/执行工具: {len(tools)} -> {len(kept)}")
+    return kept
+
 
 def _ensure_read_skill_local(tools, tk):
     """S209：知识 skill 读取与 CLI 执行权限解耦——列表无 read_skill* 变体时
@@ -208,9 +225,15 @@ async def build_llm_tools(request, settings, tk):
                     "type": "function",
                     "function": {
                         "name": f"comfyui_{workflow['unique_filename']}",
-                        "description": f"{workflow['description']}+\n如果要输入图片提示词或者修改提示词，尽可能使用英语。\n返回的图片结果，请将图片的URL放入![image]()这样的markdown语法中，用户才能看到图片。如果是视频，请将视频的URL放入<video controls> <source src=''></video>的中src中，用户才能看到视频。如果有多个结果，则请用换行符分隔开这几个图片或者视频，用户才能看到多个结果。",
+                        "description": f"{workflow['description']}+\n如果要输入图片提示词或者修改提示词，尽可能使用英语。\n返回的图片结果，请将图片的URL放入![image]()这样的markdown语法中，用户才能看到图片。如果是视频，请将视频的URL放入<video controls> <source src=''></video>的src中，用户才能看到视频。如果有多个结果，则请用换行符分隔开这几个图片或者视频，用户才能看到多个结果。",
                         "parameters": comfyui_parameters,
                     },
                 }
                 tools.append(comfyui_tool)
+    # S221: plan 模式统一尾滤——含 request.tools 带入的原生写/执行工具与 visionControl
+    # 键鼠类（dispatch 层 _plan_mode_block 仍留作兜底）。纪律能力索引(S204)在本函数之后
+    # 注入，自动与隐藏后的有效声明集一致，无需额外处理。
+    _is_plan = bool(settings['CLISettings']['enabled']) and \
+        tk["cli_permission_mode_for"](settings) == "plan"
+    tools = _plan_hide_blocked_tools(tools, _is_plan)
     return tools
