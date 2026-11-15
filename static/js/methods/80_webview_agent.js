@@ -138,8 +138,43 @@ Object.assign(vue_methods, {
                     lines.push(line);
                 });
 
-                if (lines.length === 0) return "Page empty or no interactive elements found.";
-                return lines.join('\\n');
+                // --- images (S228): 让 agent 知道哪里有图，赋 uid 供 take_screenshot/remove_element 定位 ---
+                const imgLines = [];
+                let skipped = 0, listed = 0;
+                const imgEls = document.querySelectorAll('img,[role="img"],input[type="image"],canvas');
+                imgEls.forEach(el => {
+                    if (!isVisible(el)) return;
+                    let rect = { width: 0, height: 0, top: 0, bottom: 0 };
+                    try { rect = el.getBoundingClientRect(); } catch (e) {}
+                    const rw = rect.width || 0, rh = rect.height || 0;
+                    const isCanvas = (el.tagName === 'CANVAS');
+                    const nw = isCanvas ? (el.width || rw) : (el.naturalWidth || rw);
+                    const nh = isCanvas ? (el.height || rh) : (el.naturalHeight || rh);
+                    if (rw < 24 || rh < 24 || nw <= 1 || nh <= 1) { skipped++; return; }
+                    let iuid = el.getAttribute('data-ai-id');
+                    if (!iuid) { iuid = 'ai-' + window._ai_uid_counter++; el.setAttribute('data-ai-id', iuid); }
+                    if (listed >= 60) { skipped++; return; }
+                    listed++;
+                    const tag = el.tagName.toLowerCase();
+                    const irole = el.getAttribute('role') || (tag === 'img' ? 'img' : tag);
+                    let nm = String(el.getAttribute('alt') || el.getAttribute('aria-label') || '').slice(0, 60);
+                    nm = nm.split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(13)).join(' ').trim();
+                    const loaded = isCanvas ? 'canvas' : ((el.complete && nw > 1) ? 'loaded' : 'pending');
+                    const off = (rect.bottom < 0 || rect.top > window.innerHeight) ? ' [offscreen]' : '';
+                    let iline = '[' + iuid + '] ' + irole + (nm ? ' "' + nm + '"' : '') + ' ' + Math.round(nw) + 'x' + Math.round(nh) + ' [' + loaded + ']' + off;
+                    imgLines.push(iline);
+                });
+
+                const out = [];
+                if (lines.length) out.push(lines.join('\\n'));
+                if (imgLines.length) {
+                    out.push('--- images (' + imgLines.length + (skipped ? ', +' + skipped + ' more omitted' : '') + ') ---');
+                    out.push(imgLines.join('\\n'));
+                } else if (skipped) {
+                    out.push('--- images: ' + skipped + ' small/hidden image(s) omitted ---');
+                }
+                if (out.length === 0) return "Page empty or no interactive elements found.";
+                return out.join('\\n');
             } catch (e) {
                 return "Snapshot Script Error: " + e.message;
             }
@@ -540,37 +575,55 @@ Object.assign(vue_methods, {
         if (!wv) return "Error: No active webview";
         wv.focus();
         try {
-            // 1. 滚动 (如果指定元素)
+            // 1. 元素区域：定位 + 滚动入视口 + 测量（无 click 副作用，S228）
+            let region = null;
             if (uid) {
-                await this.webviewClick(uid);
+                const sel = (/^ai-\d+$/.test(uid)) ? '[data-ai-id="' + uid + '"]' : String(uid);
+                const measure = "(function(){try{"
+                    + "var el=document.querySelector(" + JSON.stringify(sel) + ");"
+                    + "if(!el)return JSON.stringify({err:'notfound'});"
+                    + "try{el.scrollIntoView({block:'center',inline:'center',behavior:'instant'});}catch(e){}"
+                    + "var r=el.getBoundingClientRect();"
+                    + "return JSON.stringify({x:r.left,y:r.top,w:r.width,h:r.height,iw:window.innerWidth,ih:window.innerHeight});"
+                    + "}catch(e){return JSON.stringify({err:String((e&&e.message)||e)});}})()";
+                const infoStr = await this._wvExec(wv, measure);
+                let info = {}; try { info = JSON.parse(infoStr); } catch (e) {}
+                if (info.err) return "Screenshot Error: element not found: " + uid;
+                if (!(info.w > 0 && info.h > 0 && info.iw > 0 && info.ih > 0)) return "Screenshot Error: element has zero size: " + uid;
+                region = info;
                 await this._humanDelay();
             }
 
-            // 2. 捕获页面
+            // 2. 捕获视口像素（静态图/动态渲染 img/canvas 一视同仁；fullPage 暂为视口）
             const image = await wv.capturePage();
-
-            // 3. 缩放 (AI 不需要 4K，1280 宽足够，节省 Token)
             const size = image.getSize();
-            let resized = image;
-            if (size.width > 1280) {
-                resized = image.resize({ width: 1280 });
+
+            // 3. 元素裁剪：CSS px rect -> 设备像素 crop（越界夹取），失败回退整屏
+            let target = image;
+            if (region) {
+                const sx = size.width / region.iw, sy = size.height / region.ih;
+                const cx = Math.max(0, Math.min(Math.round(region.x * sx), size.width - 1));
+                const cy = Math.max(0, Math.min(Math.round(region.y * sy), size.height - 1));
+                const cw = Math.max(1, Math.min(Math.round(region.w * sx), size.width - cx));
+                const ch = Math.max(1, Math.min(Math.round(region.h * sy), size.height - cy));
+                try { target = image.crop({ x: cx, y: cy, width: cw, height: ch }); } catch (e) { target = image; }
             }
 
-            // 4. 转为 JPEG Buffer (质量 70)
-            const buffer = resized.toJPEG(70);
+            // 4. 缩放 (AI 不需要 4K，1280 宽足够，节省 Token)
+            const tsize = target.getSize();
+            let resized = target;
+            if (tsize.width > 1280) {
+                resized = target.resize({ width: 1280 });
+            }
 
-            // 5. 调用主进程保存文件
-            // 注意：Buffer 通过 IPC 传输非常快，比 Base64 字符串快得多
+            // 5. 转为 JPEG Buffer (质量 70) 并交主进程保存（Buffer 走 IPC 比 base64 快）
+            const buffer = resized.toJPEG(70);
             const filename = await window.electronAPI.saveScreenshotDirect(buffer);
-            
-            // 6. 拼接 URL
-            // window.electron.server.port 是在 preload 里暴露的后端端口
+
+            // 6. 拼接 URL（preload 暴露后端 host/port）
             const host = window.electron.server.host || '127.0.0.1';
             const port = window.electron.server.port || 3456;
-            
-            const fileUrl = `http://${host}:${port}/uploaded_files/${filename}`;
-            
-            return fileUrl;
+            return `http://${host}:${port}/uploaded_files/${filename}`;
 
         } catch (e) {
             return "Screenshot Error: " + e.message;

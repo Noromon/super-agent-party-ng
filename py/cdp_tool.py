@@ -521,7 +521,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_snapshot",
-            "description": "Get the accessibility tree of the current page to find UIDs for interaction.",
+            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen), so you can target them with take_screenshot(uid) or remove_element(uid).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -631,12 +631,12 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_screenshot",
-            "description": "Take a screenshot of the current page.",
+            "description": "Take a screenshot of the current page (or a specific element). Captures rendered pixels, so static images, dynamically rendered images and canvas are all visible. The result is shown back to you visually, so you can look at it directly without a separate analyze_image call.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "fullPage": {"type": "boolean", "description": "If set to true takes a screenshot of the full page instead of the currently visible viewport. Incompatible with uid."},
-                    "uid": {"type": "string", "description": "The uid of an element on the page from the page content snapshot. If omitted takes a pages screenshot."}
+                    "uid": {"type": "string", "description": "Crop to this element only (uid like 'ai-12' from the snapshot, or any CSS selector). The element is auto-scrolled into view; no click is performed. Omit to capture the whole viewport."}
                 },
                 "required": []
             }

@@ -6327,6 +6327,71 @@ async def _stream_regrab(request, settings, results, images, fastapi_base_url):
     return images
 
 
+_BROWSER_VISION_TOOLS = {"take_screenshot"}  # S228：内置浏览器截图工具，结果含 uploaded_files URL
+
+
+def _collect_new_browser_screenshots(messages):
+    """本轮 take_screenshot 新截、且尚未注入过的浏览器画面 URL。
+    以「最近一条真实 user 消息」为本轮下界（排除历史轮），再以「最近一条 browser_vision 标记」
+    为本轮内已注入界，避免跨轮/同轮多轮重复注入。"""
+    turn_start = 0
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "user" and m.get("name") not in ("browser_vision", "system_note"):
+            turn_start = i
+            break
+    last = turn_start
+    for i in range(len(messages) - 1, turn_start, -1):
+        m = messages[i]
+        if m.get("role") == "user" and m.get("name") == "browser_vision":
+            last = i
+            break
+    urls = []
+    for i in range(last + 1, len(messages)):
+        m = messages[i]
+        if m.get("role") == "tool" and m.get("name") in _BROWSER_VISION_TOOLS:
+            c = m.get("content")
+            if isinstance(c, str):
+                mm = re.search(r"https?://\S*uploaded_files/[^\s\"']+", c)
+                if mm:
+                    urls.append(mm.group(0))
+    return urls
+
+
+async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_url):
+    """S228：把本轮 take_screenshot 截到的浏览器画面作为图像直注本次模型调用——
+    unifiedModel/视觉原生时主模型一手读像素，配独立 vision 时由既有路由自动转描述（均免手动
+    analyze_image）。与桌面 _stream_regrab 同管线，但只定向注入新图（不全局剥离历史图，回归安全）。"""
+    try:
+        urls = _collect_new_browser_screenshots(request.messages)
+    except Exception:
+        urls = []
+    if not urls:
+        return images
+    urls = urls[:3]
+    inj0 = len(request.messages)
+    for u in urls:
+        request.messages.append({
+            "role": "user",
+            "name": "browser_vision",
+            "content": [
+                {"type": "text", "text": "[Browser screenshot] 内置浏览器截图的实际画面，请据图判断。"},
+                {"type": "image_url", "image_url": {"url": u}},
+            ],
+        })
+    try:
+        new_imgs = await images_in_messages(request.messages[inj0:], fastapi_base_url)
+        for e in new_imgs:
+            e["index"] = e["index"] + inj0
+        for m in request.messages[inj0:]:
+            if isinstance(m.get("content"), list):
+                m["content"] = next((it["text"] for it in m["content"] if it.get("type") == "text"), "")
+        return (images or []) + new_imgs
+    except Exception as _bv_e:
+        logging.getLogger("app").info("[S228] 浏览器截图注入失败: %r", _bv_e)
+        return images
+
+
 async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
     """While-loop LLM re-request chunk stream (slot merge + think tags)."""
     _st["tcg_emit"], _st["tcg_cut"] = len(full_content or ""), -1  # S183 显示拦截基线
@@ -6967,6 +7032,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
             vision_control_enabled = settings.get('visionControlSettings', {}).get('enabled', False)
             if vision_control_enabled and (results =='[Getting screenshot]' or settings.get('visionControlSettings', {}).get('desktopVision', False)):
                 images = await _stream_regrab(request, settings, results, images, fastapi_base_url)
+            images = await _maybe_inject_browser_vision(request, settings, images, fastapi_base_url)  # S228：浏览器截图直注主模型
             msg = await images_add_in_messages(request.messages, images, settings)
             if request.top_p != 1 or _eff_main.get('top_p') != 1:
                 extra['top_p'] = request.top_p or _eff_main.get('top_p')
@@ -8278,6 +8344,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 content_append(request.messages, 'user',  f"\n对于联网搜索的结果，如果联网搜索的信息不足以回答问题时，你可以进一步使用联网搜索查询还未给出的必要信息。如果已经足够回答问题，请直接回答问题。")
             if settings['reasoner']['enabled'] or enable_thinking:
                 vendor = await _ns_reasoner_pass(request, reasoner_client, reasoner_messages, settings, images, reasoner_extra, open_tag, close_tag, tools, vendor)
+            images = await _maybe_inject_browser_vision(request, settings, images, fastapi_base_url)  # S228：浏览器截图直注主模型
             msg = await images_add_in_messages(request.messages, images,settings)
             if request.top_p != 1 or _eff_main.get('top_p') != 1:
                 extra['top_p'] = request.top_p or _eff_main.get('top_p')
