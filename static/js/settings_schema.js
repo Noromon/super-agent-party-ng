@@ -125,7 +125,18 @@
       return {
         enabled: false, intervalSeconds: 5, retentionHours: 48,
         digestRetentionDays: 30, digestHour: 4,
-        speak: { enabled: false, attachScreenshot: false, minImportance: 4, cooldownSeconds: 600, dailyLimit: 5, quietStart: 0, quietEnd: 8, platforms: ['all'] }
+        speak: { enabled: false, attachScreenshot: false, minImportance: 4, cooldownSeconds: 600, dailyLimit: 5, quietStart: 0, quietEnd: 8, platforms: ['all'] },
+        observe: {
+          mode: 'auto', custom: { model: '', baseUrl: '', apiKey: '' }, activePreset: '', extraParamsJson: '',
+          presets: [
+            { name: '无（跟随默认）', bodyJson: '{}' },
+            { name: '关思考 · LM Studio/llama.cpp', bodyJson: '{"enable_thinking": false}' },
+            { name: '低思考 · LM Studio/llama.cpp', bodyJson: '{"reasoning_effort": "low"}' },
+            { name: '中思考 · LM Studio/llama.cpp', bodyJson: '{"reasoning_effort": "medium"}' },
+            { name: '关思考 · vLLM', bodyJson: '{"chat_template_kwargs": {"enable_thinking": false}}' },
+            { name: '低思考 · vLLM', bodyJson: '{"chat_template_kwargs": {"reasoning_effort": "low"}}' }
+          ]
+        }
       };
     },
     selectedProvider: '',

@@ -21,8 +21,9 @@ from typing import Optional
 
 from py import llm_gate
 from py import screen_memory
+from py import screen_observe
 from py import screen_speak
-from py.get_setting import SCREEN_WATCH_DIR, load_settings, vision_model_cfg
+from py.get_setting import SCREEN_WATCH_DIR, load_settings
 from py.llm_recovery import acreate
 
 GUI_AVAILABLE = False
@@ -221,12 +222,13 @@ class ScreenWatcher:
     async def _observe_once(self):
         try:
             settings = await load_settings()
-            # S224 统一交给主模型：开启观察用主模型做一手观察（vision_model_cfg 在 unified
-            # 时返回主模型 cfg 且 enabled=True），否则用独立 vision 角色。
-            vision = vision_model_cfg(settings)
+            # S226：观察/判断 VLM 的路由与请求参数独立解析；auto 模式完全委托 vision_model_cfg
+            # （＝现状 unified 语义，零回归），main/vlm/custom 显式接管端点。
+            vision = screen_observe.resolve_observe_cfg(settings)
             if not vision.get("enabled"):
                 self._warn_vlm_missing()
                 return
+            observe_extra = screen_observe.build_observe_extra_body(settings)
             title = self._title()
             if privacy_blocked(title, self._privacy_keywords()):
                 logging.getLogger("app").debug(
@@ -247,7 +249,7 @@ class ScreenWatcher:
             attach_on = isinstance(_sp, dict) and bool(_sp.get("attachScreenshot")) and bool(settings.get("unifiedModel"))
             attach_b64 = data_uri.split(",", 1)[1] if attach_on else None
             t0 = time.time()
-            parsed = parse_vlm_json(await self._vlm(vision, data_uri))
+            parsed = parse_vlm_json(await self._vlm(vision, data_uri, observe_extra))
             self._cooldown_until = 0.0
             now = time.time()
             ev = {"ts": round(now, 1),
@@ -320,14 +322,17 @@ class ScreenWatcher:
         return foreground_window_title()
 
     @llm_gate.gated
-    async def _vlm(self, vision, data_uri):
+    async def _vlm(self, vision, data_uri, extra_body=None):
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=vision.get("api_key"),
                              base_url=vision.get("base_url"),
                              timeout=self._cfg_int("vlmTimeoutSeconds", 60))
         extra = {}
+        eb = dict(extra_body or {})
+        # S226：思考/引擎参数经 extra_body（顶层 body 字段，LM Studio/llama.cpp/vLLM 由
+        # 模板或引擎读取）；temperature 仍具名下发，除非预设/自定义参数已含 temperature。
         temp = vision.get("temperature")
-        if isinstance(temp, (int, float)) and temp != 1:
+        if isinstance(temp, (int, float)) and temp != 1 and "temperature" not in eb:
             extra["temperature"] = temp
         resp = await acreate(
             lambda: client.chat.completions.create(
@@ -335,7 +340,7 @@ class ScreenWatcher:
                 messages=[{"role": "user", "content": [
                     {"type": "text", "text": _VLM_PROMPT},
                     {"type": "image_url", "image_url": {"url": data_uri}}]}],
-                **extra),
+                extra_body=eb, **extra),
             attempts=1, base_delay=1.0, label="s215-screen-watcher")
         return resp.choices[0].message.content
 

@@ -3367,6 +3367,72 @@
                     </div>
                   </div>
 
+                  <!-- 判断用视觉模型：仅影响窥屏观察/判断调用，发言仍走主模型 -->
+                  <div class="tool-item">
+                    <div class="tool-header">
+                      <div class="header-left">
+                        <span>
+                          <el-icon><i class="fa-solid fa-eye"></i></el-icon>
+                          {{ t('screenWatchObserve') || '判断用视觉模型' }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="sub-config-box">
+                      <el-alert type="info" :closable="false" class="mb-2">
+                        <div class="alert-content">
+                          {{ t('screenWatchObserveNotice') || '仅影响“窥屏观察/判断”这一次视觉调用，不影响聊天图片理解、桌面视觉与发言生成（发言始终用主模型）。预设与自定义参数只叠加在这次调用上。' }}
+                        </div>
+                      </el-alert>
+                      <el-form-item :label="t('screenWatchObserveMode') || '端点来源'" class="form-item-align" label-position="left">
+                        <el-select v-model="screenWatchSettings.observe.mode" @change="autoSaveSettings" style="width: 100%; max-width: 240px;">
+                          <el-option :label="t('screenWatchObserveAuto') || '自动（跟随统一开关）'" value="auto"></el-option>
+                          <el-option :label="t('screenWatchObserveMain') || '主模型'" value="main"></el-option>
+                          <el-option :label="t('screenWatchObserveVlm') || '独立视觉模型(VLM)'" value="vlm"></el-option>
+                          <el-option :label="t('screenWatchObserveCustom') || '独立端点'" value="custom"></el-option>
+                        </el-select>
+                        <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                          {{ t('screenWatchObserveModeHint') || '自动＝现状：开启“全部交给主模型处理”则观察用主模型，否则用独立视觉角色。手动指定可让观察单独走主模型／独立 VLM／第三方端点，互不影响其它视觉功能。' }}
+                        </div>
+                      </el-form-item>
+                      <template v-if="screenWatchSettings.observe.mode === 'custom'">
+                        <el-form-item label="Base URL" class="form-item-align" label-position="left">
+                          <el-input v-model="screenWatchSettings.observe.custom.baseUrl" placeholder="http://127.0.0.1:1234/v1" @change="autoSaveSettings" style="width: 100%; max-width: 360px;"></el-input>
+                        </el-form-item>
+                        <el-form-item label="Model" class="form-item-align" label-position="left">
+                          <el-input v-model="screenWatchSettings.observe.custom.model" @change="autoSaveSettings" style="width: 100%; max-width: 360px;"></el-input>
+                        </el-form-item>
+                        <el-form-item label="API Key" class="form-item-align" label-position="left">
+                          <el-input v-model="screenWatchSettings.observe.custom.apiKey" @change="autoSaveSettings" style="width: 100%; max-width: 360px;"></el-input>
+                        </el-form-item>
+                      </template>
+                      <el-form-item :label="t('screenWatchObservePreset') || '思考/引擎预设'" class="form-item-align" label-position="left">
+                        <el-select v-model="screenWatchSettings.observe.activePreset" @change="autoSaveSettings" style="width: 100%; max-width: 320px;" clearable :placeholder="t('screenWatchObservePresetNone') || '（不注入，跟随模型默认）'">
+                          <el-option v-for="p in screenWatchSettings.observe.presets" :key="p.name" :label="p.name" :value="p.name"></el-option>
+                        </el-select>
+                        <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                          {{ t('screenWatchObservePresetHint') || '选中即把该预设的 JSON 作为本次观察调用的附加请求参数（如关闭思考／调低思考强度）。按引擎形状填写：LM Studio/llama.cpp 用顶层 enable_thinking / reasoning_effort；vLLM 用 chat_template_kwargs 包裹。' }}
+                        </div>
+                      </el-form-item>
+                      <div v-for="(p, i) in screenWatchSettings.observe.presets" :key="i"
+                        style="margin: 0 0 10px 0; padding: 8px 10px; border: 1px solid var(--el-border-color, #dcdfe6); border-radius: 6px;">
+                        <el-input v-model="p.name" @change="autoSaveSettings" style="margin-bottom: 6px;" :placeholder="t('screenWatchObservePresetName') || '预设名称'"></el-input>
+                        <el-input v-model="p.bodyJson" type="textarea" :autosize="{ minRows: 1, maxRows: 5 }" @change="autoSaveSettings" placeholder='{"enable_thinking": false}'></el-input>
+                        <el-button size="small" type="danger" plain style="margin-top: 6px;" @click="screenWatchSettings.observe.presets.splice(i, 1); autoSaveSettings()">{{ t('screenWatchObserveDelete') || '删除' }}</el-button>
+                      </div>
+                      <el-form-item label=" " class="form-item-align" label-position="left">
+                        <el-button size="small" @click="screenWatchSettings.observe.presets.push({ name: t('screenWatchObserveNewPreset') || '新预设', bodyJson: '{}' }); autoSaveSettings()">
+                          <i class="fa-solid fa-plus"></i> {{ t('screenWatchObserveAddPreset') || '新增预设' }}
+                        </el-button>
+                      </el-form-item>
+                      <el-form-item :label="t('screenWatchObserveExtra') || '自定义参数(JSON)'" class="form-item-align" label-position="left">
+                        <el-input v-model="screenWatchSettings.observe.extraParamsJson" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" @change="autoSaveSettings" style="width: 100%; max-width: 560px;" placeholder='{"reasoning_effort": "low"}'></el-input>
+                        <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                          {{ t('screenWatchObserveExtraHint') || '兜底：合并进所选预设之上、同名深度覆盖，可写任意引擎字段；留空跟随默认。非法 JSON 将被忽略（不影响观察）。' }}
+                        </div>
+                      </el-form-item>
+                    </div>
+                  </div>
+
                 </el-form>
               </div>
             </div>

@@ -63,7 +63,7 @@ def _stub(e, shot=None, title="记事本 - note.txt", vlm_ret=None, calls=None):
     e._title = lambda: title
     n = calls if calls is not None else {"vlm": 0}
 
-    async def fake_vlm(vision, data_uri):
+    async def fake_vlm(vision, data_uri, extra_body=None):
         n["vlm"] += 1
         if vlm_ret is None:
             return '{"summary": "打开着记事本", "activity": "coding", "importance": 2}'

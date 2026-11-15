@@ -62,8 +62,11 @@ class TestBackendDispatchPins:
         assert "if current_settings.get('unifiedModel'):" in src[i - 120:i]
 
     def test_watcher_uses_resolver(self):
+        # S226：观察端点改由 screen_observe.resolve_observe_cfg 统一解析；其 auto 模式内部
+        # 仍委托 vision_model_cfg（unified→主模型语义不变）。
         src = _read("py/screen_watcher.py")
-        assert "vision = vision_model_cfg(settings)" in src
+        assert "vision = screen_observe.resolve_observe_cfg(settings)" in src
+        assert "vision_model_cfg" in _read("py/screen_observe.py")
         assert "vision_model_cfg" in _read("py/get_setting.py")
 
 
