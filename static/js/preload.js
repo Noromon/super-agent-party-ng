@@ -94,6 +94,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   saveChromeSettings: (settings) => ipcRenderer.invoke('save-chrome-config', settings),
   getInternalCDPInfo: () => ipcRenderer.invoke('get-internal-cdp-info'),
+  // S227: 重定向护栏（guardRedirect 开启时生效）——授权/查询/裁决页面自发跳转
+  guardAuthorize: (payload) => ipcRenderer.invoke('guard-authorize', payload),
+  guardList: () => ipcRenderer.invoke('guard-list'),
+  guardDecide: (payload) => ipcRenderer.invoke('guard-decide', payload),
+  setGuardFlag: (on) => ipcRenderer.invoke('set-guard-flag', on),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
   // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈

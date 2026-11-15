@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S226 loaded');
+console.warn('[Probe] renderer build=S227 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -787,6 +787,17 @@ const app = Vue.createApp({
     } catch (e) {
       console.error('获取 Preload 路径失败:', e);
     }
+
+    // S227: 把重定向护栏开关同步到主进程（默认关；延迟再推一次以覆盖设置加载后的持久值）
+    const _pushGuardFlag = () => {
+      try {
+        if (window.electronAPI && window.electronAPI.setGuardFlag) {
+          window.electronAPI.setGuardFlag(this.chromeMCPSettings && this.chromeMCPSettings.guardRedirect === true);
+        }
+      } catch (e) {}
+    };
+    _pushGuardFlag();
+    setTimeout(_pushGuardFlag, 2000);
 
     window.handleToolApproval = (toolCallId, action) => {
         console.log('Global approval triggered:', toolCallId, action); // 调试日志

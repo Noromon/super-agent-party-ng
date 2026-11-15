@@ -101,6 +101,7 @@ dependencies = [
     # S91(THA)：桌宠 JPEG 编码 + macOS CoreML 引擎（win/linux 安装不受影响）
     "simplejpeg>=1.7.6",
     "coremltools>=8.0 ; sys_platform == 'darwin'",
+    "markdownify>=1.2.3",
 ]
 
 [dependency-groups]

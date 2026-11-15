@@ -5,6 +5,7 @@ Object.assign(vue_methods, {
     openUrlInNewTab(url) {
         // 如果 url 为空或者无效，可以做个判断，或者直接打开
         if (!url) return;
+        this._guardAuthNav(url); // S227: guardRedirect 开启时，agent 主动导航授权放行
 
         const newTab = {
             id: Date.now(),
@@ -165,6 +166,7 @@ Object.assign(vue_methods, {
     // 核心导航方法
     navigateTo(url) {
         if (!this.currentTab) return;
+        this._guardAuthNav(url); // S227: guardRedirect 开启时，agent 主动导航授权放行
         
         // 如果是刷新当前页面（URL 没变）
         // 注意：这里比较时最好也比较 currentUrl
@@ -350,6 +352,13 @@ Object.assign(vue_methods, {
             read: this.t('read') || '朗读',
             copy: this.t('copy') || '复制'
         });
+        // S227: 反弹窗/广告自动软清理（adblock 默认开；adblock===false 才关）
+        try {
+            if (!this.chromeMCPSettings || this.chromeMCPSettings.adblock !== false) {
+                const _p = this._applyAdblock(webview, false);
+                if (_p && _p.catch) _p.catch(() => {});
+            }
+        } catch (e) {}
         //webview.openDevTools();
     },
 

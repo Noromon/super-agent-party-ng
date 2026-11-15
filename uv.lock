@@ -1657,6 +1657,19 @@ wheels = [
 ]
 
 [[package]]
+name = "markdownify"
+version = "1.2.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/ab/d1297139c0e2ceb151ae564c8c4f57ac0155d8f1f8b4cbd5d6523c82ea36/markdownify-1.2.3.tar.gz", hash = "sha256:1a176f05522c8a2cb1dd3ab9d307dcdadbed5c26ae717855bfc42b3b6d38d937", size = 18852, upload-time = "2026-06-30T20:27:39.06Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/10/fa543d484e8b1199243fe20eedd02cc5af050edebce98a7293a5773df592/markdownify-1.2.3-py3-none-any.whl", hash = "sha256:a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba", size = 15732, upload-time = "2026-06-30T20:27:38.094Z" },
+]
+
+[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -5539,6 +5552,7 @@ dependencies = [
     { name = "lark-oapi" },
     { name = "litellm" },
     { name = "lxml" },
+    { name = "markdownify" },
     { name = "mcp" },
     { name = "mem0ai" },
     { name = "modelscope" },
@@ -5640,6 +5654,7 @@ requires-dist = [
     { name = "lark-oapi", specifier = ">=1.4.24" },
     { name = "litellm", specifier = ">=1.83.7" },
     { name = "lxml", specifier = ">=6.1.0" },
+    { name = "markdownify", specifier = ">=1.2.3" },
     { name = "mcp", specifier = ">=1.6.0" },
     { name = "mem0ai", specifier = "==1.0.0" },
     { name = "modelscope", specifier = ">=1.35.4" },

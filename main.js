@@ -1,5 +1,5 @@
 const remoteMain = require('@electron/remote/main')
-const { app, BrowserWindow, ipcMain, screen, shell, dialog, Tray, Menu, session,globalShortcut} = require('electron')
+const { app, BrowserWindow, ipcMain, screen, shell, dialog, Tray, Menu, session, webContents, globalShortcut} = require('electron')
 const { clipboard, nativeImage,desktopCapturer  } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const path = require('path')
@@ -1112,6 +1112,27 @@ app.whenReady().then(async () => {
     // 前端传来的 settings 是一个对象，saveEnvVariable 现在能处理它了
     ipcMain.handle('save-chrome-config', async (event, settings) => {
       saveEnvVariable('chromeMCPSettings', settings);
+      return true;
+    });
+
+    // S227: 重定向护栏 IPC —— 默认 guardRedirect=false 时挂起表恒空，工具查询恒空
+    ipcMain.handle('set-guard-flag', (e, on) => { global.guardRedirect = !!on; return true; });
+    ipcMain.handle('guard-authorize', (e, payload) => {
+      const url = payload && payload.url;
+      _guardAuthorizeUrl(url, payload && payload.ttl);
+      return true;
+    });
+    ipcMain.handle('guard-list', () => Object.keys(_guardPending).map((id) => ({ id: Number(id), url: _guardPending[id] })));
+    ipcMain.handle('guard-decide', (e, payload) => {
+      const id = payload && payload.id;
+      const allow = !!(payload && payload.allow);
+      if (id == null || !(_guardPending[id])) return false;
+      const url = _guardPending[id];
+      delete _guardPending[id];
+      if (allow) {
+        const wc = webContents.fromId(Number(id));
+        if (wc) { _guardAuthorizeUrl(url); try { wc.loadURL(url); } catch (_) {} }
+      }
       return true;
     });
 
@@ -2668,6 +2689,45 @@ function updatecontextMenu() {
     }
   ]);
 }
+
+// === S227: 重定向护栏（guardRedirect 默认关闭；关闭时本段对所有导航零影响）===
+// 仅对内置浏览器（persist:party-browser-session）的页面自发顶层跳转生效：
+// agent 主动 navigate/new_page 的 URL 经 guard-authorize 临时授权放行；其余跳转
+// preventDefault 挂起，回报后端，等待 agent redirect_decision(allow|block)。
+global.guardRedirect = false;
+const _guardAuthUrls = {};   // url -> expireTs（agent 主动导航的短时授权）
+const _guardPending = {};    // webContentsId -> url（被挂起的跳转）
+const _GUARD_URL_TTL = 20000;
+
+function _guardAuthorizeUrl(url, ttl) {
+  if (!url) return;
+  _guardAuthUrls[url] = Date.now() + (ttl || _GUARD_URL_TTL);
+}
+function _guardConsume(url) {
+  const exp = _guardAuthUrls[url];
+  if (exp == null) return false;
+  delete _guardAuthUrls[url];
+  return exp >= Date.now();
+}
+function setupRedirectGuard() {
+  let ps = null;
+  try { ps = session.fromPartition('persist:party-browser-session'); } catch (_) { return; }
+  app.on('web-contents-created', (event, contents) => {
+    try { if (!ps || contents.session !== ps) return; } catch (_) { return; }
+    const onNav = (e, url) => {
+      if (!global.guardRedirect) return;                 // 关闭：完全放行
+      if (!url || !/^https?:/i.test(url)) return;         // 非 http(s)（如 about/data）放行
+      if (_guardConsume(url)) return;                     // agent 主动导航已授权
+      try { e.preventDefault(); } catch (_) {}
+      _guardPending[contents.id] = url;
+      try { contents.send('redirect-held', { url }); } catch (_) {}
+      try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('redirect-held', { id: contents.id, url }); } catch (_) {}
+    };
+    try { contents.on('will-navigate', onNav); } catch (_) {}
+    try { contents.on('will-redirect', onNav); } catch (_) {}  // 老版本无此事件则忽略
+  });
+}
+setupRedirectGuard();
 
 // app.on('web-contents-created', (e, webContents) => {
 //   webContents.on('new-window', (event, url) => {

@@ -7,6 +7,7 @@ import uuid
 import requests
 import asyncio
 import websockets
+from py import html_to_md
 from py.get_setting import UPLOAD_FILES_DIR, get_port, load_settings
 
 # 全局变量，用于保持当前上下文
@@ -112,12 +113,15 @@ async def cdp_command(ws_url, method, params=None, timeout=None):
 # Input Automation (Via Vue Controller)
 # ==========================================
 
-async def call_vue_method(method_name, args_list=None):
+async def call_vue_method(method_name, args_list=None, timeout=None):
     """
     通用函数：调用 window.aiBrowser 的方法 (带重试机制)
+    timeout: 单次 CDP 往返秒数；长耗时操作（如离屏渲染）可放宽，默认沿用 CDP_CALL_TIMEOUT。
     """
     max_retries = 3
     retry_delay = 1.0 # 1秒等待
+    if timeout is None:
+        timeout = CDP_CALL_TIMEOUT
 
     ws_url = await get_main_window_ws()
     if not ws_url:
@@ -139,7 +143,7 @@ async def call_vue_method(method_name, args_list=None):
                 "expression": expression,
                 "returnByValue": True,
                 "awaitPromise": True
-            }, timeout=CDP_CALL_TIMEOUT)
+            }, timeout=timeout)
             
             # 1. 检查 CDP 协议本身的异常
             if 'exceptionDetails' in res:
@@ -250,8 +254,10 @@ async def list_pages():
     """列出所有标签页"""
     return await call_vue_method('getPagesInfo')
 
-async def new_page(url, timeout=0):
-    """新建标签页"""
+async def new_page(url, timeout=0, background=False):
+    """新建标签页；background=True 时后台打开（不抢占用户可见面板）。"""
+    if background:
+        return await call_vue_method('openUrlInBackground', [url])
     return await call_vue_method('openUrlInNewTab', [url])
 
 async def close_page(pageIdx):
@@ -317,6 +323,123 @@ async def take_screenshot(fullPage=False, uid=None):
         
     return f"Screenshot saved to {result}"
 
+
+# ==========================================
+# S227: 本地无头渲染动态页 -> Markdown（一次性）
+# ==========================================
+
+async def web_render(original_url, wait_text=None, timeout=45):
+    """用内置浏览器在离屏隐藏 webview 渲染动态(含JavaScript)页面，本地转 Markdown 回传，无云。
+
+    仅 Electron 桌面版且启用内置浏览器时有效；可访问本机/内网地址（异于云端 markdown_new）。
+    慢站超时前会尽量回传已加载到的部分内容(标注 partial)；重站可加大 timeout 或用 wait_text 等关键文本。
+    """
+    url = (original_url or "").strip()
+    if not url:
+        return "[Error] web_render: 缺少 url。"
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    if not await get_targets():
+        return ("[Error] 内置浏览器通道不可用：仅 Electron 桌面版且已启用“内置浏览器”时有效。"
+                "可改用 markdown_new / simple_fetch 等抓取工具。")
+    t = int(timeout or 45)
+    t = max(5, min(t, 60))
+    opts = {"waitText": wait_text or "", "timeout": t}
+    res = await call_vue_method("renderOffscreenPage", [url, opts], timeout=t + 20)
+    if not isinstance(res, str):
+        res = json.dumps(res or {})
+    data = None
+    s = res.strip()
+    if s.startswith("{"):
+        try:
+            data = json.loads(s)
+        except Exception:  # noqa: BLE001
+            data = None
+    if not isinstance(data, dict) or not data.get("ok"):
+        e = str((data.get("error") if isinstance(data, dict) else s) or "unknown")
+        if "render timeout" in e:
+            hint = ("超时未加载完成：站可能很慢或被墙/需代理（内置浏览器不走 SAP 应用内代理）。"
+                    "可加大 timeout、提供 wait_text，或改用可直连的镜像/来源。")
+        elif "no-content" in e:
+            hint = "已连接但未抓到正文：可能需登录或被反爬，可加 wait_text 指定正文关键句后重试。"
+        elif "wait-text-timeout" in e:
+            hint = "等待的 wait_text 未出现：文本可能不对或被延迟，校正 wait_text 或加大 timeout。"
+        elif "load failed" in e:
+            hint = "加载失败：检查该地址是否可达/被墙（内置浏览器不走 SAP 代理），或换其它来源。"
+        else:
+            hint = "可稍后重试、提供 wait_text、加大 timeout，或改用其它来源。"
+        return f"[Fetch failed] 本地渲染 {url} 未成功：{e[:160]}。{hint}"
+    html = data.get("html") or ""
+    md = html_to_md.html_to_markdown(html, max_chars=120000)
+    if not md.strip():
+        return (f"[Empty] 本地渲染 {url} 成功但正文为空（可能需登录、被反爬，或纯 SPA 未渲染出内容）。"
+                "可加 wait_text 等待关键文本出现后重试，或加大 timeout。")
+    title = (data.get("title") or "").strip()
+    final_url = data.get("finalUrl") or url
+    partial = bool(data.get("partial"))
+    src = f"Source: {final_url} (partial)" if partial else f"Source: {final_url}"
+    head = f"# {title}\n{src}\n\n" if title else f"{src}\n\n"
+    if partial:
+        head += "> 注意：页面在超时前未完全加载，以下为已加载到的部分内容。\n\n"
+    return head + md
+
+
+# ==========================================
+# S227: 浏览器增强（反弹窗/拔元素/急停后退/当前页转MD）
+# ==========================================
+
+async def clean_dom(force=False):
+    """清除当前页弹窗/遮罩/Cookie同意条/广告占位（仅 DOM 层）。force=True 启用激进档（含 modal/paywall）。"""
+    return await call_vue_method('cleanPage', [bool(force)])
+
+
+async def remove_element(target):
+    """拔除元素：target 为快照 uid（如 ai-12）或任意 CSS 选择器。"""
+    if not (target or "").strip():
+        return "[Error] remove_element: 缺少 target（uid 或 CSS 选择器）。"
+    return await call_vue_method('removeElement', [target])
+
+
+async def stop_loading():
+    """急停：停止当前页加载（误跳/卡死时逃生）。"""
+    return await call_vue_method('stopLoading', [])
+
+
+async def escape_back():
+    """急停并后退到上一页（从误跳转/弹窗快速撤回）。"""
+    return await call_vue_method('escapeBack', [])
+
+
+async def get_page_markdown():
+    """把当前活动标签页就地清洗并转 Markdown 返回（本地，无云）。"""
+    res = await call_vue_method('getPageHtml', [])
+    s = res if isinstance(res, str) else json.dumps(res or {})
+    if s.startswith("Error"):
+        return s
+    md = html_to_md.html_to_markdown(s, max_chars=120000)
+    if not md.strip():
+        return "[Empty] 当前页无可抽取正文（可能需登录或纯 SPA 未渲染出内容）。"
+    return md
+
+
+# ==========================================
+# S227: 重定向护栏（guardRedirect 开启时）
+# ==========================================
+
+async def check_redirect():
+    """查询被重定向护栏挂起的跳转列表（[{id,url}]）。guardRedirect 关闭时恒为 []。"""
+    res = await call_vue_method('listPendingRedirects', [])
+    return res if isinstance(res, str) else json.dumps(res or [])
+
+
+async def approve_navigation(allow=True, tab_id=None):
+    """裁决挂起的重定向：allow=True 放行该跳转，否则维持拦截。tab_id 省略则作用于当前活动页。
+
+    放行=主进程以授权方式加载目标 URL；拦截=保持停留在原页面。
+    """
+    return await call_vue_method('resolveRedirect', [bool(allow), tab_id])
+
+
 # ==========================================
 # Tool Definitions (JSON Schemas)
 # ==========================================
@@ -340,7 +463,8 @@ all_cdp_tools = [
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "URL to load"},
-                    "timeout": {"type": "integer"}
+                    "timeout": {"type": "integer"},
+                    "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"}
                 },
                 "required": ["url"]
             }
@@ -570,6 +694,124 @@ all_cdp_tools = [
                     "promptText": {"type": "string", "description": "Text to enter if the dialog is a prompt."}
                 },
                 "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_render",
+            "description": (
+                "用内置浏览器在离屏隐藏页面渲染动态(含JavaScript)网页，并把正文转成 Markdown "
+                "返回给你。纯本地、无第三方云端，适合 markdown_new 抓不到的动态页/SPA。"
+                "可访问本机或内网地址。若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本。"
+                "慢站超时前会尽量返回已加载到的部分内容(标注 partial)。"
+                "仅 Electron 桌面版且已启用内置浏览器时有效。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "original_url": {
+                        "type": "string",
+                        "description": "要渲染的完整 URL（http/https）。",
+                    },
+                    "wait_text": {
+                        "type": "string",
+                        "description": "可选：等待页面出现该文本后再抽取（用于异步/懒加载内容）。",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "可选：渲染等待秒数（5-60，默认45）。慢站/重站可调大；超时仍会尽量返回部分内容(partial)。",
+                    },
+                },
+                "required": ["original_url"],
+            },
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clean_dom",
+            "description": (
+                "清除当前页上的弹窗/遮罩/Cookie同意条/广告占位（仅 DOM 层，不影响网络）。"
+                "多数弹窗已在页面加载时自动软清理；本工具用于按需再次清理或对未及时出现的弹窗做即时清理。"
+                "force=true 启用激进档（额外隐藏 modal/paywall/遮罩，可能误伤正文，慎用）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "force": {"type": "boolean", "description": "激进档，默认 false。"},
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_element",
+            "description": "从当前页拔除元素：可传快照里的 uid（如 ai-12），或任意 CSS 选择器。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "uid（ai-N）或 CSS 选择器（如 '#banner', '.popup-close'）。"},
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_loading",
+            "description": "急停：停止当前页的加载（页面卡死、被恶意重定向时的逃生手段）。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "escape_back",
+            "description": "急停并后退到上一页（从误跳转/误入页面快速撤回）。",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_page_markdown",
+            "description": "把当前活动标签页就地清洗并转换为 Markdown 文本返回（本地，无云）。适合读取已在浏览器打开的页面正文。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_redirect",
+            "description": (
+                "查询被“重定向护栏”挂起、等待你裁决的页面跳转，返回 [{id,url}] 列表。"
+                "仅当用户在设置里开启“重定向护栏”时才会产生挂起；否则返回空列表 []。"
+                "你在点击/提交表单后若怀疑发生跳转，可调用本工具查看是否有待裁决跳转，再用 approve_navigation 放行或拦截。"
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_navigation",
+            "description": "对挂起的重定向做出裁决：allow=true 放行该跳转（继续前往目标 URL），false 维持拦截（留在原页）。tab_id 可省略（默认作用于当前活动页/或唯一挂起项）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "allow": {"type": "boolean", "description": "true=放行，false=拦截。默认 true。"},
+                    "tab_id": {"type": "integer", "description": "可选：挂起项的 webContents id（来自 redirect_pending 的 id）。"},
+                },
+                "required": []
             }
         }
     }

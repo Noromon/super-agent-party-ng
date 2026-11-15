@@ -597,5 +597,229 @@ Object.assign(vue_methods, {
         } catch (e) {
             return "JS Execution Error: " + e.message;
         }
+    },
+
+    // --- 12b. S227：反弹窗/广告注入（CSS 实时隐藏 + 立即移除匹配节点；force=激进档）---
+    // 仅 DOM 层，无网络域名名单。onDomReady 在标签页每次加载后自动调用软档（受 adblock 设置控制）。
+    _applyAdblock(wv, hard) {
+        if (!wv) return Promise.resolve("Error: No active webview");
+        const soft = '#onetrust-consent-sdk,#onetrust-banner-sdk,#onetrust-popup,.qc-cmp2-container,#cmpwrapper,#cookie-banner,#cookieConsent,.cookie-consent,.cookie-banner,[id^="didomi-"],#didomi-host,#didomi-consent,.adns-popup,.adns-overlay,iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adservice"],iframe[src*="amazon-adsystem"],ins.adsbygoogle,.adsbygoogle,div[id^="google_ads_"],div[class*="ad-slot"],[aria-label="Advertisement"]';
+        const extra = ',[role="dialog"][aria-modal="true"],[class*="modal-backdrop"],[class*="interstitial"],[id*="paywall"],[class*="paywall"]';
+        const css = hard ? (soft + extra) : soft;
+        const script = '(function(){try{'
+            + 'var css=' + JSON.stringify(css) + ';'
+            + 'var el=document.getElementById("__sap_adblock__");if(!el){el=document.createElement("style");el.id="__sap_adblock__";(document.head||document.documentElement).appendChild(el);}'
+            + 'el.textContent=css+"{display:none!important;width:0!important;height:0!important;}";'
+            + 'var n=0;css.split(",").forEach(function(s){try{document.querySelectorAll(s.trim()).forEach(function(x){try{x.remove?x.remove():(x.parentNode&&x.parentNode.removeChild(x));n++;}catch(e){}})}catch(e){}});'
+            + 'return "cleaned:"+n;}catch(e){return "clean err:"+e.message;}})()';
+        return this._wvExec(wv, script);
+    },
+
+    cleanPage(force) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        return this._applyAdblock(wv, !!force);
+    },
+
+    // 拔除指定元素：target 可为快照 uid（ai-N）或任意 CSS 选择器
+    removeElement(target) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        const script = '(function(){try{'
+            + 'var t=' + JSON.stringify(target || '') + ';if(!t)return "no target";'
+            + 'var sel=t;if(/^ai-\\d+$/.test(t)){sel=\'[data-ai-id="\'+t+\'"]\';}'
+            + 'var els=document.querySelectorAll(sel);var n=0;'
+            + 'els.forEach(function(e){try{e.remove?e.remove():(e.parentNode&&e.parentNode.removeChild(e));n++;}catch(x){}});'
+            + 'return "removed:"+n;}catch(e){return "remove err:"+e.message;}})()';
+        return this._wvExec(wv, script);
+    },
+
+    stopLoading() {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        try { if (wv.stop) wv.stop(); return "stopped"; }
+        catch (e) { return "stop err: " + e.message; }
+    },
+
+    // 急停 + 后退：从误跳转/弹窗逃生
+    escapeBack() {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        try {
+            if (wv.stop) wv.stop();
+            if (wv.canGoBack()) { wv.goBack(); return "stopped and went back"; }
+            return "stopped (no history to go back)";
+        } catch (e) { return "escapeBack err: " + e.message; }
+    },
+
+    // 把当前活动页就地清洗后返回 HTML（供 get_page_markdown 转 Markdown）
+    getPageHtml() {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        if (wv.isLoading()) return "Error: Page is loading...";
+        const kill = "(function(){"
+            + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe','nav','footer','header','aside'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
+            + "try{return document.body?document.body.innerHTML:'';}catch(e){return '';}})()";
+        return this._wvExec(wv, kill);
+    },
+
+    // 后台开标签：建 tab 并设为当前供 agent 操作，但不切换 activeMenu（不抢用户可见面板）
+    openUrlInBackground(url) {
+        if (!url) return "Error: no url";
+        this._guardAuthNav(url);
+        const newTab = { id: Date.now(), title: 'Loading...', url: url, favicon: '', isLoading: true, loaded: true, canGoBack: false, canGoForward: false };
+        this.browserTabs.push(newTab);
+        this.currentTabId = newTab.id;
+        this.urlInput = url;
+        return "Opened in background tab id " + newTab.id;
+    },
+
+    // --- 14. S227：重定向护栏（guardRedirect 开启时）---
+    // agent 主动导航授权放行（guardRedirect 关闭时为空操作）
+    _guardAuthNav(url) {
+        try {
+            if (this.chromeMCPSettings && this.chromeMCPSettings.guardRedirect
+                && window.electronAPI && window.electronAPI.guardAuthorize) {
+                window.electronAPI.guardAuthorize({ url });
+            }
+        } catch (e) {}
+    },
+
+    // 查询当前被挂起的跳转（guardRedirect 关闭时恒为 []）
+    async listPendingRedirects() {
+        try {
+            if (!(window.electronAPI && window.electronAPI.guardList)) return "[]";
+            const r = await window.electronAPI.guardList();
+            return JSON.stringify(r || []);
+        } catch (e) { return "[]"; }
+    },
+
+    // 裁决：allow=true 放行该跳转，否则维持拦截。id 省略时取当前活动 webview
+    async resolveRedirect(allow, id) {
+        try {
+            if (!(window.electronAPI && window.electronAPI.guardDecide)) return "no bridge";
+            let wid = id;
+            if (wid == null) {
+                const wv = this.getWebview();
+                try { if (wv && wv.getWebContentsId) wid = wv.getWebContentsId(); } catch (e) {}
+            }
+            const r = await window.electronAPI.guardDecide({ id: wid, allow: !!allow });
+            return r ? ("redirect " + (allow ? "allowed" : "blocked")) : "no pending redirect";
+        } catch (e) { return "resolveRedirect err: " + e.message; }
+    },
+
+    // 设置页切换 guardRedirect：保存 + 通知主进程实时生效
+    onGuardRedirectChange() {
+        try { this.autoSaveSettings && this.autoSaveSettings(); } catch (e) {}
+        try {
+            if (window.electronAPI && window.electronAPI.setGuardFlag) {
+                window.electronAPI.setGuardFlag(this.chromeMCPSettings && this.chromeMCPSettings.guardRedirect === true);
+            }
+        } catch (e) {}
+    },
+
+    // --- 13. S227：离屏隐藏渲染动态页 -> 清洗后 HTML（供 web_render 转 Markdown）---
+    // 不建标签、不动 currentTab/activeMenu，纯隐藏 webview 渲染后抽取，避免抢占用户视图。
+    renderOffscreenPage(url, opts) {
+        opts = opts || {};
+        const waitText = (opts.waitText || "");
+        let total = parseInt(opts.timeout) || 45;
+        total = Math.max(5, Math.min(total, 60));
+        const totalMs = total * 1000;
+        return new Promise((resolve) => {
+            let done = false, hardTimer = null, domReadySeen = false, lastStage = 'connect';
+            let wv;
+            try {
+                wv = document.createElement('webview');
+            } catch (e) {
+                resolve(JSON.stringify({ ok: false, url: url, error: 'createElement failed' }));
+                return;
+            }
+            const finish = (obj) => {
+                if (done) return;
+                done = true;
+                try { if (hardTimer) clearTimeout(hardTimer); } catch (e) {}
+                try { wv.remove(); } catch (e) {}
+                resolve(JSON.stringify(obj));
+            };
+            wv.setAttribute('partition', 'persist:party-browser-session');
+            if (this.webviewPreloadPath) { try { wv.setAttribute('preload', this.webviewPreloadPath); } catch (e) {} }
+            wv.setAttribute('webpreferences', 'contextIsolation=true, nodeIntegration=false, sandbox=true, webSecurity=true, enableRemoteModule=false');
+            wv.setAttribute('style', 'position:fixed;left:-20000px;top:0;width:1280px;height:900px;opacity:0;pointer-events:none;border:0;');
+            if (this.dynamicUserAgent) { try { wv.setAttribute('useragent', this.dynamicUserAgent); } catch (e) {} }
+
+            const kill = "(function(){"
+                + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
+                + "try{var sel='nav,footer,header,aside,[role=banner],[role=contentinfo],[aria-modal=true],[class*=cookie],[id*=cookie],[class*=consent],[class*=paywall]';sel.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{var r=n.getBoundingClientRect?n.getBoundingClientRect():{width:0,height:0};if((r.width*r.height)>600000)return;n.remove();}catch(e){}})}catch(e){}});}catch(e){}"
+                + "try{return JSON.stringify({title:document.title||'',finalUrl:(window.location?window.location.href:''),body:(document.body?document.body.innerHTML:'')});}catch(e){return JSON.stringify({title:'',finalUrl:'',body:''});}"
+                + "})()";
+
+            // 抽取当前 DOM；有正文则 finish 结束（partialFlag 标记是否为超时兜底的部分内容）
+            const grab = (partialFlag) => {
+                if (done) return Promise.resolve(true);
+                return wv.executeJavaScript(kill).then(function (s) {
+                    let d = {}; try { d = JSON.parse(s); } catch (e) {}
+                    let body = (d && d.body) || '';
+                    if (body.length > 400000) body = body.slice(0, 400000);
+                    if (body.trim()) {
+                        finish({ ok: true, partial: !!partialFlag, title: (d && d.title) || '', finalUrl: (d && d.finalUrl) || url, html: body });
+                        return true;
+                    }
+                    return false;
+                }).catch(function () { return false; });
+            };
+
+            // 总超时：先兜底抽取当前 DOM（拿到=部分内容），拿不到才判失败；按是否曾 DCL 分类
+            hardTimer = setTimeout(function () {
+                grab(true).then(function (got) {
+                    if (!got) finish({ ok: false, url: url, error: domReadySeen ? 'no-content' : 'render timeout', stage: lastStage });
+                });
+            }, totalMs);
+
+            wv.addEventListener('did-fail-load', function (e) {
+                if (!(e && e.isMainFrame === true)) return;
+                if (e.errorCode === -3) return; // ERR_ABORTED（多由重定向触发，忽略）
+                grab(false).then(function (got) {
+                    if (!got) finish({ ok: false, url: url, error: 'load failed', code: e.errorCode, desc: e.errorDescription || '', stage: 'net' });
+                });
+            });
+            wv.addEventListener('did-stop-loading', function () { lastStage = 'load-stop'; grab(false); });
+
+            wv.addEventListener('dom-ready', function () {
+                domReadySeen = true; lastStage = 'dom-ready';
+                if (waitText) {
+                    const start = Date.now();
+                    const poll = function () {
+                        if (done) return;
+                        wv.executeJavaScript('((document.body&&document.body.innerText)||"").indexOf(' + JSON.stringify(waitText) + ')>=0').then(function (found) {
+                            if (done) return;
+                            if (found) grab(false);
+                            else if (Date.now() - start > totalMs) finish({ ok: false, url: url, error: 'wait-text-timeout', stage: 'waittext' });
+                            else setTimeout(poll, 500);
+                        }).catch(function () { grab(false); });
+                    };
+                    setTimeout(poll, 300);
+                } else {
+                    // DCL 已触发：给 SPA 几次机会抓正文；仍空且页面不再加载则判空，避免登录墙也死等
+                    let tries = 0;
+                    const probe = function () {
+                        if (done) return;
+                        grab(false).then(function (got) {
+                            if (got) return;
+                            if (tries++ < 4) setTimeout(probe, 800);
+                            else if (!wv.isLoading()) finish({ ok: true, url: url, title: '', finalUrl: url, html: '' });
+                        });
+                    };
+                    setTimeout(probe, 600);
+                }
+            });
+
+            try {
+                wv.src = url;
+                document.body.appendChild(wv);
+            } catch (e) {
+                finish({ ok: false, url: url, error: 'attach failed', desc: (e && e.message) || '' });
+            }
+        });
     }
 });
