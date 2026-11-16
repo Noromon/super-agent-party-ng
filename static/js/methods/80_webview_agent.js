@@ -1,5 +1,7 @@
 // 批 3 F2：自 vue_methods.js 搬移的 js/methods/80_webview_agent.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
+// S229：移动端 App 拉活/扫码登录/全屏遮罩选择器（定向、避免误伤正文），供离屏清洗与反广告注入共用。
+const WALLS_SEL = '[class*=open-app],[class*=openapp],[class*=callapp],[class*=call-native],[class*=call_native],[class*=download-app],[class*=downloadapp],[class*=app-download],[class*=app-banner],[class*=appopen],[class*=OpenApp],[class*=AppDownload],[class*=AppBanner],[class*=login-mask],[class*=loginMask],[class*=LoginMask],[id*=loginbox],[class*=scan-login],[class*=scanlogin],[class*=qrcode-login],[class*=QRLogin],[class*=modal-backdrop],[class*=interstitial],[class*=downloadTop],[id*=downloadTop]';
 Object.assign(vue_methods, {
 
     // S106: guest 端结果截断网关。MB 级页面内容原样回传宿主时，DOMWebSocket
@@ -657,7 +659,7 @@ Object.assign(vue_methods, {
     _applyAdblock(wv, hard) {
         if (!wv) return Promise.resolve("Error: No active webview");
         const soft = '#onetrust-consent-sdk,#onetrust-banner-sdk,#onetrust-popup,.qc-cmp2-container,#cmpwrapper,#cookie-banner,#cookieConsent,.cookie-consent,.cookie-banner,[id^="didomi-"],#didomi-host,#didomi-consent,.adns-popup,.adns-overlay,iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adservice"],iframe[src*="amazon-adsystem"],ins.adsbygoogle,.adsbygoogle,div[id^="google_ads_"],div[class*="ad-slot"],[aria-label="Advertisement"]';
-        const extra = ',[role="dialog"][aria-modal="true"],[class*="modal-backdrop"],[class*="interstitial"],[id*="paywall"],[class*="paywall"]';
+        const extra = ',[role="dialog"][aria-modal="true"],[class*="modal-backdrop"],[class*="interstitial"],[id*="paywall"],[class*="paywall"]' + ',' + WALLS_SEL;
         const css = hard ? (soft + extra) : soft;
         const script = '(function(){try{'
             + 'var css=' + JSON.stringify(css) + ';'
@@ -712,6 +714,7 @@ Object.assign(vue_methods, {
         if (wv.isLoading()) return "Error: Page is loading...";
         const kill = "(function(){"
             + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe','nav','footer','header','aside'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
+            + "try{var walls=" + JSON.stringify(WALLS_SEL) + ";walls.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
             + "try{return document.body?document.body.innerHTML:'';}catch(e){return '';}})()";
         return this._wvExec(wv, kill);
     },
@@ -720,7 +723,7 @@ Object.assign(vue_methods, {
     openUrlInBackground(url) {
         if (!url) return "Error: no url";
         this._guardAuthNav(url);
-        const newTab = { id: Date.now(), title: 'Loading...', url: url, favicon: '', isLoading: true, loaded: true, canGoBack: false, canGoForward: false };
+        const newTab = { id: Date.now(), title: 'Loading...', url: url, favicon: '', isLoading: true, loaded: true, canGoBack: false, canGoForward: false, mobile: false };
         this.browserTabs.push(newTab);
         this.currentTabId = newTab.id;
         this.urlInput = url;
@@ -779,6 +782,8 @@ Object.assign(vue_methods, {
         let total = parseInt(opts.timeout) || 45;
         total = Math.max(5, Math.min(total, 60));
         const totalMs = total * 1000;
+        const mobile = !!opts.mobile;
+        const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
         return new Promise((resolve) => {
             let done = false, hardTimer = null, domReadySeen = false, lastStage = 'connect';
             let wv;
@@ -798,12 +803,15 @@ Object.assign(vue_methods, {
             wv.setAttribute('partition', 'persist:party-browser-session');
             if (this.webviewPreloadPath) { try { wv.setAttribute('preload', this.webviewPreloadPath); } catch (e) {} }
             wv.setAttribute('webpreferences', 'contextIsolation=true, nodeIntegration=false, sandbox=true, webSecurity=true, enableRemoteModule=false');
-            wv.setAttribute('style', 'position:fixed;left:-20000px;top:0;width:1280px;height:900px;opacity:0;pointer-events:none;border:0;');
-            if (this.dynamicUserAgent) { try { wv.setAttribute('useragent', this.dynamicUserAgent); } catch (e) {} }
+            const _vw = mobile ? 414 : 1280, _vh = mobile ? 896 : 900;
+            wv.setAttribute('style', 'position:fixed;left:-20000px;top:0;width:' + _vw + 'px;height:' + _vh + 'px;opacity:0;pointer-events:none;border:0;');
+            const _ua = mobile ? MOBILE_UA : this.dynamicUserAgent;
+            if (_ua) { try { wv.setAttribute('useragent', _ua); } catch (e) {} }
 
             const kill = "(function(){"
                 + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
                 + "try{var sel='nav,footer,header,aside,[role=banner],[role=contentinfo],[aria-modal=true],[class*=cookie],[id*=cookie],[class*=consent],[class*=paywall]';sel.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{var r=n.getBoundingClientRect?n.getBoundingClientRect():{width:0,height:0};if((r.width*r.height)>600000)return;n.remove();}catch(e){}})}catch(e){}});}catch(e){}"
+                + "try{var walls='" + WALLS_SEL + "';walls.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
                 + "try{return JSON.stringify({title:document.title||'',finalUrl:(window.location?window.location.href:''),body:(document.body?document.body.innerHTML:'')});}catch(e){return JSON.stringify({title:'',finalUrl:'',body:''});}"
                 + "})()";
 

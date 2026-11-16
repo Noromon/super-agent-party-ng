@@ -1136,6 +1136,52 @@ app.whenReady().then(async () => {
       return true;
     });
 
+    // S229: 内置浏览器移动端仿真（Android Chrome UA + 手机视口 + 触摸）。
+    // 优先走 CDP Emulation（真视口/触摸）；调试器被 DevTools 占用时回退为仅 setUA，渲染层会另设 414 宽视口。
+    const SAP_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
+    const _sapMobileDbg = new Set();
+    ipcMain.handle('set-webview-mobile', async (e, payload) => {
+      try {
+        const wcId = Number(payload && payload.wcId);
+        const mobile = !!(payload && payload.mobile);
+        const desktopUA = (payload && payload.desktopUA) || '';
+        if (!wcId) return { ok: false, err: 'no-wcid' };
+        const wc = webContents.fromId(wcId);
+        if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+        if (mobile) {
+          try { wc.setUserAgent(SAP_MOBILE_UA); } catch (_) {}
+          try {
+            if (!wc.debugger.isAttached()) {
+              wc.debugger.attach('1.3');
+              _sapMobileDbg.add(wcId);
+              wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); });
+            }
+            await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: SAP_MOBILE_UA, acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8', platform: 'Android' });
+            await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 414, height: 896, deviceScaleFactor: 3, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
+            await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+            try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }); } catch (_) {}
+            return { ok: true, cdp: true };
+          } catch (ce) {
+            return { ok: true, cdp: false, err: 'emulation-fallback: ' + String((ce && ce.message) || ce) };
+          }
+        } else {
+          try {
+            if (wc.debugger.isAttached() && _sapMobileDbg.has(wcId)) {
+              try { await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride'); } catch (_) {}
+              try { await wc.debugger.sendCommand('Emulation.clearUserAgentOverride'); } catch (_) {}
+              try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
+              try { wc.debugger.detach(); } catch (_) {}
+              _sapMobileDbg.delete(wcId);
+            }
+          } catch (_) {}
+          try { if (desktopUA) wc.setUserAgent(desktopUA); } catch (_) {}
+          return { ok: true, cdp: false };
+        }
+      } catch (err) {
+        return { ok: false, err: String((err && err.message) || err) };
+      }
+    });
+
     // 添加获取端口信息的 IPC 处理
     ipcMain.handle('get-server-info', () => {
       return {

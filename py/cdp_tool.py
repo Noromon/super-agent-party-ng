@@ -254,11 +254,18 @@ async def list_pages():
     """列出所有标签页"""
     return await call_vue_method('getPagesInfo')
 
-async def new_page(url, timeout=0, background=False):
-    """新建标签页；background=True 时后台打开（不抢占用户可见面板）。"""
+async def new_page(url, timeout=0, background=False, mobile=False):
+    """新建标签页；background=True 时后台打开（不抢占用户可见面板）；mobile=True 用移动端 UA + 手机视口渲染。"""
     if background:
-        return await call_vue_method('openUrlInBackground', [url])
-    return await call_vue_method('openUrlInNewTab', [url])
+        res = await call_vue_method('openUrlInBackground', [url])
+    else:
+        res = await call_vue_method('openUrlInNewTab', [url])
+    if mobile:
+        try:
+            await call_vue_method('setTabMobile', [None, True, True])
+        except Exception:  # noqa: BLE001
+            pass
+    return res
 
 async def close_page(pageIdx):
     """关闭标签页"""
@@ -268,8 +275,13 @@ async def select_page(pageIdx, bringToFront=True):
     """选择/切换标签页"""
     return await call_vue_method('switchTabByIndex', [pageIdx])
 
-async def navigate_page(type="url", url=None, ignoreCache=False, timeout=0):
-    """页面导航"""
+async def navigate_page(type="url", url=None, ignoreCache=False, timeout=0, mobile=None):
+    """页面导航；mobile=True/False 切换当前标签页移动/桌面模式（None 不改，移动模式需重新加载才生效）。"""
+    if mobile is not None:
+        try:
+            await call_vue_method('setTabMobile', [None, bool(mobile), False])
+        except Exception:  # noqa: BLE001
+            pass
     return await call_vue_method('browserNavigate', [type, url, ignoreCache])
 
 async def wait_for(text, timeout=1000):
@@ -328,11 +340,12 @@ async def take_screenshot(fullPage=False, uid=None):
 # S227: 本地无头渲染动态页 -> Markdown（一次性）
 # ==========================================
 
-async def web_render(original_url, wait_text=None, timeout=45):
+async def web_render(original_url, wait_text=None, timeout=45, mobile=False):
     """用内置浏览器在离屏隐藏 webview 渲染动态(含JavaScript)页面，本地转 Markdown 回传，无云。
 
     仅 Electron 桌面版且启用内置浏览器时有效；可访问本机/内网地址（异于云端 markdown_new）。
     慢站超时前会尽量回传已加载到的部分内容(标注 partial)；重站可加大 timeout 或用 wait_text 等关键文本。
+    mobile=True 用移动端 UA + 手机视口渲染（针对移动端 H5/公众号/贴吧/知乎等只给移动端内容的站点）。
     """
     url = (original_url or "").strip()
     if not url:
@@ -344,7 +357,7 @@ async def web_render(original_url, wait_text=None, timeout=45):
                 "可改用 markdown_new / simple_fetch 等抓取工具。")
     t = int(timeout or 45)
     t = max(5, min(t, 60))
-    opts = {"waitText": wait_text or "", "timeout": t}
+    opts = {"waitText": wait_text or "", "timeout": t, "mobile": bool(mobile)}
     res = await call_vue_method("renderOffscreenPage", [url, opts], timeout=t + 20)
     if not isinstance(res, str):
         res = json.dumps(res or {})
@@ -464,7 +477,8 @@ all_cdp_tools = [
                 "properties": {
                     "url": {"type": "string", "description": "URL to load"},
                     "timeout": {"type": "integer"},
-                    "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"}
+                    "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"},
+                    "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。"}
                 },
                 "required": ["url"]
             }
@@ -503,13 +517,14 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "navigate_page",
-            "description": "Navigates the currently selected page.",
+            "description": "Navigates the currently selected page. Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "type": {"type": "string", "enum": ["url", "back", "forward", "reload"]},
                     "url": {"type": "string"},
-                    "ignoreCache": {"type": "boolean"}
+                    "ignoreCache": {"type": "boolean"},
+                    "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"}
                 },
                 "required": ["type"]
             }
@@ -706,6 +721,7 @@ all_cdp_tools = [
                 "返回给你。纯本地、无第三方云端，适合 markdown_new 抓不到的动态页/SPA。"
                 "可访问本机或内网地址。若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本。"
                 "慢站超时前会尽量返回已加载到的部分内容(标注 partial)。"
+                "若站点只向移动端吐内容或弹「打开App/扫码登录」墙，设 mobile=true 用手机UA+视口渲染。"
                 "仅 Electron 桌面版且已启用内置浏览器时有效。"
             ),
             "parameters": {
@@ -722,6 +738,10 @@ all_cdp_tools = [
                     "timeout": {
                         "type": "integer",
                         "description": "可选：渲染等待秒数（5-60，默认45）。慢站/重站可调大；超时仍会尽量返回部分内容(partial)。",
+                    },
+                    "mobile": {
+                        "type": "boolean",
+                        "description": "可选：true=用移动端 UA + 手机视口渲染。针对只向移动端吐内容的站点（手机H5/公众号/贴吧/知乎 App 墙等），可绕开「请打开App/扫码登录」桌面墙。默认 false。",
                     },
                 },
                 "required": ["original_url"],

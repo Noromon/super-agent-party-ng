@@ -15,7 +15,8 @@ Object.assign(vue_methods, {
             isLoading: true,
             loaded: true,
             canGoBack: false,
-            canGoForward: false
+            canGoForward: false,
+            mobile: false
         };
         this.browserTabs.push(newTab);
         this.switchTab(newTab.id);
@@ -301,7 +302,8 @@ Object.assign(vue_methods, {
             isLoading: true,
             loaded: true,
             canGoBack: false,
-            canGoForward: false
+            canGoForward: false,
+            mobile: false
         };
         this.browserTabs.push(newTab);
         this.switchTab(newTab.id);
@@ -698,5 +700,46 @@ Object.assign(vue_methods, {
         } catch (e) {
             console.error('Failed to load favorites:', e);
         }
+    },
+
+    // S229: 移动端模式切换（Android UA + 手机视口/触摸仿真）。id 省略=当前标签页；reload!==false 时重载以生效。
+    // 走 main 进程 CDP Emulation；若调试器被 DevTools 占用则回退为「移动端 UA + 414 宽视口」（元素收窄仍可触发响应式）。
+    async setTabMobile(id, enable, reload) {
+        const tabId = (id === null || id === undefined) ? this.currentTabId : id;
+        const wv = this.getWebview(tabId);
+        if (!wv) return 'Error: no webview for tab ' + tabId;
+        const tab = this.browserTabs.find(t => t.id === tabId);
+        let wcId = 0;
+        try { wcId = wv.getWebContentsId(); } catch (e) {}
+        let res = null;
+        try {
+            if (window.electronAPI && window.electronAPI.setWebviewMobile) {
+                res = await window.electronAPI.setWebviewMobile({ wcId, mobile: !!enable, desktopUA: this.dynamicUserAgent });
+            } else {
+                res = { ok: false, err: 'no-ipc-bridge' };
+            }
+        } catch (e) { res = { ok: false, err: String((e && e.message) || e) }; }
+        if (tab) tab.mobile = !!enable;
+        try {
+            if (enable) { wv.style.flex = '0 1 414px'; wv.style.width = '414px'; wv.style.alignSelf = 'center'; }
+            else { wv.style.flex = ''; wv.style.width = ''; wv.style.alignSelf = ''; }
+        } catch (e) {}
+        if (reload !== false) { try { wv.reload(); } catch (e) {} }
+        const how = (res && res.cdp) ? 'CDP' : 'UA/viewport';
+        let out = (enable ? 'mobile ON' : 'mobile OFF') + ' [' + how + ']';
+        if (res && res.ok === false) out += ' (degraded: ' + (res.err || '') + ')';
+        else if (res && res.cdp === false && enable) out += ' (emulation limited: UA/viewport only)';
+        return out;
+    },
+
+    // S229: 工具栏「移动端」开关——切换当前标签页移动/桌面模式（重载生效）。
+    toggleTabMobile() {
+        const tab = this.currentTab;
+        if (!tab || !tab.url) {
+            try { showNotification(this.t('browserMobileNoPage') || '当前没有可切换的页面', 'info'); } catch (e) {}
+            return;
+        }
+        const p = this.setTabMobile(tab.id, !tab.mobile, true);
+        if (p && p.then) p.then(() => {}).catch(() => {});
     }
 });

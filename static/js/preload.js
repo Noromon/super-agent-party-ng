@@ -99,6 +99,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   guardList: () => ipcRenderer.invoke('guard-list'),
   guardDecide: (payload) => ipcRenderer.invoke('guard-decide', payload),
   setGuardFlag: (on) => ipcRenderer.invoke('set-guard-flag', on),
+  // S229: 移动端模式（Android UA + 手机视口/触摸仿真），按 guest webContents id 切换
+  setWebviewMobile: (payload) => ipcRenderer.invoke('set-webview-mobile', payload),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
   // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈
