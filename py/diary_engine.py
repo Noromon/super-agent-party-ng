@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import time
 import random
@@ -136,8 +137,10 @@ async def build_recall_seed(book_id: str = DEFAULT_BOOK_ID, prev_ratio: float = 
 # 把当天已发生的记录（日记条目+mem0 当天新增记忆）注入 system，纠正时间认知。
 _TODAY_TYPE_CN = {
     "think": "自我思考", "webSearch": "联网搜索", "knowledge": "知识库",
-    "imMessage": "主动消息", "browserControl": "浏览器", "smartHome": "智能家居",
-    "chatSummary": "对话摘要",
+    # S231：类型名直接标明互动语义——旧「主动消息/对话摘要」不分「谁在场」，
+    # 模型会把单方面外发当互动、把摘要里的真实对话忽略掉。
+    "imMessage": "你单方面发出的主动消息", "browserControl": "浏览器", "smartHome": "智能家居",
+    "chatSummary": "对话记录（用户与你实际说过话）",
 }
 
 
@@ -187,24 +190,44 @@ async def _fetch_today_new_memories(limit: int = 5):
     return await asyncio.to_thread(_collect)
 
 
-async def build_today_context(book_id: str, now=None, max_entries: int = 6):
-    """S84：【今日概况】块。两个数据源都异常/为空时明示「今天确实尚未交流」。"""
+def _entry_head(text: str) -> str:
+    """S231：取条目前置正文头——先剥掉开头的空行与 markdown 强调/日期时刻头行。
+    旧实现把「**2026年11月16日 星期一 晴**」连同正文一起截 30 字，日期头吃掉预算后
+    恰好截出「主人今天没让我…」这类半句，反而强化「用户缺席」错觉（16:12 误发事故链一环）。"""
+    lines = (text or "").strip().splitlines()
+    while lines:
+        first = lines[0].strip()
+        if not first:
+            lines.pop(0)
+            continue
+        stripped = first.strip("*# ").strip()
+        is_date_head = bool(re.search(r"\d{1,2}月\d{1,2}日|\d{4}[年\-]", first)) and len(first) <= 60
+        is_bold_head = first.startswith("**") and bool(_TIME_HEAD_RE.search(stripped))
+        if is_date_head or is_bold_head:
+            lines.pop(0)
+            continue
+        break
+    return " ".join(s.strip() for s in lines).strip()
+
+
+async def _collect_today_evidence(book_id: str, now=None, max_entries: int = 6):
+    """S231：返回 (【今日概况】文本, has_user_chat)。
+    chatSummary = 今天用户与角色实际对话过的机证；think 只计数不展开（自证循环防护不变）。"""
     now = now or datetime.datetime.now()
     today = now.strftime("%Y-%m-%d")
     interact = []
     think_n = 0
+    has_user_chat = False
     try:
         entries = await get_recent_diary_entries(book_id, n=40)
         # S86：日记条目时间字段实为 time（diary_system 写入口径），created_at 仅兼容旧数据。
-        # think 是自我思考非互动证据，且幻觉 think 会以「事实」回灌后续思考（自证循环），
-        # 只计数不展开。
         todays = [e for e in entries
                   if str(e.get("time") or e.get("created_at") or "").startswith(today)]
         think_n = sum(1 for e in todays if e.get("type") == "think")
+        has_user_chat = any(e.get("type") == "chatSummary" for e in todays)
         for e in [e for e in todays if e.get("type") != "think"][-max_entries:]:
             t = str(e.get("time") or e.get("created_at") or "")[11:16]
-            head = _strip_injection_traces(
-                (e.get("content") or "").strip().replace("\n", " "))[:30]
+            head = _strip_injection_traces(_entry_head(e.get("content") or ""))[:30]
             kind = _TODAY_TYPE_CN.get(e.get("type"), e.get("type") or "记录")
             interact.append(f"- {t} {kind}：{head}")
     except Exception as e:
@@ -217,18 +240,42 @@ async def build_today_context(book_id: str, now=None, max_entries: int = 6):
         logging.debug(f"[DiaryEngine] 读取今日新增记忆失败: {e}")
     logging.getLogger("app").info(
         f"[DiaryEngine] 今日概况：互动={len(interact)}（日记={_n_diary} "
-        f"mem0={len(interact) - _n_diary}）思考={think_n}")
+        f"mem0={len(interact) - _n_diary}）思考={think_n} 用户对话={has_user_chat}")
     if interact:
         tail = f"\n（此外今天你已自行发呆写下 {think_n} 篇思考，非互动证据）" if think_n else ""
+        hard = ""
+        if has_user_chat:
+            hard = ("\n（注：上文出现「对话记录」即表明用户今天确实与你说过话，任何输出"
+                    "（尤其主动消息）严禁采用「今天还没联系/一整天没听见你说话/没人理你」"
+                    "之类缺席预设；「你单方面发出的主动消息」只是你发过言，不代表用户在。）")
         return ("【今日概况】以下是今天已经发生的记录，据此认知时间线，"
                 "切勿写出「用户今天还没找过我」之类与记录矛盾的话：\n"
-                + _neutralize("\n".join(interact), store="diary-today") + tail)
+                + _neutralize("\n".join(interact), store="diary-today") + tail + hard), has_user_chat
     if think_n:
         return ("【今日概况】到目前为止，今天还没有与用户交流的记录"
                 f"（今天你自己已写过 {think_n} 篇思考，非互动）。"
                 "若此刻确实还没有互动，可以照实写他还没来找你；"
-                "但只要上下文或记忆中显示今天其实聊过，就绝不能那样写。")
-    return "【今日概况】今天还没有与用户交流的任何记录——今天确实尚未互动。"
+                "但只要上下文或记忆中显示今天其实聊过，就绝不能那样写。"), False
+    return "【今日概况】今天还没有与用户交流的任何记录——今天确实尚未互动。", False
+
+
+async def build_today_context(book_id: str, now=None, max_entries: int = 6) -> str:
+    """S84：【今日概况】块。两个数据源都异常/为空时明示「今天确实尚未交流」。"""
+    block, _has = await _collect_today_evidence(book_id, now, max_entries)
+    return block
+
+
+async def has_today_user_interaction(book_id: str, now=None) -> bool:
+    """S231：今天是否存在 chatSummary（真实对话）记录——主动消息事实校验的证据门控。"""
+    now = now or datetime.datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    try:
+        entries = await get_recent_diary_entries(book_id, n=40)
+        return any(str(e.get("time") or e.get("created_at") or "").startswith(today)
+                   and e.get("type") == "chatSummary" for e in entries)
+    except Exception as e:
+        logging.debug(f"[DiaryEngine] 判定今日对话证据失败: {e}")
+        return False
 
 
 class DiaryEngine:
@@ -599,6 +646,27 @@ class DiaryEngine:
             book_id, character_id, character_name = await self._resolve_active_book()
             pushed_to = []
 
+            # S231：imMessage 事实校验——今天存在对话证据(chatSummary)时做一次性语义校对，
+            # 防「今天一整天都没听见你说话」这类与当日记录矛盾的消息直达用户。
+            # 校验器故障 fail-open（原文照发+日志），只有判矛盾且无有效改写才丢弃归档 think。
+            if action == "imMessage" and content:
+                try:
+                    if await has_today_user_interaction(book_id):
+                        _tb = await build_today_context(book_id)
+                        reviewed = await self._truthful_review_im(content, _tb)
+                        if reviewed == "":
+                            await append_diary_entry(
+                                "think", content,
+                                title="【校对丢弃】" + content.strip().splitlines()[0][:16],
+                                book_id=book_id, character_id=character_id,
+                                character_name=character_name)
+                            logging.getLogger("app").info(
+                                "[DiaryTruth] 主动消息与当日对话证据矛盾且无可用改写，已丢弃（归档 think）")
+                            return
+                        content = reviewed
+                except Exception as e:
+                    logging.warning(f"[DiaryEngine] 主动消息事实校验异常，原文放行: {e}")
+
             # imMessage 动作：随机选择一个渠道发送（S71：按平台去重后随机；
             # 同平台勾选了多个显式目标时全发，字典条目 {platform, chatId} 与旧字符串条目兼容）
             if action == "imMessage":
@@ -665,6 +733,21 @@ class DiaryEngine:
         system_prompt = system_prompt + "\n\n" + today_block
         seed = await build_recall_seed(book_id)
         user_prompt = f"{user_prompt}\n\n（本次思绪不妨从以下内容开始：{seed}。）"
+        if action == "imMessage":
+            # S231：防重复骚扰——16:12 事故里角色 13:43 刚问过「吃饭了没」又发「有没有好好吃饭」。
+            try:
+                _recent = await get_recent_diary_entries(book_id, n=20)
+                _cut = (now - datetime.timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M")
+                prevs = [e for e in _recent if e.get("type") == "imMessage"
+                         and str(e.get("time") or e.get("created_at") or "")[:16] >= _cut]
+                if prevs:
+                    prev_txt = _strip_injection_traces(
+                        (prevs[-1].get("content") or "").strip().replace("\n", " "))[:120]
+                    if prev_txt:
+                        user_prompt += ("\n（提醒：你 24 小时内上一条主动消息是「" + prev_txt + "」。"
+                                        "这次别重复相近的问候或重复提问，换一个全新的由头。）")
+            except Exception as e:
+                logging.debug(f"[DiaryEngine] 主动消息防重复提示失败: {e}")
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"[system]: {user_prompt}"},
@@ -731,6 +814,78 @@ class DiaryEngine:
         except Exception as e:
             logging.error(f"[DiaryEngine] 调用智能体失败: {e}")
             return ""
+
+    async def _truthful_review_im(self, draft: str, today_block: str) -> str:
+        """S231：主动消息事实校对 pass（仅在今日有对话证据时被调用）。
+
+        返回：改写文本 / 原文（无矛盾或任何解析、调用故障 fail-open）/ ""（判矛盾但改写为空→丢弃）。
+        走与生成同一条本机网关链路（platform=diary；S231 起 diary 自调用不入 mem0 与对话摘要缓冲）。
+        """
+        port = get_port()
+        url = f"http://127.0.0.1:{port}/v1/chat/completions"
+        sys_txt = (
+            "你是事实校对器。给定【今日概况】与一条将要发给用户的『主动消息』草稿，"
+            "检查草稿是否含有与今日记录矛盾的说法（例如声称用户整天没来找你、一整天没听见你说话、"
+            "没人理你，而记录里其实出现了『对话记录』）。有矛盾则只把这些句子改写为与记录一致、"
+            "自然口语化的表达，其余内容与个人风格原样保留；无矛盾则原样返回。"
+            '只输出一个 JSON 对象：第一个字符是 { ，最后一个字符是 } ，结构为 '
+            '{"fixed": true或false, "text": "最终文本"}。'
+            "fixed=是否做了改写；text=最终文本。禁止 markdown 代码块、解释、额外键。"
+        )
+        payload = {
+            "model": "super-model",
+            "messages": [
+                {"role": "system", "content": sys_txt},
+                {"role": "user", "content": today_block + "\n\n【草稿】\n" + draft},
+            ],
+            "stream": False,
+            "is_app_bot": True,
+            "platform": "diary",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                out = (resp.json().get("choices", [{}])[0]
+                           .get("message", {}).get("content", "") or "").strip()
+        except Exception as e:
+            logging.warning(f"[DiaryTruth] 校对调用失败，原文放行: {e}")
+            return draft
+        parsed = self._parse_review_json(out)
+        if not isinstance(parsed, dict):
+            logging.warning(f"[DiaryTruth] 校对输出不可解析，原文放行: {out[:120]!r}")
+            return draft
+        if parsed.get("fixed") is True:
+            txt = str(parsed.get("text") or "").strip()
+            if txt:
+                logging.getLogger("app").info(
+                    "[DiaryTruth] 主动消息与当日对话记录矛盾，已按证据改写后发送")
+                return txt
+            logging.getLogger("app").info("[DiaryTruth] 校对判矛盾但改写为空")
+            return ""
+        return draft
+
+    @staticmethod
+    def _parse_review_json(out: str):
+        """剥 ``` 围栏后严格 json.loads，失败退 repair_loose_json（S134 同款兜底）。"""
+        cand = (out or "").strip()
+        if cand.startswith("```"):
+            cand = cand.split("\n", 1)[-1]
+            if cand.rstrip().endswith("```"):
+                cand = cand.rstrip()[:-3]
+            cand = cand.strip()
+        try:
+            return json.loads(cand)
+        except Exception:
+            pass
+        try:
+            from py.memory_store import repair_loose_json
+            repaired = repair_loose_json(cand)
+            if repaired:
+                return json.loads(repaired)
+        except Exception:
+            pass
+        return None
 
     async def _push_to_chat(self, action: str, content: str, character_name: str = ""):
         """通过 WebSocket 广播日记给网页端，由前端直接展示"""

@@ -6718,7 +6718,8 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
     # ========== 对话缓冲：记录助手回复用于闲时自动总结 ==========
     try:
         diary_settings_inner = (settings.get("diarySettings", {}) or {})
-        if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined:
+        if diary_settings_inner.get("enabled", False) and diary_settings_inner.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined \
+                and getattr(request, "platform", "") != "diary":  # S231：日记自调用(含校对 pass)不回灌对话摘要缓冲，防自证回路
             ms = (settings or {}).get("memorySettings", {}) or {}
             buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
             if full_content:
@@ -6727,7 +6728,12 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
         logging.getLogger("app").info(f"[DiaryBuffer] 记录助手回复失败: {e}")
     if m0 and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
         logging.getLogger("app").info("记忆更新任务开始提交")
-        messages = _neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{full_content}", store="mem0-add")
+        # S231：结构化传角色（user/assistant 各自 sanitize），不再压平成单条 user 文本——
+        # 压平会让 mem0 把「你说」段当用户话语提取，造成记忆角色漂移/反转。
+        messages = [
+            {"role": "user", "content": _neutralize(user_prompt or "", store="mem0-add")},
+            {"role": "assistant", "content": _neutralize(full_content or "", store="mem0-add")},
+        ]
         infer = cur_memory.get('infer', False) or False
         _m0_job = m0
         _mid = memoryId
@@ -7239,7 +7245,8 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # ========== 对话缓冲：记录用户消息用于闲时自动总结 ==========
         try:
             diary_settings = (settings.get("diarySettings", {}) or {})
-            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined:
+            if diary_settings.get("enabled", False) and diary_settings.get("chatSummary", {}).get("enabled", True) and not request.is_quarantined \
+                    and getattr(request, "platform", "") != "diary":  # S231：同流式侧，diary 自调用不入缓冲
                 ms = (settings or {}).get("memorySettings", {}) or {}
                 buffer_key = ms.get("selectedMemory") or DIARY_DEFAULT_BOOK
                 update_buffer_identity(buffer_key, book_id=buffer_key,
@@ -8013,7 +8020,12 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
             # 移除原内容中的标签部分
             response_dict["choices"][0]['message']['content'] = re.sub(fr'{open_tag}(.*?)\{close_tag}', '', content, flags=re.DOTALL).strip()
     if m0 and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
-        messages=_neutralize(f"用户说：{user_prompt}\n\n---\n\n你说：{response_dict["choices"][0]['message']['content']}", store="mem0-add-complete")
+        _reply_txt = response_dict["choices"][0]['message']['content'] or ""
+        # S231：结构化传角色，防记忆角色漂移（同流式路径 mem0-add）。
+        messages = [
+            {"role": "user", "content": _neutralize(user_prompt or "", store="mem0-add-complete")},
+            {"role": "assistant", "content": _neutralize(_reply_txt, store="mem0-add-complete")},
+        ]
         infer = cur_memory.get('infer') or False
         _m0_job = m0
         _mid = memoryId

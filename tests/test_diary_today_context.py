@@ -71,8 +71,8 @@ def test_today_entries_only_today_and_formatted(monkeypatch):
     monkeypatch.setattr(de, "get_recent_diary_entries", fake_recent)
     monkeypatch.setattr(de, "_fetch_today_new_memories", no_mem)
     block = asyncio.run(de.build_today_context("book-a"))
-    assert "00:37 对话摘要" in block and "今晚主人哭得很凶" in block
-    assert "08:15 主动消息" in block          # created_at 旧字段兼容
+    assert "00:37 对话记录" in block and "今晚主人哭得很凶" in block
+    assert "08:15 你单方面发出的主动消息" in block          # created_at 旧字段兼容
     assert "发呆写下 1 篇思考" in block          # think 只计数（昨日那篇不计入）
     assert "清晨随笔" not in block             # think 不展开（防自证循环）
     assert "昨天及更早" not in block and "2026" not in block.split("切勿")[0].split("】")[-1]
@@ -179,7 +179,7 @@ def test_build_messages_has_weekday_and_today_block(monkeypatch):
     monkeypatch.setattr(de, "_fetch_today_new_memories", none_mem)
     msgs, _seed = asyncio.run(eng._build_messages("think"))
     assert "星期" in msgs[0]["content"]
-    assert "【今日概况】" in msgs[0]["content"] and "10:09 对话摘要" in msgs[0]["content"]
+    assert "【今日概况】" in msgs[0]["content"] and "10:09 对话记录" in msgs[0]["content"]
     assert "本次思绪不妨从" in msgs[-1]["content"]
 
 
