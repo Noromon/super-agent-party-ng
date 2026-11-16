@@ -230,6 +230,7 @@
   "_showStreamRetryNote",
   "_syncAssistantBody",
   "_toggleHighlight",
+  "_waitLoadStop",
   "_wvExec",
   "abortTranslate",
   "activateBotConversation",

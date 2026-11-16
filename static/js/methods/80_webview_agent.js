@@ -2,14 +2,17 @@
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 // S229：移动端 App 拉活/扫码登录/全屏遮罩选择器（定向、避免误伤正文），供离屏清洗与反广告注入共用。
 const WALLS_SEL = '[class*=open-app],[class*=openapp],[class*=callapp],[class*=call-native],[class*=call_native],[class*=download-app],[class*=downloadapp],[class*=app-download],[class*=app-banner],[class*=appopen],[class*=OpenApp],[class*=AppDownload],[class*=AppBanner],[class*=login-mask],[class*=loginMask],[class*=LoginMask],[id*=loginbox],[class*=scan-login],[class*=scanlogin],[class*=qrcode-login],[class*=QRLogin],[class*=modal-backdrop],[class*=interstitial],[class*=downloadTop],[id*=downloadTop]';
+// S230：软档反广告选择器上提为常量，_applyAdblock 与 getPageHtml（markdown 路径）共用。
+const AD_SOFT_SEL = '#onetrust-consent-sdk,#onetrust-banner-sdk,#onetrust-popup,.qc-cmp2-container,#cmpwrapper,#cookie-banner,#cookieConsent,.cookie-consent,.cookie-banner,[id^="didomi-"],#didomi-host,#didomi-consent,.adns-popup,.adns-overlay,iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adservice"],iframe[src*="amazon-adsystem"],ins.adsbygoogle,.adsbygoogle,div[id^="google_ads_"],div[class*="ad-slot"],[aria-label="Advertisement"]';
 Object.assign(vue_methods, {
 
     // S106: guest 端结果截断网关。MB 级页面内容原样回传宿主时，DOMWebSocket
     // host handler 实测 1s+ 长任务（LoAF 点名 DOMWebSocket.onmessage=1080ms）。
-    _wvExec(wv, script) {
+    _wvExec(wv, script, maxLen) {
+      const lim = maxLen || 60000; // S230: 仅个别路径(如 getPageHtml)放宽回传上限；默认仍守 S106 长任务防护
       const cap = '(async()=>{const __r=await eval(' + JSON.stringify(script) + ');' +
-        "if(typeof __r==='string'&&__r.length>60000)return __r.slice(0,60000)+'\\n...[S106 truncated '+(__r.length-60000)+' chars]';" +
-        "if(__r&&typeof __r==='object'){try{const __s=JSON.stringify(__r);if(__s.length>60000)return __s.slice(0,60000)+'...[S106 truncated]';}catch(_e){}}" +
+        "if(typeof __r==='string'&&__r.length>" + lim + ")return __r.slice(0," + lim + ")+'\\n...[S106 truncated '+(__r.length-" + lim + ")+' chars]';" +
+        "if(__r&&typeof __r==='object'){try{const __s=JSON.stringify(__r);if(__s.length>" + lim + ")return __s.slice(0," + lim + ")+'...[S106 truncated]';}catch(_e){}}" +
         'return __r;})()';
       return wv.executeJavaScript(cap);
     },
@@ -43,44 +46,76 @@ Object.assign(vue_methods, {
         return "Error: Tab index " + index + " not found";
     },
 
-    browserNavigate(type, url, ignoreCache) {
+    // S230: timeout(秒)>0 时等待加载停止再返回，结果带 (loaded)/(still loading)；缺省/0=旧行为立即返回。
+    async browserNavigate(type, url, ignoreCache, timeout) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        let waitSec = parseInt(timeout) || 0;
+        waitSec = Math.max(0, Math.min(waitSec, 30));
 
         try {
             this.activeMenu = 'ai-browser'; // 切换到 AI Browser 菜单
+            let base = '';
             switch (type) {
                 case 'url':
                     if (!url) return "Error: URL is required";
                     this.navigateTo(url);
-                    return "Navigating to " + url;
+                    base = "Navigating to " + url;
+                    break;
                 case 'back':
                     if (wv.canGoBack()) {
                         wv.goBack();
-                        return "Navigated Back";
+                        base = "Navigated Back";
+                        break;
                     }
                     return "Error: Cannot go back";
                 case 'forward':
                     if (wv.canGoForward()) {
                         wv.goForward();
-                        return "Navigated Forward";
+                        base = "Navigated Forward";
+                        break;
                     }
                     return "Error: Cannot go forward";
                 case 'reload':
                     if (ignoreCache) wv.reloadIgnoringCache();
                     else wv.reload();
-                    return "Reloaded";
+                    base = "Reloaded";
+                    break;
                 default:
                     // 默认为 URL 导航
                     if (url) {
                         this.navigateTo(url);
-                        return "Navigated to " + url;
+                        base = "Navigated to " + url;
+                        break;
                     }
                     return "Error: Unknown navigation type";
             }
+            if (waitSec > 0) {
+                const done = await this._waitLoadStop(wv, waitSec * 1000);
+                base += done ? " (loaded)" : " (still loading)";
+            }
+            return base;
         } catch (e) {
             return "Navigation Exception: " + e.message;
         }
+    },
+
+    // S230: 轮询等待 webview 停止加载。true=已停止(或瞬时完成)；false=超时仍在加载。
+    _waitLoadStop(wv, ms) {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            let sawLoading = false;
+            const tick = () => {
+                let loading = false;
+                try { loading = wv.isLoading(); } catch (e) { resolve(true); return; }
+                if (loading) sawLoading = true;
+                if (!loading && sawLoading) { resolve(true); return; }
+                if (!loading && !sawLoading && Date.now() - start > 400) { resolve(true); return; } // 缓存页/瞬时导航
+                if (Date.now() - start > ms) { resolve(!loading); return; }
+                setTimeout(tick, 250);
+            };
+            setTimeout(tick, 150);
+        });
     },
 
     // --- 0. 拟人化延迟辅助函数 ---
@@ -94,7 +129,12 @@ Object.assign(vue_methods, {
     async getWebviewSnapshot(verbose = false) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
-        if (wv.isLoading()) return "Error: Page is loading...";
+        // S230: 加载中先短等 3s；仍未完不再硬报错，改为照常出(可能不完整的)快照并加尾注
+        let loadNote = '';
+        if (wv.isLoading()) {
+            const done = await this._waitLoadStop(wv, 3000);
+            if (!done) loadNote = '\n(note: page still loading — snapshot may be partial)';
+        }
 
         const script = `
         (function() {
@@ -184,7 +224,8 @@ Object.assign(vue_methods, {
         `;
         
         try {
-            return await this._wvExec(wv, script);
+            const r = await this._wvExec(wv, script);
+            return (typeof r === 'string') ? (r + loadNote) : r;
         } catch (e) {
             return "Vue Snapshot Error: " + e.message;
         }
@@ -552,11 +593,11 @@ Object.assign(vue_methods, {
                     else if (Date.now() - start > ${timeout}) {
                         // 3. 关键修改：超时后，检查页面加载状态
                         if (document.readyState === 'complete') {
-                            // 页面已加载完毕，但文本未找到
-                            resolve("Page loaded");
+                            // 页面已加载完毕，但文本未找到（S230: 明确 Not found 语义，不再用歧义短语）
+                            resolve("Not found: " + ${JSON.stringify(text)} + " (page loaded)");
                         } else {
                             // 页面还在加载中，且超时
-                            resolve("Timeout waiting for text");
+                            resolve("Timeout: " + ${JSON.stringify(text)} + " not found (page still loading)");
                         }
                     } 
                     // 4. 继续轮询
@@ -658,7 +699,7 @@ Object.assign(vue_methods, {
     // 仅 DOM 层，无网络域名名单。onDomReady 在标签页每次加载后自动调用软档（受 adblock 设置控制）。
     _applyAdblock(wv, hard) {
         if (!wv) return Promise.resolve("Error: No active webview");
-        const soft = '#onetrust-consent-sdk,#onetrust-banner-sdk,#onetrust-popup,.qc-cmp2-container,#cmpwrapper,#cookie-banner,#cookieConsent,.cookie-consent,.cookie-banner,[id^="didomi-"],#didomi-host,#didomi-consent,.adns-popup,.adns-overlay,iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adservice"],iframe[src*="amazon-adsystem"],ins.adsbygoogle,.adsbygoogle,div[id^="google_ads_"],div[class*="ad-slot"],[aria-label="Advertisement"]';
+        const soft = AD_SOFT_SEL;
         const extra = ',[role="dialog"][aria-modal="true"],[class*="modal-backdrop"],[class*="interstitial"],[id*="paywall"],[class*="paywall"]' + ',' + WALLS_SEL;
         const css = hard ? (soft + extra) : soft;
         const script = '(function(){try{'
@@ -713,10 +754,12 @@ Object.assign(vue_methods, {
         if (!wv) return "Error: No active webview";
         if (wv.isLoading()) return "Error: Page is loading...";
         const kill = "(function(){"
+            + "try{var sel=" + JSON.stringify(AD_SOFT_SEL + ',' + WALLS_SEL) + ";sel.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
+            + "try{document.querySelectorAll('img[src^=\"data:\"]').forEach(function(n){try{n.remove()}catch(e){}});}catch(e){}"
             + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe','nav','footer','header','aside'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
             + "try{var walls=" + JSON.stringify(WALLS_SEL) + ";walls.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
             + "try{return document.body?document.body.innerHTML:'';}catch(e){return '';}})()";
-        return this._wvExec(wv, kill);
+        return this._wvExec(wv, kill, 400000);
     },
 
     // 后台开标签：建 tab 并设为当前供 agent 操作，但不切换 activeMenu（不抢用户可见面板）

@@ -2,6 +2,7 @@
 import logging
 import json
 import os
+import re
 import time
 import uuid
 import requests
@@ -275,14 +276,20 @@ async def select_page(pageIdx, bringToFront=True):
     """选择/切换标签页"""
     return await call_vue_method('switchTabByIndex', [pageIdx])
 
-async def navigate_page(type="url", url=None, ignoreCache=False, timeout=0, mobile=None):
-    """页面导航；mobile=True/False 切换当前标签页移动/桌面模式（None 不改，移动模式需重新加载才生效）。"""
+async def navigate_page(type="url", url=None, ignoreCache=False, timeout=8, mobile=None):
+    """页面导航。默认等待页面加载完成（最多 timeout 秒，加载完成即提前返回），结果带 (loaded)/(still loading)；timeout=0 不等待立即返回。
+    mobile=True/False 切换当前标签页移动/桌面模式（None 不改，移动模式需重新加载才生效）。"""
+    try:
+        t = int(timeout)
+    except (TypeError, ValueError):
+        t = 8
+    t = max(0, min(t, 30))
     if mobile is not None:
         try:
             await call_vue_method('setTabMobile', [None, bool(mobile), False])
         except Exception:  # noqa: BLE001
             pass
-    return await call_vue_method('browserNavigate', [type, url, ignoreCache])
+    return await call_vue_method('browserNavigate', [type, url, ignoreCache, t], timeout=t + 20)
 
 async def wait_for(text, timeout=1000):
     """等待文本出现"""
@@ -306,17 +313,20 @@ async def evaluate_script(script_code, args=None):
         # 帮它包一层标准函数
         clean_code = f"function() {{\n{clean_code}\n}}"
         
-    # 3. 导航安全拦截：防止执行页面跳转后，原页面上下文丢失导致 WebSocket 断开
-    if "submit()" in clean_code or "location" in clean_code:
+    # 3. S230 导航写护栏：只拦"真会换页/提交表单"的写操作（location 赋值/assign/replace/reload、submit()），
+    #    避免把 location.href 之类的纯读取脚本误判为导航而吞掉返回值。写操作仍异步调度（防上下文丢失断连）。
+    if re.search(r"(location\s*\.\s*(href|assign|replace|reload)\s*[=(]|location\s*=[^=]|submit\s*\()", clean_code):
         safe_code = f"""
         function() {{
             setTimeout(function() {{
                 ({clean_code})();
             }}, 100);
-            return 'Command scheduled (Async execution for navigation safety)';
+            return 'scheduled';
         }}
         """
-        return await call_vue_method('executeInActiveWebview', [safe_code, args or []])
+        await call_vue_method('executeInActiveWebview', [safe_code, args or []])
+        return ('[Navigation scheduled] 导航/提交脚本已异步调度执行；页面上下文将被替换，本次调用拿不到返回值。'
+                '请等待导航完成后重新调用 take_snapshot / get_page_markdown / evaluate_script 读取结果。')
     
     # 4. 正常执行
     return await call_vue_method('executeInActiveWebview', [clean_code, args or []])
@@ -517,13 +527,14 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "navigate_page",
-            "description": "Navigates the currently selected page. Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating.",
+            "description": "Navigates the currently selected page. By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "type": {"type": "string", "enum": ["url", "back", "forward", "reload"]},
                     "url": {"type": "string"},
                     "ignoreCache": {"type": "boolean"},
+                    "timeout": {"type": "integer", "description": "等待页面加载完成的秒数（0-30，默认 8）。加载完成会提前返回；超时返回 (still loading)，可再 wait_for/take_snapshot。0=不等待立即返回。"},
                     "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"}
                 },
                 "required": ["type"]
@@ -536,7 +547,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_snapshot",
-            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen), so you can target them with take_screenshot(uid) or remove_element(uid).",
+            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default.",
             "parameters": {
                 "type": "object",
                 "properties": {
