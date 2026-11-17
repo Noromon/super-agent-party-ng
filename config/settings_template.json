@@ -37,6 +37,8 @@
       "proxyMode": "system",
       "isChinaProxy": false,
       "externalApiRequireToken": false,
+      "maxToolIterations": 100,
+      "toolCapUnlimited": false,
       "enableShortcuts": true,
     "contentSafety": false,
       "fontScale": 1,

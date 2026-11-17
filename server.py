@@ -20,6 +20,7 @@ from py.llm_recovery import (  # S207：瞬断故障恢复
 from py.token_guard import neutralize as _neutralize, neutralize_deep, apply_eos_guard
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
 from py import agent_activity as _agent_activity  # S232：在途请求计数（对话/长任务繁忙信号）
+from py import tool_cap as _tool_cap  # S233：工具轮数上限热值（轮边界动态读）
 from py.prompt_assembly import (
     AUTO_BEHAVIOR_HINT, DOCKER_ENV_INFO, INFERENCE_THINK_HINT, LATEX_DELIM_HINT,
     STICKER_IMAGE_RULE, TEXT2IMG_IMAGE_RULE, WSL_ENV_INFO,
@@ -859,6 +860,12 @@ async def lifespan(app: FastAPI):
     sap_auth.ensure_machine_token(USER_DATA_DIR)
     # M5：外联 API（/v1 /mcp）免 token 开关初始态；后续随 save_settings 刷新
     await _sync_external_api_token_flag()
+    # S233：工具轮数上限/破限开关初始态（重启后破限须随已存设置恢复）；后续随 save_settings 刷新
+    try:
+        from py import get_setting as _gs
+        _tool_cap.apply_setting(await _gs.load_settings())
+    except Exception as _tc_boot_e:
+        logging.getLogger("app").info(f"[S233] 工具上限热值初始化失败(用默认): {_tc_boot_e}")
     # --- [核心防御] 立即清理系统环境变量中的 SOCKS 代理，防止 httpx 崩溃 ---
     for env_key in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
         val = os.environ.get(env_key, "")
@@ -6995,12 +7002,12 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                 _tcg_reentry = True
         reasoner_messages = copy.deepcopy(request.messages)
         _tool_loop_count = 0
-        _max_tool_iterations = int(settings.get("max_tool_iterations", 100) or 100)
         force_no_tools = False
         results = None  # S213：重入轮/纯 DRS 轮不进 tool 分支，先置空（原为潜在未定义引用）
         while tool_calls or search_not_done or _tcg_reentry:
             _tcg_reentry = False
             _tool_loop_count += 1
+            _max_tool_iterations = _tool_cap.effective_limit()  # S233：轮边界动态上限（调值/破限即时生效）
             if not _drs_round_cap(_tool_loop_count, _max_tool_iterations, search_not_done, tool_calls, "流式"):
                 search_not_done, tool_calls = False, []
                 break
@@ -8333,10 +8340,10 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
             DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=True)
         reasoner_messages = copy.deepcopy(request.messages)
         _ns_loop_count = 0
-        _ns_max_iterations = int(settings.get("max_tool_iterations", 100) or 100)
         ns_force_no_tools = False
         while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):  # B1: None 守卫
             _ns_loop_count += 1
+            _ns_max_iterations = _tool_cap.effective_limit()  # S233：轮边界动态上限（调值/破限即时生效）
             # T-8: 取消围栏——后续 LLM 轮次前检查（cancel 端点可停不可停工具链的漏洞封堵）
             _cur_entry = _current_stream_entry.get()
             if _cur_entry and _cur_entry.get("cancelled"):
@@ -9676,6 +9683,10 @@ async def _ws_save_settings(websocket: WebSocket, data: dict):
             _tg_apply_setting(current.get("eosGuard"))  # S160：净化总开关热更新
         except Exception as _te:
             logger.info(f"EOS 净化开关同步异常: {_te}")
+        try:
+            _tool_cap.apply_setting(current)  # S233：工具轮数上限/破限开关热更新（在途任务下一轮边界生效）
+        except Exception as _tce:
+            logger.info(f"工具上限热值同步异常: {_tce}")
     except Exception as _save_e:
         logger.error(f"[WS] save_settings 失败: {_save_e}")
         await ws_manager.send_json({

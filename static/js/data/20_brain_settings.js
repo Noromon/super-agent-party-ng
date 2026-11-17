@@ -139,6 +139,8 @@ Object.assign(vue_data, {
       enableNotifications: false,
       rememberWindowSize: true,
       externalApiRequireToken: false,
+      maxToolIterations: 100,
+      toolCapUnlimited: false,
     },
 
     // S183：智能体健壮性（再锚间隔轮数 / 塌方调用返工上限；0=关闭）
