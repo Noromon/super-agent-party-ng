@@ -62,10 +62,10 @@ class TestIntraZoneYoloS182:
         # T1 重排只免 fs 家族；读取族（图像/文件直读）区内仍需审批（S153 决策保持）
         ps = _ps()
         w, _ = ws
-        d = ps.evaluate("analyze_image", {"image_url": str(w / "p.png")}, _settings(w))
+        d = ps.evaluate("secondhand_describe_image", {"image_url": str(w / "p.png")}, _settings(w))
         assert d is not None and d.error and "不存在" in d.error
         (w / "p.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
-        d = ps.evaluate("analyze_image", {"image_url": str(w / "p.png")}, _settings(w))
+        d = ps.evaluate("secondhand_describe_image", {"image_url": str(w / "p.png")}, _settings(w))
         assert d.payload.startswith(SENT)
 
 

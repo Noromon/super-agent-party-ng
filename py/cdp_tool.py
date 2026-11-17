@@ -709,7 +709,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_screenshot",
-            "description": "Take a screenshot of the current page (or a specific element). Captures rendered pixels, so static images, dynamically rendered images and canvas are all visible. The result is shown back to you visually, so you can look at it directly without a separate analyze_image call.",
+            "description": "Take a screenshot of the current page (or a specific element). Captures rendered pixels, so static images, dynamically rendered images and canvas are all visible. FIRST-HAND vision (一手视觉): the result is shown back to you visually, so you can look at it directly without any secondhand VLM paraphrase. Prefer this and view_images over secondhand_* vision tools unless a text paraphrase is explicitly required.",
             "parameters": {
                 "type": "object",
                 "properties": {

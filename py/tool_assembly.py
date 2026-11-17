@@ -163,6 +163,7 @@ async def build_llm_tools(request, settings, tk):
     if settings['tools']['getFile']['enabled']:
         tools.append(tk["file_tool"])
         tools.append(tk["image_tool"])
+        tools.append(tk["view_images_tool"])  # S243: 一手视觉优先
         tools.append(tk["analyze_image_tool"])
         tools.append(tk["review_image_tool"])
         tools.append(tk["analyze_images_tool"])

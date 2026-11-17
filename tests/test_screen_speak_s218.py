@@ -112,7 +112,9 @@ class TestWatcherDispatch:
     def wired(self, tmp_path, monkeypatch):
         from py.behavior_engine import global_behavior_engine
         e = sw.global_screen_watcher
-        e.update_config({"speak": {"enabled": True, "minImportance": 4}})
+        # quietStart==quietEnd=关闭静默窗（默认 0-8 会让凌晨跑测试被墙钟静默误拦）
+        e.update_config({"speak": {"enabled": True, "minImportance": 4,
+                                   "quietStart": 12, "quietEnd": 12}})
         monkeypatch.setattr(sp, "SCREEN_WATCH_DIR", str(tmp_path))
         calls = []
 

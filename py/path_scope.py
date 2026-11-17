@@ -33,9 +33,10 @@ PATH_SCOPED_TOOLS = {
     "search_files_tool_local": ("fs", ["path"]),
     # read：任何本地路径审批，URL 免费
     "get_image_content": ("read", ["image_url"]),
-    "analyze_image": ("read", ["image_url"]),
-    "review_image": ("read", ["image_url"]),
-    "analyze_images": ("read", ["image_urls"]),
+    "secondhand_describe_image": ("read", ["image_url"]),
+    "secondhand_review_image": ("read", ["image_url"]),
+    "secondhand_describe_images": ("read", ["image_urls"]),
+    "view_images": ("read", ["image_urls"]),
     "get_file_content": ("read", ["file_url"]),
     "custom_llm_tool": ("read", ["image_url"]),
 }

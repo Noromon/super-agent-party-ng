@@ -881,8 +881,8 @@ image_tool = {
 analyze_image_tool = {
     "type": "function",
     "function": {
-        "name": "analyze_image",
-        "description": f"对给定的图片进行针对性的分析或验证。你可以提供具体的提示词来指引VLM关注图像的特定细节（如文字校验、物体识别、场景验证等）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "name": "secondhand_describe_image",
+        "description": f"【SECOND-HAND 二手视觉】由独立VLM把图像转述成文本，你自己从未看过像素，图像细节在转述中不可逆丢失。除非确有必要得到转述文本（或主模型无法看图），否则优先使用一手视觉工具 view_images / take_screenshot 亲自看图。功能：对给定的图片进行针对性的分析或验证。你可以提供具体的提示词来指引VLM关注图像的特定细节（如文字校验、物体识别、场景验证等）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -903,8 +903,8 @@ analyze_image_tool = {
 review_image_tool = {
     "type": "function",
     "function": {
-        "name": "review_image",
-        "description": f"基于对话上下文审查图像，使VLM像读连环画一样理解图像在对话中的位置和意义。与analyze_image不同，review_image会将当前对话历史作为上下文传递给VLM，使其能结合对话语境来理解图像。适用于需要根据对话上下文判断图像是否符合要求、验证生成结果等场景。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "name": "secondhand_review_image",
+        "description": f"【SECOND-HAND 二手视觉】由独立VLM结合对话历史转述图像，你自己从未看过像素，细节在转述中不可逆丢失。除非确有必要得到转述文本（或主模型无法看图），否则优先使用一手视觉工具 view_images / take_screenshot 亲自看图。功能：基于对话上下文审查图像，使VLM像读连环画一样理解图像在对话中的位置和意义。与secondhand_describe_image不同，本工具会将当前对话历史作为上下文传递给VLM，使其能结合对话语境来理解图像。适用于需要根据对话上下文判断图像是否符合要求、验证生成结果等场景。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -925,8 +925,8 @@ review_image_tool = {
 analyze_images_tool = {
     "type": "function",
     "function": {
-        "name": "analyze_images",
-        "description": f"将多张图片一次性交给VLM进行联合分析或比较，例如判断生成图中的角色与参考图中的角色是否为同一角色。可在提示词中用『第1张图』『第2张图』指代图片（顺序与image_urls列表一致）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "name": "secondhand_describe_images",
+        "description": f"【SECOND-HAND 二手视觉】由独立VLM把多张图联合转述成文本，你自己从未看过像素，细节在转述中不可逆丢失。除非确有必要得到转述文本（或主模型无法看图），否则优先使用一手视觉工具 view_images（支持多图直注）/ take_screenshot 亲自看图。功能：将多张图片一次性交给VLM进行联合分析或比较，例如判断生成图中的角色与参考图中的角色是否为同一角色。可在提示词中用『第1张图』『第2张图』指代图片（顺序与image_urls列表一致）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
         "parameters": {
             "type": "object",
             "properties": {
@@ -935,7 +935,7 @@ analyze_images_tool = {
                     "items": {
                         "type": "string"
                     },
-                    "description": "图片URL或本机本地文件路径组成的列表，每个元素的格式要求与analyze_image相同（公网URL、服务器内部URL（默认仅支持/uploaded_files路由，开启设置的网络放行开关后可用本机或局域网URL）或本机原生风格路径，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
+                    "description": "图片URL或本机本地文件路径组成的列表，每个元素的格式要求与secondhand_describe_image相同（公网URL、服务器内部URL（默认仅支持/uploaded_files路由，开启设置的网络放行开关后可用本机或局域网URL）或本机原生风格路径，如 Windows: C:\\Users\\name\\img.png，Linux/Mac: /home/user/img.png）",
                 },
                 "prompt": {
                     "type": "string",
@@ -943,6 +943,27 @@ analyze_images_tool = {
                 }
             },
             "required": ["image_urls", "prompt"],
+        },
+    },
+}
+
+view_images_tool = {
+    "type": "function",
+    "function": {
+        "name": "view_images",
+        "description": f"【FIRST-HAND 一手视觉】首选视觉工具：图像不经任何VLM转述，实际像素直接注入本会话，由你亲自看图并产生输出（与用户附图消息同一路径，信息零损失）。没有特殊情况或用户明确要求转述文本时，优先使用本工具而非 secondhand_describe_image / secondhand_describe_images / secondhand_review_image。调用后图像会随后续对话附上，你直接据图作答即可；单次最多附上前3张。输入支持：公网URL、服务器内部URL（默认仅支持/uploaded_files路由，开启设置的网络放行开关后可用本机或局域网URL）、本机原生风格路径（会被自动登记到服务器供你查看，Windows 如 C:\\Users\\name\\img.png，Linux/Mac 如 /home/user/img.png）。支持格式：{', '.join(ALLOWED_IMAGE_EXTENSIONS)}",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "要亲自查看的图片URL或本机本地文件路径列表（格式要求同 secondhand_describe_image），最多附上前3张",
+                }
+            },
+            "required": ["image_urls"],
         },
     },
 }

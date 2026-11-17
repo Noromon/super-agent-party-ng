@@ -60,7 +60,8 @@ _CATEGORIES: Dict[str, tuple] = {
         "create_subtask", "query_task_progress", "acpx_agent", "run_sub_agent",
     }),
     "media_analysis": ("media analysis", {
-        "analyze_image", "analyze_images", "review_image",
+        "secondhand_describe_image", "secondhand_describe_images",
+        "secondhand_review_image", "view_images",
     }),
     "settings_admin": ("workspace settings", {
         "update_workspace_settings",
@@ -79,7 +80,7 @@ _RULES: List[tuple] = [
     ("shell_exec", ("shell", "docker", "process", "kill_process")),
     ("browse", ("browser", "_page", "take_snapshot", "screenshot", "cdp")),
     ("web_search", ("search", "crawl", "fetch", "crawler")),
-    ("media_analysis", ("analyze_image", "review_image", "vision")),
+    ("media_analysis", ("secondhand", "analyze_image", "review_image", "vision")),
     ("media_gen", ("text2img", "img2img", "generate_image", "paint", "tts",
                    "music", "comfy")),
     ("knowledge_diary", ("diary", "knowledge_base", "memory", "knowbase")),

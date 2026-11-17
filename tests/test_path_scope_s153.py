@@ -120,21 +120,21 @@ class TestGateRead:
     def test_any_local_needs_approval(self, ws):
         ps = _ps()
         w, _ = ws
-        d = ps.evaluate("analyze_image", {"image_url": str(w / "sub" / "b.png")}, _settings(w))
+        d = ps.evaluate("secondhand_describe_image", {"image_url": str(w / "sub" / "b.png")}, _settings(w))
         assert d.payload.startswith(SENT)  # 工作区内也要批（用户决策①）
 
     def test_urls_free(self, ws):
         ps = _ps()
         w, _ = ws
-        assert ps.evaluate("analyze_image", {"image_url": "http://a.b/c.png"}, _settings(w)) is None
-        assert ps.evaluate("analyze_images", {"image_urls": ["https://a.b/c.png",
+        assert ps.evaluate("secondhand_describe_image", {"image_url": "http://a.b/c.png"}, _settings(w)) is None
+        assert ps.evaluate("secondhand_describe_images", {"image_urls": ["https://a.b/c.png",
                                                              "http://d.e/f.png"]}, _settings(w)) is None
         assert ps.evaluate("custom_llm_tool", {"tool_name": "t", "query": "q"}, _settings(w)) is None
 
     def test_mixed_list_gated(self, ws):
         ps = _ps()
         w, _ = ws
-        d = ps.evaluate("analyze_images", {"image_urls": ["https://a.b/c.png",
+        d = ps.evaluate("secondhand_describe_images", {"image_urls": ["https://a.b/c.png",
                                                           str(w / "sub" / "b.png")]}, _settings(w))
         assert d.payload.startswith(SENT)
 
@@ -201,7 +201,7 @@ class TestAgentDirs:
         assert is_tool_allowed_by_project_config(str(cwd), "read_file_tool_local")
         assert is_dir_allowed_by_project_config(str(cwd), ps.path_norm(allowed / "sub"))
         assert not is_dir_allowed_by_project_config(str(cwd), ps.path_norm(sibling))  # 前缀陷阱
-        assert not is_tool_allowed_by_project_config(str(cwd), "analyze_image")  # 目录不进工具表
+        assert not is_tool_allowed_by_project_config(str(cwd), "secondhand_describe_image")  # 目录不进工具表
         data = json.loads((cwd / ".party" / "config.json").read_text(encoding="utf-8"))
         assert set(data) >= {"allowed_tools", "allowed_dirs"}
 
@@ -217,7 +217,7 @@ class TestApprovedCallGrants:
         assert ps.approved_call_grants("read_file_tool_local", {"path": "a.txt"}, str(w)) == ()
         g = ps.approved_call_grants("read_file_tool_local", {"path": str(out / "secret.txt")}, str(w))
         assert g == (ps.path_norm(out),)  # 文件→父目录粒度
-        g = ps.approved_call_grants("analyze_image", {"image_url": str(w / "sub" / "b.png")}, str(w))
+        g = ps.approved_call_grants("secondhand_describe_image", {"image_url": str(w / "sub" / "b.png")}, str(w))
         assert g == (ps.path_norm(w / "sub"),)  # 读取族区内也要授权
         g = ps.approved_call_grants("list_files_tool_local", {"path": str(out)}, str(w))
         assert g == (ps.path_norm(out),)  # 目录工具=目标本身

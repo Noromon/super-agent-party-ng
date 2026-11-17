@@ -41,7 +41,7 @@ def _assemble_toolkit():
     from py.a2a_tool import get_a2a_tool
     from py.cli_tool import get_tools_for_permission, get_local_tools_for_permission, get_wsl_tools_for_permission
     from py.cli_tool import LOCAL_TOOLS_REGISTRY
-    from py.load_files import file_tool, image_tool, analyze_image_tool, review_image_tool, analyze_images_tool
+    from py.load_files import file_tool, image_tool, analyze_image_tool, review_image_tool, analyze_images_tool, view_images_tool
     from py.pollinations import pollinations_image_tool, openai_image_tool, openai_chat_image_tool
     from py.code_interpreter import e2b_code_tool, local_run_code_tool
     from py.utility_tools import (time_tool, weather_tool, location_tool, timer_weather_tool,
@@ -88,6 +88,7 @@ def _assemble_toolkit():
         "openai_chat_image_tool": openai_chat_image_tool,
         "file_tool": file_tool,
         "image_tool": image_tool,
+        "view_images_tool": view_images_tool,  # S243: 一手视觉
         "analyze_image_tool": analyze_image_tool,
         "review_image_tool": review_image_tool,
         "analyze_images_tool": analyze_images_tool,
@@ -446,7 +447,7 @@ import contextvars
 import copy
 from functools import partial
 
-# 用于在工具调用时传递当前对话上下文（特别是 review_image 工具需要）
+# 用于在工具调用时传递当前对话上下文（特别是 secondhand_review_image 工具需要）
 current_request_messages = contextvars.ContextVar('current_request_messages', default=None)
 import json
 import random
@@ -1492,7 +1493,7 @@ async def analyze_image(image_url: str, prompt: str) -> str:
             model=settings['vision']['model'],
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-analyze_image")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_describe_image")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
@@ -1504,7 +1505,7 @@ async def analyze_image(image_url: str, prompt: str) -> str:
             model=settings['model'],
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": url}}]}],
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-analyze_image")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_describe_image")
         return response.choices[0].message.content
 
 async def analyze_images(image_urls: list, prompt: str) -> str:
@@ -1529,7 +1530,7 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
             model=settings['vision']['model'],
             messages=[{"role": "user", "content": content}],
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-analyze_images")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_describe_images")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
@@ -1541,8 +1542,80 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
             model=settings['model'],
             messages=[{"role": "user", "content": content}],
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-analyze_images")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_describe_images")
         return response.choices[0].message.content
+
+async def view_images(image_urls: list) -> str:
+    """S243 一手视觉：不调任何VLM。登记/校验图片后返回 URL 列表文本，
+    实际像素由 _maybe_inject_browser_vision 管线（view_images 已入
+    _BROWSER_VISION_TOOLS）注入后续模型调用，主模型亲自看图（同附图消息路径）。"""
+    from py.load_files import ALLOWED_IMAGE_EXTENSIONS
+    import shutil
+    import hashlib as _hashlib
+    from urllib.parse import unquote as _unquote, urlparse as _urlparse
+    from py.get_setting import get_host, get_port
+    _gh, _gp = get_host(), get_port()
+    if not image_urls or not isinstance(image_urls, list):
+        return "错误：image_urls 不能为空"
+    max_n = 3
+    urls = []
+    errs = []
+    for one in image_urls:
+        one = (one or "").strip()
+        if not one:
+            continue
+        if len(urls) >= max_n:
+            errs.append("单次最多附上前3张，多余的已忽略")
+            break
+        try:
+            parsed = _urlparse(one)
+            if parsed.scheme in ("http", "https"):
+                if ('uploaded_files' in parsed.path or 'tool_temp' in parsed.path) and (
+                        parsed.hostname in ("127.0.0.1", "localhost", "0.0.0.0", _gh) or not parsed.hostname):
+                    fname = os.path.basename(_unquote(parsed.path))
+                    fpath = os.path.join(UPLOAD_FILES_DIR, fname)
+                    if not os.path.isfile(fpath) or os.path.getsize(fpath) == 0:
+                        errs.append(f"{one}: 内部图片不存在或为0字节")
+                        continue
+                    _ext = fname.rsplit('.', 1)[-1].lower() if '.' in fname else ''
+                    if _ext not in ALLOWED_IMAGE_EXTENSIONS:
+                        errs.append(f"{one}: 非图片格式({_ext or '无扩展名'})")
+                        continue
+                    urls.append(one)
+                else:
+                    # 公网/其它 URL：预读一次验证可读且非0字节（避免注入时炸调用）
+                    b64 = await get_image_base64(one)
+                    if not b64:
+                        errs.append(f"{one}: 图片读取失败或为空")
+                        continue
+                    urls.append(one)
+            else:
+                # 本机本地路径：存在+扩展名校验后复制进 uploaded_files 生成内部 URL
+                p = os.path.abspath(os.path.expanduser(one))
+                if not os.path.isfile(p) or os.path.getsize(p) == 0:
+                    errs.append(f"{one}: 文件不存在或为0字节")
+                    continue
+                _ext = p.rsplit('.', 1)[-1].lower() if '.' in os.path.basename(p) else ''
+                if _ext not in ALLOWED_IMAGE_EXTENSIONS:
+                    errs.append(f"{one}: 非图片格式({_ext or '无扩展名'})")
+                    continue
+                os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+                _sig = _hashlib.md5(f"{p}|{os.path.getsize(p)}|{int(os.path.getmtime(p))}".encode()).hexdigest()[:16]
+                unique = f"view_{_sig}.{_ext}"
+                dest = os.path.join(UPLOAD_FILES_DIR, unique)
+                if not os.path.isfile(dest):
+                    shutil.copy2(p, dest)
+                urls.append(f"http://{_gh}:{_gp}/uploaded_files/{unique}")
+        except Exception as e:
+            errs.append(f"{one}: {e!r}")
+    if not urls:
+        return "错误：没有可附上的图片。" + "；".join(errs) if errs else "错误：没有可附上的图片"
+    tail = f"（FIRST-HAND：图像将随本轮对话直接附上，请据图亲自判断并作答，无需再调用任何 secondhand_* 转述工具。）"
+    out = f"Images attached for direct viewing: {' '.join(urls)}\n{tail}"
+    if errs:
+        out += "\n(部分图片未能附上: " + "；".join(errs) + ")"
+    return out
+
 
 async def review_image(image_url: str, prompt: str) -> str:
     """基于对话上下文审查图像，使VLM像读连环画一样理解图像在对话中的位置和意义
@@ -1634,7 +1707,7 @@ async def review_image(image_url: str, prompt: str) -> str:
             model=settings['vision']['model'],
             messages=context_messages,
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-review_image")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_review_image")
         return response.choices[0].message.content
     else:
         client = AsyncOpenAI(api_key=settings['api_key'], base_url=settings['base_url'])
@@ -1646,7 +1719,7 @@ async def review_image(image_url: str, prompt: str) -> str:
             model=settings['model'],
             messages=context_messages,
             **extra
-        ), attempts=2, base_delay=1.0, label="s207-review_image")
+        ), attempts=2, base_delay=1.0, label="s207-secondhand_review_image")
         return response.choices[0].message.content
 
 # 存储等待中的MCP调用结果
@@ -1829,9 +1902,10 @@ def _build_tool_hooks():
         "pollinations_image":pollinations_image,
         "get_file_content":get_file_content,
         "get_image_content": get_image_content,
-        "analyze_image": analyze_image,
-        "review_image": review_image,
-        "analyze_images": analyze_images,
+        "secondhand_describe_image": analyze_image,
+        "secondhand_review_image": review_image,
+        "secondhand_describe_images": analyze_images,
+        "view_images": view_images,  # S243: 一手视觉直注
         "e2b_code": e2b_code,
         "local_run_code": local_run_code,
         "openai_image": openai_image,
@@ -6333,13 +6407,13 @@ async def _stream_regrab(request, settings, results, images, fastapi_base_url):
     return images
 
 
-_BROWSER_VISION_TOOLS = {"take_screenshot"}  # S228：内置浏览器截图工具，结果含 uploaded_files URL
+_BROWSER_VISION_TOOLS = {"take_screenshot", "view_images"}  # S228 截图 / S243 一手直看，结果含可注入 URL
 
 
-def _collect_new_browser_screenshots(messages):
-    """本轮 take_screenshot 新截、且尚未注入过的浏览器画面 URL。
+def _collect_new_vision_requests(messages):
+    """S243：本轮新产生、尚未注入过的 (url, 来源工具) 列表。
     以「最近一条真实 user 消息」为本轮下界（排除历史轮），再以「最近一条 browser_vision 标记」
-    为本轮内已注入界，避免跨轮/同轮多轮重复注入。"""
+    为本轮内已注入界，避免跨轮/同轮多轮重复注入。view_images 结果可含空格分隔的多图 URL。"""
     turn_start = 0
     for i in range(len(messages) - 1, -1, -1):
         m = messages[i]
@@ -6352,36 +6426,46 @@ def _collect_new_browser_screenshots(messages):
         if m.get("role") == "user" and m.get("name") == "browser_vision":
             last = i
             break
-    urls = []
+    out = []
     for i in range(last + 1, len(messages)):
         m = messages[i]
         if m.get("role") == "tool" and m.get("name") in _BROWSER_VISION_TOOLS:
             c = m.get("content")
             if isinstance(c, str):
-                mm = re.search(r"https?://\S*uploaded_files/[^\s\"']+", c)
-                if mm:
-                    urls.append(mm.group(0))
-    return urls
+                for u in re.findall(r"https?://\S+", c):
+                    u = u.rstrip("\"'(),;，。；>")
+                    if 'uploaded_files' in u or 'tool_temp' in u or re.search(
+                            r"\.(?:png|jpe?g|gif|webp|bmp)(?:\?|$)", u, re.I):
+                        out.append((u, m.get("name")))
+    return out
+
+
+def _collect_new_browser_screenshots(messages):
+    """S228：本轮 take_screenshot 新截、且尚未注入过的浏览器画面 URL。"""
+    return [u for u, _src in _collect_new_vision_requests(messages)]
 
 
 async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_url):
-    """S228：把本轮 take_screenshot 截到的浏览器画面作为图像直注本次模型调用——
+    """S228/S243：把本轮 take_screenshot 画面或 view_images 请求的图片作为图像直注本次模型调用——
     unifiedModel/视觉原生时主模型一手读像素，配独立 vision 时由既有路由自动转描述（均免手动
-    analyze_image）。与桌面 _stream_regrab 同管线，但只定向注入新图（不全局剥离历史图，回归安全）。"""
+    转述工具）。与桌面 _stream_regrab 同管线，但只定向注入新图（不全局剥离历史图，回归安全）。"""
     try:
-        urls = _collect_new_browser_screenshots(request.messages)
+        reqs = _collect_new_vision_requests(request.messages)
     except Exception:
-        urls = []
-    if not urls:
+        reqs = []
+    if not reqs:
         return images
-    urls = urls[:3]
+    reqs = reqs[:3]
     inj0 = len(request.messages)
-    for u in urls:
+    for u, _src in reqs:
+        _txt = ("[Browser screenshot] 内置浏览器截图的实际画面，请据图判断。" if _src == "take_screenshot" else
+                "[First-hand image] 这是你用 view_images 请求亲自查看的图片，原图像素已附上，"
+                "请直接看图并据此作答，无需再调用 secondhand_* 转述工具。")
         request.messages.append({
             "role": "user",
             "name": "browser_vision",
             "content": [
-                {"type": "text", "text": "[Browser screenshot] 内置浏览器截图的实际画面，请据图判断。"},
+                {"type": "text", "text": _txt},
                 {"type": "image_url", "image_url": {"url": u}},
             ],
         })
@@ -7111,7 +7195,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
     try:
         # (global decl cleared: migrated to py/app_state.py)
         
-        # 设置对话上下文，供 review_image 等工具使用
+        # 设置对话上下文，供 secondhand_review_image 等工具使用
         current_request_messages.set(request.messages)
         
         DRS_STAGE = 1
@@ -7132,7 +7216,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # =========================================================================
         images = await images_in_messages(request.messages,fastapi_base_url)
         request.messages = await message_without_images(request.messages)
-        from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool
+        from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool,view_images_tool,view_images_tool
         from py.web_search import (
             DDGsearch, 
             searxng, 
@@ -8113,14 +8197,14 @@ def _ns_behavior_sanitize(response_dict):
 async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
     # (global decl cleared: migrated to py/app_state.py)
     
-    # 设置对话上下文，供 review_image 等工具使用
+    # 设置对话上下文，供 secondhand_review_image 等工具使用
     current_request_messages.set(request.messages)
     
     DRS_STAGE = 1 # 1: 明确用户需求阶段 2: 工具调用阶段 3: 生成结果阶段
     DRS_STAGE = _apply_context_compression(request, DRS_STAGE)
         # =========================================================================
 
-    from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool
+    from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool,view_images_tool
     from py.web_search import (
         DDGsearch, 
         searxng, 
@@ -8583,9 +8667,10 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         "pollinations_image":pollinations_image,
         "get_file_content":get_file_content,
         "get_image_content": get_image_content,
-        "analyze_image": analyze_image,
-        "review_image": review_image,
-        "analyze_images": analyze_images,
+        "secondhand_describe_image": analyze_image,
+        "secondhand_review_image": review_image,
+        "secondhand_describe_images": analyze_images,
+        "view_images": view_images,  # S243: 一手视觉直注
         "e2b_code": e2b_code,
         "local_run_code": local_run_code,
         "openai_image": openai_image,
