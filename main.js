@@ -682,6 +682,35 @@ function getAcpxPath() {
   }
 }
 
+// S236: agent 浏览器工具代理出口——两个专用分区。agent-direct=直连(mode direct，
+// 无视系统代理/PAC，agent 默认：国内/本地站正确且免疫全局翻墙引发的异常)；
+// agent-proxy=设置→系统→代理填的地址(backend 经 stdout SAP_PROXY: 协议行下发)。
+// 用户手动标签所在 persist:party-browser-session 不动(维持跟系统代理的现状)。
+// S237: 必须声明在模块顶层——startBackend 函数体开头与 executor 内 onData 都要引用，
+// 曾因误插在 executor 块内令 const 对外不可见而启动即 ReferenceError。
+const AGENT_DIRECT_PARTITION = 'persist:agent-direct'
+const AGENT_PROXY_PARTITION = 'persist:agent-proxy'
+let AGENT_PROXY_URL = ''
+let _sapLineBuf = ''
+async function applyAgentProxyLine(val) {
+  const url = (!val || val === 'null' || val === 'None') ? '' : val
+  AGENT_PROXY_URL = url
+  try {
+    const sProxy = session.fromPartition(AGENT_PROXY_PARTITION)
+    if (url) {
+      await sProxy.setProxy({
+        mode: 'fixed_servers', proxyRules: url,
+        proxyBypassRules: 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,<->',
+      })
+    } else {
+      await sProxy.setProxy({ mode: 'direct' })
+    }
+    console.log('[AgentProxy] agent-proxy 分区 -> ' + (url || 'direct(未配置代理)'))
+  } catch (e) {
+    console.error('[AgentProxy] setProxy 失败: ' + e.message)
+  }
+}
+
 // 修改后的启动后端函数
 /**
  * 启动后端服务
@@ -741,33 +770,6 @@ async function startBackend() {
       backendProcess = spawn(execPath, backendArgs, spawnOptions);
 
       let isHandshaked = false;
-
-// S236: agent 浏览器工具代理出口——两个专用分区。agent-direct=直连(mode direct，
-// 无视系统代理/PAC，agent 默认：国内/本地站正确且免疫全局翻墙引发的异常)；
-// agent-proxy=设置→系统→代理填的地址(backend 经 stdout SAP_PROXY: 协议行下发)。
-// 用户手动标签所在 persist:party-browser-session 不动(维持跟系统代理的现状)。
-const AGENT_DIRECT_PARTITION = 'persist:agent-direct'
-const AGENT_PROXY_PARTITION = 'persist:agent-proxy'
-let AGENT_PROXY_URL = ''
-let _sapLineBuf = ''
-async function applyAgentProxyLine(val) {
-  const url = (!val || val === 'null' || val === 'None') ? '' : val
-  AGENT_PROXY_URL = url
-  try {
-    const sProxy = session.fromPartition(AGENT_PROXY_PARTITION)
-    if (url) {
-      await sProxy.setProxy({
-        mode: 'fixed_servers', proxyRules: url,
-        proxyBypassRules: 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,<->',
-      })
-    } else {
-      await sProxy.setProxy({ mode: 'direct' })
-    }
-    console.log('[AgentProxy] agent-proxy 分区 -> ' + (url || 'direct(未配置代理)'))
-  } catch (e) {
-    console.error('[AgentProxy] setProxy 失败: ' + e.message)
-  }
-}
 
 // 核心监听逻辑
 const onData = (data) => {

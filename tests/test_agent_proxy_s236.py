@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """S236：agent 浏览器/render 工具 per-call 代理选择（默认直连）——静态链路断言。"""
 import pathlib
+import shutil
+import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -24,6 +26,9 @@ def test_mainjs_partitions_and_protocol_line():
     assert "mode: 'direct'" in MAIN                        # agent-direct 启动钉直连
     assert "mode: 'fixed_servers'" in MAIN                 # 下发代理→fixed_servers
     assert "proxyBypassRules" in MAIN                      # 本地地址绕代理
+    # S237：声明必须在模块顶层且先于 startBackend（块作用域内声明=启动 ReferenceError）
+    assert MAIN.index("const AGENT_DIRECT_PARTITION") < MAIN.index("async function startBackend")
+    assert any(ln.startswith("const AGENT_DIRECT_PARTITION") for ln in MAIN.splitlines())  # 零缩进=顶层
     # 用户分区不受影响
     assert "persist:party-browser-session" in PAGE
 
@@ -60,3 +65,28 @@ def test_js_partition_plumbing():
 
 def test_stamp_s236():
     assert "build=S236" in _read("static", "js", "renderer.js")
+
+
+_AST_SCRIPT = (
+    "const acorn=require('acorn');"
+    "const src=require('fs').readFileSync(process.argv[1],'utf8');"
+    "const ast=acorn.parse(src,{ecmaVersion:'latest',sourceType:'script',allowReturnOutsideFunction:true});"
+    "const want=['AGENT_DIRECT_PARTITION','AGENT_PROXY_PARTITION','_sapLineBuf','applyAgentProxyLine'];"
+    "for(const n of want){"
+    "const ok=ast.body.some(t=>(t.type==='VariableDeclaration'&&t.declarations.some(d=>d.id&&d.id.name===n))"
+    "||(t.type==='FunctionDeclaration'&&t.id&&t.id.name===n));"
+    "if(!ok){console.error('NOT-TOPLEVEL:'+n);process.exit(1);}}"
+    "console.log('TOPLEVEL-OK');"
+)
+
+
+def test_mainjs_agent_proxy_symbols_really_top_level():
+    """S237：S236 曾因声明落在 startBackend 的 executor 块作用域内、函数体开头
+    引用不到而启动即 ReferenceError——node --check 只验语法。此处用 AST 真验
+    四个符号位于模块顶层（Program.body），把该崩溃形态钉死。"""
+    if not shutil.which("node"):
+        import pytest
+        pytest.skip("node unavailable")
+    r = subprocess.run(["node", "-e", _AST_SCRIPT, str(ROOT / "main.js")],
+                       capture_output=True, text=True, timeout=60, cwd=str(ROOT))
+    assert "TOPLEVEL-OK" in (r.stdout or ""), (r.stdout or "") + (r.stderr or "")
