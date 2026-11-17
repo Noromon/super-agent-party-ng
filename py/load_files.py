@@ -278,7 +278,16 @@ async def handle_url(url):
             try:
                 async with session.get(target_url, timeout=10, ssl=False) as response:
                     response.raise_for_status()
-                    return await response.read(), ext
+                    data = await response.read()
+                    # S238：空/异常产物（如 0 字节假截图）当场拒收——把垃圾喂给上游
+                    # 只会换来难定位的 400「image could not be read」
+                    if not data:
+                        raise RuntimeError(
+                            f"[Error] The internal file is empty (0 bytes): {target_url}. "
+                            "It may be a broken screenshot/download artifact; delete it and retry the tool.")
+                    return data, ext
+            except RuntimeError:
+                raise
             except Exception as e:
                 raise RuntimeError(f"[Error] Failed to read the internal file: {e}. Verify the exact path with list/glob tools, then retry.")
 

@@ -1278,6 +1278,18 @@ app.whenReady().then(async () => {
     })
 
     ipcMain.handle('save-screenshot-direct', async (event, { buffer }) => {
+      // S238：S236 曾把 Uint8Array 跨 contextBridge 直传——到达本进程时长度为 0，
+      // 写出 0 字节假图被当图片喂给上游模型吃 400。改传 base64 字符串（跨桥可靠），
+      // 此处解码并拒空：空数据抛错让调用方拿到 Screenshot Error 而非假 URL。
+      let buf = null;
+      try {
+        if (typeof buffer === 'string') buf = Buffer.from(buffer, 'base64');
+        else if (buffer && buffer.length) buf = Buffer.from(buffer);
+      } catch (_) { buf = null; }
+      if (!buf || !buf.length) {
+        console.error('[Screenshot] 空截图载荷，拒绝落盘 (typeof=' + typeof buffer + ')');
+        throw new Error('empty screenshot payload');
+      }
       // 1. 确定保存路径: userData/uploaded_files
       // 确保这个路径和 Python 后端挂载的静态目录一致
       const uploadDir = path.join(app.getPath('userData'),'Super-Agent-Party', 'uploaded_files');
@@ -1292,7 +1304,7 @@ app.whenReady().then(async () => {
       const filePath = path.join(uploadDir, filename);
 
       // 4. 写入文件
-      fs.writeFileSync(filePath, Buffer.from(buffer));
+      fs.writeFileSync(filePath, buf);
       
       // 5. 只返回文件名，由前端拼接 URL
       return filename;

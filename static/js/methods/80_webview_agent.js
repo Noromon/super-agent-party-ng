@@ -657,7 +657,9 @@ Object.assign(vue_methods, {
             // 4. S235：解码/裁剪/缩放/编码移出主线程——nativeImage crop/resize/toJPEG
             //    是同步位图处理，大帧每步阻塞主窗口渲染线程数百 ms（整屏冻结观感之一）；
             //    改 createImageBitmap + OffscreenCanvas.convertToBlob 后全异步。
-            let buffer = null;
+            //    S238：跨 contextBridge 传 Uint8Array 不可靠（实测到达主进程变 0 字节 →
+            //    0B 假图喂上游 400），统一改传 base64 字符串；空数据当场报错不发假 URL。
+            let b64 = '';
             try {
                 const pngBlob = new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' });
                 const tw = cropRect.w > 1280 ? 1280 : cropRect.w;
@@ -668,7 +670,14 @@ Object.assign(vue_methods, {
                 canvas.getContext('2d').drawImage(bmp, 0, 0);
                 if (bmp.close) bmp.close();
                 const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
-                buffer = new Uint8Array(await jpeg.arrayBuffer());
+                const ab = await jpeg.arrayBuffer();
+                if (!ab || ab.byteLength === 0) return "Screenshot Error: empty";
+                const bytes = new Uint8Array(ab);
+                let bin = '';
+                for (let i = 0; i < bytes.length; i += 0x8000) {
+                    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+                }
+                b64 = btoa(bin);
             } catch (e) {
                 // S235-fallback：异步管线不可用时兜底旧同步三连（crop→resize→toJPEG）
                 let target = image;
@@ -676,11 +685,13 @@ Object.assign(vue_methods, {
                     try { target = image.crop({ x: cropRect.x, y: cropRect.y, width: cropRect.w, height: cropRect.h }); } catch (e2) { target = image; }
                 }
                 if (target.getSize().width > 1280) target = target.resize({ width: 1280 });
-                buffer = target.toJPEG(70);
+                const jpegBuf = target.toJPEG(70);
+                if (!jpegBuf || jpegBuf.length === 0) return "Screenshot Error: empty";
+                b64 = jpegBuf.toString('base64');
             }
 
-            // 5. 交主进程保存（二进制 Buffer 走 IPC 比 base64 快）
-            const filename = await window.electronAPI.saveScreenshotDirect(buffer);
+            // 5. 交主进程保存（S238：base64 字符串跨桥可靠；主进程解码并拒空）
+            const filename = await window.electronAPI.saveScreenshotDirect(b64);
 
             // 6. 拼接 URL（preload 暴露后端 host/port）
             const host = window.electron.server.host || '127.0.0.1';
