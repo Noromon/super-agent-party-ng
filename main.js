@@ -247,7 +247,19 @@ const locales = {
     copyLink: '复制链接地址',
     copyLinkText: '复制链接文本',
     selectAll: '全选',
-    inspect: '检查元素'
+    inspect: '检查元素',
+    // S240：标签条/会话列表右键菜单
+    tabReload: '重新加载',
+    tabCopyUrl: '复制链接地址',
+    tabDuplicate: '在旁侧重复新建',
+    tabClose: '关闭标签页',
+    tabCloseOthers: '关闭其它标签页',
+    tabCloseLeft: '关闭左侧标签页',
+    tabCloseRight: '关闭右侧标签页',
+    tabCloseAll: '关闭全部标签页',
+    convRename: '重命名',
+    convMoveToGroup: '移动到分组',
+    convDelete: '删除'
   },
   'en-US': {
     show: 'Show Window',
@@ -266,7 +278,19 @@ const locales = {
     copyLink: 'Copy link address',
     copyLinkText: 'Copy link text',
     selectAll: 'Select All',
-    inspect: 'Inspect'
+    inspect: 'Inspect',
+    // S240: tab bar / conversation list context menus
+    tabReload: 'Reload',
+    tabCopyUrl: 'Copy link address',
+    tabDuplicate: 'Duplicate tab',
+    tabClose: 'Close tab',
+    tabCloseOthers: 'Close other tabs',
+    tabCloseLeft: 'Close tabs to the left',
+    tabCloseRight: 'Close tabs to the right',
+    tabCloseAll: 'Close all tabs',
+    convRename: 'Rename',
+    convMoveToGroup: 'Move to group',
+    convDelete: 'Delete'
   }
 };
 const ALLOWED_EXTENSIONS = [
@@ -2384,7 +2408,40 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
           { label: lang.selectAll, role: 'selectAll' }
         ];
       }
-      // --- D. 默认/空白处菜单 ---
+      // --- D. 标签条右键菜单（S240：动作回 renderer 执行，主进程只画菜单）---
+      else if (menuType === 'browser-tab') {
+        const act = (action) => () => win.webContents.send('browser-tab-action', { action, tabId: data.tabId });
+        const hasUrl = !!data.url;
+        menuTemplate = [
+          { label: lang.tabReload, click: act('reload') },
+          { label: lang.tabCopyUrl, enabled: hasUrl, click: act('copyUrl') },
+          { label: lang.tabDuplicate, enabled: hasUrl, click: act('duplicate') },
+          { type: 'separator' },
+          { label: lang.tabClose, click: act('close') },
+          { label: lang.tabCloseOthers, click: act('closeOthers') },
+          { label: lang.tabCloseLeft, click: act('closeLeft') },
+          { label: lang.tabCloseRight, click: act('closeRight') },
+          { label: lang.tabCloseAll, click: act('closeAll') }
+        ];
+      }
+      // --- E. 会话列表右键菜单（S240：复用既有对话操作方法）---
+      else if (menuType === 'conversation') {
+        const actConv = (action, extra) => () => win.webContents.send('conversation-action',
+          Object.assign({ action, convId: data.convId }, extra || {}));
+        menuTemplate = [
+          { label: lang.convRename, click: actConv('rename') },
+        ];
+        const groups = Array.isArray(data.groups) ? data.groups : [];
+        if (groups.length) {
+          menuTemplate.push({
+            label: lang.convMoveToGroup,
+            submenu: groups.map(g => ({ label: String(g.name || g.id), click: actConv('move', { groupId: g.id }) }))
+          });
+        }
+        menuTemplate.push({ type: 'separator' });
+        menuTemplate.push({ label: lang.convDelete, click: actConv('delete') });
+      }
+      // --- F. 默认/空白处菜单 ---
       else {
         menuTemplate = [
           { label: lang.cut, role: 'cut' },

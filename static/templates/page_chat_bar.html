@@ -20,6 +20,7 @@
                     :class="{ 'active': currentTabId === tab.id }"
                     @click="switchTab(tab.id)"
                     @mousedown.middle="closeTab(tab.id, $event)"
+                    @contextmenu.prevent="openTabContextMenu(tab)"
                 >
                     <div class="ib-tab-content">
                         <span class="ib-icon" v-if="tab.isLoading"><i class="fa-solid fa-spinner fa-spin"></i></span>

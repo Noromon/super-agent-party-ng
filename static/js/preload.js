@@ -23,7 +23,9 @@ contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     on: (channel, func) => {
       // 只允许特定的通道
-      const validChannels = ['backend-ready', 'trigger-search', 'hud-toggle-capsule', 'hud-demo', 'hud-cfg'];
+      const validChannels = ['backend-ready', 'trigger-search', 'hud-toggle-capsule', 'hud-demo', 'hud-cfg',
+        // S240：右键菜单动作回传（browser-tab/conversation 原生菜单点击后执行）
+        'browser-tab-action', 'conversation-action'];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(...args));
       }

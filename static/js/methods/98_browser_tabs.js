@@ -744,5 +744,51 @@ Object.assign(vue_methods, {
         }
         const p = this.setTabMobile(tab.id, !tab.mobile, true);
         if (p && p.then) p.then(() => {}).catch(() => {});
+    },
+
+    // ===== S240：标签条右键菜单（主进程只画原生菜单，动作经 browser-tab-action 回传执行）=====
+    openTabContextMenu(tab) {
+        if (window.electronAPI && window.electronAPI.showContextMenu) {
+            window.electronAPI.showContextMenu('browser-tab', { tabId: tab.id, url: tab.url || '' });
+        }
+    },
+
+    tabReloadOne(id) {
+        const tab = this.browserTabs.find(t => t.id === id);
+        if (!tab || !tab.url) return;
+        if (!tab.loaded) { tab.loaded = true; return; } // S95 懒标签：唤醒加载即等效重载
+        const wv = this.getWebview(id);
+        if (wv) { try { wv.reload(); } catch (e) {} }
+    },
+
+    tabCopyUrl(id) {
+        const tab = this.browserTabs.find(t => t.id === id);
+        if (!tab || !tab.url) return;
+        try { navigator.clipboard.writeText(tab.url); } catch (e) {}
+    },
+
+    tabDuplicate(id) {
+        const tab = this.browserTabs.find(t => t.id === id);
+        if (!tab || !tab.url) return;
+        this.openUrlInNewTab(tab.url, tab.partition); // 保留 agent/user 网络出口分区
+    },
+
+    // 批量关标签：close 复用 closeTab 末位语义；批量动作保留被右键目标并使其激活
+    closeTabsAction(action, tabId) {
+        const tabs = this.browserTabs;
+        const ti = tabs.findIndex(t => t.id === tabId);
+        if (ti === -1) return;
+        if (action === 'close') { this.closeTab(tabId); return; }
+        if (action === 'closeAll') {
+            this.browserTabs = [];
+            this.addNewTab(); // 同 closeTab 末位语义：至少留一个干净新标签
+            return;
+        }
+        const kept = action === 'closeOthers' ? [tabs[ti]]
+            : action === 'closeLeft' ? tabs.slice(ti)
+            : action === 'closeRight' ? tabs.slice(0, ti + 1)
+            : tabs;
+        this.browserTabs = kept;
+        if (!kept.some(t => t.id === this.currentTabId)) this.switchTab(tabId);
     }
 });

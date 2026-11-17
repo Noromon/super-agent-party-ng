@@ -552,5 +552,30 @@ Object.assign(vue_methods, {
       if (!options.silent) {
         showNotification(this.t('groupDeleted'), 'success');
       }
+    },
+
+    // ===== S240：会话列表右键菜单（原生菜单，动作经 conversation-action 回传，
+    // 复用既有重命名/移动/删除方法；与行内…菜单同款 isTyping 流式期禁用）=====
+    openConvContextMenu(conv) {
+      if (this.isTyping) return; // 与既有 dropdown 的 v-if="!isTyping" 一致
+      if (!window.electronAPI || !window.electronAPI.showContextMenu) return;
+      const groups = (this.conversationGroups || [])
+        .map(g => ({ id: g.id, name: g.name || g.id }));
+      window.electronAPI.showContextMenu('conversation', {
+        convId: conv.id,
+        groups: groups
+      });
+    },
+
+    handleConversationAction(action, convId, groupId) {
+      if (action === 'move') { this.moveConversationToGroup(convId, groupId); return; }
+      if (action === 'delete') { this.confirmDeleteConversation(convId); return; }
+      if (action === 'rename') {
+        const groups = this.conversationGroups || [];
+        for (let i = 0; i < groups.length; i++) {
+          const c = (groups[i].conversations || []).find(x => x.id === convId);
+          if (c) { this.openRenameConversationDialog(c); return; }
+        }
+      }
     }
 });

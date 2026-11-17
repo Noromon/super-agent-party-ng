@@ -255,6 +255,7 @@
                           class="history-item-row" 
                           :class="{ active: currentConversationId === conv.id || conversationId === conv.id }" 
                           @click="loadConversation(conv.id)"
+                          @contextmenu.prevent="openConvContextMenu(conv)"
                           style="padding-left: 24px;"> <!-- 缩进体现层级 -->
                         
                         <i class="fa-regular fa-comment item-icon"></i>
