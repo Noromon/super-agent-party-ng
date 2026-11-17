@@ -416,21 +416,21 @@
                     @change="autoSaveSettings">
                   </el-input-number>
                 </el-form-item>
-                <el-form-item :label="t('maxToolIterationsDesc')" class="form-item-align" label-position="left">
+                <el-form-item :label="t('maxToolIterationsDesc')">
                   <el-input-number
                     v-model="systemSettings.maxToolIterations"
                     :min="1" :max="1000" :step="10"
                     :disabled="systemSettings.toolCapUnlimited"
                     @change="autoSaveSettings">
                   </el-input-number>
-                  <div class="form-tip" style="margin-top: 4px; font-size: 12px; color: #909399;">
+                  <div class="form-tip" style="width: 100%; margin-top: 4px; font-size: 12px; color: #909399;">
                     {{ t('maxToolIterationsHint') }}
                   </div>
                 </el-form-item>
-                <el-form-item :label="t('toolCapUnlimitedDesc')" class="form-item-align" label-position="left">
+                <el-form-item :label="t('toolCapUnlimitedDesc')">
                   <el-switch v-model="systemSettings.toolCapUnlimited" @change="autoSaveSettings"
                              style="--el-switch-on-color: #e6a23c;"></el-switch>
-                  <div class="form-tip" style="margin-top: 4px; font-size: 12px; color: #909399;">
+                  <div class="form-tip" style="width: 100%; margin-top: 4px; font-size: 12px; color: #909399;">
                     {{ t('toolCapUnlimitedHint') }}
                   </div>
                 </el-form-item>
