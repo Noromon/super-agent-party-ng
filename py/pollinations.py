@@ -5,7 +5,9 @@ import os
 import re
 
 import requests
+import httpx
 from py.get_setting import load_settings,get_host,get_port,UPLOAD_FILES_DIR
+from py.proxy_util import active_proxy, requests_proxies
 from openai import AsyncClient
 import uuid
 
@@ -25,7 +27,8 @@ async def pollinations_image(prompt: str, width=512, height=512, model="flux"):
     # Convert prompt into a URL-compatible format
     prompt = prompt.replace(" ", "%20")
     url = f"https://image.pollinations.ai/prompt/{prompt}?width={width}&height={height}&model={model}&nologo=true&enhance=true&private=true&safe=true"
-    res_data = requests.get(url).content
+    # S239：显式代理接线（全局自动跟随设置；含 proxyBypass 白名单）
+    res_data = requests.get(url, proxies=requests_proxies(settings, url)).content
     image_id = str(uuid.uuid4())
     # 将图片保存到本地UPLOAD_FILES_DIR，文件名为image_id，返回本地文件路径
     with open(f"{UPLOAD_FILES_DIR}/{image_id}.png", "wb") as f:
@@ -78,12 +81,21 @@ async def openai_image(prompt: str, size="auto"):
     base_url = settings["text2imgSettings"]["base_url"]
     api_key = settings["text2imgSettings"]["api_key"]
     try:
-        client = AsyncClient(api_key=api_key,base_url=base_url)
-    
+        # S239：生成 API 出口显式跟随设置代理（socks-only 环境可用；无代理=直连不变）
+        _px = active_proxy(settings)
+        _kh = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(proxy=_px) if _px
+                                else httpx.AsyncHTTPTransport(), trust_env=False, timeout=300.0)
+        client = AsyncClient(api_key=api_key, base_url=base_url, http_client=_kh)
+
         response = await client.images.generate(prompt=prompt, size=size, model=model)
     except Exception as e:
         logging.getLogger("app").info(e)
         return f"ERROR: {e}"
+    finally:
+        try:
+            await client.close()  # S239: 连带关闭自建 httpx client，防每次生图泄漏连接池
+        except Exception:
+            pass
     
     res_url = response.data[0].url
     res = f"![image]({res_url})"
@@ -100,7 +112,8 @@ async def openai_image(prompt: str, size="auto"):
             f.write(base64.b64decode(res))
         res = f"![image](http://{HOST}:{PORT}/uploaded_files/{image_id}.png)"
     else:
-        res_data = requests.get(res_url).content
+        # S239：显式代理接线（全局自动跟随设置；含 proxyBypass 白名单）
+        res_data = requests.get(res_url, proxies=requests_proxies(settings, res_url)).content
         image_id = str(uuid.uuid4())
         # 将图片保存到本地UPLOAD_FILES_DIR，文件名为image_id，返回本地文件路径
         with open(f"{UPLOAD_FILES_DIR}/{image_id}.png", "wb") as f:

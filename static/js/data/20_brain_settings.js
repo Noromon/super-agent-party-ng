@@ -125,8 +125,9 @@ Object.assign(vue_data, {
       language: 'auto',
       theme: 'light',
       network:"local",
-      proxy: 'http://127.0.0.1:7890',
-      proxyMode: 'system', //system or manual or none
+        proxy: 'http://127.0.0.1:7890',
+        proxyBypass: '',
+        proxyMode: 'system', //system or manual or none
       isChinaProxy: false,
     enableShortcuts: true,
       backupIncludeUploads: false,

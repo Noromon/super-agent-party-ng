@@ -171,7 +171,8 @@ def test_socks_deps_available(mod):
 
 def test_server_wiring_pins():
     src = _read("server.py")
-    assert "proxy_url = normalize_proxy_url(manual_url)" in src
+    # S239：boot 三模式统一 active_proxy（normalize 内聚；trust_env 钉死通道废除）
+    assert "proxy_url = active_proxy(settings)" in src
     assert "apply_env_proxy(settings)" in src
     assert "_apply_proxy_env_safe(current)" in src
     assert src.count('"incremental": True') >= 2          # 流式 + DRS 双站点

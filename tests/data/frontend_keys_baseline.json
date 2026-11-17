@@ -1875,7 +1875,7 @@
   "methods/50_bots_lifecycle.js": 4,
   "methods/54_ui_nav.js": 5,
   "methods/58_shortcuts_input.js": 1,
-  "methods/60_system_settings.js": 9,
+  "methods/60_system_settings.js": 8,
   "methods/63_extension_bridge.js": 2,
   "methods/64_conversation_groups.js": 1,
   "methods/66_render_preview.js": 7,
@@ -1895,6 +1895,6 @@
   "renderer.js": 7,
   "vrm.js": 41
  },
- "console_log_total": 199,
+ "console_log_total": 198,
  "styles_css_lines": 12871
 }

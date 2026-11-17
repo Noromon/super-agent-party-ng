@@ -289,19 +289,10 @@ openEnvPage(menu) {
   },
 
   async updateProxy(){
+    // S239：删除 update_proxy GET 死调用——后端从未注册该路由(必 404,
+    // 每次改代理必现 更新代理失败 报错)。热更新由 save_settings 尾部链路完成
+    // (env 注入 + SAP_PROXY/SAP_PROXY_BYPASS 协议线 + global_http_client 出口 swap)。
     await this.autoSaveSettings();
-    const response = await fetch('/api/update_proxy',{
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-    if (response.ok) {
-      const data = await response.json();
-      console.log(data);
-    }else {
-      console.error('更新代理失败');
-    }
   },
 
   async openUserfile(){

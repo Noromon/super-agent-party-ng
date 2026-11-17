@@ -6,6 +6,7 @@ import aiohttp
 import requests
 from tzlocal import get_localzone
 from py.get_setting import load_settings
+from py.proxy_util import requests_proxies
 from py.diary_system import cn_clock_time  # S208：双格式时刻
 import wikipediaapi
 import arxiv
@@ -285,7 +286,10 @@ async def get_weather_by_city(city: str,lang:str="zh-CN",product:str="astro") ->
             "output": "json",
             "tzshift": 0,
         }
-        data_response = requests.get(base_url, params=data_params)
+        # S239：显式代理接线（全局自动跟随设置；含 proxyBypass 白名单）
+        _st = await load_settings()
+        data_response = requests.get(base_url, params=data_params,
+                                     proxies=requests_proxies(_st, base_url))
         data_response.raise_for_status()
         weather_data = data_response.json()
         

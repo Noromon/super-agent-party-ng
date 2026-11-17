@@ -965,21 +965,16 @@ async def lifespan(app: FastAPI):
 
     # --- [代理与 HTTP 客户端初始化] ---
     proxy_url = None
-    trust_env = False
-    
+
     if settings:
-        sys_set = settings.get("systemSettings", {})
-        mode = sys_set.get("proxyMode")
-        manual_url = sys_set.get("proxy", "").strip()
-        isChinaProxy = sys_set.get("isChinaProxy", False)
+        isChinaProxy = settings.get("systemSettings", {}).get("isChinaProxy", False)
 
         # S85-D：normalize 容错——代理栏任何形态（http/socks5h/裸host:port/垃圾）
         # 都只会得到 None+warning，永不炸启动；env 兜底让全部 SDK 同步生效
-        from py.proxy_util import apply_env_proxy, normalize_proxy_url
-        if mode == "manual":
-            proxy_url = normalize_proxy_url(manual_url)
-        elif mode == "system":
-            trust_env = True
+        # S239：三模式统一走 active_proxy（manual/system 探测/旧库兼容/none=None），
+        # httpx 出口改为显式 transport，不再依赖 trust_env（与热 swap 同一通道）
+        from py.proxy_util import active_proxy, apply_env_proxy
+        proxy_url = active_proxy(settings)
         apply_env_proxy(settings)
         _announce_agent_proxy(settings)  # S236：启动即下发 agent-proxy 分区代理
         if isChinaProxy:
@@ -995,11 +990,13 @@ async def lifespan(app: FastAPI):
     timeout_config = httpx.Timeout(None, connect=10.0)
     try:
         app_state.global_http_client = httpx.AsyncClient(
-            timeout=timeout_config, proxy=proxy_url, trust_env=trust_env)
+            timeout=timeout_config, transport=_build_proxy_transport(proxy_url),
+            trust_env=False)
     except Exception as _px_e:  # S85-D：socks 依赖缺失等 → 降级直连，绝不阻断启动
         logger.error(f"HTTP 客户端带代理初始化失败（{_px_e}），已降级为直连")
         app_state.global_http_client = httpx.AsyncClient(
-            timeout=timeout_config, trust_env=False)
+            timeout=timeout_config, transport=_build_proxy_transport(),
+            trust_env=False)
 
     # --- [模型 Client 初始化] ---
     # 辅助函数：统一注入 app_state.global_http_client
@@ -9548,21 +9545,52 @@ def _announce_agent_proxy(settings):
     """S236：向主进程 stdout 协议行下发规范化代理地址，供 agent 专用
     persist:agent-proxy 分区 setProxy（Electron 侧此前完全无代理接线）。"""
     try:
-        from py.proxy_util import active_proxy
+        from py.proxy_util import (active_proxy, mask_proxy_url,
+                                   proxy_bypass_rules)
         px = active_proxy(settings)
         print(f"SAP_PROXY:{px}" if px else "SAP_PROXY:null", flush=True)
+        # S239：自定义直连白名单第二协议线 + 后端留痕（此前只走 stdout，
+        # backend.log 零痕迹=agent 报代理问题时全链路无从对案）
+        bl = proxy_bypass_rules(settings)
+        print(f"SAP_PROXY_BYPASS:{bl}" if bl else "SAP_PROXY_BYPASS:none", flush=True)
+        logger.info(f"[Proxy] SAP_PROXY 下发 proxy={mask_proxy_url(px) or 'null'} "
+                    f"bypass={bl or '(仅内置内网)'}")
     except Exception as e:
         logger.info(f"SAP_PROXY 播报异常: {e}")
 
 
+def _build_proxy_transport(px=None):
+    """S239：global_http_client 唯一代理通道=显式 transport（trust_env 恒 False）。
+    px 为 active_proxy 规范化值（http/https/socks*），None=直连。"""
+    return httpx.AsyncHTTPTransport(proxy=px) if px else httpx.AsyncHTTPTransport()
+
+
+def _swap_global_http_proxy(px):
+    """S239：原地热 swap global_http_client 的 transport——修「启动值钉死」。
+    不换客户端实例：AsyncOpenAI/各工具持同一引用，原地替换引用零波及即全链路
+    实时生效（agent 看到的出口=设置实时值）。失败保持原出口，绝不 raise。"""
+    try:
+        client = getattr(app_state, "global_http_client", None)
+        if client is None:
+            return
+        client._transport = _build_proxy_transport(px)
+        from py.proxy_util import mask_proxy_url
+        logger.info(f"[Proxy] global HTTP 客户端出口已切换 -> "
+                    f"{mask_proxy_url(px) or 'direct'}")
+    except Exception as e:
+        logger.info(f"[Proxy] global HTTP 客户端代理热切换失败（保持原出口）: {e}")
+
+
 def _apply_proxy_env_safe(settings):
     """S85-D：代理设置保存后即时同步进程 env（manual=注入/system=探测/none=清除）。"""
+    px = None
     try:
         from py.proxy_util import apply_env_proxy
-        apply_env_proxy(settings)
+        px = apply_env_proxy(settings)
     except Exception as e:
         logger.info(f"代理环境同步异常: {e}")
     _announce_agent_proxy(settings)  # S236：Electron agent-proxy 分区随设置热更新
+    _swap_global_http_proxy(px)      # S239：全局 HTTP 客户端出口随设置热更新
 
 
 async def _sanitize_conversations_safety(covs: list) -> None:

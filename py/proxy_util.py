@@ -79,6 +79,55 @@ def is_literal_ip(host):
         return False
 
 
+def mask_proxy_url(url):
+    """S239：日志脱敏——去掉代理 URL 里的 user:pass@ 凭据段。"""
+    if not url:
+        return url
+    return re.sub(r"://[^/@]+@", "://***@", str(url))
+
+
+def bypass_list(settings):
+    """S239：systemSettings.proxyBypass 自定义直连白名单（逗号/分号/空白分隔，
+    附加语义=永远叠加在默认内网直连之上）。返回规范化小写条目，永不 raise。"""
+    try:
+        raw = str(((settings or {}).get("systemSettings", {}) or {})
+                  .get("proxyBypass") or "")
+        out = []
+        for item in re.split(r"[,;\s]+", raw):
+            item = item.strip().lower().lstrip("*.").rstrip(".")
+            if item:
+                out.append(item)
+        return out
+    except Exception:
+        return []
+
+
+def host_in_bypass(host, items):
+    """S239：目标主机命中自定义白名单？条目语义=域名后缀（example.com 同时匹配
+    *.example.com）；含 '/' 的条目按 CIDR 只匹配字面 IP。永不 raise。"""
+    try:
+        if not host or not items:
+            return False
+        host = str(host).lower().rstrip(".")
+        for it in items:
+            if "/" in it:
+                try:
+                    if ipaddress.ip_address(host) in ipaddress.ip_network(it, strict=False):
+                        return True
+                except ValueError:
+                    continue
+            elif it == host or host.endswith("." + it):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def proxy_bypass_rules(settings):
+    """S239：自定义白名单 → 下发 Electron 的逗号串（''=仅用内置内网规则）。"""
+    return ",".join(bypass_list(settings))
+
+
 def http_ua(settings, default=""):
     """S88：全局抓取 User-Agent。systemSettings.httpUserAgent 非空 → 覆盖
     抓取/搜索族的 UA（DDG/jina/searxng/markdown.new/网页与图片下载/robots）；
@@ -151,6 +200,9 @@ def requests_proxies(settings, target_url=None):
                 if ip is None or ip.is_private or ip.is_loopback \
                         or ip.is_link_local or ip.is_unspecified:
                     return None
+            # S239：自定义 proxyBypass 白名单（附加于默认内网直连之上）→ 直连
+            if host_in_bypass(host, bypass_list(settings)):
+                return None
     return {"http": px, "https": px}
 
 
@@ -170,8 +222,11 @@ def apply_env_proxy(settings):
         for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                   "http_proxy", "https_proxy", "all_proxy"):
             os.environ[k] = px
-        os.environ.setdefault("NO_PROXY", NO_PROXY_DEFAULT)
-        os.environ.setdefault("no_proxy", NO_PROXY_DEFAULT)
+        # S239：NO_PROXY=默认内网段+自定义 proxyBypass（附加语义）
+        extra = ",".join(bypass_list(settings))
+        no_proxy = NO_PROXY_DEFAULT + ("," + extra if extra else "")
+        os.environ.setdefault("NO_PROXY", no_proxy)
+        os.environ.setdefault("no_proxy", no_proxy)
     elif px:
         logging.getLogger("app").info(
             f"[Proxy] {px.split('://', 1)[0]}:// 型代理不注入 env"

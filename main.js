@@ -691,24 +691,40 @@ function getAcpxPath() {
 const AGENT_DIRECT_PARTITION = 'persist:agent-direct'
 const AGENT_PROXY_PARTITION = 'persist:agent-proxy'
 let AGENT_PROXY_URL = ''
+let AGENT_PROXY_BYPASS = ''
 let _sapLineBuf = ''
-async function applyAgentProxyLine(val) {
-  const url = (!val || val === 'null' || val === 'None') ? '' : val
-  AGENT_PROXY_URL = url
+// S239：直连通配符 Chromium 合法写法是 '<-'（'<->' 是无效 token 曾被静默吞掉）；
+// 自定义条目经 SAP_PROXY_BYPASS: 协议线附加。注意 socks 型代理 Chromium 无视
+// bypass 规则（分流靠代理端），文案已在设置页说明。
+const AGENT_BYPASS_BASE = 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,<-'
+async function applyAgentProxyConfig() {
   try {
     const sProxy = session.fromPartition(AGENT_PROXY_PARTITION)
-    if (url) {
+    if (AGENT_PROXY_URL) {
+      const bypass = AGENT_BYPASS_BASE + (AGENT_PROXY_BYPASS ? ',' + AGENT_PROXY_BYPASS : '')
       await sProxy.setProxy({
-        mode: 'fixed_servers', proxyRules: url,
-        proxyBypassRules: 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,<->',
+        mode: 'fixed_servers', proxyRules: AGENT_PROXY_URL,
+        proxyBypassRules: bypass,
       })
+      console.log('[AgentProxy] agent-proxy -> ' + AGENT_PROXY_URL + ' (bypass+' + (AGENT_PROXY_BYPASS || 'none') + ')')
+      evidenceAppend('[AgentProxy] setProxy ' + AGENT_PROXY_URL.replace(/:\/\/[^@/]+@/, '://***@') + ' bypass=' + (AGENT_PROXY_BYPASS || '仅内置'))
     } else {
       await sProxy.setProxy({ mode: 'direct' })
+      console.log('[AgentProxy] agent-proxy -> direct(未配置代理)')
+      evidenceAppend('[AgentProxy] setProxy direct(未配置代理)')
     }
-    console.log('[AgentProxy] agent-proxy 分区 -> ' + (url || 'direct(未配置代理)'))
   } catch (e) {
     console.error('[AgentProxy] setProxy 失败: ' + e.message)
+    evidenceAppend('[AgentProxy] setProxy FAILED ' + e.message)
   }
+}
+function applyAgentProxyLine(val) {
+  AGENT_PROXY_URL = (!val || val === 'null' || val === 'None') ? '' : val
+  applyAgentProxyConfig()
+}
+function applyAgentBypassLine(val) {
+  AGENT_PROXY_BYPASS = (!val || val === 'none' || val === 'null' || val === 'None') ? '' : val
+  applyAgentProxyConfig()
 }
 
 // 修改后的启动后端函数
@@ -784,7 +800,8 @@ const onData = (data) => {
     if (nl === -1) break
     const line = _sapLineBuf.slice(0, nl).trim()
     _sapLineBuf = _sapLineBuf.slice(nl + 1)
-    if (line.startsWith('SAP_PROXY:')) applyAgentProxyLine(line.slice(10).trim())
+        if (line.startsWith('SAP_PROXY_BYPASS:')) applyAgentBypassLine(line.slice(17).trim())
+        else if (line.startsWith('SAP_PROXY:')) applyAgentProxyLine(line.slice(10).trim())
   }
   if (_sapLineBuf.length > 8192) _sapLineBuf = ''
 

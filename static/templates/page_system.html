@@ -586,6 +586,16 @@
                     @input="updateProxy"
                   ></el-input>
                 </el-form-item>
+                <el-form-item :label="t('proxyBypass')" class="form-item-align" label-position="left"
+                  v-show="systemSettings.proxyMode === 'manual'">
+                  <el-input
+                    v-model="systemSettings.proxyBypass"
+                    :placeholder="t('proxyBypassPlaceholder')"
+                    class="full-width-input"
+                    @change="updateProxy"
+                  ></el-input>
+                  <div class="form-tip" style="width: 100%;">{{ t('proxyBypassHint') }}</div>
+                </el-form-item>
 
                 <el-form-item :label="t('httpUserAgent')" class="form-item-align" label-position="left">
                   <el-input
