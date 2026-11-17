@@ -641,26 +641,45 @@ Object.assign(vue_methods, {
             const image = await wv.capturePage();
             const size = image.getSize();
 
-            // 3. 元素裁剪：CSS px rect -> 设备像素 crop（越界夹取），失败回退整屏
-            let target = image;
+            // 3. 裁剪区域 → 设备像素 rect（越界夹取；S235：先算好喂异步管线）
+            let cropRect = { x: 0, y: 0, w: size.width, h: size.height };
             if (region) {
                 const sx = size.width / region.iw, sy = size.height / region.ih;
                 const cx = Math.max(0, Math.min(Math.round(region.x * sx), size.width - 1));
                 const cy = Math.max(0, Math.min(Math.round(region.y * sy), size.height - 1));
-                const cw = Math.max(1, Math.min(Math.round(region.w * sx), size.width - cx));
-                const ch = Math.max(1, Math.min(Math.round(region.h * sy), size.height - cy));
-                try { target = image.crop({ x: cx, y: cy, width: cw, height: ch }); } catch (e) { target = image; }
+                cropRect = {
+                    x: cx, y: cy,
+                    w: Math.max(1, Math.min(Math.round(region.w * sx), size.width - cx)),
+                    h: Math.max(1, Math.min(Math.round(region.h * sy), size.height - cy)),
+                };
             }
 
-            // 4. 缩放 (AI 不需要 4K，1280 宽足够，节省 Token)
-            const tsize = target.getSize();
-            let resized = target;
-            if (tsize.width > 1280) {
-                resized = target.resize({ width: 1280 });
+            // 4. S235：解码/裁剪/缩放/编码移出主线程——nativeImage crop/resize/toJPEG
+            //    是同步位图处理，大帧每步阻塞主窗口渲染线程数百 ms（整屏冻结观感之一）；
+            //    改 createImageBitmap + OffscreenCanvas.convertToBlob 后全异步。
+            let buffer = null;
+            try {
+                const pngBlob = new Blob([new Uint8Array(image.toPNG())], { type: 'image/png' });
+                const tw = cropRect.w > 1280 ? 1280 : cropRect.w;
+                const th = Math.max(1, Math.round(cropRect.h * (tw / cropRect.w)));
+                const bmp = await createImageBitmap(pngBlob, cropRect.x, cropRect.y, cropRect.w, cropRect.h,
+                    { resizeWidth: tw, resizeHeight: th, resizeQuality: 'high' });
+                const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+                canvas.getContext('2d').drawImage(bmp, 0, 0);
+                if (bmp.close) bmp.close();
+                const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+                buffer = new Uint8Array(await jpeg.arrayBuffer());
+            } catch (e) {
+                // S235-fallback：异步管线不可用时兜底旧同步三连（crop→resize→toJPEG）
+                let target = image;
+                if (region) {
+                    try { target = image.crop({ x: cropRect.x, y: cropRect.y, width: cropRect.w, height: cropRect.h }); } catch (e2) { target = image; }
+                }
+                if (target.getSize().width > 1280) target = target.resize({ width: 1280 });
+                buffer = target.toJPEG(70);
             }
 
-            // 5. 转为 JPEG Buffer (质量 70) 并交主进程保存（Buffer 走 IPC 比 base64 快）
-            const buffer = resized.toJPEG(70);
+            // 5. 交主进程保存（二进制 Buffer 走 IPC 比 base64 快）
             const filename = await window.electronAPI.saveScreenshotDirect(buffer);
 
             // 6. 拼接 URL（preload 暴露后端 host/port）

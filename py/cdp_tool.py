@@ -9,7 +9,7 @@ import requests
 import asyncio
 import websockets
 from py import html_to_md
-from py.get_setting import UPLOAD_FILES_DIR, get_port, load_settings
+from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, load_settings
 
 # 全局变量，用于保持当前上下文
 CURRENT_PAGE_INDEX = 0
@@ -114,7 +114,32 @@ async def cdp_command(ws_url, method, params=None, timeout=None):
 # Input Automation (Via Vue Controller)
 # ==========================================
 
+WVACT_SLOW_MS = 2000  # S235：往返超阈的浏览器动作才落对账行（正常频次不刷屏）
+
+
+def _wvact_evidence(ms, method_name, ret_preview):
+    """S235：与主进程 [ProcHeat] 同一 evidence 文件按时序对账——
+    整屏定格时段哪个 webview 动作卡了多久一目了然。小行即写即关，跨进程追加安全。"""
+    try:
+        line = "%s [WvAct] name=%s ms=%d ret=%s\n" % (
+            time.strftime("%Y-%m-%dT%H:%M:%S"), method_name, ms,
+            str(ret_preview).replace("\n", " ")[:60])
+        with open(os.path.join(LOG_DIR, "frontend-evidence.log"), "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
 async def call_vue_method(method_name, args_list=None, timeout=None):
+    _t0 = time.monotonic()
+    out = await _call_vue_method_impl(method_name, args_list, timeout)
+    _ms = int((time.monotonic() - _t0) * 1000)
+    if _ms >= WVACT_SLOW_MS:
+        _wvact_evidence(_ms, method_name, out)
+    return out
+
+
+async def _call_vue_method_impl(method_name, args_list=None, timeout=None):
     """
     通用函数：调用 window.aiBrowser 的方法 (带重试机制)
     timeout: 单次 CDP 往返秒数；长耗时操作（如离屏渲染）可放宽，默认沿用 CDP_CALL_TIMEOUT。

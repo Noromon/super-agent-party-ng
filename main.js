@@ -641,6 +641,37 @@ function attachFreezeProbe(win) {
       // S119: 流式常开 Profiler 钩子已拆（见上），stream-active/idle 仅入证据通道
     }
   })
+  // S235: 进程热度采样——「整屏定格但主窗口线程空闲」类卡顿（GPU 合成被重页
+  // 打满、贴吧图片流式滚动等）现有探针全部盖不到。周期核 CPU，写热进程行进
+  // evidence（pid 节流 15s），与 [WvAct] 对账线同文件按时序定罪罪魁进程。
+  const _heatLast = new Map()
+  setInterval(async () => {
+    try {
+      const metrics = await app.getAppMetrics({ captureValue: 'cpu' })
+      const pidUrl = new Map()
+      try {
+        for (const wc of webContents.getAllWebContents()) {
+          try {
+            const p = wc.getOSProcessId()
+            if (p && !pidUrl.has(p)) {
+              let u = ''
+              try { u = String(wc.getURL() || '').slice(0, 110) } catch (_) {}
+              pidUrl.set(p, u)
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+      const nowT = Date.now()
+      for (const m of metrics) {
+        const pct = Number(m.cpu && m.cpu.percentCPU) || 0
+        if (pct <= 75) continue
+        const last = _heatLast.get(m.pid) || 0
+        if (nowT - last < 15000) continue
+        _heatLast.set(m.pid, nowT)
+        evidenceAppend('[ProcHeat] type=' + m.type + ' pid=' + m.pid + ' cpu=' + pct.toFixed(1) + '% url=' + (pidUrl.get(m.pid) || '-'))
+      }
+    } catch (_) {}
+  }, 5000).unref?.()
 }
 
 function getAcpxPath() {
