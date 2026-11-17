@@ -18,6 +18,7 @@ RENDERER = _read("static", "js", "renderer.js")
 TABS = _read("static", "js", "methods", "98_browser_tabs.js")
 GROUPS = _read("static", "js", "methods", "64_conversation_groups.js")
 BAR = _read("static", "templates", "page_chat_bar.html")
+HOST_INDEX = _read("static", "index.html")
 CHAT = _read("static", "templates", "page_chat_main.html")
 HOME = _read("static", "templates", "page_home.html")
 
@@ -96,10 +97,17 @@ def test_missing_tab_noop():
 # ---------------- 接线静态断言 ----------------
 
 def test_template_bindings():
-    # S241：必须 .stop——全局 document 兜底监听在冒泡顶端，不断流就会被二次覆盖
+    # S241：必须 .stop——全局 document 兜底监听在冒泡顶端，不断流就会被二次覆盖。
+    # S242 教训：标签条存在双源（宿主 index.html 内联副本 + templates/page_chat_bar
+    # 锚点版），宿主内联=用户实机界面；改拆分模板时必须 grep 同名 class 补内联副本，
+    # 此处双源各自钉死断言防再漏。
     assert '@contextmenu.prevent.stop="openTabContextMenu(tab)"' in BAR
+    assert '@contextmenu.prevent.stop="openTabContextMenu(tab)"' in HOST_INDEX
     assert '@contextmenu.prevent.stop="openConvContextMenu(conv)"' in CHAT
     assert '@contextmenu.prevent.stop="openConvContextMenu(conv)"' in HOME
+    # 内联副本与会话行不得在宿主内联重复出现而缺绑定（双源审计哨兵）
+    assert HOST_INDEX.count('class="ib-tab"') == HOST_INDEX.count('openTabContextMenu(tab)')
+    assert "history-item-row" not in HOST_INDEX  # 会话行仅锚点装配, 若内联化须同步补绑定
 
 
 def test_global_listener_yields_to_handled_menus():
