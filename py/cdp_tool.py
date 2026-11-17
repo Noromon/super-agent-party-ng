@@ -10,6 +10,7 @@ import asyncio
 import websockets
 from py import html_to_md
 from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, load_settings
+from py.proxy_util import active_proxy
 
 # 全局变量，用于保持当前上下文
 CURRENT_PAGE_INDEX = 0
@@ -280,12 +281,31 @@ async def list_pages():
     """列出所有标签页"""
     return await call_vue_method('getPagesInfo')
 
-async def new_page(url, timeout=0, background=False, mobile=False):
-    """新建标签页；background=True 时后台打开（不抢占用户可见面板）；mobile=True 用移动端 UA + 手机视口渲染。"""
+async def _proxy_egress_precheck(use_proxy):
+    """S236：use_proxy=true 但设置未配置可用代理 → 返回报错文案；None=放行。"""
+    if not use_proxy:
+        return None
+    try:
+        if not active_proxy(await load_settings()):
+            return ("[Error] use_proxy=true 但应用未配置可用代理："
+                    "请先在 设置→系统→代理 填写（http/socks5 均可）后重试，或改用默认直连。"
+                    "(No valid proxy configured in Settings -> System -> Proxy.)")
+    except Exception:  # noqa: BLE001
+        return None  # 预检自身故障不拦调用
+    return None
+
+
+async def new_page(url, timeout=0, background=False, mobile=False, use_proxy=False):
+    """新建标签页；background=True 时后台打开（不抢占用户可见面板）；mobile=True 用移动端 UA + 手机视口渲染；
+    use_proxy=True 走应用内代理分区（默认直连分区，不受系统代理影响）。"""
+    err = await _proxy_egress_precheck(use_proxy)
+    if err:
+        return err
+    partition = "persist:agent-proxy" if use_proxy else "persist:agent-direct"
     if background:
-        res = await call_vue_method('openUrlInBackground', [url])
+        res = await call_vue_method('openUrlInBackground', [url, partition])
     else:
-        res = await call_vue_method('openUrlInNewTab', [url])
+        res = await call_vue_method('openUrlInNewTab', [url, partition])
     if mobile:
         try:
             await call_vue_method('setTabMobile', [None, True, True])
@@ -375,24 +395,29 @@ async def take_screenshot(fullPage=False, uid=None):
 # S227: 本地无头渲染动态页 -> Markdown（一次性）
 # ==========================================
 
-async def web_render(original_url, wait_text=None, timeout=45, mobile=False):
+async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use_proxy=False):
     """用内置浏览器在离屏隐藏 webview 渲染动态(含JavaScript)页面，本地转 Markdown 回传，无云。
 
     仅 Electron 桌面版且启用内置浏览器时有效；可访问本机/内网地址（异于云端 markdown_new）。
     慢站超时前会尽量回传已加载到的部分内容(标注 partial)；重站可加大 timeout 或用 wait_text 等关键文本。
     mobile=True 用移动端 UA + 手机视口渲染（针对移动端 H5/公众号/贴吧/知乎等只给移动端内容的站点）。
+    默认直连（不受系统全局代理影响）；use_proxy=True 走应用内代理（需先在设置配置）。
     """
     url = (original_url or "").strip()
     if not url:
         return "[Error] web_render: 缺少 url。"
     if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
+    err = await _proxy_egress_precheck(use_proxy)
+    if err:
+        return err
     if not await get_targets():
         return ("[Error] 内置浏览器通道不可用：仅 Electron 桌面版且已启用“内置浏览器”时有效。"
                 "可改用 markdown_new / simple_fetch 等抓取工具。")
     t = int(timeout or 45)
     t = max(5, min(t, 60))
-    opts = {"waitText": wait_text or "", "timeout": t, "mobile": bool(mobile)}
+    opts = {"waitText": wait_text or "", "timeout": t, "mobile": bool(mobile),
+            "useProxy": bool(use_proxy)}
     res = await call_vue_method("renderOffscreenPage", [url, opts], timeout=t + 20)
     if not isinstance(res, str):
         res = json.dumps(res or {})
@@ -406,8 +431,9 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False):
     if not isinstance(data, dict) or not data.get("ok"):
         e = str((data.get("error") if isinstance(data, dict) else s) or "unknown")
         if "render timeout" in e:
-            hint = ("超时未加载完成：站可能很慢或被墙/需代理（内置浏览器不走 SAP 应用内代理）。"
-                    "可加大 timeout、提供 wait_text，或改用可直连的镜像/来源。")
+            hint = ("超时未加载完成：站可能很慢或被墙。内置浏览器默认直连——"
+                    "若目标需 VPN 出口可设 use_proxy=true（需先在 设置→系统→代理 配置）；"
+                    "也可加大 timeout、提供 wait_text，或改用可直连的镜像/来源。")
         elif "no-content" in e:
             hint = "已连接但未抓到正文：可能需登录或被反爬，可加 wait_text 指定正文关键句后重试。"
         elif "wait-text-timeout" in e:
@@ -506,14 +532,15 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "new_page",
-            "description": "Creates a new page in the browser tab bar.",
+            "description": "Creates a new page in the browser tab bar. Network egress is chosen at creation: direct by default, or the app proxy with use_proxy=true.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "URL to load"},
                     "timeout": {"type": "integer"},
                     "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"},
-                    "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。"}
+                    "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。"},
+                    "use_proxy": {"type": "boolean", "description": "true=本标签走应用内代理（设置→系统→代理 填的地址）；默认 false=直连——对国内站/本机内网地址正确，且不受系统全局代理(翻墙软件改系统代理时 Electron 行为异常)影响。仅目标确需 VPN 出口（如 Google、X）时设 true；设置里未配置可用代理时会直接报错。出口在创建时定死，想换用 close_page + new_page(use_proxy) 重建。"}
                 },
                 "required": ["url"]
             }
@@ -552,7 +579,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "navigate_page",
-            "description": "Navigates the currently selected page. By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating.",
+            "description": "Navigates the currently selected page. By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating. The tab's network egress (direct vs app proxy) is fixed at creation via new_page(use_proxy); navigation keeps the current egress.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -758,6 +785,7 @@ all_cdp_tools = [
                 "可访问本机或内网地址。若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本。"
                 "慢站超时前会尽量返回已加载到的部分内容(标注 partial)。"
                 "若站点只向移动端吐内容或弹「打开App/扫码登录」墙，设 mobile=true 用手机UA+视口渲染。"
+                "默认直连访问（不受系统全局代理影响）；目标需 VPN 出口（如 Google、X）时设 use_proxy=true 走应用内代理。"
                 "仅 Electron 桌面版且已启用内置浏览器时有效。"
             ),
             "parameters": {
@@ -778,6 +806,10 @@ all_cdp_tools = [
                     "mobile": {
                         "type": "boolean",
                         "description": "可选：true=用移动端 UA + 手机视口渲染。针对只向移动端吐内容的站点（手机H5/公众号/贴吧/知乎 App 墙等），可绕开「请打开App/扫码登录」桌面墙。默认 false。",
+                    },
+                    "use_proxy": {
+                        "type": "boolean",
+                        "description": "可选：true=本次渲染走应用内代理（设置→系统→代理 填的地址）；默认 false=直连——对国内站/本机内网地址正确，且不受系统全局代理(翻墙软件改系统代理时 Electron 行为异常)影响。仅目标确需 VPN 出口（如 Google、X）时设 true；设置里未配置可用代理时会直接报错。",
                     },
                 },
                 "required": ["original_url"],

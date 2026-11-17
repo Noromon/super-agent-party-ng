@@ -688,6 +688,12 @@ function getAcpxPath() {
  * 逻辑：传 port 0 -> 捕获 REAL_PORT_FOUND -> 返回真实端口
  */
 async function startBackend() {
+  // S236: agent-direct 分区启动即钉死直连（Electron webview 默认裸随系统
+  // 代理=全局翻墙时行为异常的根源；agent 工具默认走本分区）
+  session.fromPartition(AGENT_DIRECT_PARTITION)
+    .setProxy({ mode: 'direct' })
+    .then(() => session.fromPartition(AGENT_DIRECT_PARTITION).clearCache().catch(() => {}))
+    .catch((e) => console.error('[AgentProxy] agent-direct 初始化失败: ' + e.message))
   return new Promise((resolve, reject) => {
     try {
       console.log('🔍 准备启动后端进程...');
@@ -736,11 +742,49 @@ async function startBackend() {
 
       let isHandshaked = false;
 
-      // 核心监听逻辑
-      const onData = (data) => {
-        const output = data.toString();
-        // 1. 依然保留日志缓冲，供前端查看
-        appendLogToBuffer('BACKEND', output);
+// S236: agent 浏览器工具代理出口——两个专用分区。agent-direct=直连(mode direct，
+// 无视系统代理/PAC，agent 默认：国内/本地站正确且免疫全局翻墙引发的异常)；
+// agent-proxy=设置→系统→代理填的地址(backend 经 stdout SAP_PROXY: 协议行下发)。
+// 用户手动标签所在 persist:party-browser-session 不动(维持跟系统代理的现状)。
+const AGENT_DIRECT_PARTITION = 'persist:agent-direct'
+const AGENT_PROXY_PARTITION = 'persist:agent-proxy'
+let AGENT_PROXY_URL = ''
+let _sapLineBuf = ''
+async function applyAgentProxyLine(val) {
+  const url = (!val || val === 'null' || val === 'None') ? '' : val
+  AGENT_PROXY_URL = url
+  try {
+    const sProxy = session.fromPartition(AGENT_PROXY_PARTITION)
+    if (url) {
+      await sProxy.setProxy({
+        mode: 'fixed_servers', proxyRules: url,
+        proxyBypassRules: 'localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,<->',
+      })
+    } else {
+      await sProxy.setProxy({ mode: 'direct' })
+    }
+    console.log('[AgentProxy] agent-proxy 分区 -> ' + (url || 'direct(未配置代理)'))
+  } catch (e) {
+    console.error('[AgentProxy] setProxy 失败: ' + e.message)
+  }
+}
+
+// 核心监听逻辑
+const onData = (data) => {
+  const output = data.toString();
+  // 1. 依然保留日志缓冲，供前端查看
+  appendLogToBuffer('BACKEND', output);
+
+  // S236: SAP_PROXY 协议行（行缓冲解析，跨 chunk 安全）
+  _sapLineBuf += output
+  for (;;) {
+    const nl = _sapLineBuf.indexOf('\n')
+    if (nl === -1) break
+    const line = _sapLineBuf.slice(0, nl).trim()
+    _sapLineBuf = _sapLineBuf.slice(nl + 1)
+    if (line.startsWith('SAP_PROXY:')) applyAgentProxyLine(line.slice(10).trim())
+  }
+  if (_sapLineBuf.length > 8192) _sapLineBuf = ''
 
         if (isDev) {
             // 开发模式下在控制台打印原始输出，方便排查

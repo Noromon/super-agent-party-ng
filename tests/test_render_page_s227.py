@@ -170,7 +170,7 @@ def test_offscreen_renderer_method_present():
     assert "renderOffscreenPage(url, opts)" in src
     assert "createElement('webview')" in src
     assert "left:-20000px" in src
-    assert "persist:party-browser-session" in src
+    assert "persist:agent-proxy' : 'persist:agent-direct" in src  # S236: 离屏走 agent 专用出口分区
 
 
 def test_call_vue_method_accepts_timeout():

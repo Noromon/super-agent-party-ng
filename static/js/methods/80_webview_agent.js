@@ -782,10 +782,11 @@ Object.assign(vue_methods, {
     },
 
     // 后台开标签：建 tab 并设为当前供 agent 操作，但不切换 activeMenu（不抢用户可见面板）
-    openUrlInBackground(url) {
+    // S236：partition=agent 网络出口分区（默认 agent-direct 直连；agent-proxy=设置代理）
+    openUrlInBackground(url, partition) {
         if (!url) return "Error: no url";
         this._guardAuthNav(url);
-        const newTab = { id: Date.now(), title: 'Loading...', url: url, favicon: '', isLoading: true, loaded: true, canGoBack: false, canGoForward: false, mobile: false };
+        const newTab = { id: Date.now(), title: 'Loading...', url: url, favicon: '', isLoading: true, loaded: true, canGoBack: false, canGoForward: false, mobile: false, partition: partition || 'persist:agent-direct' };
         this.browserTabs.push(newTab);
         this.currentTabId = newTab.id;
         this.urlInput = url;
@@ -862,7 +863,8 @@ Object.assign(vue_methods, {
                 try { wv.remove(); } catch (e) {}
                 resolve(JSON.stringify(obj));
             };
-            wv.setAttribute('partition', 'persist:party-browser-session');
+            // S236：agent 工具默认直连分区（免疫系统代理）；useProxy=true 走设置代理分区
+            wv.setAttribute('partition', opts.useProxy ? 'persist:agent-proxy' : 'persist:agent-direct');
             if (this.webviewPreloadPath) { try { wv.setAttribute('preload', this.webviewPreloadPath); } catch (e) {} }
             wv.setAttribute('webpreferences', 'contextIsolation=true, nodeIntegration=false, sandbox=true, webSecurity=true, enableRemoteModule=false');
             const _vw = mobile ? 414 : 1280, _vh = mobile ? 896 : 900;

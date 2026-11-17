@@ -115,7 +115,7 @@ def test_server_wiring_mirrored():
 def test_renderer_methods_present():
     src = _read("static/js/methods/80_webview_agent.js")
     for m in ("_applyAdblock(wv, hard)", "cleanPage(force)", "removeElement(target)",
-              "stopLoading()", "escapeBack()", "getPageHtml()", "openUrlInBackground(url)"):
+              "stopLoading()", "escapeBack()", "getPageHtml()", "openUrlInBackground(url, partition)"):
         assert m in src, m
     assert "__sap_adblock__" in src
 
@@ -128,7 +128,7 @@ def test_domready_auto_adblock():
 
 def test_open_bg_does_not_steal_active_menu():
     src = _read("static/js/methods/80_webview_agent.js")
-    seg = src[src.index("openUrlInBackground(url)"):]
+    seg = src[src.index("openUrlInBackground(url, partition)"):]
     seg = seg[:seg.index("renderOffscreenPage")]
     # 不写 this.activeMenu（仅注释提到 activeMenu 不算抢占）
     assert "this.activeMenu" not in seg

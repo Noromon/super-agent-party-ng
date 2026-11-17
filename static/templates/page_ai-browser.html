@@ -28,7 +28,7 @@
                     plugins
                     :preload="webviewPreloadPath"
                     @ipc-message="handleWebviewIpcMessage"
-                    partition="persist:party-browser-session"
+                    :partition="tab.partition || 'persist:party-browser-session'"
                     @did-start-loading="onDidStartLoading(tab.id)"
                     @did-stop-loading="onDidStopLoading(tab.id)"
                     @page-title-updated="onPageTitleUpdated(tab.id, $event)"

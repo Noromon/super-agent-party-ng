@@ -981,6 +981,7 @@ async def lifespan(app: FastAPI):
         elif mode == "system":
             trust_env = True
         apply_env_proxy(settings)
+        _announce_agent_proxy(settings)  # S236：启动即下发 agent-proxy 分区代理
         if isChinaProxy:
             # 2. 注入 Node.js / NPM 镜像源 (重点)
             # 设置这个环境变量后，所有的 npm install (包括你的 node_runner) 都会默认使用这个源
@@ -9543,6 +9544,17 @@ async def _sync_external_api_token_flag():
             "可在设置开启「外联 API 需要令牌」改用 Authorization: Bearer <MACHINE_TOKEN>。")
 
 
+def _announce_agent_proxy(settings):
+    """S236：向主进程 stdout 协议行下发规范化代理地址，供 agent 专用
+    persist:agent-proxy 分区 setProxy（Electron 侧此前完全无代理接线）。"""
+    try:
+        from py.proxy_util import active_proxy
+        px = active_proxy(settings)
+        print(f"SAP_PROXY:{px}" if px else "SAP_PROXY:null", flush=True)
+    except Exception as e:
+        logger.info(f"SAP_PROXY 播报异常: {e}")
+
+
 def _apply_proxy_env_safe(settings):
     """S85-D：代理设置保存后即时同步进程 env（manual=注入/system=探测/none=清除）。"""
     try:
@@ -9550,6 +9562,7 @@ def _apply_proxy_env_safe(settings):
         apply_env_proxy(settings)
     except Exception as e:
         logger.info(f"代理环境同步异常: {e}")
+    _announce_agent_proxy(settings)  # S236：Electron agent-proxy 分区随设置热更新
 
 
 async def _sanitize_conversations_safety(covs: list) -> None:

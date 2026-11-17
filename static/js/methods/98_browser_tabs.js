@@ -2,7 +2,9 @@
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
     // AI浏览器相关
-    openUrlInNewTab(url) {
+    // S236：partition=agent 网络出口分区（agent 经 new_page 传入，默认 agent-direct；
+    // 用户手动开标签不带此参走 persist:party-browser-session 维持跟系统代理）
+    openUrlInNewTab(url, partition) {
         // 如果 url 为空或者无效，可以做个判断，或者直接打开
         if (!url) return;
         this._guardAuthNav(url); // S227: guardRedirect 开启时，agent 主动导航授权放行
@@ -16,7 +18,8 @@ Object.assign(vue_methods, {
             loaded: true,
             canGoBack: false,
             canGoForward: false,
-            mobile: false
+            mobile: false,
+            partition: partition || 'persist:party-browser-session'
         };
         this.browserTabs.push(newTab);
         this.switchTab(newTab.id);
