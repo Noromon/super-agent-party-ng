@@ -2,6 +2,9 @@ const isElectron = window.electronAPI ? true : false;
 // 事件监听改造
 if (isElectron) {
     document.addEventListener('contextmenu', (e) => {
+      // S241：已被元素级处理器 prevent 过的右键(标签条/会话行等专属菜单)直接放行——
+      // 此前无条件弹 default, 第二个原生菜单把专属菜单盖掉(S240 根因)
+      if (e.defaultPrevented) return;
       const imgTarget = e.target.closest('img');
       
       if (imgTarget) {

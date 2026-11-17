@@ -96,9 +96,19 @@ def test_missing_tab_noop():
 # ---------------- 接线静态断言 ----------------
 
 def test_template_bindings():
-    assert '@contextmenu.prevent="openTabContextMenu(tab)"' in BAR
-    assert '@contextmenu.prevent="openConvContextMenu(conv)"' in CHAT
-    assert '@contextmenu.prevent="openConvContextMenu(conv)"' in HOME
+    # S241：必须 .stop——全局 document 兜底监听在冒泡顶端，不断流就会被二次覆盖
+    assert '@contextmenu.prevent.stop="openTabContextMenu(tab)"' in BAR
+    assert '@contextmenu.prevent.stop="openConvContextMenu(conv)"' in CHAT
+    assert '@contextmenu.prevent.stop="openConvContextMenu(conv)"' in HOME
+
+
+def test_global_listener_yields_to_handled_menus():
+    """S241 根因：vue_data.js 全局 document contextmenu 兜底曾无条件弹 default
+    菜单，把元素级专属菜单盖掉。守卫必须先于任何 showContextMenu 调用。"""
+    vd = _read("static", "js", "vue_data.js")
+    guard = vd.index("if (e.defaultPrevented) return;")
+    assert guard < vd.index("showContextMenu('default')")
+    assert guard < vd.index("showContextMenu('image'")
 
 
 def test_vue_methods_exist():
