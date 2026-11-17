@@ -400,6 +400,7 @@ main();`,
       maxMinutes: 60,
       quietStart: 23,
       quietEnd: 8,
+      pauseOnBusy: true,
       actions: {
         think: { enabled: true, weight: 4 },
         webSearch: { enabled: false, weight: 2 },

@@ -2910,6 +2910,13 @@
                                 {{ t('diaryQuietHint') || '此时间段内不触发（起止相同表示不静默）' }}
                               </div>
                             </el-form-item>
+                            <el-form-item :label="t('diaryPauseOnBusy') || '繁忙时暂停计时'">
+                              <el-switch v-model="diarySettings.pauseOnBusy" @change="autoSaveSettings"
+                                         style="--el-switch-on-color: #13ce66;"></el-switch>
+                              <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                                {{ t('diaryPauseOnBusyHint') || '对话或长任务进行中时挂起日记触发计时器，结束后约 1 分钟重试，避免互相抢推理' }}
+                              </div>
+                            </el-form-item>
                           </div>
                         </div>
                       </div>

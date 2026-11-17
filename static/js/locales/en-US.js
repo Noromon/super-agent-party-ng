@@ -498,6 +498,8 @@ window.lang_enUS = {
     'diaryInterval': 'Random trigger interval (minutes)',
     'diaryQuietWindow': 'Quiet hours (hour)',
     'diaryQuietHint': 'No triggers during this window (set equal start/end to disable)',
+    'diaryPauseOnBusy': 'Pause timer when busy',
+    'diaryPauseOnBusyHint': 'While a conversation or long task is running, the diary trigger timer is held and retries about a minute after it finishes, so they do not compete for inference',
     'diaryActions': 'Action types & weights',
     'diaryWeight': 'Weight',
     'diaryAction_think': 'Write a reflective diary',

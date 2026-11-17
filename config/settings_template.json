@@ -722,6 +722,7 @@
       "maxMinutes": 60,
       "quietStart": 23,
       "quietEnd": 8,
+      "pauseOnBusy": true,
       "actions": {
         "think": {
           "enabled": true,

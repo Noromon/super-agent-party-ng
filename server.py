@@ -19,6 +19,7 @@ from py.llm_recovery import (  # S207：瞬断故障恢复
     retry_suffix, attach_retry_note as llm_attach)
 from py.token_guard import neutralize as _neutralize, neutralize_deep, apply_eos_guard
 from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
+from py import agent_activity as _agent_activity  # S232：在途请求计数（对话/长任务繁忙信号）
 from py.prompt_assembly import (
     AUTO_BEHAVIOR_HINT, DOCKER_ENV_INFO, INFERENCE_THINK_HINT, LATEX_DELIM_HINT,
     STICKER_IMAGE_RULE, TEXT2IMG_IMAGE_RULE, WSL_ENV_INFO,
@@ -8774,6 +8775,20 @@ _approval_im.set_executor(execute_approved_tool)
 
 @app.post("/v1/chat/completions", operation_id="chat_with_agent_party")
 async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
+    """S232：在途计数包装——非流式长任务（IM bot/子代理/complete 路径）的
+    handler 全程计入繁忙信号；日记自调用（platform=diary）不计，防触发暂停自锁。
+    流式任务由 stream_relay._active_streams 覆盖，不依赖本计数。"""
+    _counted = (getattr(request, "platform", "") or "") != "diary"
+    if _counted:
+        _agent_activity.begin()
+    try:
+        return await _chat_endpoint_impl(request, fastapi_request)
+    finally:
+        if _counted:
+            _agent_activity.end()
+
+
+async def _chat_endpoint_impl(request: ChatRequest, fastapi_request: Request):
     """
     用来与agent party中的模型聊天
     """

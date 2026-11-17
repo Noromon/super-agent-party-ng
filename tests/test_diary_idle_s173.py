@@ -97,7 +97,9 @@ class TestTickWiring:
 
     def test_tick_checks_live_streams_before_spawn(self):
         src = self._engine_src()
-        assert "and not has_live_streams()):" in src
+        # S232：has_live_streams 并入 _busy_now 表达式，仍是总结任务的硬门控
+        assert "_busy_now = has_live_streams() or" in src
+        assert "and not _busy_now):" in src
 
     def test_helper_defined_at_module_level(self):
         src = self._engine_src()

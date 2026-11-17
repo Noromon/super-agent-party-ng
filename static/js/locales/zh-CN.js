@@ -498,6 +498,8 @@ window.lang_zhCN = {
     'diaryInterval': '随机触发间隔（分钟）',
     'diaryQuietWindow': '夜间静默时段（点）',
     'diaryQuietHint': '此时间段内不触发（起止相同表示不静默）',
+    'diaryPauseOnBusy': '繁忙时暂停计时',
+    'diaryPauseOnBusyHint': '对话或长任务进行中时挂起日记触发计时器，结束后约 1 分钟重试，避免互相抢推理',
     'diaryActions': '动作类型与权重',
     'diaryWeight': '权重',
     'diaryAction_think': '自我思考写日记',

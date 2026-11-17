@@ -12,6 +12,7 @@ from py.get_setting import get_port, load_settings, save_settings
 from py.diary_system import append_diary_entry, get_recent_diary_entries, DEFAULT_BOOK_ID, cn_clock_time
 from py.diary_chat_integration import summarize_and_save_buffers
 from py.token_guard import neutralize as _neutralize
+from py.agent_activity import is_agent_busy  # S232：非流式长任务繁忙信号（流式用 has_live_streams）
 
 
 def has_live_streams() -> bool:
@@ -330,6 +331,10 @@ class DiaryEngine:
     def _enabled(self) -> bool:
         return bool(self.config.get("enabled", False))
 
+    def _pause_on_busy(self) -> bool:
+        """S232：对话/长任务进行中是否暂停日记触发计时器（默认开）。"""
+        return bool(self.config.get("pauseOnBusy", True))
+
     def _schedule_next(self):
         """根据随机区间排下一次触发时间"""
         min_m = max(1, int(self.config.get("minMinutes", 10) or 10))
@@ -396,8 +401,10 @@ class DiaryEngine:
                 summary_retry = _cfg_num("retrySeconds")
                 # S172：单飞——上一个总结未落地就不再叠任务（曾每分钟积压自调用打满引擎）
                 # S173：在途流=对话正忙（agent 长任务执行中），本 tick 跳过，下个 60s 再查
+                # S232：开关开启时在途非流式请求（IM bot/子代理）同样算忙
+                _busy_now = has_live_streams() or (self._pause_on_busy() and is_agent_busy())
                 if ((self._chat_summary_task is None or self._chat_summary_task.done())
-                        and not has_live_streams()):
+                        and not _busy_now):
                     self._chat_summary_task = asyncio.create_task(
                         summarize_and_save_buffers(idle_min, summary_timeout, summary_retry))
 
@@ -405,6 +412,12 @@ class DiaryEngine:
             return
         now = time.time()
         if now < self.next_run:
+            return
+
+        # S232：对话/长任务进行中 → 计时挂起（不消费排程、不跳过本轮），60s 后重试
+        if self._pause_on_busy() and (has_live_streams() or is_agent_busy()):
+            self.next_run = now + 60
+            logging.info("[DiaryEngine] 对话/长任务进行中，日记计时挂起，60 秒后重试")
             return
 
         # 命中触发点：先排下一次，避免阻塞期间重复触发
