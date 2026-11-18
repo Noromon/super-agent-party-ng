@@ -122,6 +122,8 @@ def test_inject_view_images_text_and_cap3(monkeypatch):
         for idx, m in enumerate(msgs):
             if isinstance(m.get("content"), list):
                 items = [it for it in m["content"] if it.get("type") == "image_url"]
+                for it in items:  # 真实语义：就地重写 url 为 data URI
+                    it["image_url"]["url"] = "data:image/jpeg;base64,AAA"
                 if items:
                     out.append({"index": idx, "images": items})
         return out

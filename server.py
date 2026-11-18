@@ -1583,12 +1583,27 @@ async def view_images(image_urls: list) -> str:
                         continue
                     urls.append(one)
                 else:
-                    # 公网/其它 URL：预读一次验证可读且非0字节（避免注入时炸调用）
+                    # 公网/其它 URL：预读并落盘为内部 URL（S245：不透传外链——注入端
+                    # 二次下载可能瞬败，且本地推理服务器不会拉远程图，裸 http url 必 400）
                     b64 = await get_image_base64(one)
                     if not b64:
                         errs.append(f"{one}: 图片读取失败或为空")
                         continue
-                    urls.append(one)
+                    import base64 as _b64m
+                    raw = _b64m.b64decode(b64)
+                    _mt = await get_image_media_type(one, b64)
+                    _ext2 = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+                             "image/webp": "webp", "image/bmp": "bmp"}.get(_mt, "")
+                    if not raw or _ext2 not in ALLOWED_IMAGE_EXTENSIONS:
+                        errs.append(f"{one}: 下载内容为空或非图片格式({_mt or '?'})")
+                        continue
+                    os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+                    unique = "view_" + _hashlib.md5(raw).hexdigest()[:16] + "." + _ext2
+                    dest = os.path.join(UPLOAD_FILES_DIR, unique)
+                    if not os.path.isfile(dest):
+                        with open(dest, "wb") as _f:
+                            _f.write(raw)
+                    urls.append(f"http://{_gh}:{_gp}/uploaded_files/{unique}")
             else:
                 # 本机本地路径：存在+扩展名校验后复制进 uploaded_files 生成内部 URL
                 p = os.path.abspath(os.path.expanduser(one))
@@ -6475,13 +6490,40 @@ async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_u
         new_imgs = await images_in_messages(request.messages[inj0:], fastapi_base_url)
         for e in new_imgs:
             e["index"] = e["index"] + inj0
-        for m in request.messages[inj0:]:
-            if isinstance(m.get("content"), list):
-                m["content"] = next((it["text"] for it in m["content"] if it.get("type") == "text"), "")
-        return (images or []) + new_imgs
     except Exception as _bv_e:
-        logging.getLogger("app").info("[S228] 浏览器截图注入失败: %r", _bv_e)
+        # S245: 转换失败=整段回滚，绝不把带裸 http url 的注入消息留给请求体
+        # （本地推理服务器不拉远程图，残留必 400 炸整轮；18:16 实证）
+        del request.messages[inj0:]
+        logging.getLogger("app").info("[S228] 浏览器截图注入失败，已回滚: %r", _bv_e)
         return images
+    # S245 二线：漏网的「url 仍为 http / base64 为空」注入行（内部文件被删/0字节等）整行剔除
+    bad = []
+    for off in range(len(request.messages) - inj0):
+        m = request.messages[inj0 + off]
+        if isinstance(m.get("content"), list):
+            for it in m["content"]:
+                if isinstance(it, dict) and it.get("type") in ("image_url", "video_url"):
+                    uu = (it.get(it["type"]) or {}).get("url") or ""
+                    if uu.startswith("http") or (uu.startswith("data:") and not uu.split("base64,", 1)[-1]):
+                        bad.append(off)
+                        break
+    if bad:
+        badset = set(bad)
+        kept = []
+        for e in new_imgs:
+            off = e["index"] - inj0
+            if off in badset:
+                continue
+            e["index"] = inj0 + off - sum(1 for b in bad if b < off)
+            kept.append(e)
+        new_imgs = kept
+        for off in sorted(bad, reverse=True):
+            del request.messages[inj0 + off]
+        logging.getLogger("app").info("[S245] 图像注入残留剔除 %d 行", len(bad))
+    for m in request.messages[inj0:]:
+        if isinstance(m.get("content"), list):
+            m["content"] = next((it["text"] for it in m["content"] if it.get("type") == "text"), "")
+    return (images or []) + new_imgs
 
 
 async def _stream_loop_pass(_st, response, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, full_content, in_reasoning, content_buffer, reasoning_buffer, _chunk_count2):
