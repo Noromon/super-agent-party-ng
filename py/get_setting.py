@@ -268,7 +268,7 @@ async def _backfill_rows(db):
             if isinstance(conv, dict) and conv.get("id") is not None:
                 await db.execute(
                     'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at, ord) VALUES (?, ?, ?, ?)',
-                    (str(conv["id"]), json.dumps(conv, ensure_ascii=False), now, idx))
+                    (str(conv["id"]), _encodable(json.dumps(conv, ensure_ascii=False)), now, idx))
                 n += 1
         if n:
             logging.getLogger(__name__).info("conversation_rows backfilled from blob: %d rows", n)
@@ -317,7 +317,7 @@ async def _meta_get(db, key):
 
 async def _meta_put(db, key, value):
     await db.execute("INSERT OR REPLACE INTO covs_meta (key, data) VALUES (?, ?)",
-                     (key, json.dumps(value, ensure_ascii=False)))
+                     (key, _encodable(json.dumps(value, ensure_ascii=False))))
 
 
 async def _sync_rows(db, conversations):
@@ -329,7 +329,7 @@ async def _sync_rows(db, conversations):
     idx = 0
     for conv in conversations:
         if isinstance(conv, dict) and conv.get("id") is not None:
-            snap[str(conv["id"])] = json.dumps(conv, ensure_ascii=False)
+            snap[str(conv["id"])] = _encodable(json.dumps(conv, ensure_ascii=False))
             await db.execute(
                 'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at, ord) VALUES (?, ?, ?, ?)',
                 (str(conv["id"]), snap[str(conv["id"])], now, idx))
@@ -836,15 +836,24 @@ async def save_covs_delta_rows(incoming, groups=None):
                 await db.execute(
                     "INSERT INTO conversation_rows (conv_id, data, updated_at, ord) "
                     "VALUES (?, ?, ?, ?)",
-                    (cid, json.dumps(conv, ensure_ascii=False), now, base + i))
+                    (cid, _encodable(json.dumps(conv, ensure_ascii=False)), now, base + i))
             for cid, conv in updates:
                 await db.execute(
                     "UPDATE conversation_rows SET data = ?, updated_at = ? WHERE conv_id = ?",
-                    (json.dumps(conv, ensure_ascii=False), now, cid))
+                    (_encodable(json.dumps(conv, ensure_ascii=False)), now, cid))
             if groups is not None:
                 await _meta_put(db, "conversationGroups", groups)
             await db.commit()
     return len(incoming)
+
+def _encodable(s):
+    """S244：入库绑定前剥离孤立代理项（页面截断残留/本地推理引擎 CESU-8 破碎
+    代理对），否则 sqlite bind 的 utf-8 编码炸掉整次持久化（15:22 实证丢轮）。"""
+    try:
+        return s.encode("utf-8", "ignore").decode("utf-8")
+    except Exception:
+        return s
+
 
 # ----------------- 7. bot 渠道会话（"手机"行级存储，bot: 前缀命名空间） -----------------
 # 与主会话 blob 完全隔离：blob 不含 bot 会话，_sync_rows 也不碰 bot: 行。
@@ -862,7 +871,7 @@ async def save_bot_conv(conv_id, messages):
         async with aiosqlite.connect(COVS_PATH) as db:
             await db.execute(
                 'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
-                (str(conv_id), json.dumps(messages, ensure_ascii=False), time.time()))
+                (str(conv_id), _encodable(json.dumps(messages, ensure_ascii=False)), time.time()))
             await db.commit()
 
 
@@ -939,7 +948,7 @@ async def archive_bot_conv(conv_id):
             now = time.time()
             await db.execute(
                 'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
-                (archive_id, json.dumps(msgs, ensure_ascii=False), row[1] if row else now))
+                (archive_id, _encodable(json.dumps(msgs, ensure_ascii=False)), row[1] if row else now))
             await db.execute(
                 'INSERT OR REPLACE INTO conversation_rows (conv_id, data, updated_at) VALUES (?, ?, ?)',
                 (conv_id, "[]", now))

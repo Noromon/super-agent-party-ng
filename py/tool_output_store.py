@@ -72,6 +72,10 @@ def _take_prefix_bytes(text, maximum):
             lo = mid
         else:
             hi = mid - 1
+    # S244: 切点若把代理对劈开，head 尾部的高代理会成孤立字符，下游
+    # json/utf-8 序列化整轮炸（15:22 实证）——退到配对边界前。
+    while lo > 0 and 0xD800 <= ord(text[lo - 1]) <= 0xDBFF:
+        lo -= 1
     return text[:lo]
 
 
@@ -87,6 +91,9 @@ def _take_suffix_bytes(text, maximum):
             hi = mid
         else:
             lo = mid + 1
+    # S244: 对称防护——tail 首字符为低代理（配对被劈开）则前进到配对边界后。
+    while lo < len(text) and 0xDC00 <= ord(text[lo]) <= 0xDFFF:
+        lo += 1
     return text[lo:]
 
 

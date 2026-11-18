@@ -4515,7 +4515,9 @@ def _bound_tool_output(result, settings):
     out = bound_output(text, cwd, settings)
     if out is not text:
         logging.getLogger("app").info("[Context] 工具输出超限已落盘预览: %d -> %d 字符", len(text), len(out))
-    return out
+    # S244: 落历史前剥离孤立代理项——脏源含页面截断残留与本地推理引擎 CESU-8
+    # 破碎代理对输出；带病进 messages 会让后续请求 json 序列化整轮炸。
+    return out.encode("utf-8", "ignore").decode("utf-8")
 
 
 async def _bound_tool_output_async(result):
