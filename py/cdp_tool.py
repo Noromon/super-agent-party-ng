@@ -475,7 +475,7 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use
         elif "no-content" in e:
             hint = "已连接但未抓到正文：可能需登录或被反爬，可加 wait_text 指定正文关键句后重试。"
         elif "wait-text-timeout" in e:
-            hint = "等待的 wait_text 未出现：文本可能不对或被延迟，校正 wait_text 或加大 timeout。"
+            hint = "等待的 wait_text 未出现：文本可能不对或被延迟，校正 wait_text 或加大 timeout；若连占位内容都没抓到，多为 SPA 数据请求被拒/未发出。"
         elif "load failed" in e:
             hint = "加载失败：检查该地址是否可达/被墙（内置浏览器不走 SAP 代理），或换其它来源。"
         else:
@@ -489,12 +489,19 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use
     title = (data.get("title") or "").strip()
     final_url = data.get("finalUrl") or url
     partial = bool(data.get("partial"))
+    reason = str(data.get("reason") or "")
+    # S248: Python 侧兜底——Vue 漏判的骨架屏短文本也拒绝宣告完整
+    if not partial and not reason and len(md.replace(" ", "").replace("\n", "")) < 300 and _STALL_PAT.search(md):
+        partial, reason = True, "async_load_stalled"
     src = f"Source: {final_url} (partial)" if partial else f"Source: {final_url}"
     head = f"# {title}\n{src}\n\n" if title else f"{src}\n\n"
     if partial:
-        head += "> 注意：页面在超时前未完全加载，以下为已加载到的部分内容。\n\n"
+        if reason == "wait_text_not_seen":
+            head += "> 注意：wait_text 未出现，以下为超时前抓到的内容，大概率仍是占位/未加载完。请看尾部 [net-diag] 判断数据请求是被拒还是未发出。\n\n"
+        else:
+            head += "> 注意：页面疑似异步未加载完（骨架屏/占位），以下为已抓内容，非完整正文。可加大 timeout、改用内置浏览器标签+take_snapshot，并看尾部 [net-diag]。\n\n"
     wall = bool(_WALL_PAT.search(md[:6000]))
-    return head + md + _wall_hint(wall)
+    return head + md + _page_meta(wall, partial, reason, data.get("net"), data.get("ua"), data.get("cookieLen"))
 
 
 # ==========================================
@@ -533,6 +540,60 @@ def _wall_hint(wall: bool) -> str:
     return ("\n\n[page-meta] login_wall_detected=true"
             "——检测到登录墙信号：正文可能被软墙截断，「看不到更多」≠「抓完了」；"
             "考虑在内置浏览器标签登录（与 web_render/本工具共享登录态）后重试。")
+
+
+# S248：骨架屏/异步未加载完关键词（md 文本级兜底，配合 Vue 侧 isStalled）
+_STALL_PAT = re.compile(r"(玩命加载|正在加载|加载中|页面加载中|请稍候|loading\.{0,3}|Loding)", re.I)
+
+
+def _net_diag(net) -> str:
+    """S248: SPA 数据请求诊断行——总数常附，仅在有 4xx/5xx/失败时列明细（体积受控）。"""
+    try:
+        rows = [r for r in (net or []) if isinstance(r, dict)]
+    except Exception:  # noqa: BLE001
+        rows = []
+    if not rows:
+        return ""
+    line = f"\n\n[net-diag] reqs={len(rows)} (dom-ready 后捕获)"
+    bad = []
+    for r in rows:
+        try:
+            st = int(r.get("s") or 0)
+        except (TypeError, ValueError):
+            st = 0
+        if st >= 400 or st == -1:
+            bad.append(r)
+    if bad:
+        uniq = {}
+        for r in bad:
+            key = f"{str(r.get('u'))[:110]} ({'failed' if r.get('s') == -1 else r.get('s')})"
+            uniq[key] = uniq.get(key, 0) + 1
+        line += "; failures: " + "; ".join(f"{k}×{v}" if v > 1 else k for k, v in list(uniq.items())[:8])
+        line += " —— 4xx/被拒=风控或鉴权问题(考虑登录态/mobile/换源)；failed=连接层被断"
+    return line[:1500]
+
+
+def _page_meta(wall: bool, partial: bool = False, reason: str = "", net=None, ua="", cookie_len=None) -> str:
+    """S248: web_render 结构化尾行——只有真完整才宣告完整；附 net 诊断与 ctx 自证行。"""
+    parts = ["login_wall_detected=" + ("true" if wall else "false")]
+    if partial or reason:
+        parts.append("partial=true reason=" + (reason or "timeout"))
+    out = "\n\n[page-meta] " + " ".join(parts)
+    if wall:
+        out += ("——检测到登录墙信号：正文可能被软墙截断，「看不到更多」≠「抓完了」；"
+                "考虑在内置浏览器标签登录（与 web_render/本工具共享登录态）后重试。")
+    elif partial or reason:
+        if reason == "wait_text_not_seen":
+            out += "（wait_text 未出现，以上大概率仍是占位/未加载完，非完整正文；看 [net-diag] 定位数据请求成败）"
+        else:
+            out += "（疑似骨架屏/异步未加载完，非完整正文；加大 timeout 或改用内置浏览器标签+take_snapshot，并看 [net-diag]）"
+    else:
+        out += "（以上应为完整正文）"
+    out += _net_diag(net)
+    if ua:
+        cl = cookie_len if isinstance(cookie_len, int) else 0
+        out += f"\n[ctx] ua={str(ua)[:60]} cookie_len={cl}（cookie_len>0 且 ua 与请求参数一致=分区/UA 生效）"
+    return out
 
 
 async def get_page_markdown():
@@ -857,8 +918,11 @@ all_cdp_tools = [
             "description": (
                 "用内置浏览器在离屏隐藏页面渲染动态(含JavaScript)网页，并把正文转成 Markdown "
                 "返回给你。纯本地、无第三方云端，适合 markdown_new 抓不到的动态页/SPA。"
-                "可访问本机或内网地址。若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本。"
-                "慢站超时前会尽量返回已加载到的部分内容(标注 partial)。"
+                "可访问本机或内网地址。SPA 骨架屏（加载中占位）会被自动识别并继续等待数据加载，不会把占位符当正文返回；"
+                "若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本（超时也会带回已抓内容并标 reason=wait_text_not_seen）。"
+                "慢站超时前会尽量返回已加载到的部分内容(标注 partial + reason)。"
+                "输出尾部附 [net-diag]（dom-ready 后页面 XHR/fetch 请求成败，4xx=数据被风控拒）与 [ctx]（实际 UA/cookie 长度自证），"
+                "SPA 拿到骨架屏时先看 net-diag 定位是请求被拒还是未发出，再决定换 mobile/登录/换源。"
                 "若站点只向移动端吐内容或弹「打开App/扫码登录」墙，设 mobile=true 用手机UA+视口渲染。"
                 "与内置浏览器 agent 标签共享登录态（同一持久分区，cookie 通用）：需要登录的站点可先用"
                 " new_page/navigate_page 在标签里完成登录，本工具随即可见登录后的内容。"

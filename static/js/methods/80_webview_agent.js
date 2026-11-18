@@ -920,18 +920,42 @@ Object.assign(vue_methods, {
                 + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
                 + "try{var sel='nav,footer,header,aside,[role=banner],[role=contentinfo],[aria-modal=true],[class*=cookie],[id*=cookie],[class*=consent],[class*=paywall]';sel.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{var r=n.getBoundingClientRect?n.getBoundingClientRect():{width:0,height:0};if((r.width*r.height)>600000)return;n.remove();}catch(e){}})}catch(e){}});}catch(e){}"
                 + "try{var walls='" + WALLS_SEL + "';walls.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
-                + "try{return JSON.stringify({title:document.title||'',finalUrl:(window.location?window.location.href:''),body:(document.body?document.body.innerHTML:'')});}catch(e){return JSON.stringify({title:'',finalUrl:'',body:''});}"
+                + "try{return JSON.stringify({title:document.title||'',finalUrl:(window.location?window.location.href:''),body:(document.body?document.body.innerHTML:''),txt:((document.body&&document.body.innerText)||'').slice(0,4000),cookieLen:(document.cookie||'').length,ua:(navigator.userAgent||'').slice(0,60),net:(window.__netcap||[]).slice(0,50)});}catch(e){return JSON.stringify({title:'',finalUrl:'',body:'',txt:'',cookieLen:0,ua:'',net:[]});}"
                 + "})()";
 
-            // 抽取当前 DOM；有正文则 finish 结束（partialFlag 标记是否为超时兜底的部分内容）
-            const grab = (partialFlag) => {
+            // S248：dom-ready 后注入 fetch/XHR 收集，SPA 数据请求成败一眼可见（≤50 条，随 kill 一并回传）
+            const NETCAP = "(function(){try{if(window.__netcap)return 'dup';window.__netcap=[];"
+                + "var push=function(u,s){try{if(window.__netcap.length<50)window.__netcap.push({u:String(u).slice(0,180),s:s|0});}catch(e){}};"
+                + "var of_=window.fetch;if(of_){window.fetch=function(i){var u=(i&&i.url)||String(i);return of_.apply(this,arguments).then(function(r){push(u,r&&r.status);return r;},function(e){push(u,-1);throw e;});};}"
+                + "var oo=XMLHttpRequest.prototype.open,os=XMLHttpRequest.prototype.send;"
+                + "XMLHttpRequest.prototype.open=function(m,u){this.__u=u;return oo.apply(this,arguments);};"
+                + "XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('loadend',function(){push(x.__u,x.status);});return os.apply(this,arguments);};"
+                + "return 'ok';}catch(e){return 'err';}})()";
+
+            // S248：骨架屏启发式——短文本且命中 loading 占位文案 = 异步数据未落地，不算正文
+            const STALL_RE = /(玩命加载|正在加载|加载中|页面加载中|请稍候|loading\.{0,3}|Loding)/i;
+            const isStalled = function (d) {
+                try {
+                    const txt = (d && d.txt) || '';
+                    return txt.replace(/\s+/g, '').length < 300 && STALL_RE.test(txt);
+                } catch (e) { return false; }
+            };
+            let stallSeen = false;
+
+            // 抽取当前 DOM；有正文则 finish 结束（partialFlag=超时兜底，附 reason；S248 骨架屏不算正文）
+            const grab = (partialFlag, reason) => {
                 if (done) return Promise.resolve(true);
                 return wv.executeJavaScript(kill).then(function (s) {
                     let d = {}; try { d = JSON.parse(s); } catch (e) {}
                     let body = (d && d.body) || '';
                     if (body.length > 400000) body = body.slice(0, 400000);
+                    if (!partialFlag && isStalled(d)) { stallSeen = true; return false; }
                     if (body.trim()) {
-                        finish({ ok: true, partial: !!partialFlag, title: (d && d.title) || '', finalUrl: (d && d.finalUrl) || url, html: body });
+                        finish({
+                            ok: true, partial: !!partialFlag, reason: partialFlag ? (reason || 'async_load_stalled') : '',
+                            title: (d && d.title) || '', finalUrl: (d && d.finalUrl) || url, html: body,
+                            net: (d && d.net) || [], cookieLen: (d && d.cookieLen) || 0, ua: (d && d.ua) || ''
+                        });
                         return true;
                     }
                     return false;
@@ -940,7 +964,7 @@ Object.assign(vue_methods, {
 
             // 总超时：先兜底抽取当前 DOM（拿到=部分内容），拿不到才判失败；按是否曾 DCL 分类
             hardTimer = setTimeout(function () {
-                grab(true).then(function (got) {
+                grab(true, 'async_load_stalled').then(function (got) {
                     if (!got) finish({ ok: false, url: url, error: domReadySeen ? 'no-content' : 'render timeout', stage: lastStage });
                 });
             }, totalMs);
@@ -956,6 +980,7 @@ Object.assign(vue_methods, {
 
             wv.addEventListener('dom-ready', function () {
                 domReadySeen = true; lastStage = 'dom-ready';
+                try { wv.executeJavaScript(NETCAP).catch(function () {}); } catch (e) {}
                 if (waitText) {
                     const start = Date.now();
                     const poll = function () {
@@ -963,7 +988,7 @@ Object.assign(vue_methods, {
                         wv.executeJavaScript('((document.body&&document.body.innerText)||"").indexOf(' + JSON.stringify(waitText) + ')>=0').then(function (found) {
                             if (done) return;
                             if (found) grab(false);
-                            else if (Date.now() - start > totalMs) finish({ ok: false, url: url, error: 'wait-text-timeout', stage: 'waittext' });
+                            else if (Date.now() - start > totalMs) grab(true, 'wait_text_not_seen').then(function (got) { if (!got) finish({ ok: false, url: url, error: 'wait-text-timeout', stage: 'waittext' }); });
                             else setTimeout(poll, 500);
                         }).catch(function () { grab(false); });
                     };
@@ -976,7 +1001,7 @@ Object.assign(vue_methods, {
                         grab(false).then(function (got) {
                             if (got) return;
                             if (tries++ < 4) setTimeout(probe, 800);
-                            else if (!wv.isLoading()) finish({ ok: true, url: url, title: '', finalUrl: url, html: '' });
+                            else if (!wv.isLoading() && !stallSeen) finish({ ok: true, url: url, title: '', finalUrl: url, html: '' });
                         });
                     };
                     setTimeout(probe, 600);
