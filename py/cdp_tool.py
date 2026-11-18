@@ -313,17 +313,50 @@ async def new_page(url, timeout=0, background=False, mobile=False, use_proxy=Fal
             pass
     return res
 
-async def close_page(pageIdx):
-    """关闭标签页"""
+async def _resolve_tab_index(tab_id):
+    """S247: 稳定 tab_id（list_pages 的 id）→ 当前 index。返回 (index, None) 或 (None, 报错)。"""
+    try:
+        info = await call_vue_method('getPagesInfo', [])
+        info = json.loads(info) if isinstance(info, str) else info
+    except Exception as e:  # noqa: BLE001
+        return None, f"[Error] tab_id 解析失败: {e!r}"
+    for t in info or []:
+        if isinstance(t, dict) and t.get("id") == tab_id:
+            return t.get("index"), None
+    return None, (f"[Error] tab_id {tab_id} 不存在（标签已关闭？）。"
+                  "用 list_pages 重新获取；id 跨轮稳定，index 会随开关标签平移。")
+
+
+async def close_page(pageIdx=None, tab_id=None):
+    """关闭标签页；tab_id（list_pages 的 id，跨轮稳定）优先于 pageIdx。"""
+    if tab_id is not None:
+        idx, err = await _resolve_tab_index(tab_id)
+        if err:
+            return err
+        pageIdx = idx
+    if pageIdx is None:
+        return "[Error] close_page: 需要 pageIdx 或 tab_id 之一。"
     return await call_vue_method('closeTabByIndex', [pageIdx])
 
-async def select_page(pageIdx, bringToFront=True):
-    """选择/切换标签页"""
+async def select_page(pageIdx=None, bringToFront=True, tab_id=None):
+    """选择/切换标签页；tab_id（list_pages 的 id，跨轮稳定）优先于 pageIdx。"""
+    if tab_id is not None:
+        idx, err = await _resolve_tab_index(tab_id)
+        if err:
+            return err
+        pageIdx = idx
+    if pageIdx is None:
+        return "[Error] select_page: 需要 pageIdx 或 tab_id 之一。"
     return await call_vue_method('switchTabByIndex', [pageIdx])
 
-async def navigate_page(type="url", url=None, ignoreCache=False, timeout=8, mobile=None):
-    """页面导航。默认等待页面加载完成（最多 timeout 秒，加载完成即提前返回），结果带 (loaded)/(still loading)；timeout=0 不等待立即返回。
+async def navigate_page(type="url", url=None, ignoreCache=False, timeout=8, mobile=None, tab_id=None):
+    """页面导航（默认作用于活动标签；传 tab_id 先原子切换过去再导航）。
+    默认等待页面加载完成（最多 timeout 秒，加载完成即提前返回），结果带 (loaded)/(still loading)；timeout=0 不等待立即返回。
     mobile=True/False 切换当前标签页移动/桌面模式（None 不改，移动模式需重新加载才生效）。"""
+    if tab_id is not None:
+        r = await select_page(tab_id=tab_id)
+        if isinstance(r, str) and r.startswith("[Error]"):
+            return r
     try:
         t = int(timeout)
     except (TypeError, ValueError):
@@ -555,7 +588,9 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "list_pages",
-            "description": "Get a list of pages open in the browser.",
+            "description": ("Get a list of pages open in the browser. Each page has a STABLE `id` (survives other tabs "
+                            "opening/closing) and an unstable positional `index` — prefer passing the id as `tab_id` to "
+                            "select_page/close_page/navigate_page when addressing a specific tab."),
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
@@ -563,7 +598,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "new_page",
-            "description": "Creates a new page in the browser tab bar. Network egress is chosen at creation: direct by default, or the app proxy with use_proxy=true.",
+            "description": "Creates a new page in the browser tab bar. Network egress is chosen at creation: direct by default, or the app proxy with use_proxy=true. The new tab becomes active; call list_pages to get its stable `id` for reliable tab_id addressing later.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -581,13 +616,14 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "close_page",
-            "description": "Closes the page by its index.",
+            "description": "Closes the page by tab_id (stable, from list_pages — preferred) or pageIdx (positional, shifts as tabs open/close).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "pageIdx": {"type": "integer", "description": "Index of the page to close"}
+                    "pageIdx": {"type": "integer", "description": "Index of the page to close"},
+                    "tab_id": {"type": "integer", "description": "Stable tab id from list_pages (takes precedence over pageIdx)"}
                 },
-                "required": ["pageIdx"]
+                "required": []
             }
         }
     },
@@ -595,14 +631,15 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "select_page",
-            "description": "Switch tab to the specified page index.",
+            "description": "Switch tab to a page by tab_id (stable, from list_pages — preferred) or pageIdx (positional, shifts as tabs open/close).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pageIdx": {"type": "integer"},
-                    "bringToFront": {"type": "boolean"}
+                    "bringToFront": {"type": "boolean"},
+                    "tab_id": {"type": "integer", "description": "Stable tab id from list_pages (takes precedence over pageIdx)"}
                 },
-                "required": ["pageIdx"]
+                "required": []
             }
         }
     },
@@ -610,7 +647,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "navigate_page",
-            "description": "Navigates the currently selected page. By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating. The tab's network egress (direct vs app proxy) is fixed at creation via new_page(use_proxy); navigation keeps the current egress.",
+            "description": "Navigates a page — the ACTIVE tab by default, or a specific tab via tab_id (stable id from list_pages; it is switched to first, then navigated — avoids wrong-tab bugs caused by pageIdx shifting when tabs open/close). By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating. The tab's network egress (direct vs app proxy) is fixed at creation via new_page(use_proxy); navigation keeps the current egress.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -618,7 +655,8 @@ all_cdp_tools = [
                     "url": {"type": "string"},
                     "ignoreCache": {"type": "boolean"},
                     "timeout": {"type": "integer", "description": "等待页面加载完成的秒数（0-30，默认 8）。加载完成会提前返回；超时返回 (still loading)，可再 wait_for/take_snapshot。0=不等待立即返回。"},
-                    "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"}
+                    "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"},
+                    "tab_id": {"type": "integer", "description": "稳定 tab id（list_pages 的 id）：先切到该标签再导航，跨轮安全；省略=操作活动标签"}
                 },
                 "required": ["type"]
             }
