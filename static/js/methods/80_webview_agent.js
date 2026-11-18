@@ -203,7 +203,10 @@ Object.assign(vue_methods, {
                     nm = nm.split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(13)).join(' ').trim();
                     const loaded = isCanvas ? 'canvas' : ((el.complete && nw > 1) ? 'loaded' : 'pending');
                     const off = (rect.bottom < 0 || rect.top > window.innerHeight) ? ' [offscreen]' : '';
-                    let iline = '[' + iuid + '] ' + irole + (nm ? ' "' + nm + '"' : '') + ' ' + Math.round(nw) + 'x' + Math.round(nh) + ' [' + loaded + ']' + off;
+                    // S246: 带源 URL，agent 可直接喂 view_images 一手看图（零转述闭环）
+                    let iurl = '';
+                    if (!isCanvas) { try { iurl = String(el.currentSrc || el.src || '').slice(0, 200); } catch (e) {} }
+                    let iline = '[' + iuid + '] ' + irole + (nm ? ' "' + nm + '"' : '') + ' ' + Math.round(nw) + 'x' + Math.round(nh) + ' [' + loaded + ']' + off + (iurl ? ' url=' + iurl : '');
                     imgLines.push(iline);
                 });
 
@@ -239,7 +242,10 @@ Object.assign(vue_methods, {
         const script = `
         (async function() {
             const el = document.querySelector('[data-ai-id="${uid}"]');
-            if (!el) return "Element not found: ${uid}";
+            // S246: 快照 uid 全灭=页面重建，给结构化信号省一轮盲猜
+            if (!el) return document.querySelectorAll('[data-ai-id]').length === 0
+                ? "UID_EXPIRED: page DOM rebuilt — all snapshot UIDs invalid, call take_snapshot for a fresh set"
+                : "Element not found: ${uid}";
             
             // 1. 滚动到可见 (平滑滚动更像人)
             el.scrollIntoView({behavior: "smooth", block: "center", inline: "center"});
@@ -305,7 +311,9 @@ Object.assign(vue_methods, {
         const script = `
         (async function() {
             const el = document.querySelector('[data-ai-id="${uid}"]');
-            if (!el) return "Element not found: ${uid}";
+            if (!el) return document.querySelectorAll('[data-ai-id]').length === 0
+                ? "UID_EXPIRED: page DOM rebuilt — all snapshot UIDs invalid, call take_snapshot for a fresh set"
+                : "Element not found: ${uid}";
             
             el.focus();
             
@@ -454,7 +462,9 @@ Object.assign(vue_methods, {
         const script = `
         (function() {
             const el = document.querySelector('[data-ai-id="${uid}"]');
-            if (!el) return "Element not found";
+            if (!el) return document.querySelectorAll('[data-ai-id]').length === 0
+                ? "UID_EXPIRED: page DOM rebuilt — all snapshot UIDs invalid, call take_snapshot for a fresh set"
+                : "Element not found: ${uid}";
             el.scrollIntoView({block: "center"});
             el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
             el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
@@ -515,7 +525,7 @@ Object.assign(vue_methods, {
 
         try {
             const rect = await this._wvExec(wv, rectScript);
-            if (!rect) return "Element not found: " + uid;
+            if (!rect) return "Element not found or not rendered: " + uid + " (uid stale/hidden? call take_snapshot for a fresh set)";
 
             // ★ 关键修复：使用 sendInputEvent 发送真实的鼠标点击
             // 这会强制操作系统将焦点转移到该坐标下的输入框
@@ -576,33 +586,38 @@ Object.assign(vue_methods, {
     },
 
     // --- 10. 等待文本 (无延迟，这是轮询操作) ---
-    async webviewWaitFor(text, timeout) {
+    // S246: wait_for 扩展——mode='text'|'selector'|'js'（默认 text，向后兼容两参调用）。
+    // selector: querySelector 命中即真；js: 谓词表达式每次轮询求值（truthy 通过，抛错=未就绪）。
+    async webviewWaitFor(expr, timeout, mode = 'text') {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
-        
+
+        const probe = mode === 'selector'
+            ? "(function(){try{return !!document.querySelector(" + JSON.stringify(expr) + ")})()"
+            : mode === 'js'
+                ? "(function(){try{return !!(" + String(expr) + ")||false}catch(_e){return false}})()"
+                : "document.body.innerText.includes(" + JSON.stringify(expr) + ")";
         const script = `
         (function() {
             return new Promise((resolve) => {
                 const start = Date.now();
+                const probe = ${probe};
+                const label = ${JSON.stringify((mode === 'text' ? '' : mode + ':') + String(expr).slice(0, 80))};
                 const check = () => {
-                    // 1. 优先检查文本是否存在
-                    if (document.body.innerText.includes(${JSON.stringify(text)})) {
-                        resolve("Found: " + ${JSON.stringify(text)});
+                    let hit = false;
+                    try { hit = probe; } catch (e) { hit = false; }
+                    if (hit) {
+                        resolve("Found: " + label);
                     } 
-                    // 2. 检查是否超时
                     else if (Date.now() - start > ${timeout}) {
-                        // 3. 关键修改：超时后，检查页面加载状态
                         if (document.readyState === 'complete') {
-                            // 页面已加载完毕，但文本未找到（S230: 明确 Not found 语义，不再用歧义短语）
-                            resolve("Not found: " + ${JSON.stringify(text)} + " (page loaded)");
+                            resolve("Not found: " + label + " (page loaded)");
                         } else {
-                            // 页面还在加载中，且超时
-                            resolve("Timeout: " + ${JSON.stringify(text)} + " not found (page still loading)");
+                            resolve("Timeout: " + label + " not matched (page still loading)");
                         }
                     } 
-                    // 4. 继续轮询
                     else {
-                        setTimeout(check, 100);
+                        setTimeout(check, 250);
                     }
                 };
                 check();
@@ -631,7 +646,7 @@ Object.assign(vue_methods, {
                     + "}catch(e){return JSON.stringify({err:String((e&&e.message)||e)});}})()";
                 const infoStr = await this._wvExec(wv, measure);
                 let info = {}; try { info = JSON.parse(infoStr); } catch (e) {}
-                if (info.err) return "Screenshot Error: element not found: " + uid;
+                if (info.err) return "Screenshot Error: element not found: " + uid + " (uid stale? call take_snapshot for a fresh set)";
                 if (!(info.w > 0 && info.h > 0 && info.iw > 0 && info.ih > 0)) return "Screenshot Error: element has zero size: " + uid;
                 region = info;
                 await this._humanDelay();
@@ -779,17 +794,35 @@ Object.assign(vue_methods, {
     },
 
     // 把当前活动页就地清洗后返回 HTML（供 get_page_markdown 转 Markdown）
-    getPageHtml() {
+    // S246: 返回 JSON {html,url,title,wallN,wallTxt}——url/title 供 meta 头；
+    // wallN/wallTxt 为删除遮罩【之前】的登录墙信号计数（软墙检测的事实源）。
+    // guest 回传串带 'S246W|n|t|' 前缀（单字符串走 _wvExec cap，截断也不丢头部）。
+    async getPageHtml() {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
         if (wv.isLoading()) return "Error: Page is loading...";
         const kill = "(function(){"
+            + "var wallN=0,wallTxt=false;"
+            + "try{var walls=" + JSON.stringify(WALLS_SEL) + ";walls.split(',').forEach(function(s){try{wallN+=document.querySelectorAll(s).length}catch(e){}});}catch(e){}"
+            + "try{wallTxt=/(扫码登录|请先登录|登录后查看|登录后可见|登录查看全部|扫码下载.*查看更多|please log ?in|sign ?in to (view|continue))/i.test((document.body&&document.body.innerText||'').slice(0,8000));}catch(e){}"
             + "try{var sel=" + JSON.stringify(AD_SOFT_SEL + ',' + WALLS_SEL) + ";sel.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
             + "try{document.querySelectorAll('img[src^=\"data:\"]').forEach(function(n){try{n.remove()}catch(e){}});}catch(e){}"
             + "try{['script','style','noscript','template','svg','canvas','video','audio','iframe','nav','footer','header','aside'].forEach(function(t){document.querySelectorAll(t).forEach(function(n){try{n.remove()}catch(e){}})});}catch(e){}"
-            + "try{var walls=" + JSON.stringify(WALLS_SEL) + ";walls.split(',').forEach(function(s){try{document.querySelectorAll(s).forEach(function(n){try{n.remove()}catch(e){}})}catch(e){}});}catch(e){}"
-            + "try{return document.body?document.body.innerHTML:'';}catch(e){return '';}})()";
-        return this._wvExec(wv, kill, 400000);
+            + "try{return 'S246W|'+wallN+'|'+(wallTxt?1:0)+'|'+(document.body?document.body.innerHTML:'');}catch(e){return 'S246W|0|0|';}})()";
+        let raw = await this._wvExec(wv, kill, 400000);
+        if (typeof raw !== 'string') raw = String(raw || '');
+        if (raw.indexOf("Error") === 0) return raw;
+        let wallN = 0, wallTxt = false, html = raw;
+        if (raw.indexOf('S246W|') === 0) {
+            const p = raw.split('|');
+            wallN = parseInt(p[1], 10) || 0;
+            wallTxt = p[2] === '1';
+            html = raw.slice(('S246W|' + p[1] + '|' + p[2] + '|').length);
+        }
+        let url = '', title = '';
+        try { url = wv.getURL() || ''; } catch (e) {}
+        try { title = wv.getTitle() || ''; } catch (e) {}
+        return JSON.stringify({ html: html, url: url, title: title, wallN: wallN, wallTxt: wallTxt });
     },
 
     // 后台开标签：建 tab 并设为当前供 agent 操作，但不切换 activeMenu（不抢用户可见面板）

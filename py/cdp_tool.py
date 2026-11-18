@@ -336,9 +336,14 @@ async def navigate_page(type="url", url=None, ignoreCache=False, timeout=8, mobi
             pass
     return await call_vue_method('browserNavigate', [type, url, ignoreCache, t], timeout=t + 20)
 
-async def wait_for(text, timeout=1000):
-    """等待文本出现"""
-    return await call_vue_method('webviewWaitFor', [text, timeout])
+async def wait_for(text=None, selector=None, js=None, timeout=1000):
+    """S246: 等待页面条件——text(文本出现)/selector(CSS 命中)/js(谓词表达式 truthy) 三选一。"""
+    picked = [v for v in (text, selector, js) if v]
+    if len(picked) != 1:
+        return "[Error] wait_for: 请且仅传 text / selector / js 三者之一。"
+    mode = "text" if text else ("selector" if selector else "js")
+    expr = text or selector or js
+    return await call_vue_method('webviewWaitFor', [expr, int(timeout), mode])
 
 # ------------------------------------------
 # Debugging Tools
@@ -455,7 +460,8 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use
     head = f"# {title}\n{src}\n\n" if title else f"{src}\n\n"
     if partial:
         head += "> 注意：页面在超时前未完全加载，以下为已加载到的部分内容。\n\n"
-    return head + md
+    wall = bool(_WALL_PAT.search(md[:6000]))
+    return head + md + _wall_hint(wall)
 
 
 # ==========================================
@@ -484,16 +490,41 @@ async def escape_back():
     return await call_vue_method('escapeBack', [])
 
 
+_WALL_PAT = re.compile(r"(扫码登录|请先登录|登录后查看|登录后可见|登录查看全部|登录查看更多"
+                       r"|please log\s?in|sign\s?in to (view|continue))", re.I)
+
+
+def _wall_hint(wall: bool) -> str:
+    if not wall:
+        return "\n\n[page-meta] login_wall_detected=false（以上应为完整正文）"
+    return ("\n\n[page-meta] login_wall_detected=true"
+            "——检测到登录墙信号：正文可能被软墙截断，「看不到更多」≠「抓完了」；"
+            "考虑在内置浏览器标签登录（与 web_render/本工具共享登录态）后重试。")
+
+
 async def get_page_markdown():
-    """把当前活动标签页就地清洗并转 Markdown 返回（本地，无云）。"""
+    """S246: meta 化——附 url/title 与登录墙信号，让 agent 明确"内容没了"还是"抓完了"。"""
     res = await call_vue_method('getPageHtml', [])
     s = res if isinstance(res, str) else json.dumps(res or {})
     if s.startswith("Error"):
         return s
-    md = html_to_md.html_to_markdown(s, max_chars=120000)
+    html, url, title, wall = s, "", "", False
+    try:
+        d = json.loads(s)
+    except Exception:  # noqa: BLE001
+        d = None
+    if isinstance(d, dict) and "html" in d:  # 新版结构化返回；旧版纯 html 串走兜底
+        html = d.get("html") or ""
+        url = d.get("url") or ""
+        title = (d.get("title") or "").strip()
+        wall = bool(d.get("wallTxt")) or (int(d.get("wallN") or 0) > 0)
+    md = html_to_md.html_to_markdown(html, max_chars=120000)
+    if not wall:
+        wall = bool(_WALL_PAT.search(md[:4000]))
     if not md.strip():
-        return "[Empty] 当前页无可抽取正文（可能需登录或纯 SPA 未渲染出内容）。"
-    return md
+        return "[Empty] 当前页无可抽取正文（可能需登录或纯 SPA 未渲染出内容）。" + _wall_hint(wall)
+    head = (f"# {title}\n" if title else "") + (f"Source: {url}\n\n" if url else "")
+    return head + md + _wall_hint(wall)
 
 
 # ==========================================
@@ -599,7 +630,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_snapshot",
-            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default.",
+            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen and their source `url=` — pass those urls to view_images to actually SEE the images first-hand), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default. UID_EXPIRED / 'Element not found' after an interaction means the page DOM rebuilt and old UIDs died — just re-take_snapshot.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -694,14 +725,20 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "wait_for",
-            "description": "Wait for specific text to appear on the page.",
+            "description": ("Wait for a page condition. Pass EXACTLY ONE of: text (substring appears in body), "
+                            "selector (CSS selector matches an element — for 'wait for DOM structure'), or "
+                            "js (JS predicate expression polled every 250ms until truthy — e.g. "
+                            "\"document.querySelectorAll('.post').length>3\" or \"document.readyState==='complete'\"; "
+                            "approximate network-idle via a readyState+contentStability predicate in js)."),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "The text to wait for."},
-                    "timeout": {"type": "integer", "description": "Timeout in milliseconds (default 1000).","minimum": 100,"default": 1000,"maximum": 10000}
+                    "text": {"type": "string", "description": "Text to wait for (mutually exclusive with selector/js)."},
+                    "selector": {"type": "string", "description": "CSS selector to wait for (mutually exclusive)."},
+                    "js": {"type": "string", "description": "JS predicate expression, waits until truthy (mutually exclusive)."},
+                    "timeout": {"type": "integer", "description": "Timeout in milliseconds (default 1000).","minimum": 100,"default": 1000,"maximum": 30000}
                 },
-                "required": ["text"]
+                "required": []
             }
         }
     },
@@ -785,6 +822,8 @@ all_cdp_tools = [
                 "可访问本机或内网地址。若页面需滚动加载或异步渲染，可用 wait_text 指定等待出现的文本。"
                 "慢站超时前会尽量返回已加载到的部分内容(标注 partial)。"
                 "若站点只向移动端吐内容或弹「打开App/扫码登录」墙，设 mobile=true 用手机UA+视口渲染。"
+                "与内置浏览器 agent 标签共享登录态（同一持久分区，cookie 通用）：需要登录的站点可先用"
+                " new_page/navigate_page 在标签里完成登录，本工具随即可见登录后的内容。"
                 "默认直连访问（不受系统全局代理影响）；目标需 VPN 出口（如 Google、X）时设 use_proxy=true 走应用内代理。"
                 "仅 Electron 桌面版且已启用内置浏览器时有效。"
             ),
@@ -868,7 +907,9 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "get_page_markdown",
-            "description": "把当前活动标签页就地清洗并转换为 Markdown 文本返回（本地，无云）。适合读取已在浏览器打开的页面正文。",
+            "description": ("把当前活动标签页就地清洗并转换为 Markdown 文本返回（本地，无云）。适合读取已在浏览器打开的页面正文。"
+                            "内容图以 ![](url) 保留（可把 url 交给 view_images 一手查看）；输出尾部附 [page-meta] "
+                            "登录墙信号行，据此判断是抓完了还是被软墙截断。"),
             "parameters": {
                 "type": "object",
                 "properties": {},

@@ -30,6 +30,11 @@ def _prettify(html: str) -> str:
     soup = BeautifulSoup(html or "", "html.parser")
     for t in soup(_STRIP_TAGS):
         t.decompose()
+    # S246: data: URI 图对模型无意义且会撑爆体量——就地摘除
+    for img in soup.find_all("img"):
+        src = img.get("src") or ""
+        if src.startswith("data:"):
+            img.replace_with("[img:data-uri omitted]")
     body = soup.body or soup
     return str(body)
 
@@ -38,6 +43,33 @@ def _collapse(text: str) -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _denoise(md: str) -> str:
+    """S246: 重复膨胀熔断——字体未加载/CSS 损坏页会向文本注入整屏重复串（如
+    'mmmm…li'），淹没有效正文。同字符长 run 与短 token 高次连排折叠并标注；
+    连续相同行 >=8 折叠为计数行。正常内容几乎不触发。"""
+    if not md:
+        return md
+    # 阈值取垃圾级（同字符>=60 / 短序列连排>=20 次）：正常中英文几乎不可能触及，
+    # 而字体/CSS 损坏注入的膨胀串动辄数百上千字符必被命中。
+    md = re.sub(r"([^\n])\1{59,}", lambda m: m.group(1) * 3 + "…[repeat collapsed]", md)
+    # {2,6}: 序列须多字符——单字符已由上行 60 阈值处理，否则等价于 run>=20 误伤中文
+    md = re.sub(r"([^\s\n]{2,6})\1{19,}", lambda m: m.group(1)[:6] + "…[repeat collapsed]", md)
+    lines = md.split("\n")
+    out, i, n = [], 0, len(lines)
+    while i < n:
+        j = i
+        while j < n and lines[j] == lines[i]:
+            j += 1
+        run = j - i
+        if lines[i].strip() and run >= 8:
+            out.append(lines[i])
+            out.append(f"[repeated pattern collapsed ×{run - 1}]")
+        else:
+            out.extend(lines[i:j])
+        i = j
+    return "\n".join(out)
 
 
 def html_to_markdown(html: str, max_chars: int = 120000) -> str:
@@ -55,16 +87,18 @@ def html_to_markdown(html: str, max_chars: int = 120000) -> str:
     md = ""
     try:
         from markdownify import markdownify as _md
+        # S246: img 不再剥离——内容图输出为 ![](url)，关键证据常在图里，
+        # agent 可拿 url 直接走 view_images 一手查看
         md = _md(
             cleaned,
             heading_style="ATX",
             bullets="-",
-            strip=["img", "picture", "svg", "canvas", "video", "audio", "iframe"],
+            strip=["picture", "svg", "canvas", "video", "audio", "iframe"],
         )
     except Exception as e:  # noqa: BLE001
         _log().info(f"markdownify unavailable/failed, fallback to text: {e}")
         md = _text_fallback(cleaned)
-    md = _collapse(md or "")
+    md = _denoise(_collapse(md or ""))
     if max_chars and max_chars > 0 and len(md) > max_chars:
         md = md[:max_chars] + f"\n\n...[truncated {len(md) - max_chars} chars]"
     return md
