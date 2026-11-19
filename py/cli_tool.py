@@ -1608,19 +1608,41 @@ async def read_file_tool_local(path: str) -> str:
     except Exception as e: 
         return f"[Error] Read failed: {str(e)}"  
 
-async def read_file_range_tool_local(path: str, start_line: int, end_line: Optional[int] = None) -> str:
-    """[Local] 精准读取文件指定行范围，增加溢出保护"""
+async def read_file_range_tool_local(path: str, start_line: int = 1, end_line: Optional[int] = None,
+                                     symbol: str = "") -> str:
+    """[Local] 精准读取文件指定行范围，增加溢出保护；
+    S251: symbol=方法/函数名时自动定位并返回其完整定义块（大括号配平/Python 缩进）。"""
     try:
         MAX_TOTAL_CHARS = 30000  # 单次返回最大字符数，防止上下文爆炸
         MAX_LINE_CHARS = 1000    # 单行最大显示长度
-        
-        if start_line < 1 or (end_line is not None and end_line < start_line):
+        header = ""
+
+        if not str(symbol or "").strip() and (start_line < 1 or (end_line is not None and end_line < start_line)):
             return "[Error] Invalid line range."
-            
+
         cwd = await _get_current_cwd()
         target = resolve_strict_path(cwd, path, check_symlink=True)
-        if not target.exists() or not target.is_file(): 
+        if not target.exists() or not target.is_file():
             return f"[Error] File not found: {path}"
+
+        sym = str(symbol or "").strip()
+        if sym:
+            if target.stat().st_size > 4 * 1024 * 1024:
+                return "[Error] symbol 定位要求文件 ≤4MB；超大文件请先 search_files_tool_local 拿行号再用 start_line。"
+            raw = await asyncio.to_thread(target.read_text, "utf-8", "replace")
+            lines = raw.splitlines()
+            from py.symbol_tools import find_symbol_block
+            res = find_symbol_block(lines, sym, is_py=target.suffix.lower() in (".py", ".pyw"))
+            if res.start is None:
+                if res.candidates:
+                    cands = "\n".join(f"  L{i + 1}: {lines[i].strip()[:110]}" for i in res.candidates)
+                    return (f"[Error] symbol '{sym}': 未找到定义行，仅找到引用点(前{len(res.candidates)})：\n{cands}\n"
+                            "Tip: 若目标是变量/常量请用 search_files_tool_local；定义在其他文件时先按引用点追。")
+                return f"[Error] symbol '{sym}': 文件中无任何出现。"
+            start_line = res.start + 1
+            end_line = res.end + 1
+            header = (f"[symbol] {sym} → L{res.start + 1}-L{res.end + 1} "
+                      f"({res.end - res.start + 1} 行, {res.how})\n")
 
         output = []
         current_total_len = 0
@@ -1643,8 +1665,8 @@ async def read_file_range_tool_local(path: str, start_line: int, end_line: Optio
             
         if not output and line_idx < start_line:
             return f"[Error] start_line ({start_line}) is beyond file length ({line_idx})."
-            
-        return "\n".join(output)
+
+        return header + "\n".join(output)
     except Exception as e: 
         return f"[Error] Range read failed: {str(e)}"
 
@@ -1847,10 +1869,38 @@ def _py_search_collect(cwd, target_str, regex, include, want):
     return rows, len(out) >= want
 
 
-async def search_files_tool_local(pattern: str, path: str = ".", include: str = "",
+async def search_files_tool_local(pattern: str = "", path: str = ".", include: str = "",
                                   max_results: int = 200, offset: int = 0,
-                                  case_insensitive: bool = False) -> str:
-    """[Local] S184 跨平台内容检索：优先 ripgrep（SAP_RG_PATH → 数据目录 bin → PATH），
+                                  case_insensitive: bool = False, patterns=None) -> str:
+    """[Local] S184 跨平台内容检索；S251 支持 patterns=[...] 多模式一次查（分组返回）。"""
+    plist = []
+    if isinstance(patterns, (list, tuple)):
+        plist = [str(p).strip() for p in patterns if str(p or "").strip()]
+    p0 = str(pattern or "").strip()
+    if p0:
+        plist = [p0] + plist
+    if not plist:
+        return "[Error] search_files_tool_local: 'pattern' (or non-empty 'patterns') is required."
+    if len(plist) == 1:
+        return await _search_one(plist[0], path, include, max_results, offset, case_insensitive)
+    try:
+        per = max(10, min(int(max_results or 200), 100))
+    except (TypeError, ValueError):
+        per = 100
+    out = []
+    for i, pat in enumerate(plist[:10], 1):
+        r = await _search_one(pat, path, include, per, 0, case_insensitive)
+        out.append(f"=== [{i}/{min(len(plist), 10)}] pattern: {pat} ===\n{r}")
+    tail = ""
+    if len(plist) > 10:
+        tail = f"\n[多模式上限 10 个，忽略 {len(plist) - 10} 个；各组独立限额 {per}，如需续查请单模式+offset]"
+    return "\n\n".join(out) + tail
+
+
+async def _search_one(pattern: str, path: str = ".", include: str = "",
+                      max_results: int = 200, offset: int = 0,
+                      case_insensitive: bool = False) -> str:
+    """S184 跨平台内容检索：优先 ripgrep（SAP_RG_PATH → 数据目录 bin → PATH），
     未安装则走并行 Python 扫描。两引擎统一 Python re 语义（旧 git grep BRE 混用语义已除），
     统一输出 path:line:text，支持 include 过滤与 offset 分页续查。"""
     try:
@@ -2613,15 +2663,19 @@ LOCAL_TOOLS_REGISTRY = {
     "read_file_range_local": {
         "type": "function", "function": {
             "name": "read_file_range_tool_local", 
-            "description": "Read a specific range of lines from a local file. Useful for large files after grepping.",
+            "description": ("Read lines from a local file. Two modes: (a) symbol=Method_or_function_name — auto-locates and "
+                            "returns its COMPLETE definition block (brace-balanced for Java/JS/TS/C…, indent-based for Python; "
+                            "no line guessing needed, ideal for code archaeology); falls back to listing reference points if "
+                            "no definition found. (b) start_line/end_line — raw line range (after grepping)."),
             "parameters": {
                 "type": "object", 
                 "properties": {
                     "path": {"type": "string", "description": "Relative path to file"},
-                    "start_line": {"type": "integer", "description": "1-based first line to read"},
-                    "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"}
+                    "start_line": {"type": "integer", "description": "1-based first line to read (mode b; default 1)"},
+                    "end_line": {"type": "integer", "description": "1-based last line to read (default: end of file)"},
+                    "symbol": {"type": "string", "description": "Mode (a): method/function name to read COMPLETE definition block for. Takes precedence over start_line."}
                 }, 
-                "required": ["path", "start_line"]
+                "required": ["path"]
             }
         }
     },
@@ -2642,18 +2696,19 @@ LOCAL_TOOLS_REGISTRY = {
     "search_files_local": {
          "type": "function", "function": {
             "name": "search_files_tool_local",
-            "description": "Cross-platform content search over local workspace files (Python re.search semantics; a plain substring also works). Returns 'path:line_number:line_text' rows, sorted, max 1000 per call with offset pagination. Text files only; binary files and build dirs (.git, node_modules, .venv, __pycache__, dist, build, target, ...) are skipped. Narrow a big search with path= or include=; continue past the cap with offset=.",
+            "description": ("Cross-platform content search over local workspace files (Python re.search semantics; a plain substring also works). Returns 'path:line_number:line_text' rows, sorted, max 1000 per call with offset pagination. Text files only; binary files and build dirs (.git, node_modules, .venv, __pycache__, dist, build, target, ...) are skipped. Narrow a big search with path= or include=; continue past the cap with offset=. S251: searching several symbols? pass patterns=['a','b',…] (up to 10) to get ALL in one call, grouped per pattern — ideal for call-chain tracing."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "Python regex (escape ( ) [ ] { } * + ? ^ $ | to match them literally) or a plain substring"},
+                    "patterns": {"type": "array", "items": {"type": "string"}, "description": "Multiple patterns to search in ONE call (results grouped per pattern, up to 10). Combine with pattern= to add one more."},
                     "path": {"type": "string", "description": "Optional relative subdirectory of the workspace to restrict the search (default: whole workspace)"},
                     "include": {"type": "string", "description": "Optional comma-separated glob patterns to restrict searched files, e.g. '*.py,src/**/*.ts'"},
                     "max_results": {"type": "integer", "default": 200, "description": "Matches to return per call (1-1000, default 200)"},
                     "offset": {"type": "integer", "default": 0, "description": "Skip this many matches to page through results (continue with the offset suggested in truncated output)"},
                     "case_insensitive": {"type": "boolean", "default": False, "description": "Case-insensitive search"}
                 },
-                "required": ["pattern"]
+                "required": []
             }
         }
     },
