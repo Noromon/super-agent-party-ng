@@ -3,8 +3,11 @@
 #  C：captureWebviewScreenshot 元素裁剪（scrollIntoView+crop，无 webviewClick）
 #  D：getWebviewSnapshot 暴露内容图片（赋 uid/alt/尺寸/loaded/offscreen，上限 60，跳小图）
 import asyncio
+import base64
 import sys
 from pathlib import Path
+
+_WEBP_B64 = base64.b64encode(b"RIFF\x04\x00\x00\x00WEBPVP8 ").decode()
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -84,7 +87,7 @@ def _install_fake_images_in_messages(monkeypatch):
             if isinstance(m.get("content"), list):
                 for it in m["content"]:
                     if it.get("type") == "image_url":
-                        it["image_url"]["url"] = "data:image/jpeg;base64,AAA"
+                        it["image_url"]["url"] = "data:image/webp;base64," + _WEBP_B64  # S252: 需真魔数
                         it["image_url"]["hash"] = "h" + str(idx)
                         items.append(it)
             if items:

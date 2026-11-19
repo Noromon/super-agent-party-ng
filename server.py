@@ -1545,6 +1545,41 @@ async def analyze_images(image_urls: list, prompt: str) -> str:
         ), attempts=2, base_delay=1.0, label="s207-secondhand_describe_images")
         return response.choices[0].message.content
 
+def _image_magic_ok(head: bytes) -> bool:
+    """S252: 图像字节魔数判定（PNG/JPEG/GIF/WebP/BMP）。head 建议取前 16 字节。"""
+    if not head or len(head) < 8:
+        return False
+    if head[:4] == b"\x89PNG":
+        return True
+    if head[:3] == b"\xff\xd8\xff":
+        return True
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return True
+    if head[:4] == b"GIF8":
+        return True
+    if head[:2] == b"BM":
+        return True
+    return False
+
+
+def _strip_image_parts_from_messages(msg_list) -> int:
+    """S252: 剥离请求体中全部图像/视频 parts（引擎加载图像失败 400 后的降级重试用）。
+    返回剥离条数；含图消息保留文本+注记。"""
+    removed = 0
+    if not isinstance(msg_list, list):
+        return 0
+    for m in msg_list:
+        c = m.get("content") if isinstance(m, dict) else None
+        if isinstance(c, list):
+            keep = [p for p in c if not (isinstance(p, dict) and p.get("type") in ("image_url", "video_url"))]
+            n = len(c) - len(keep)
+            if n:
+                removed += n
+                note = {"type": "text", "text": "[image stripped] 引擎无法加载本轮图像（已自动剥离图像降级为文本重试，可能因伪装/不支持的图像字节）"}
+                m["content"] = keep + [note]
+    return removed
+
+
 async def view_images(image_urls: list) -> str:
     """S243 一手视觉：不调任何VLM。登记/校验图片后返回 URL 列表文本，
     实际像素由 _maybe_inject_browser_vision 管线（view_images 已入
@@ -1581,6 +1616,15 @@ async def view_images(image_urls: list) -> str:
                     if _ext not in ALLOWED_IMAGE_EXTENSIONS:
                         errs.append(f"{one}: 非图片格式({_ext or '无扩展名'})")
                         continue
+                    # S252: 扩展名合法≠字节合法（历史污染：HTML 伪装 .png 落盘）——查文件头魔数
+                    try:
+                        with open(fpath, "rb") as _ff:
+                            _hdr = _ff.read(16)
+                    except OSError:
+                        _hdr = b""
+                    if not _image_magic_ok(_hdr):
+                        errs.append(f"{one}: 内部文件首字节非图片魔数（疑似 HTML/防盗链页伪装的污染文件），建议删除后重新获取")
+                        continue
                     urls.append(one)
                 else:
                     # 公网/其它 URL：预读并落盘为内部 URL（S245：不透传外链——注入端
@@ -1591,11 +1635,17 @@ async def view_images(image_urls: list) -> str:
                         continue
                     import base64 as _b64m
                     raw = _b64m.b64decode(b64)
-                    _mt = await get_image_media_type(one, b64)
+                    # S252: 严格魔数——不用 get_image_media_type（其嗅探失败会按 URL 后缀猜、
+                    # 猜不中还默认 image/png，把 200+HTML 的防盗链页当 png 落盘 → 注入后引擎
+                    # 400 "Failed to load image" 炸整轮；22:22 贴吧签名图事故实证）
+                    from py.llm_tool import sniff_media_type_from_base64
+                    _mt = sniff_media_type_from_base64(b64)
                     _ext2 = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
                              "image/webp": "webp", "image/bmp": "bmp"}.get(_mt, "")
-                    if not raw or _ext2 not in ALLOWED_IMAGE_EXTENSIONS:
-                        errs.append(f"{one}: 下载内容为空或非图片格式({_mt or '?'})")
+                    if not raw or not _ext2:
+                        _head = (raw[:40].decode("utf-8", "replace") if raw else "")
+                        errs.append(f"{one}: 下载内容非有效图片字节（未识别魔数:{_mt or '无'}；防盗链/反爬页常见）。首字节: {_head!r}。"
+                                    "提示：防盗链站（如贴吧图片）请用 new_page 打开原页面后 take_screenshot 查看，或换图片来源")
                         continue
                     os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
                     unique = "view_" + _hashlib.md5(raw).hexdigest()[:16] + "." + _ext2
@@ -5783,6 +5833,27 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
         except Exception as _lr_e:
             # S207：本轮瞬断→同 messages 重发本轮推理（工具执行在边界外，
             # 已执行副作用永不重放）；半截轮正文/思考从未落账，清后重生成
+            # S252: 引擎加载图像失败类 400（伪装图/AVIF 等不支持字节）非瞬态，原样重发必再炸——
+            # 剥离全部图像降级为纯文本请求重试一次（一次性标志），图像问题不再拖垮整轮
+            _et252 = str(_lr_e).lower()
+            if (not _st.get("img_strip_retried")
+                    and ("failed to load image" in _et252 or "image or audio" in _et252
+                         or "load image" in _et252)
+                    and _strip_image_parts_from_messages(request.messages)):
+                _st["img_strip_retried"] = True
+                logging.getLogger("app").warning(
+                    "[S252] 引擎图像加载失败(400)，已剥离图像降级重试: %s", str(_lr_e)[:160])
+                yield stream_retry_chunk(_lr_attempt + 1, _lr_max, "图像加载失败：已剥离图像降级为纯文本重试")
+                content_buffer = []
+                reasoning_buffer = []
+                in_reasoning = False
+                _st["full_content"] = ""
+                _st["content_buffer"] = []
+                _st["reasoning_buffer"] = []
+                _st["in_reasoning"] = False
+                _lr_attempt += 1
+                await llm_backoff(0, _lr_attempt, cancelled=lambda: _st_cancelled(_st))
+                continue
             if (_lr_attempt >= _lr_max or _st_cancelled(_st)
                     or not is_transient_transport_error(_lr_e)):
                 raise llm_attach(_lr_e, _lr_attempt) from None
@@ -6497,7 +6568,10 @@ async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_u
         logging.getLogger("app").info("[S228] 浏览器截图注入失败，已回滚: %r", _bv_e)
         return images
     # S245 二线：漏网的「url 仍为 http / base64 为空」注入行（内部文件被删/0字节等）整行剔除
-    bad = []
+    # S252: 新增毒字节判定——base64 有效但非图像魔数（HTML 伪装图实证会引擎 400 炸整轮），
+    # 此类不删行而是改写为纯文本注记，让模型知情（否则静默丢图模型会瞎猜）
+    import base64 as _b64s
+    bad, poisoned = [], []
     for off in range(len(request.messages) - inj0):
         m = request.messages[inj0 + off]
         if isinstance(m.get("content"), list):
@@ -6507,19 +6581,34 @@ async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_u
                     if uu.startswith("http") or (uu.startswith("data:") and not uu.split("base64,", 1)[-1]):
                         bad.append(off)
                         break
-    if bad:
-        badset = set(bad)
+                    b64p = uu.split("base64,", 1)[-1] if uu.startswith("data:") else ""
+                    if b64p:
+                        try:
+                            _h = _b64s.b64decode(b64p[:32])
+                        except Exception:
+                            _h = b""
+                        if not _image_magic_ok(_h):
+                            poisoned.append(off)
+                            break
+    for off in poisoned:
+        request.messages[inj0 + off]["content"] = [{"type": "text", "text":
+            "[vision dropped] 登记的图片字节无效（非图像魔数，常见为防盗链/反爬 HTML 伪装成图片），已被框架剔除以保护本轮。"
+            "如仍需该图：用 new_page 打开原始页面 + wait_for 等待渲染后 take_screenshot 查看，或换图片来源；勿反复重试同一 URL。"}]
+        logging.getLogger("app").info("[S252] 注入图像魔数无效，已剔图留注记 (msg %d)", inj0 + off)
+    if bad or poisoned:
+        drop_entries = set(bad) | set(poisoned)
         kept = []
         for e in new_imgs:
             off = e["index"] - inj0
-            if off in badset:
+            if off in drop_entries:
                 continue
+            # 位移只算删行（bad）；poisoned 行仍在 messages 原位（已改纯文本）
             e["index"] = inj0 + off - sum(1 for b in bad if b < off)
             kept.append(e)
         new_imgs = kept
         for off in sorted(bad, reverse=True):
             del request.messages[inj0 + off]
-        logging.getLogger("app").info("[S245] 图像注入残留剔除 %d 行", len(bad))
+        logging.getLogger("app").info("[S245/S252] 注入剔除 bad=%d 行 poisoned=%d 图", len(bad), len(poisoned))
     for m in request.messages[inj0:]:
         if isinstance(m.get("content"), list):
             m["content"] = next((it["text"] for it in m["content"] if it.get("type") == "text"), "")

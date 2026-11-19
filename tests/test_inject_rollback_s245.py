@@ -103,8 +103,8 @@ def test_inject_second_line_sweeps_http_and_empty_residue(monkeypatch):
                 for it in m["content"]:
                     if it.get("type") == "image_url":
                         u = it["image_url"]["url"]
-                        if u == good:  # 只有一张转换成功
-                            it["image_url"]["url"] = "data:image/jpeg;base64,AAA"
+                        if u == good:  # 只有一张转换成功（S252: 需真图像魔数，否则被毒字节判定剔除）
+                            it["image_url"]["url"] = "data:image/webp;base64," + _WEBP
                         items.append(it)
             if items:
                 out.append({"index": idx, "images": items})

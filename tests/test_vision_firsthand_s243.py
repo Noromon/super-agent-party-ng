@@ -2,8 +2,11 @@
 #  A: secondhand_* 改名引用面全同步（schema∩dispatch∩path_scope 一致哨兵）+ 二手警示描述
 #  B: view_images 一手工具：执行登记(本地路径转URL/内部URL校验) + _collect 多图 findall + 注入
 import asyncio
+import base64
 import sys
 from pathlib import Path
+
+_WEBP_B64 = base64.b64encode(b"RIFF\x04\x00\x00\x00WEBPVP8 ").decode()
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -122,8 +125,8 @@ def test_inject_view_images_text_and_cap3(monkeypatch):
         for idx, m in enumerate(msgs):
             if isinstance(m.get("content"), list):
                 items = [it for it in m["content"] if it.get("type") == "image_url"]
-                for it in items:  # 真实语义：就地重写 url 为 data URI
-                    it["image_url"]["url"] = "data:image/jpeg;base64,AAA"
+                for it in items:  # 真实语义：就地重写 url 为 data URI（S252: 需真魔数过毒字节判定）
+                    it["image_url"]["url"] = "data:image/webp;base64," + _WEBP_B64
                 if items:
                     out.append({"index": idx, "images": items})
         return out
