@@ -1304,6 +1304,52 @@ app.whenReady().then(async () => {
       }
     });
 
+    // S254: CDP 真输入事件派发（isTrusted，浏览器命中测试路由——与人手操作等价）。
+    // 解决 AI 侧 window.scrollBy 滚不动内层容器（如贴吧 uniapp .uni-frs）、el.click()
+    // untrusted 卡片无响应的人机差异问题。DevTools 占用调试器时返回 devtools-busy 由渲染层回退。
+    const _sapInputErr = (e) => String((e && e.message) || e || '').slice(0, 140);
+    ipcMain.handle('cdp-input-wheel', async (e, payload) => {
+      try {
+        const wcId = Number(payload && payload.wcId);
+        const wc = wcId ? webContents.fromId(wcId) : null;
+        if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+        const x = Math.max(0, Math.round(Number(payload.x) || 0));
+        const y = Math.max(0, Math.round(Number(payload.y) || 0));
+        const dy = Math.round(Number(payload.deltaY) || 300);
+        const steps = Math.max(1, Math.min(12, Number(payload.steps) || 6));
+        try {
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapMobileDbg.add(wcId); wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); }); }
+        } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
+        const per = Math.round(dy / steps);
+        for (let i = 0; i < steps; i++) {
+          try {
+            await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: per });
+          } catch (se) { return { ok: i > 0, partial: true, err: _sapInputErr(se) }; }
+          await new Promise((r) => setTimeout(r, 16));
+        }
+        return { ok: true, steps, deltaY: dy };
+      } catch (err) { return { ok: false, err: _sapInputErr(err) }; }
+    });
+    ipcMain.handle('cdp-input-click', async (e, payload) => {
+      try {
+        const wcId = Number(payload && payload.wcId);
+        const wc = wcId ? webContents.fromId(wcId) : null;
+        if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+        const x = Math.max(0, Math.round(Number(payload.x) || 0));
+        const y = Math.max(0, Math.round(Number(payload.y) || 0));
+        try {
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapMobileDbg.add(wcId); wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); }); }
+        } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
+        const base = { x, y, button: 'left', clickCount: 1 };
+        try {
+          await wc.debugger.sendCommand('Input.dispatchMouseEvent', Object.assign({ type: 'mouseMoved' }, base));
+          await wc.debugger.sendCommand('Input.dispatchMouseEvent', Object.assign({ type: 'mousePressed' }, base));
+          await wc.debugger.sendCommand('Input.dispatchMouseEvent', Object.assign({ type: 'mouseReleased' }, base));
+        } catch (se) { return { ok: false, err: _sapInputErr(se) }; }
+        return { ok: true, x, y };
+      } catch (err) { return { ok: false, err: _sapInputErr(err) }; }
+    });
+
     // 添加获取端口信息的 IPC 处理
     ipcMain.handle('get-server-info', () => {
       return {

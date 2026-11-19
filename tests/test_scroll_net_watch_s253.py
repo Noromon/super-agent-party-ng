@@ -49,15 +49,15 @@ def test_network_watch_validation_and_dispatch():
     assert cdp and asyncio.run(cdp.network_watch(mode="bogus")).startswith("[Error]")
     _run(calls, fake, lambda: cdp.network_watch(mode="READ", pattern="newpostlist", include_body=True))
     m, args, tmo = calls[-1]
-    assert m == "networkWatch" and args == ["read", "newpostlist", True] and tmo == 30
+    assert m == "networkWatch" and args == ["read", "newpostlist", True, 0] and tmo == 30  # S254: 第4参 pull idx
 
 
 def test_vue_scroll_and_find_impl():
     i = JS.index("scrollAndFind")
-    seg = JS[i:i + 4200]
-    assert "scrollIntoView" in seg and "el.click()" in seg
+    seg = JS[i:i + 9000]  # S254 后方法变长（真输入回退链）
+    assert "scrollIntoView" in seg and ".click()" in seg
     assert "url_changed" in seg and "url_after" in seg
-    assert "scrollBy(0,Math.round(window.innerHeight*0.85))" in seg
+    assert "window.scrollBy(0," in seg
     assert "innerText" in seg and "t.length>1200" in seg  # 最小含文本小块匹配
     assert "stable" in seg and "scrollHeight" in seg      # 到底早退
 
@@ -66,8 +66,8 @@ def test_vue_network_watch_impl():
     i = JS.index("networkWatch")
     seg = JS[i:i + 4600]
     assert "__netw" in seg and "window.fetch" in seg and "XMLHttpRequest.prototype.open" in seg
-    assert "slice(0,2048)" in seg and "E.length>=500" in seg
-    assert "w.c=E.length" in seg and "o.u.indexOf(pat)>=0" in seg  # 游标增量+pattern 过滤
+    assert "slice(0,2048)" in seg and "E.length>=CAP" in seg
+    assert "w.c=E.length" in seg and "o.u.indexOf(pat)<0" in seg  # 游标增量+pattern 过滤
     assert "not armed" in seg and "导航" in seg  # 导航丢钩子提示
     j = JS.index("networkWatch")
     assert "return 'armed'" in JS[j:j + 2200]

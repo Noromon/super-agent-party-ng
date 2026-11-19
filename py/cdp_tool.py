@@ -9,7 +9,7 @@ import requests
 import asyncio
 import websockets
 from py import html_to_md
-from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, load_settings
+from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, get_host, load_settings
 from py.proxy_util import active_proxy
 
 # 全局变量，用于保持当前上下文
@@ -329,7 +329,8 @@ async def _resolve_tab_index(tab_id):
         if isinstance(t, dict) and t.get("id") == tab_id:
             return t.get("index"), None
     return None, (f"[Error] tab_id {tab_id} 不存在（标签已关闭？）。"
-                  "用 list_pages 重新获取；id 跨轮稳定，index 会随开关标签平移。")
+                  "注意：tab_id 必须是 list_pages 返回的长整型 id（如 1234567），不是 0 起的列表下标——"
+                  "下标请填 pageIdx。用 list_pages 重新获取；id 跨轮稳定，index 会随开关标签平移。")
 
 
 async def close_page(pageIdx=None, tab_id=None):
@@ -393,12 +394,46 @@ async def scroll_and_find(match, action="none", max_scrolls=30, pause_ms=700, at
 
 async def network_watch(mode="start", pattern="", include_body=False):
     """S253: 内置网络观察器——start 挂 fetch/XHR 钩子（页面导航后需重挂）→ 操作页面 →
-    read 增量收割 {url,status[,body≤2KB]}（pattern 子串过滤）；stop 清空并解除。"""
+    read 增量收割 {url,status[,body 预览≤2KB]}（pattern 子串过滤）；stop 清空并解除。
+    S254: include_body=True 时全量响应体留在页面侧，read 中超长正文自动落盘为
+    uploaded_files 文件并回 body_url——完整 JSON 可用 load_files/终端 grep 读，不再 2KB 截断。"""
     if str(mode or "").lower() not in ("start", "read", "stop"):
         return "[Error] network_watch: mode 需 start|read|stop"
-    return await call_vue_method('networkWatch',
-                                 [str(mode).lower(), str(pattern or ""), bool(include_body)],
-                                 timeout=30)
+    m = str(mode).lower()
+    res = await call_vue_method('networkWatch', [m, str(pattern or ""), bool(include_body), 0],
+                                timeout=30)
+    if m == "read" and isinstance(res, str) and res.strip().startswith("{"):
+        try:
+            import hashlib as _hl
+            import os as _os
+            d = json.loads(res)
+            items = d.get("items") if isinstance(d, dict) else None
+            overs = [it for it in (items or [])
+                     if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:3]
+            saved = 0
+            for it in overs:
+                try:
+                    body = await call_vue_method(
+                        'networkWatch', ["pull", "", False, int(it.get("gi") or -1)], timeout=25)
+                    if isinstance(body, str) and body:
+                        _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+                        fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
+                        with open(_os.path.join(UPLOAD_FILES_DIR, fn), "w", encoding="utf-8") as f:
+                            f.write(body)
+                        it["body_url"] = f"http://{get_host()}:{get_port()}/uploaded_files/{fn}"
+                        it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_url"
+                                        "（load_files 或 read_file_range 可全文读；b 仅前 2048 预览）")
+                        saved += 1
+                except Exception:  # noqa: BLE001
+                    pass
+            if saved:
+                d["note"] = (str(d.get("note") or "") +
+                             f"；{saved} 条超长响应已落盘（见各项 body_url），直接读文件拿完整 JSON，"
+                             "不必再手搓 fetch 钩子").lstrip("；")
+                res = json.dumps(d, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            pass
+    return res
 
 
 async def wait_for(text=None, selector=None, js=None, timeout=1000):
@@ -909,7 +944,10 @@ all_cdp_tools = [
                             "常无真实 href、点击才路由），自动逐屏向下滚动等新卡片挂载，命中即停。"
                             "这是此类站点『从列表进入某帖』的正确姿势：一次调用替代手搓 滚动+MutationObserver+XHR钩子+翻页探测 的几十次往返。"
                             "贴吧示例：scroll_and_find(match='让CMG把控教育', action='click') → 返回 url_after 即帖子地址，随后 web_render/get_page_markdown 读楼。"
-                            "action=click 命中卡片会合成点击并等 SPA 路由（最多3s）返回新 URL；"
+                            "S254 人机等价：滚动用真滚轮输入事件(CDP isTrusted，浏览器命中测试自动路由到页面真正可滚的内层容器，"
+                            "window.scrollBy 滚不动的 uniapp/虚拟列表页也能滚)、点击用真鼠标事件——返回 scroller_mode 说明所用通道"
+                            "(wheel=真滚轮/container=内层容器/window)。"
+                            "action=click 真点击命中卡片并等 SPA 路由返回新 URL，URL 不变会自动改点卡内标题/链接子目标再试；"
                             "action=extract 抠卡片 href 或 attribute 指定属性；action=none 仅报告命中。"
                             "未命中会返回滚动深度——可换 match 措辞/加大 max_scrolls，或改 network_watch 抓列表接口 JSON。"),
             "parameters": {
@@ -931,15 +969,17 @@ all_cdp_tools = [
             "name": "network_watch",
             "description": ("S253: 内置网络观察器（替代手搓 XHR/fetch 钩子）。start=给当前标签页挂 fetch/XHR 钩子（幂等；"
                             "页面导航后钩子丢失需重新 start）→ 然后 navigate/滚动/点击让页面自己发请求 → "
-                            "read=增量收割 {url,status[,body≤2KB]}（pattern 按 URL 子串过滤，如 'newpostlist'；每次只返回上次 read 之后的新条目）。"
+                            "read=增量收割 {url,status[,b=body预览2KB]}（pattern 按 URL 子串过滤，如 'newpostlist'；每次只返回上次 read 之后的新条目）。"
                             "适合『页面渲染不出但数据在接口里』的场景：抓列表/详情接口 JSON 直接拿 tid/数据。"
+                            "S254: include_body=true 时响应体全量保留，read 中 blen>2048 的条目自动落盘并附 body_url+blen"
+                            "——完整 JSON 用 load_files/read_file_range 读 body_url 即可，无 2KB 截断，无需再手搓钩子。"
                             "stop=清空并停用。"),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {"type": "string", "enum": ["start", "read", "stop"], "description": "start 挂钩 / read 增量收割 / stop 清空停用。"},
                     "pattern": {"type": "string", "description": "read 时按 URL 子串过滤（如 'newpostlist'），省略返回全部新条目。"},
-                    "include_body": {"type": "boolean", "description": "start 时是否记录响应体前 2KB（调试用，条目更大）。默认 false。"}
+                    "include_body": {"type": "boolean", "description": "start 时是否记录响应体（全量保留；read 回 2KB 预览，超长自动落盘给 body_url）。默认 false。抓数据用 true。"}
                 },
                 "required": ["mode"]
             }

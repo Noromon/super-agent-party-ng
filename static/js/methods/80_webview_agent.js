@@ -1043,76 +1043,168 @@ Object.assign(vue_methods, {
         let rounds = parseInt(maxScrolls) || 30; rounds = Math.max(1, Math.min(rounds, 100));
         const pause = Math.max(200, Math.min(parseInt(pauseMs) || 700, 4000));
         const attr = String(attribute || "");
-        const findExpr = "(function(){var m=" + JSON.stringify(m) + ";var act=" + JSON.stringify(act) + ";var attr=" + JSON.stringify(attr) + ";"
+        const api = window.electronAPI || {};
+        let wcId = 0; try { wcId = wv.getWebContentsId(); } catch (e) {}
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const hrefExpr = "(function(){return String(window.location?window.location.href:'');})()";
+        // S254：人机等价输入——人的滚轮/点击是浏览器输入事件(命中测试自动派发到自己滚的容器)；
+        // 旧实现 window.scrollBy 在内层容器滚动的页面(贴吧 uniapp .uni-frs)整体空转。
+        // 现：真 wheel(CDP isTrusted)优先 → 内层容器 scrollBy → window 兜底；点击真事件优先。
+        const vpExpr = "(function(){return JSON.stringify({w:window.innerWidth||1,h:window.innerHeight||1});})()";
+        let vp = { w: 1280, h: 800 };
+        try { vp = JSON.parse(await this._wvExec(wv, vpExpr) || "{}") || vp; } catch (e) {}
+        const cx = Math.max(24, Math.round(vp.w * 0.5)), cy = Math.max(24, Math.round(vp.h * 0.55));
+        const stepPx = Math.max(200, Math.round(vp.h * 0.85));
+        // 进度=当前活跃 scroller（window 与最大可滚容器取 scrollTop 更大者）
+        const posExpr = "(function(){var se=document.scrollingElement||document.documentElement;"
+            + "var winP=Math.round(se.scrollTop||window.scrollY||0),winM=Math.max(0,se.scrollHeight-window.innerHeight);"
+            + "var c=document.querySelector('[data-sap-sc]');if(c){try{var cp=Math.round(c.scrollTop),cm=Math.max(0,c.scrollHeight-c.clientHeight);"
+            + "if(cp>=winP)return JSON.stringify({p:cp,max:cm});}catch(e){}}"
+            + "return JSON.stringify({p:winP,max:winM});})()";
+        // 找最大纵向可滚元素并打标（容器模式用；页面重构后标记丢失会重新探测）
+        const probeExpr = "(function(){var els=document.querySelectorAll('div,main,ul,section');var best=null,br=0;"
+            + "for(var i=0;i<els.length;i++){var el=els[i];try{var st=window.getComputedStyle(el);if(!/auto|scroll/.test(st.overflowY))continue;"
+            + "var r=el.getBoundingClientRect();if(r.height<200)continue;var rg=el.scrollHeight-el.clientHeight;if(rg>br){br=rg;best=el;}}catch(e){}}"
+            + "var old=document.querySelectorAll('[data-sap-sc]');for(var k=0;k<old.length;k++){try{old[k].removeAttribute('data-sap-sc');}catch(e){}}"
+            + "if(best){try{best.setAttribute('data-sap-sc','1');}catch(e){}}"
+            + "return JSON.stringify({container:!!best,container_range:Math.round(br)});})()";
+        let mode = "window";
+        let pos0 = { p: 0, max: 0 };
+        try { pos0 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || pos0; } catch (e) {}
+        if (api.cdpInputWheel && wcId) {
+            try {
+                const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 });
+                await sleep(450);
+                const pos1 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || {};
+                if (r && r.ok && Math.abs((pos1.p || 0) - (pos0.p || 0)) > 8) mode = "wheel";
+            } catch (e) {}
+        }
+        if (mode !== "wheel") {
+            try {
+                const pr = JSON.parse(await this._wvExec(wv, probeExpr) || "{}") || {};
+                if (pr.container && (pr.container_range || 0) > 100) mode = "container";
+            } catch (e) {}
+        }
+        const doScroll = async () => {
+            if (mode === "wheel") {
+                try { const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }); if (r && r.ok) return; } catch (e) {}
+                mode = "container";
+            }
+            if (mode === "container") {
+                let ok = "";
+                try { ok = String(await this._wvExec(wv, "(function(){var c=document.querySelector('[data-sap-sc]');if(!c)return 'gone';try{c.scrollBy(0," + stepPx + ");return 'ok';}catch(e){return 'err';}})()") || ""); } catch (e) {}
+                if (ok === "ok") return;
+                let pr = {}; try { pr = JSON.parse(await this._wvExec(wv, probeExpr) || "{}") || {}; } catch (e) {}
+                if (pr.container) { try { await this._wvExec(wv, "(function(){var c=document.querySelector('[data-sap-sc]');if(c){try{c.scrollBy(0," + stepPx + ");}catch(e){}}})()"); } catch (e) {} return; }
+                mode = "window";
+            }
+            try { await this._wvExec(wv, "(function(){window.scrollBy(0," + stepPx + ");})()"); } catch (e) {}
+        };
+        const findExpr = "(function(){var m=" + JSON.stringify(m) + ";var attr=" + JSON.stringify(attr) + ";"
             + "var el=null;try{el=document.querySelector(m);}catch(e){}"
             + "if(!el){var all=document.querySelectorAll('a,li,[class*=card],[class*=item],[class*=post],[class*=thread],div,td,tr');"
             + "for(var i=0;i<all.length;i++){var c=all[i];try{if(!c.offsetParent)continue;var t=c.innerText||'';"
             + "if(t.length>1200||t.indexOf(m)<0)continue;if(!el||t.length<(el.innerText||'').length)el=c;}}}"
             + "if(!el)return JSON.stringify({found:false});"
             + "try{el.scrollIntoView({block:'center'});}catch(e){}"
+            + "var r={width:0,height:0,left:0,top:0};try{r=el.getBoundingClientRect();}catch(e){}"
             + "var out={found:true,tag:el.tagName.toLowerCase(),text:(el.innerText||'').slice(0,160).replace(/\\s+/g,' '),href:el.getAttribute?el.getAttribute('href')||'':''};"
+            + "out.cx=Math.round((r.left||0)+r.width/2);out.cy=Math.round((r.top||0)+r.height/2);"
+            + "out.inview=!!(r.width>0&&r.height>0&&(r.top||0)>=0&&(r.top||0)<=(window.innerHeight||0));"
             + "if(attr){try{out.attr=el.getAttribute(attr)||'';}catch(e){out.attr='';}}"
-            + "if(act==='click'){try{el.click();out.clicked=true;}catch(e){out.clicked=false;out.click_err=String(e&&e.message||e);}}"
+            + "window.__sapInner=el;"
             + "return JSON.stringify(out);})()";
-        const hrefExpr = "(function(){return String(window.location?window.location.href:'');})()";
-        const scrollExpr = "(function(){window.scrollBy(0,Math.round(window.innerHeight*0.85));"
-            + "return JSON.stringify({y:Math.round(window.scrollY),h:Math.round(document.documentElement.scrollHeight),vh:Math.round(window.innerHeight)});})()";
-        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-        let stable = 0, lastH = -1, lastY = -1, info = { y: 0, h: 0, vh: 0 };
+        const pollUrl = async (before) => {
+            for (let k = 0; k < 10; k++) {
+                await sleep(300);
+                let a = ""; try { a = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) { break; }
+                if (a && a !== before) return a;
+            }
+            return before;
+        };
+        const trustedOrSyntheticClick = async (x, y) => {
+            if (api.cdpInputClick && wcId && x > 0 && y > 0) {
+                try { const r = await api.cdpInputClick({ wcId, x, y }); if (r && r.ok) return "trusted"; } catch (e) {}
+            }
+            try { await this._wvExec(wv, "(function(){try{window.__sapInner&&window.__sapInner.click();}catch(e){}})()"); } catch (e) {}
+            return "synthetic";
+        };
+        let stable = 0, lastP = -1, lastMax = -1, pos = pos0;
         for (let i = 0; i < rounds; i++) {
             let hit = {};
             try { hit = JSON.parse(await this._wvExec(wv, findExpr) || "{}"); } catch (e) {}
             if (hit.found) {
                 hit.scroll_rounds = i;
-                hit.scroll_y = info.y;
+                hit.scroller_mode = mode;
                 if (act === "click") {
-                    let before = "";
-                    try { before = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) {}
-                    // click 已在 findExpr 内执行；轮询 URL 变化（SPA 路由）
-                    let after = before;
-                    for (let k = 0; k < 12; k++) {
-                        await sleep(300);
-                        try { after = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) { break; }
-                        if (after && after !== before) break;
+                    let before = ""; try { before = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) {}
+                    hit.click_via = await trustedOrSyntheticClick(hit.cx, hit.cy);
+                    let after = await pollUrl(before);
+                    if (after === before) {
+                        // 外层无路由反应 → 点内层交互子目标（a/标题），仍真点击优先
+                        let ic = {};
+                        try {
+                            ic = JSON.parse(await this._wvExec(wv, "(function(){var h=window.__sapInner;if(!h)return JSON.stringify({found:false});"
+                                + "var t=null;try{t=h.querySelector('a,[role=button],h3,h4,[class*=title],[class*=name]');}catch(e){}"
+                                + "if(!t)t=h;try{t.scrollIntoView({block:'center'});}catch(e){}window.__sapInner=t;"
+                                + "var r={width:0,height:0,left:0,top:0};try{r=t.getBoundingClientRect();}catch(e){}"
+                                + "return JSON.stringify({found:true,cx:Math.round((r.left||0)+r.width/2),cy:Math.round((r.top||0)+r.height/2)});})()") || "{}") || {};
+                        } catch (e) {}
+                        if (ic.found) {
+                            const via2 = await trustedOrSyntheticClick(ic.cx, ic.cy);
+                            hit.click_via2 = via2;
+                            after = await pollUrl(before);
+                        }
                     }
                     hit.url_before = before;
                     hit.url_after = after;
                     hit.url_changed = !!(after && after !== before);
-                    if (!hit.url_changed) hit.note = "clicked but URL unchanged（可能非路由卡片或被拦截；可 take_snapshot 看新页面状态）";
-                    hit.hint = "url_after 即目标页；若为本页路由弹窗则原 url 不变但 DOM 已变，直接 take_snapshot/get_page_markdown";
+                    if (!hit.url_changed) hit.note = "clicked but URL unchanged（可能是本页路由弹窗——直接 take_snapshot/get_page_markdown 看新状态；或卡片非目标）";
+                    else hit.hint = "url_after 即目标页，可直接 web_render/get_page_markdown 读取";
                 }
                 return JSON.stringify(hit);
             }
-            try { info = JSON.parse(await this._wvExec(wv, scrollExpr) || "{}") || info; } catch (e) {}
+            await doScroll();
             await sleep(pause);
-            if (info.y + info.vh >= info.h - 6) {
-                if (info.y === lastY && info.h === lastH) { stable++; if (stable >= 2) break; } else stable = 0;
+            try { pos = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || pos; } catch (e) {}
+            if (pos.p + vp.h >= pos.max - 6) {
+                if (pos.p === lastP && pos.max === lastMax) { stable++; if (stable >= 2) break; } else stable = 0;
+            } else if (pos.p === lastP && pos.max === lastMax && mode === "window" && pos.max === 0) {
+                stable++; if (stable >= 2) break; // window 无滚动范围且容器探测也没戏
             }
-            lastY = info.y; lastH = info.h;
+            lastP = pos.p; lastMax = pos.max;
         }
-        return JSON.stringify({ found: false, scrolled_to: info.y, page_height: info.h, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid" });
+        return JSON.stringify({ found: false, scroller_mode: mode, scrolled_to: pos.p, scrollable_max: pos.max, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid（页面若被吧务移档则主列表永远刷不出）" });
     },
 
     // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
-    networkWatch(mode = "start", pattern = "", includeBody = false) {
+    networkWatch(mode = "start", pattern = "", includeBody = false, pullIdx = -1) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-        const arm = "(function(){try{var E=[];var BODY=" + (includeBody ? "true" : "false") + ";"
+        // S254：include_body 时全量响应体留 guest(o.bf ≤300KB)——2KB 截断曾让 agent 放弃内置钩子
+        // 回头手搓（feed JSON parse 失败）。read 只回 2KB 预览+blen，超长正文由 Python 层
+        // 经 pull 逐条拉全文落盘 uploaded_files，回 body_url。
+        const arm = "(function(){try{var E=[];var BODY=" + (includeBody ? "true" : "false") + ";var CAP=BODY?200:500;"
             + "window.__netw={armed:true,body:BODY,entries:E,c:0};"
-            + "function rec(u,s,r){try{if(E.length>=500)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
-            + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.b=x.slice(0,2048);}).catch(function(){});}};}catch(e){}}"
+            + "function rec(u,s,r){try{if(E.length>=CAP)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
+            + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.bf=x.slice(0,307200);}).catch(function(){});}};}catch(e){}}"
             + "var of_=window.fetch;if(of_){window.fetch=function(i){var u=(i&&i.url)||String(i);return of_.apply(this,arguments).then(function(r){rec(u,r&&r.status,r);return r;},function(e){rec(u,-1);throw e;});};}"
             + "var oo=XMLHttpRequest.prototype.open,os=XMLHttpRequest.prototype.send;"
             + "XMLHttpRequest.prototype.open=function(m2,u){this.__wu=u;return oo.apply(this,arguments);};"
-            + "XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('loadend',function(){var b='';try{if(" + (includeBody ? "true" : "false") + "&&x.responseText)b=x.responseText.slice(0,2048);}catch(e){}"
-            + "rec(x.__wu,x.status);if(b&&E.length){E[E.length-1].b=b;}});return os.apply(this,arguments);};"
+            + "XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('loadend',function(){var L=E.length;rec(x.__wu,x.status);"
+            + "if(BODY&&L<E.length){try{var b=x.responseText||'';if(b)E[L].bf=b.slice(0,307200);}catch(e){}}});return os.apply(this,arguments);};"
             + "return 'armed';}catch(e){return 'arm_err:'+String(e&&e.message||e);}})()";
         const read = "(function(){var w=window.__netw;if(!w)return JSON.stringify({error:'not armed — call network_watch(mode=start) first'});"
             + "var pat=" + JSON.stringify(String(pattern || "")) + ";var E=w.entries||[];var from=w.c||0;"
-            + "var items=[];for(var i=from;i<E.length;i++){var o=E[i];if(!pat||o.u.indexOf(pat)>=0)items.push(o);}"
+            + "var items=[];for(var i=from;i<E.length;i++){var o=E[i];if(pat&&o.u.indexOf(pat)<0)continue;"
+            + "var it={gi:i,u:o.u,s:o.s,t:o.t};var full=o.bf||'';"
+            + "if(full){it.b=full.slice(0,2048);if(full.length>2048)it.blen=full.length;}"
+            + "items.push(it);}"
             + "w.c=E.length;"
-            + "return JSON.stringify({total:E.length,new_items:items.length,returned:items.slice(0,60),items:items.slice(0,60)});})()";
+            + "return JSON.stringify({total:E.length,new_items:items.length,returned:Math.min(items.length,60),items:items.slice(0,60)});})()";
+        const pull = "(function(){var w=window.__netw;var gi=" + (parseInt(pullIdx) || -1) + ";"
+            + "if(!w||gi<0||!w.entries||!w.entries[gi])return '';return String(w.entries[gi].bf||'').slice(0,524288);})()";
         const stop = "(function(){try{if(window.__netw){window.__netw.entries.length=0;window.__netw.armed=false;window.__netw.stopped=true;}return 'stopped';}catch(e){return 'stop_err';}})()";
         return (async () => {
             try {
@@ -1128,6 +1220,7 @@ Object.assign(vue_methods, {
                     if (armed !== true) return "network_watch: 钩子未挂/页面已导航丢失 —— 先 mode=start 重新挂钩（导航后需重挂）";
                     return String(await this._wvExec(wv, read) || "{}");
                 }
+                if (mode === "pull") return String(await this._wvExec(wv, pull) || "");
                 if (mode === "stop") {
                     await sleep(0);
                     return String(await this._wvExec(wv, stop) || "stopped");

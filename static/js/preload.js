@@ -103,6 +103,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setGuardFlag: (on) => ipcRenderer.invoke('set-guard-flag', on),
   // S229: 移动端模式（Android UA + 手机视口/触摸仿真），按 guest webContents id 切换
   setWebviewMobile: (payload) => ipcRenderer.invoke('set-webview-mobile', payload),
+  // S254: CDP 真输入事件（isTrusted wheel/click，命中测试路由=与人手等价）
+  cdpInputWheel: (payload) => ipcRenderer.invoke('cdp-input-wheel', payload),
+  cdpInputClick: (payload) => ipcRenderer.invoke('cdp-input-click', payload),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
   // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈
