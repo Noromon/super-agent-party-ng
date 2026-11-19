@@ -207,8 +207,13 @@ async def _call_vue_method_impl(method_name, args_list=None, timeout=None):
             # S94：渲染进程繁忙/页面加载中——超时不重试（防 new_page 等副作用重复执行），
             # 直接回可读错误让 LLM 继续推理，后端协程不再无限挂起
             logging.getLogger("app").info(f"[Warn] {method_name} 超时（渲染进程繁忙）")
-            return ("浏览器操作超时：页面仍在加载或浏览器界面繁忙。"
-                    "请稍后重试该操作，或减少同时打开的标签页数量。")
+            if method_name == "renderOffscreenPage":
+                return ("web_render 超时：页面 JS 过重或站点很慢，渲染器未吐可用 DOM，本轮无可返回的部分正文。"
+                        "这通常与已开标签数无关，别靠减标签解决——改走 simple_fetch/markdown_new（只要静态文本时最快），"
+                        "或 new_page 单独开标签 + wait_for(text/selector) 等就绪后 get_page_markdown。")
+            return ("浏览器操作超时：渲染主线程繁忙——通常是某个重 JS 页面霸占渲染进程，与打开标签「数量」关系不大。"
+                    "处置：list_pages 查看各标签，close_page(tab_id) 关掉疑似卡死的页面，或稍候 30s 重试；"
+                    "本次操作未生效，可安全重发。")
         except Exception as e:
             # 如果是最后一次尝试，则放弃
             if attempt == max_retries - 1:
@@ -433,7 +438,7 @@ async def take_screenshot(fullPage=False, uid=None):
 # S227: 本地无头渲染动态页 -> Markdown（一次性）
 # ==========================================
 
-async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use_proxy=False):
+async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use_proxy=False, focus=""):
     """用内置浏览器在离屏隐藏 webview 渲染动态(含JavaScript)页面，本地转 Markdown 回传，无云。
 
     仅 Electron 桌面版且启用内置浏览器时有效；可访问本机/内网地址（异于云端 markdown_new）。
@@ -502,6 +507,14 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use
             head += "> 注意：页面疑似异步未加载完（骨架屏/占位），以下为已抓内容，非完整正文。可加大 timeout、改用内置浏览器标签+take_snapshot，并看尾部 [net-diag]。\n\n"
     wall = bool(_WALL_PAT.search(md[:6000]))
     captcha = bool(_CAPTCHA_PAT.search(md[:6000]))
+    focus_s = str(focus or "").strip()
+    if focus_s and not captcha:
+        from py.text_focus import focus_blocks
+        blocks, total = focus_blocks(md, focus_s, 6)
+        if total:
+            return head + blocks + _page_meta(wall, partial, reason, data.get("net"),
+                                              data.get("ua"), data.get("cookieLen"), False)
+        head += f"> 注意：focus '{focus_s}' 未在正文中命中（以下为全文）；可换关键词，或注意上方 partial/wall 状态。\n\n"
     return head + md + _page_meta(wall, partial, reason, data.get("net"), data.get("ua"),
                                    data.get("cookieLen"), captcha)
 
@@ -947,6 +960,7 @@ all_cdp_tools = [
                 "与内置浏览器 agent 标签共享登录态（同一持久分区，cookie 通用）：需要登录的站点可先用"
                 " new_page/navigate_page 在标签里完成登录，本工具随即可见登录后的内容。"
                 "默认直连访问（不受系统全局代理影响）；目标需 VPN 出口（如 Google、X）时设 use_proxy=true 走应用内代理。"
+                "只要页面里的特定信息时传 focus=关键词：命中则返回 ±6 行聚焦块（带 @全文x%/行号 定位）替代整页正文。"
                 "仅 Electron 桌面版且已启用内置浏览器时有效。"
             ),
             "parameters": {
@@ -971,6 +985,10 @@ all_cdp_tools = [
                     "use_proxy": {
                         "type": "boolean",
                         "description": "可选：true=本次渲染走应用内代理（设置→系统→代理 填的地址）；默认 false=直连——对国内站/本机内网地址正确，且不受系统全局代理(翻墙软件改系统代理时 Electron 行为异常)影响。仅目标确需 VPN 出口（如 Google、X）时设 true；设置里未配置可用代理时会直接报错。",
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "可选：聚焦关键词（字面匹配）。命中时返回 ±6 行命中块（带 @全文x%/行号 定位）替代整页正文，适合大页查特定信息；未命中自动回退全文并提示。",
                     },
                 },
                 "required": ["original_url"],

@@ -922,10 +922,12 @@ firecrawl_tool = {
 from bs4 import BeautifulSoup
 import re
 
-async def simple_fetch(url):
+async def simple_fetch(url, focus="", context=0):
     """
     改进的网页抓取工具，返回结构化的清洗后内容
     支持抓取内网和外网页面
+    focus: 关键词聚焦（字面匹配）——命中时只返回 ±context 行的命中块（带位置定位），免全文；
+    超长且无 focus 时自动附 heading 目录帮助判断精读方向。
     """
     from py.net_guard import url_public_ok
     from py.proxy_util import active_proxy, is_literal_ip
@@ -1034,7 +1036,38 @@ async def simple_fetch(url):
                 'error': 'ParseError',
                 'message': 'No static text could be extracted (the page may be JavaScript-rendered). Try a crawler-based fetch tool for this URL; do not retry this tool unchanged.'
             }
-        
+
+        # S250: focus 聚焦——命中即返回命中块替代全文；零命中降级全文+note
+        focus_s = str(focus or "").strip()
+        if focus_s:
+            from py.text_focus import focus_blocks
+            parts = [structured_data.get('title') or '']
+            for sec in structured_data['sections']:
+                if sec.get('type') == 'heading':
+                    parts.append('#' * int(sec.get('level') or 1) + ' ' + sec.get('content', ''))
+                else:
+                    parts.append(sec.get('content', ''))
+            full_text = '\n\n'.join(p for p in parts if p)
+            blocks, total = focus_blocks(full_text, focus_s, int(context or 0) or 6)
+            if total:
+                return {
+                    'url': url, 'focus': focus_s, 'match_lines': total,
+                    'total_chars': len(full_text),
+                    'note': 'focus 命中块已替代全文；如需其它段落可换 focus 或省略取全文',
+                    'matches': blocks,
+                }
+            structured_data['focus_note'] = (
+                f"focus '{focus_s}' 未在提取文本({len(full_text)} chars)中找到——以下为全文；"
+                "注意本页是静态抽取，JS 渲染内容可能缺失（可试 web_render）")
+        elif len(structured_data['sections']) > 40:
+            toc = [('#' * int(s.get('level') or 1) + ' ' + s['content'])
+                   for s in structured_data['sections'] if s.get('type') == 'heading'
+                   and int(s.get('level') or 1) <= 3][:15]
+            if toc:
+                structured_data['toc'] = ('\n'.join(toc) +
+                    f"\n[共 {len(structured_data['sections'])} 段，输出可能被截断] 用 focus=关键词 可直接抽取命中段落，"
+                    "或根据本目录判断是否需要精读全文")
+
         return structured_data
         
     except Exception as e:
@@ -1049,13 +1082,23 @@ simple_fetch_tool = {
     "type": "function",
     "function": {
         "name": "simple_fetch",
-        "description": "抓取指定URL的网页内容。支持内网和外网地址。",
+        "description": ("抓取指定URL的网页内容（静态抽取，不执行JS）。支持内网和外网地址。"
+                        "目标是大页面里的特定信息时传 focus=关键词：命中则只返回 ±context 行命中块（带 @全文x%/行号 定位），"
+                        "一步到位免全文截断；未命中会明确告知并回退全文。页面靠 JS 渲染时改用 web_render。"),
         "parameters": {
             "type": "object",
             "properties": {
                 "url": {
                     "type": "string",
                     "description": "需要抓取的URL地址。",
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "聚焦关键词（字面匹配，大小写不敏感）。命中时返回聚焦块替代全文。",
+                },
+                "context": {
+                    "type": "integer",
+                    "description": "focus 命中块上下各多少行（0-30，默认 6）。",
                 },
             },
             "required": ["url"],

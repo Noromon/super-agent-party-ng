@@ -147,4 +147,4 @@ class TestSoulxFrontendS136:
             assert f"'{key}'" in e, key
 
     def test_stamp(self):
-        assert "build=S249" in _read("static", "js", "renderer.js")
+        assert "build=S250" in _read("static", "js", "renderer.js")
