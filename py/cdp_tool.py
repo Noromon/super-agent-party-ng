@@ -501,7 +501,9 @@ async def web_render(original_url, wait_text=None, timeout=45, mobile=False, use
         else:
             head += "> 注意：页面疑似异步未加载完（骨架屏/占位），以下为已抓内容，非完整正文。可加大 timeout、改用内置浏览器标签+take_snapshot，并看尾部 [net-diag]。\n\n"
     wall = bool(_WALL_PAT.search(md[:6000]))
-    return head + md + _page_meta(wall, partial, reason, data.get("net"), data.get("ua"), data.get("cookieLen"))
+    captcha = bool(_CAPTCHA_PAT.search(md[:6000]))
+    return head + md + _page_meta(wall, partial, reason, data.get("net"), data.get("ua"),
+                                   data.get("cookieLen"), captcha)
 
 
 # ==========================================
@@ -534,12 +536,21 @@ _WALL_PAT = re.compile(r"(扫码登录|请先登录|登录后查看|登录后可
                        r"|please log\s?in|sign\s?in to (view|continue))", re.I)
 
 
-def _wall_hint(wall: bool) -> str:
+def _wall_hint(wall: bool, captcha: bool = False) -> str:
+    if captcha:
+        return "\n\n[page-meta] captcha_detected=true" + _CAPTCHA_HINT
     if not wall:
         return "\n\n[page-meta] login_wall_detected=false（以上应为完整正文）"
     return ("\n\n[page-meta] login_wall_detected=true"
             "——检测到登录墙信号：正文可能被软墙截断，「看不到更多」≠「抓完了」；"
             "考虑在内置浏览器标签登录（与 web_render/本工具共享登录态）后重试。")
+
+
+# S249: 验证码/安全验证页信号（文本级兜底；guest 侧还有组件级检测）
+_CAPTCHA_PAT = re.compile(r"(安全验证|拖动滑块|滑动验证|完成验证|点击按钮开始验证|输入验证码后|请完成下方验证"
+                          r"|bfe_punish|verifycode|bdverify)")
+_CAPTCHA_HINT = (" —— 检测到验证码/安全验证页：需人工处理。请提示用户在内置浏览器标签中手动完成验证"
+                 "（移动端视口裁剪与坐标已修复，可直接点击），暂停交互、勿用 evaluate_script 硬解，通过后再重试。")
 
 
 # S248：骨架屏/异步未加载完关键词（md 文本级兜底，配合 Vue 侧 isStalled）
@@ -573,8 +584,16 @@ def _net_diag(net) -> str:
     return line[:1500]
 
 
-def _page_meta(wall: bool, partial: bool = False, reason: str = "", net=None, ua="", cookie_len=None) -> str:
-    """S248: web_render 结构化尾行——只有真完整才宣告完整；附 net 诊断与 ctx 自证行。"""
+def _page_meta(wall: bool, partial: bool = False, reason: str = "", net=None, ua="", cookie_len=None,
+               captcha: bool = False) -> str:
+    """S248: web_render 结构化尾行——只有真完整才宣告完整；附 net 诊断与 ctx 自证行。S249: captcha 信号。"""
+    if captcha:
+        out = "\n\n[page-meta] captcha_detected=true" + _CAPTCHA_HINT
+        out += _net_diag(net)
+        if ua:
+            cl = cookie_len if isinstance(cookie_len, int) else 0
+            out += f"\n[ctx] ua={str(ua)[:60]} cookie_len={cl}"
+        return out
     parts = ["login_wall_detected=" + ("true" if wall else "false")]
     if partial or reason:
         parts.append("partial=true reason=" + (reason or "timeout"))
@@ -615,10 +634,11 @@ async def get_page_markdown():
     md = html_to_md.html_to_markdown(html, max_chars=120000)
     if not wall:
         wall = bool(_WALL_PAT.search(md[:4000]))
+    captcha = bool(_CAPTCHA_PAT.search(md[:6000]))
     if not md.strip():
-        return "[Empty] 当前页无可抽取正文（可能需登录或纯 SPA 未渲染出内容）。" + _wall_hint(wall)
+        return "[Empty] 当前页无可抽取正文（可能需登录或纯 SPA 未渲染出内容）。" + _wall_hint(wall, captcha)
     head = (f"# {title}\n" if title else "") + (f"Source: {url}\n\n" if url else "")
-    return head + md + _wall_hint(wall)
+    return head + md + _wall_hint(wall, captcha)
 
 
 # ==========================================
@@ -729,7 +749,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_snapshot",
-            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen and their source `url=` — pass those urls to view_images to actually SEE the images first-hand), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default. UID_EXPIRED / 'Element not found' after an interaction means the page DOM rebuilt and old UIDs died — just re-take_snapshot.",
+            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen and their source `url=` — pass those urls to view_images to actually SEE the images first-hand), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default. UID_EXPIRED / 'Element not found' after an interaction means the page DOM rebuilt and old UIDs died — just re-take_snapshot. If the snapshot ends with '[page-meta] captcha_detected=true' the page is a CAPTCHA/security-check: STOP automating it, ask the user to complete the check manually in the built-in browser tab (mouse clicks work there now), then resume — do not try to solve it via evaluate_script.",
             "parameters": {
                 "type": "object",
                 "properties": {

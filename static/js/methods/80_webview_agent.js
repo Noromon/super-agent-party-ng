@@ -226,9 +226,23 @@ Object.assign(vue_methods, {
         })()
         `;
         
+        // S249: 验证码/安全验证页信号——agent 应停下请人工在标签里过关，而不是硬解
+        let captchaNote = '';
+        try {
+            const probe = "(function(){try{"
+                + "var sel='#captcha,[class*=passMod],[id*=passMod],[class*=verify-code],[id*=verify],[class*=captcha],[id*=captcha],img[src*=verifycode]';"
+                + "var vis=function(n){try{return !!n&&(n.offsetWidth>0||n.offsetHeight>0);}catch(e){return false;};};"
+                + "var nodes=[];try{nodes=Array.prototype.slice.call(document.querySelectorAll(sel)).filter(vis);}catch(e){}"
+                + "var t='';try{t=(document.body&&document.body.innerText||'').slice(0,3000);}catch(e){}"
+                + "return nodes.length>0||/(安全验证|拖动滑块|滑动验证|完成验证|点击按钮开始验证|输入验证码后|请完成下方验证)/.test(t);"
+                + "}catch(e){return false;}})()";
+            const hit = await this._wvExec(wv, probe);
+            if (hit === true) captchaNote = '\n[page-meta] captcha_detected=true —— 检测到验证码/安全验证页：需人工处理。请提示用户在内置浏览器标签中手动完成验证（移动端视口裁剪与坐标已修复，可直接点击），你应暂停交互、勿用 evaluate_script 硬解，通过后再 take_snapshot 重试。';
+        } catch (e) {}
+
         try {
             const r = await this._wvExec(wv, script);
-            return (typeof r === 'string') ? (r + loadNote) : r;
+            return (typeof r === 'string') ? (r + captchaNote + loadNote) : r;
         } catch (e) {
             return "Vue Snapshot Error: " + e.message;
         }

@@ -1275,7 +1275,11 @@ app.whenReady().then(async () => {
               wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); });
             }
             await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: SAP_MOBILE_UA, acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8', platform: 'Android' });
-            await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 414, height: 896, deviceScaleFactor: 3, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
+            // S249: dsf 必须用系统默认(3x 缓冲 vs 屏 dpr 不符 → 页面只可见 ~dpr/3 且鼠标坐标错位，人工验证码都点不中)；
+            // 高度取真实可视 DIP（钉死 896 在缩放下会把页面下截裁掉且不滚动）
+            let _vh = 896;
+            try { const _sz = wc.getContentSize(); if (_sz && _sz[1] > 240) _vh = Math.round(_sz[1]); } catch (_) {}
+            await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 414, height: _vh, deviceScaleFactor: 0, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
             await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
             try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }); } catch (_) {}
             return { ok: true, cdp: true };
