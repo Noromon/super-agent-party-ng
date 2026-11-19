@@ -1029,5 +1029,113 @@ Object.assign(vue_methods, {
                 finish({ ok: false, url: url, error: 'attach failed', desc: (e && e.message) || '' });
             }
         });
+    },
+
+    // --- 14. S253：虚拟滚动列表「滚动搜索+点击」原语（贴吧/信息流卡片无 href、点击才路由）---
+    // match：CSS 选择器（querySelector 命中即按选择器）或可见文本（最小含文本小块）。
+    // action：click=合成点击并等新路由；extract=抠 href/data-*；none=命中即报。
+    async scrollAndFind(match, action = "none", maxScrolls = 30, pauseMs = 700, attribute = "") {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        const m = String(match || "").trim();
+        if (!m) return "Error: scroll_and_find 需要 match（文本或 CSS 选择器）";
+        const act = ["click", "extract", "none"].includes(action) ? action : "none";
+        let rounds = parseInt(maxScrolls) || 30; rounds = Math.max(1, Math.min(rounds, 100));
+        const pause = Math.max(200, Math.min(parseInt(pauseMs) || 700, 4000));
+        const attr = String(attribute || "");
+        const findExpr = "(function(){var m=" + JSON.stringify(m) + ";var act=" + JSON.stringify(act) + ";var attr=" + JSON.stringify(attr) + ";"
+            + "var el=null;try{el=document.querySelector(m);}catch(e){}"
+            + "if(!el){var all=document.querySelectorAll('a,li,[class*=card],[class*=item],[class*=post],[class*=thread],div,td,tr');"
+            + "for(var i=0;i<all.length;i++){var c=all[i];try{if(!c.offsetParent)continue;var t=c.innerText||'';"
+            + "if(t.length>1200||t.indexOf(m)<0)continue;if(!el||t.length<(el.innerText||'').length)el=c;}}}"
+            + "if(!el)return JSON.stringify({found:false});"
+            + "try{el.scrollIntoView({block:'center'});}catch(e){}"
+            + "var out={found:true,tag:el.tagName.toLowerCase(),text:(el.innerText||'').slice(0,160).replace(/\\s+/g,' '),href:el.getAttribute?el.getAttribute('href')||'':''};"
+            + "if(attr){try{out.attr=el.getAttribute(attr)||'';}catch(e){out.attr='';}}"
+            + "if(act==='click'){try{el.click();out.clicked=true;}catch(e){out.clicked=false;out.click_err=String(e&&e.message||e);}}"
+            + "return JSON.stringify(out);})()";
+        const hrefExpr = "(function(){return String(window.location?window.location.href:'');})()";
+        const scrollExpr = "(function(){window.scrollBy(0,Math.round(window.innerHeight*0.85));"
+            + "return JSON.stringify({y:Math.round(window.scrollY),h:Math.round(document.documentElement.scrollHeight),vh:Math.round(window.innerHeight)});})()";
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        let stable = 0, lastH = -1, lastY = -1, info = { y: 0, h: 0, vh: 0 };
+        for (let i = 0; i < rounds; i++) {
+            let hit = {};
+            try { hit = JSON.parse(await this._wvExec(wv, findExpr) || "{}"); } catch (e) {}
+            if (hit.found) {
+                hit.scroll_rounds = i;
+                hit.scroll_y = info.y;
+                if (act === "click") {
+                    let before = "";
+                    try { before = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) {}
+                    // click 已在 findExpr 内执行；轮询 URL 变化（SPA 路由）
+                    let after = before;
+                    for (let k = 0; k < 12; k++) {
+                        await sleep(300);
+                        try { after = String(await this._wvExec(wv, hrefExpr) || ""); } catch (e) { break; }
+                        if (after && after !== before) break;
+                    }
+                    hit.url_before = before;
+                    hit.url_after = after;
+                    hit.url_changed = !!(after && after !== before);
+                    if (!hit.url_changed) hit.note = "clicked but URL unchanged（可能非路由卡片或被拦截；可 take_snapshot 看新页面状态）";
+                    hit.hint = "url_after 即目标页；若为本页路由弹窗则原 url 不变但 DOM 已变，直接 take_snapshot/get_page_markdown";
+                }
+                return JSON.stringify(hit);
+            }
+            try { info = JSON.parse(await this._wvExec(wv, scrollExpr) || "{}") || info; } catch (e) {}
+            await sleep(pause);
+            if (info.y + info.vh >= info.h - 6) {
+                if (info.y === lastY && info.h === lastH) { stable++; if (stable >= 2) break; } else stable = 0;
+            }
+            lastY = info.y; lastH = info.h;
+        }
+        return JSON.stringify({ found: false, scrolled_to: info.y, page_height: info.h, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid" });
+    },
+
+    // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
+    networkWatch(mode = "start", pattern = "", includeBody = false) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const arm = "(function(){try{var E=[];var BODY=" + (includeBody ? "true" : "false") + ";"
+            + "window.__netw={armed:true,body:BODY,entries:E,c:0};"
+            + "function rec(u,s,r){try{if(E.length>=500)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
+            + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.b=x.slice(0,2048);}).catch(function(){});}};}catch(e){}}"
+            + "var of_=window.fetch;if(of_){window.fetch=function(i){var u=(i&&i.url)||String(i);return of_.apply(this,arguments).then(function(r){rec(u,r&&r.status,r);return r;},function(e){rec(u,-1);throw e;});};}"
+            + "var oo=XMLHttpRequest.prototype.open,os=XMLHttpRequest.prototype.send;"
+            + "XMLHttpRequest.prototype.open=function(m2,u){this.__wu=u;return oo.apply(this,arguments);};"
+            + "XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('loadend',function(){var b='';try{if(" + (includeBody ? "true" : "false") + "&&x.responseText)b=x.responseText.slice(0,2048);}catch(e){}"
+            + "rec(x.__wu,x.status);if(b&&E.length){E[E.length-1].b=b;}});return os.apply(this,arguments);};"
+            + "return 'armed';}catch(e){return 'arm_err:'+String(e&&e.message||e);}})()";
+        const read = "(function(){var w=window.__netw;if(!w)return JSON.stringify({error:'not armed — call network_watch(mode=start) first'});"
+            + "var pat=" + JSON.stringify(String(pattern || "")) + ";var E=w.entries||[];var from=w.c||0;"
+            + "var items=[];for(var i=from;i<E.length;i++){var o=E[i];if(!pat||o.u.indexOf(pat)>=0)items.push(o);}"
+            + "w.c=E.length;"
+            + "return JSON.stringify({total:E.length,new_items:items.length,returned:items.slice(0,60),items:items.slice(0,60)});})()";
+        const stop = "(function(){try{if(window.__netw){window.__netw.entries.length=0;window.__netw.armed=false;window.__netw.stopped=true;}return 'stopped';}catch(e){return 'stop_err';}})()";
+        return (async () => {
+            try {
+                if (mode === "start") {
+                    const already = await this._wvExec(wv, "(function(){return !!(window.__netw&&window.__netw.armed);})()");
+                    if (already === true) return JSON.stringify({ ok: true, note: "already armed（保留已收集条目；要清空重收集先 stop 再 start）" });
+                    const r = await this._wvExec(wv, arm);
+                    return String(r || "armed");
+                }
+                if (mode === "read") {
+                    // 导航后钩子会丢（页面新文档）——检测并提示重挂
+                    const armed = await this._wvExec(wv, "(function(){return !!(window.__netw&&window.__netw.armed);})()");
+                    if (armed !== true) return "network_watch: 钩子未挂/页面已导航丢失 —— 先 mode=start 重新挂钩（导航后需重挂）";
+                    return String(await this._wvExec(wv, read) || "{}");
+                }
+                if (mode === "stop") {
+                    await sleep(0);
+                    return String(await this._wvExec(wv, stop) || "stopped");
+                }
+                return "Error: network_watch mode 需 start|read|stop";
+            } catch (e) {
+                return "networkWatch err: " + (e && e.message ? e.message : String(e));
+            }
+        })();
     }
 });

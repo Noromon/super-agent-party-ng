@@ -374,6 +374,33 @@ async def navigate_page(type="url", url=None, ignoreCache=False, timeout=8, mobi
             pass
     return await call_vue_method('browserNavigate', [type, url, ignoreCache, t], timeout=t + 20)
 
+async def scroll_and_find(match, action="none", max_scrolls=30, pause_ms=700, attribute=""):
+    """S253: 虚拟滚动列表（贴吧/信息流：卡片无 href、滚出视口即卸载、点击才路由）的
+    滚动搜索原语——滚动到目标挂载即命中，click 触发 SPA 路由并返回新 URL，
+    extract 抠 href/data-*，none 仅报告命中。替代手搓滚动+轮询的十几次往返。"""
+    try:
+        rounds = max(1, min(int(max_scrolls), 100))
+    except (TypeError, ValueError):
+        rounds = 30
+    try:
+        pause = max(200, min(int(pause_ms), 4000))
+    except (TypeError, ValueError):
+        pause = 700
+    budget = min(rounds * pause // 1000 + 45, 300)
+    return await call_vue_method('scrollAndFind',
+                                 [match, action, rounds, pause, attribute], timeout=budget)
+
+
+async def network_watch(mode="start", pattern="", include_body=False):
+    """S253: 内置网络观察器——start 挂 fetch/XHR 钩子（页面导航后需重挂）→ 操作页面 →
+    read 增量收割 {url,status[,body≤2KB]}（pattern 子串过滤）；stop 清空并解除。"""
+    if str(mode or "").lower() not in ("start", "read", "stop"):
+        return "[Error] network_watch: mode 需 start|read|stop"
+    return await call_vue_method('networkWatch',
+                                 [str(mode).lower(), str(pattern or ""), bool(include_body)],
+                                 timeout=30)
+
+
 async def wait_for(text=None, selector=None, js=None, timeout=1000):
     """S246: 等待页面条件——text(文本出现)/selector(CSS 命中)/js(谓词表达式 truthy) 三选一。"""
     picked = [v for v in (text, selector, js) if v]
@@ -762,7 +789,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "take_snapshot",
-            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen and their source `url=` — pass those urls to view_images to actually SEE the images first-hand), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default. UID_EXPIRED / 'Element not found' after an interaction means the page DOM rebuilt and old UIDs died — just re-take_snapshot. If the snapshot ends with '[page-meta] captcha_detected=true' the page is a CAPTCHA/security-check: STOP automating it, ask the user to complete the check manually in the built-in browser tab (mouse clicks work there now), then resume — do not try to solve it via evaluate_script.",
+            "description": "Get the accessibility tree of the current page to find UIDs for interaction. Besides interactive elements it also lists content images/canvas with UIDs (alt/size/loaded/offscreen and their source `url=` — pass those urls to view_images to actually SEE the images first-hand), so you can target them with take_screenshot(uid) or remove_element(uid). If the page is still loading it waits up to ~3s; if still not done it returns a possibly-PARTIAL snapshot ending with '(note: page still loading...)'. Tip: call right after navigate_page, which already waits for load by default. UID_EXPIRED / 'Element not found' after an interaction means the page DOM rebuilt and old UIDs died — just re-take_snapshot. If the snapshot ends with '[page-meta] captcha_detected=true' the page is a CAPTCHA/security-check: STOP automating it, ask the user to complete the check manually in the built-in browser tab (mouse clicks work there now), then resume — do not try to solve it via evaluate_script. SPA virtual-list sites (tieba/weibo feeds) often have NO hrefs on cards (click-only routing, cards unmount off-screen): use scroll_and_find(match=title, action='click') instead of scraping links from static DOM, and network_watch to grab list-API JSON if rendering won't cooperate; do NOT hammer site search APIs (they trigger risk-control CAPTCHAs).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -871,6 +898,50 @@ all_cdp_tools = [
                     "timeout": {"type": "integer", "description": "Timeout in milliseconds (default 1000).","minimum": 100,"default": 1000,"maximum": 30000}
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scroll_and_find",
+            "description": ("S253: 滚动搜索原语——针对 SPA 虚拟滚动列表（贴吧吧列表、微博/信息流等：卡片滚出视口即卸载、"
+                            "常无真实 href、点击才路由），自动逐屏向下滚动等新卡片挂载，命中即停。"
+                            "这是此类站点『从列表进入某帖』的正确姿势：一次调用替代手搓 滚动+MutationObserver+XHR钩子+翻页探测 的几十次往返。"
+                            "贴吧示例：scroll_and_find(match='让CMG把控教育', action='click') → 返回 url_after 即帖子地址，随后 web_render/get_page_markdown 读楼。"
+                            "action=click 命中卡片会合成点击并等 SPA 路由（最多3s）返回新 URL；"
+                            "action=extract 抠卡片 href 或 attribute 指定属性；action=none 仅报告命中。"
+                            "未命中会返回滚动深度——可换 match 措辞/加大 max_scrolls，或改 network_watch 抓列表接口 JSON。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "match": {"type": "string", "description": "CSS 选择器（querySelector 命中即用）或目标可见文本（匹配最小含文本小块）。贴吧找帖直接填帖子标题片段。"},
+                    "action": {"type": "string", "enum": ["none", "click", "extract"], "description": "click=合成点击并等新路由URL（虚拟列表进帖首选）；extract=抠href/attribute；none=仅报告。默认 none。"},
+                    "max_scrolls": {"type": "integer", "description": "最多滚动轮数（1-100，默认30）。"},
+                    "pause_ms": {"type": "integer", "description": "每轮滚动后等待挂载的毫秒数（200-4000，默认700）。慢站调大。"},
+                    "attribute": {"type": "string", "description": "action=extract 时要抠的属性名（如 data-url），省略则抠 href。"}
+                },
+                "required": ["match"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "network_watch",
+            "description": ("S253: 内置网络观察器（替代手搓 XHR/fetch 钩子）。start=给当前标签页挂 fetch/XHR 钩子（幂等；"
+                            "页面导航后钩子丢失需重新 start）→ 然后 navigate/滚动/点击让页面自己发请求 → "
+                            "read=增量收割 {url,status[,body≤2KB]}（pattern 按 URL 子串过滤，如 'newpostlist'；每次只返回上次 read 之后的新条目）。"
+                            "适合『页面渲染不出但数据在接口里』的场景：抓列表/详情接口 JSON 直接拿 tid/数据。"
+                            "stop=清空并停用。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["start", "read", "stop"], "description": "start 挂钩 / read 增量收割 / stop 清空停用。"},
+                    "pattern": {"type": "string", "description": "read 时按 URL 子串过滤（如 'newpostlist'），省略返回全部新条目。"},
+                    "include_body": {"type": "boolean", "description": "start 时是否记录响应体前 2KB（调试用，条目更大）。默认 false。"}
+                },
+                "required": ["mode"]
             }
         }
     },
