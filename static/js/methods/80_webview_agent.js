@@ -1131,7 +1131,7 @@ Object.assign(vue_methods, {
             + "var el=null;try{el=document.querySelector(m);}catch(e){}"
             + "if(!el){var mm=nf(m);var all=document.querySelectorAll('a,li,[class*=card],[class*=item],[class*=post],[class*=thread],div,td,tr');"
             + "for(var i=0;i<all.length;i++){var c=all[i];try{if(!c.offsetParent)continue;var t=nf(c.innerText||'');"
-            + "if(!mm){continue;}if(t.length>1200||t.indexOf(mm)<0)continue;if(!el||t.length<nf(el.innerText||'').length)el=c;}}"
+            + "if(!mm){continue;}if(t.length>1200||t.indexOf(mm)<0)continue;if(!el||t.length<nf(el.innerText||'').length)el=c;}catch(e){}}"
             + "if(el)el=clk(el);}"
             + "if(!el)return JSON.stringify({found:false});"
             + "try{el.scrollIntoView({block:'center'});}catch(e){}"
@@ -1157,10 +1157,10 @@ Object.assign(vue_methods, {
             try { await this._wvExec(wv, "(function(){try{window.__sapInner&&window.__sapInner.click();}catch(e){}})()"); } catch (e) {}
             return "synthetic";
         };
-        let stable = 0, lastP = -1, lastMax = -1, pos = pos0;
+        let stable = 0, lastP = -1, lastMax = -1, pos = pos0, execErr = "";
         for (let i = 0; i < rounds; i++) {
             let hit = {};
-            try { hit = JSON.parse(await this._wvExec(wv, findExpr) || "{}"); } catch (e) {}
+            try { hit = JSON.parse(await this._wvExec(wv, findExpr) || "{}"); } catch (e) { execErr = String((e && e.message) || e).slice(0, 140); }
             if (hit.found) {
                 hit.scroll_rounds = i;
                 hit.scroller_mode = mode;
@@ -1202,7 +1202,7 @@ Object.assign(vue_methods, {
             }
             lastP = pos.p; lastMax = pos.max;
         }
-        return JSON.stringify({ found: false, scroller_mode: mode, scrolled_to: pos.p, scrollable_max: pos.max, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid（页面若被吧务移档则主列表永远刷不出）" });
+        return JSON.stringify({ found: false, scroller_mode: mode, scrolled_to: pos.p, scrollable_max: pos.max, exec_err: execErr || undefined, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid（页面若被吧务移档则主列表永远刷不出）" + (execErr ? "；注意：探测脚本执行报错(" + execErr + ")，命中检测可能未生效，非目标不存在" : "") });
     },
 
     // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
@@ -1211,7 +1211,7 @@ Object.assign(vue_methods, {
         return "(function(){try{if(window.__netw&&window.__netw.armed)return 'armed';var E=[];var BODY=" + (bodyOn ? "true" : "false") + ";var CAP=BODY?200:500;"
             + "window.__netw={armed:true,body:BODY,entries:E,c:0};"
             + "function rec(u,s,r){try{if(E.length>=CAP)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
-            + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.bf=x.slice(0,307200);}).catch(function(){});}};}catch(e){}}"
+            + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.bf=x.slice(0,307200);}).catch(function(){});}catch(_e){}};}catch(e){}}"
             + "var of_=window.fetch;if(of_){window.fetch=function(i){var u=(i&&i.url)||String(i);return of_.apply(this,arguments).then(function(r){rec(u,r&&r.status,r);return r;},function(e){rec(u,-1);throw e;});};}"
             + "var oo=XMLHttpRequest.prototype.open,os=XMLHttpRequest.prototype.send;"
             + "XMLHttpRequest.prototype.open=function(m2,u){this.__wu=u;return oo.apply(this,arguments);};"
