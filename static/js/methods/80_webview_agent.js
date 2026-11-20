@@ -1100,11 +1100,19 @@ Object.assign(vue_methods, {
             }
             try { await this._wvExec(wv, "(function(){window.scrollBy(0," + stepPx + ");})()"); } catch (e) {}
         };
+        // S256：文本匹配先规范化（贴吧卡片 innerText 混排零宽字符/空白碎片会让裸 indexOf 失配）；
+        // 命中后向上走最近可点单元（a/li/tr/onclick/card类）——最小文本块常是无点击反应的 span 碎片。
         const findExpr = "(function(){var m=" + JSON.stringify(m) + ";var attr=" + JSON.stringify(attr) + ";"
+            + "var nf=function(s){return String(s).replace(/[\\u200b-\\u200f\\u2060\\ufeff\\u00ad]+/g,'').replace(/\\s+/g,' ').trim().toLowerCase()};"
+            + "var clk=function(e){var x=e;for(var j=0;j<6&&x&&x!==document.body;j++){var tg=(x.tagName||'').toLowerCase();"
+            + "var cls='';try{cls=String(x.className&&x.className.baseVal!==undefined?x.className.baseVal:x.className)||'';}catch(_e){}"
+            + "if(tg==='a'||tg==='li'||tg==='tr'||tg==='button'||(x.onclick)||(x.getAttribute&&x.getAttribute('onclick'))||/card|item|post|thread|topic|row/i.test(cls))return x;"
+            + "x=x.parentElement;}return e;};"
             + "var el=null;try{el=document.querySelector(m);}catch(e){}"
-            + "if(!el){var all=document.querySelectorAll('a,li,[class*=card],[class*=item],[class*=post],[class*=thread],div,td,tr');"
-            + "for(var i=0;i<all.length;i++){var c=all[i];try{if(!c.offsetParent)continue;var t=c.innerText||'';"
-            + "if(t.length>1200||t.indexOf(m)<0)continue;if(!el||t.length<(el.innerText||'').length)el=c;}}}"
+            + "if(!el){var mm=nf(m);var all=document.querySelectorAll('a,li,[class*=card],[class*=item],[class*=post],[class*=thread],div,td,tr');"
+            + "for(var i=0;i<all.length;i++){var c=all[i];try{if(!c.offsetParent)continue;var t=nf(c.innerText||'');"
+            + "if(!mm){continue;}if(t.length>1200||t.indexOf(mm)<0)continue;if(!el||t.length<nf(el.innerText||'').length)el=c;}}"
+            + "if(el)el=clk(el);}"
             + "if(!el)return JSON.stringify({found:false});"
             + "try{el.scrollIntoView({block:'center'});}catch(e){}"
             + "var r={width:0,height:0,left:0,top:0};try{r=el.getBoundingClientRect();}catch(e){}"
@@ -1202,7 +1210,7 @@ Object.assign(vue_methods, {
             + "if(full){it.b=full.slice(0,2048);if(full.length>2048)it.blen=full.length;}"
             + "items.push(it);}"
             + "w.c=E.length;"
-            + "return JSON.stringify({total:E.length,new_items:items.length,returned:Math.min(items.length,60),items:items.slice(0,60)});})()";
+            + "return JSON.stringify({total:E.length,new_items:items.length,returned:Math.min(items.length,60),origin:String(location.origin||''),items:items.slice(0,60)});})()";
         const pull = "(function(){var w=window.__netw;var gi=" + (parseInt(pullIdx) || -1) + ";"
             + "if(!w||gi<0||!w.entries||!w.entries[gi])return '';return String(w.entries[gi].bf||'').slice(0,524288);})()";
         const stop = "(function(){try{if(window.__netw){window.__netw.entries.length=0;window.__netw.armed=false;window.__netw.stopped=true;}return 'stopped';}catch(e){return 'stop_err';}})()";
@@ -1220,7 +1228,8 @@ Object.assign(vue_methods, {
                     if (armed !== true) return "network_watch: 钩子未挂/页面已导航丢失 —— 先 mode=start 重新挂钩（导航后需重挂）";
                     return String(await this._wvExec(wv, read) || "{}");
                 }
-                if (mode === "pull") return String(await this._wvExec(wv, pull) || "");
+                // S256：pull 显式放行 512K——默认 60000 网关会把大响应截成碎 JSON
+                if (mode === "pull") return String(await this._wvExec(wv, pull, 524288) || "");
                 if (mode === "stop") {
                     await sleep(0);
                     return String(await this._wvExec(wv, stop) || "stopped");

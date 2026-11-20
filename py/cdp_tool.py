@@ -392,6 +392,21 @@ async def scroll_and_find(match, action="none", max_scrolls=30, pause_ms=700, at
                                  [match, action, rounds, pause, attribute], timeout=budget)
 
 
+_PULL_POLLUTED_PREFIX = ("Error executing", "Failed networkWatch", "networkWatch err:",
+                         "浏览器操作超时", '{"jsonrpc"', "[Unknown Tool]", "Success")
+
+
+def _pull_polluted(body):
+    """S256：pull 失败时 call_vue_method 会回错误文案/超时提示——这类文本绝不能当成
+    响应体落盘（agent 曾因此拿到『Vue 包装返回』伪文件）。含截断标记的半截 JSON 同理。"""
+    if not isinstance(body, str) or not body:
+        return True
+    s = body.lstrip()
+    return (s.startswith(_PULL_POLLUTED_PREFIX)
+            or "[S106 truncated" in s[-96:]
+            or s.startswith("Operation completed (Type:"))
+
+
 async def network_watch(mode="start", pattern="", include_body=False):
     """S253: 内置网络观察器——start 挂 fetch/XHR 钩子（页面导航后需重挂）→ 操作页面 →
     read 增量收割 {url,status[,body 预览≤2KB]}（pattern 子串过滤）；stop 清空并解除。
@@ -410,26 +425,38 @@ async def network_watch(mode="start", pattern="", include_body=False):
             items = d.get("items") if isinstance(d, dict) else None
             overs = [it for it in (items or [])
                      if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:3]
-            saved = 0
+            origin = str(d.get("origin") or "").strip()
+            saved = failed = 0
             for it in overs:
                 try:
                     body = await call_vue_method(
-                        'networkWatch', ["pull", "", False, int(it.get("gi") or -1)], timeout=25)
-                    if isinstance(body, str) and body:
-                        _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
-                        fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
-                        with open(_os.path.join(UPLOAD_FILES_DIR, fn), "w", encoding="utf-8") as f:
-                            f.write(body)
-                        it["body_url"] = f"http://{get_host()}:{get_port()}/uploaded_files/{fn}"
-                        it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_url"
-                                        "（load_files 或 read_file_range 可全文读；b 仅前 2048 预览）")
-                        saved += 1
+                        'networkWatch', ["pull", "", False, int(it.get("gi") or -1)], timeout=45)
+                    if _pull_polluted(body):
+                        it["b_err"] = ("全文拉取失败（渲染进程忙/被截断，非响应体内容），预览 b 仍有效；"
+                                       "稍后重读 read 再取 body_url")
+                        failed += 1
+                        continue
+                    _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+                    fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
+                    with open(_os.path.join(UPLOAD_FILES_DIR, fn), "w", encoding="utf-8") as f:
+                        f.write(body)
+                    it["body_url"] = f"http://{get_host()}:{get_port()}/uploaded_files/{fn}"
+                    it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_url"
+                                    "（load_files 或 read_file_range 可全文读；b 仅前 2048 预览）")
+                    saved += 1
                 except Exception:  # noqa: BLE001
-                    pass
+                    it["b_err"] = "全文拉取异常，预览 b 仍有效；可稍后重试 read"
+                    failed += 1
+            extra = ""
             if saved:
-                d["note"] = (str(d.get("note") or "") +
-                             f"；{saved} 条超长响应已落盘（见各项 body_url），直接读文件拿完整 JSON，"
-                             "不必再手搓 fetch 钩子").lstrip("；")
+                extra += (f"；{saved} 条超长响应已落盘（见各项 body_url），直接读文件拿完整 JSON，"
+                          "不必再手搓 fetch 钩子")
+            if failed:
+                extra += f"；{failed} 条全文拉取失败（b_err 说明），稍后可再 read 重试"
+            if origin:
+                extra += f"；数据抓取自 {origin}——正文里的相对路径资源（如 /emotions/xx.gif）需拼该域名"
+            if extra:
+                d["note"] = (str(d.get("note") or "") + extra).lstrip("；")
                 res = json.dumps(d, ensure_ascii=False)
         except Exception:  # noqa: BLE001
             pass

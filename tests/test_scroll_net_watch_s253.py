@@ -54,7 +54,7 @@ def test_network_watch_validation_and_dispatch():
 
 def test_vue_scroll_and_find_impl():
     i = JS.index("scrollAndFind")
-    seg = JS[i:i + 9000]  # S254 后方法变长（真输入回退链）
+    seg = JS[i:i + 12000]  # S254/S256 后方法变长（真输入回退链+规范化匹配）
     assert "scrollIntoView" in seg and ".click()" in seg
     assert "url_changed" in seg and "url_after" in seg
     assert "window.scrollBy(0," in seg
