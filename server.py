@@ -1921,7 +1921,7 @@ def _build_tool_hooks():
         take_screenshot,
         fill_form,
         drag,
-        handle_dialog, web_render, clean_dom, remove_element, stop_loading, escape_back, get_page_markdown, check_redirect, approve_navigation
+        handle_dialog, web_render, clean_dom, remove_element, stop_loading, escape_back, get_page_markdown, check_redirect, approve_navigation, scroll_and_find, network_watch  # S255: S253 曾漏注册
     )
     from py.random_topic import get_random_topics,get_categories
 
@@ -2008,7 +2008,7 @@ def _build_tool_hooks():
         "wait_for": wait_for,
         "fill_form":fill_form,
         "drag": drag,
-        "handle_dialog": handle_dialog, "web_render": web_render, "clean_dom": clean_dom, "remove_element": remove_element, "stop_loading": stop_loading, "escape_back": escape_back, "get_page_markdown": get_page_markdown, "check_redirect": check_redirect, "approve_navigation": approve_navigation,
+        "handle_dialog": handle_dialog, "web_render": web_render, "clean_dom": clean_dom, "remove_element": remove_element, "stop_loading": stop_loading, "escape_back": escape_back, "get_page_markdown": get_page_markdown, "check_redirect": check_redirect, "approve_navigation": approve_navigation, "scroll_and_find": scroll_and_find, "network_watch": network_watch,  # S255: 补 S253 幽灵工具
         "get_random_topics":get_random_topics,
         "get_categories":get_categories,
         
@@ -8754,7 +8754,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         take_screenshot,
         fill_form,
         drag,
-        handle_dialog, web_render, clean_dom, remove_element, stop_loading, escape_back, get_page_markdown, check_redirect, approve_navigation
+        handle_dialog, web_render, clean_dom, remove_element, stop_loading, escape_back, get_page_markdown, check_redirect, approve_navigation, scroll_and_find, network_watch  # S255: S253 曾漏注册
     )
     from py.random_topic import get_random_topics,get_categories
 
@@ -8841,7 +8841,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         "wait_for": wait_for,
         "fill_form":fill_form,
         "drag": drag,
-        "handle_dialog": handle_dialog, "web_render": web_render, "clean_dom": clean_dom, "remove_element": remove_element, "stop_loading": stop_loading, "escape_back": escape_back, "get_page_markdown": get_page_markdown, "check_redirect": check_redirect, "approve_navigation": approve_navigation,
+        "handle_dialog": handle_dialog, "web_render": web_render, "clean_dom": clean_dom, "remove_element": remove_element, "stop_loading": stop_loading, "escape_back": escape_back, "get_page_markdown": get_page_markdown, "check_redirect": check_redirect, "approve_navigation": approve_navigation, "scroll_and_find": scroll_and_find, "network_watch": network_watch,  # S255: 补 S253 幽灵工具
         "get_random_topics":get_random_topics,
         "get_categories":get_categories,
         

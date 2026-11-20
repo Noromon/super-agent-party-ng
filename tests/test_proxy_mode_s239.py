@@ -233,4 +233,4 @@ def test_python_tools_proxies_wired():
 
 
 def test_stamp_s239():
-    assert "build=S254" in _read("static", "js", "renderer.js")
+    assert "build=S255" in _read("static", "js", "renderer.js")
