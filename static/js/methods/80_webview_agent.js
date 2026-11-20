@@ -1212,8 +1212,9 @@ Object.assign(vue_methods, {
 
     // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
     // S258：钩子脚本上提为 _netwArmExpr（start 与 dom-ready 自动重挂共用），带幂等守卫。
+    // S263：BODY 驻留 CAP 200→80——300KB×200≈60MB/页在贴吧重页上叠加渲染过载（卡顿事故降载）。
     _netwArmExpr(bodyOn) {
-        return "(function(){try{if(window.__netw&&window.__netw.armed)return 'armed';var E=[];var BODY=" + (bodyOn ? "true" : "false") + ";var CAP=BODY?200:500;"
+        return "(function(){try{if(window.__netw&&window.__netw.armed)return 'armed';var E=[];var BODY=" + (bodyOn ? "true" : "false") + ";var CAP=BODY?80:500;"
             + "window.__netw={armed:true,body:BODY,entries:E,c:0};"
             + "function rec(u,s,r){try{if(E.length>=CAP)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
             + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.bf=x.slice(0,307200);}).catch(function(){});}catch(_e){}};}catch(e){}}"

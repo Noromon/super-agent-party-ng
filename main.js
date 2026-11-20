@@ -1287,13 +1287,24 @@ app.whenReady().then(async () => {
             return { ok: true, cdp: false, err: 'emulation-fallback: ' + String((ce && ce.message) || ce) };
           }
         } else {
+          // S263: touch 仿真残留事故（触摸圆点/首击被吞/右键菜单消失/wheel 失真）——
+          // 复位不能依赖 detach 隐式清理或 set 命中（detach 可能因 devtools 忙失败；
+          // set 不命中曾直接跳过整套清理）。只要 attach 着就无条件发全套显式复位，
+          // emitTouchEventsForMouse 必须显式关。detach/清 set 仅对 mobile 来源 attach。
           try {
-            if (wc.debugger.isAttached() && _sapMobileDbg.has(wcId)) {
+            if (wc.debugger.isAttached()) {
+              try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false }); } catch (_) {}
+              try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
               try { await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride'); } catch (_) {}
               try { await wc.debugger.sendCommand('Emulation.clearUserAgentOverride'); } catch (_) {}
-              try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
-              try { wc.debugger.detach(); } catch (_) {}
-              _sapMobileDbg.delete(wcId);
+              if (_sapMobileDbg.has(wcId)) {
+                try { await wc.debugger.detach(); } catch (_) {}
+                _sapMobileDbg.delete(wcId);
+              } else if (_sapInputDbg.has(wcId)) {
+                // S263: wheel/click 的临时 attach 桌面模式下无保留价值，顺手释放调试器
+                try { await wc.debugger.detach(); } catch (_) {}
+                _sapInputDbg.delete(wcId);
+              }
             }
           } catch (_) {}
           try { if (desktopUA) wc.setUserAgent(desktopUA); } catch (_) {}
@@ -1308,6 +1319,9 @@ app.whenReady().then(async () => {
     // 解决 AI 侧 window.scrollBy 滚不动内层容器（如贴吧 uniapp .uni-frs）、el.click()
     // untrusted 卡片无响应的人机差异问题。DevTools 占用调试器时返回 devtools-busy 由渲染层回退。
     const _sapInputErr = (e) => String((e && e.message) || e || '').slice(0, 140);
+    // S263: wheel/click 的临时 attach 用独立集合——混进 _sapMobileDbg 会让 desktop off
+    // 误认 mobile 来源，且原 off 双条件闸不命中时整套复位被跳过（touch 残留事故根因之一）。
+    const _sapInputDbg = new Set();
     ipcMain.handle('cdp-input-wheel', async (e, payload) => {
       try {
         const wcId = Number(payload && payload.wcId);
@@ -1318,7 +1332,7 @@ app.whenReady().then(async () => {
         const dy = Math.round(Number(payload.deltaY) || 300);
         const steps = Math.max(1, Math.min(12, Number(payload.steps) || 6));
         try {
-          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapMobileDbg.add(wcId); wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); }); }
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
         } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
         const per = Math.round(dy / steps);
         for (let i = 0; i < steps; i++) {
@@ -1338,7 +1352,7 @@ app.whenReady().then(async () => {
         const x = Math.max(0, Math.round(Number(payload.x) || 0));
         const y = Math.max(0, Math.round(Number(payload.y) || 0));
         try {
-          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapMobileDbg.add(wcId); wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); }); }
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
         } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
         const base = { x, y, button: 'left', clickCount: 1 };
         try {
