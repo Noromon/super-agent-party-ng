@@ -1,4 +1,4 @@
-# build=S257
+# build=S258
 # S254：CDP 真输入事件（isTrusted wheel/click，命中测试路由=人机等价）+ network_watch 全量 body 落盘
 import asyncio
 import json
@@ -42,8 +42,8 @@ def test_vue_scroll_uses_trusted_wheel_with_fallback_chain():
 
 
 def test_vue_network_watch_full_body_and_pull():
-    i = JS.index("networkWatch")
-    seg = JS[i:i + 4600]
+    i = JS.index("_netwArmExpr(bodyOn)")  # S258: arm 上提后自此处起覆盖钩子+read+pull 全域
+    seg = JS[i:i + 5200]
     assert "307200" in seg  # 全量 body 留 guest（≤300KB/条）
     assert "gi:i" in seg and "it.blen=full.length" in seg  # 全局索引+超长标记
     assert 'mode === "pull"' in seg and "slice(0,524288)" in seg  # pull 全文通道

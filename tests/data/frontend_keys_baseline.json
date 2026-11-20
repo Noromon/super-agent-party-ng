@@ -222,6 +222,7 @@
   "_ingestToolFrame",
   "_ingestToolProgress",
   "_markReasoningDone",
+  "_netwArmExpr",
   "_persistSystemPrompt",
   "_resumeStream",
   "_sanitizeCardText",

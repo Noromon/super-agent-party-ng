@@ -63,13 +63,13 @@ def test_vue_scroll_and_find_impl():
 
 
 def test_vue_network_watch_impl():
-    i = JS.index("networkWatch")
+    i = JS.index("_netwArmExpr(bodyOn)")  # S258: arm 主体上提为方法（start 与自动重挂共用）
     seg = JS[i:i + 4600]
     assert "__netw" in seg and "window.fetch" in seg and "XMLHttpRequest.prototype.open" in seg
     assert "slice(0,2048)" in seg and "E.length>=CAP" in seg
     assert "w.c=E.length" in seg and "o.u.indexOf(pat)<0" in seg  # 游标增量+pattern 过滤
     assert "not armed" in seg and "导航" in seg  # 导航丢钩子提示
-    j = JS.index("networkWatch")
+    j = JS.index("_netwArmExpr(bodyOn)")
     assert "return 'armed'" in JS[j:j + 2200]
 
 

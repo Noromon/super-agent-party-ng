@@ -203,10 +203,26 @@ Object.assign(vue_methods, {
                     nm = nm.split(String.fromCharCode(10)).join(' ').split(String.fromCharCode(13)).join(' ').trim();
                     const loaded = isCanvas ? 'canvas' : ((el.complete && nw > 1) ? 'loaded' : 'pending');
                     const off = (rect.bottom < 0 || rect.top > window.innerHeight) ? ' [offscreen]' : '';
-                    // S246: 带源 URL，agent 可直接喂 view_images 一手看图（零转述闭环）
-                    let iurl = '';
-                    if (!isCanvas) { try { iurl = String(el.currentSrc || el.src || '').slice(0, 200); } catch (e) {} }
-                    let iline = '[' + iuid + '] ' + irole + (nm ? ' "' + nm + '"' : '') + ' ' + Math.round(nw) + 'x' + Math.round(nh) + ' [' + loaded + ']' + off + (iurl ? ' url=' + iurl : '');
+                    // S246: 带源 URL，agent 可直接喂 view_images 一手看图（零转述闭环）。
+                    // S258: 懒加载站(贴吧等)的 src 只是占位符，真图地址在 _src/data-actualsrc 等
+                    // 属性——优先解析它们并绝对化；若仍是 data:/blob: 占位则明确标注不冒充真图。
+                    let iurl = '', ph = '';
+                    if (!isCanvas) {
+                        try {
+                            const lz = ['_src', 'data-src', 'data-actualsrc', 'data-original', 'data-lazy-src', 'data-original-src'];
+                            for (let li = 0; li < lz.length; li++) {
+                                const v = el.getAttribute(lz[li]);
+                                if (v && /^(https?:)?\\/\\//i.test(String(v))) {
+                                    try { iurl = new URL(String(v), location.href).href; } catch (e2) { iurl = String(v); }
+                                    break;
+                                }
+                            }
+                            if (!iurl) iurl = String(el.currentSrc || el.src || '');
+                            if (/^(data:|blob:)/i.test(iurl)) ph = ' [placeholder]';
+                            iurl = iurl.slice(0, 200);
+                        } catch (e) {}
+                    }
+                    let iline = '[' + iuid + '] ' + irole + (nm ? ' "' + nm + '"' : '') + ' ' + Math.round(nw) + 'x' + Math.round(nh) + ' [' + loaded + ']' + off + ph + (iurl ? ' url=' + iurl : '');
                     imgLines.push(iline);
                 });
 
@@ -1186,14 +1202,9 @@ Object.assign(vue_methods, {
     },
 
     // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
-    networkWatch(mode = "start", pattern = "", includeBody = false, pullIdx = -1) {
-        const wv = this.getWebview();
-        if (!wv) return "Error: No active webview";
-        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-        // S254：include_body 时全量响应体留 guest(o.bf ≤300KB)——2KB 截断曾让 agent 放弃内置钩子
-        // 回头手搓（feed JSON parse 失败）。read 只回 2KB 预览+blen，超长正文由 Python 层
-        // 经 pull 逐条拉全文落盘 uploaded_files，回 body_url。
-        const arm = "(function(){try{var E=[];var BODY=" + (includeBody ? "true" : "false") + ";var CAP=BODY?200:500;"
+    // S258：钩子脚本上提为 _netwArmExpr（start 与 dom-ready 自动重挂共用），带幂等守卫。
+    _netwArmExpr(bodyOn) {
+        return "(function(){try{if(window.__netw&&window.__netw.armed)return 'armed';var E=[];var BODY=" + (bodyOn ? "true" : "false") + ";var CAP=BODY?200:500;"
             + "window.__netw={armed:true,body:BODY,entries:E,c:0};"
             + "function rec(u,s,r){try{if(E.length>=CAP)return;var o={u:String(u).slice(0,300),s:s|0,t:Date.now()};E.push(o);"
             + "if(BODY&&r&&r.clone){try{r.clone().text().then(function(x){o.bf=x.slice(0,307200);}).catch(function(){});}};}catch(e){}}"
@@ -1203,6 +1214,15 @@ Object.assign(vue_methods, {
             + "XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('loadend',function(){var L=E.length;rec(x.__wu,x.status);"
             + "if(BODY&&L<E.length){try{var b=x.responseText||'';if(b)E[L].bf=b.slice(0,307200);}catch(e){}}});return os.apply(this,arguments);};"
             + "return 'armed';}catch(e){return 'arm_err:'+String(e&&e.message||e);}})()";
+    },
+    networkWatch(mode = "start", pattern = "", includeBody = false, pullIdx = -1) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        // S254：include_body 时全量响应体留 guest(o.bf ≤300KB)——2KB 截断曾让 agent 放弃内置钩子
+        // 回头手搓（feed JSON parse 失败）。read 只回 2KB 预览+blen，超长正文由 Python 层
+        // 经 pull 逐条拉全文落盘 uploaded_files，回 body_url。
+        const arm = this._netwArmExpr(includeBody);
         const read = "(function(){var w=window.__netw;if(!w)return JSON.stringify({error:'not armed — call network_watch(mode=start) first'});"
             + "var pat=" + JSON.stringify(String(pattern || "")) + ";var E=w.entries||[];var from=w.c||0;"
             + "var items=[];for(var i=from;i<E.length;i++){var o=E[i];if(pat&&o.u.indexOf(pat)<0)continue;"
@@ -1217,20 +1237,33 @@ Object.assign(vue_methods, {
         return (async () => {
             try {
                 if (mode === "start") {
+                    // S258：start 后每次导航 dom-ready 自动重挂（"导航丢钩子需手动重挂+刷新"是
+                    // agent 反复踩的坑）。配置存 webview 元素（跨导航不丢）；导航进行中就发出的
+                    // 请求收不到——要全量请 start 后 reload 再操作。
+                    try {
+                        wv.__netwBody = !!includeBody;
+                        if (wv.__netwRe) { try { wv.removeEventListener('dom-ready', wv.__netwRe); } catch (e) {} }
+                        const self = this;
+                        wv.__netwRe = function () {
+                            try { wv.executeJavaScript(self._netwArmExpr(wv.__netwBody)); } catch (e) {}
+                        };
+                        wv.addEventListener('dom-ready', wv.__netwRe);
+                    } catch (e) {}
                     const already = await this._wvExec(wv, "(function(){return !!(window.__netw&&window.__netw.armed);})()");
-                    if (already === true) return JSON.stringify({ ok: true, note: "already armed（保留已收集条目；要清空重收集先 stop 再 start）" });
+                    if (already === true) return JSON.stringify({ ok: true, note: "already armed（保留已收集条目；要清空重收集先 stop 再 start）。导航后会自动重挂，无需手动处理" });
                     const r = await this._wvExec(wv, arm);
                     return String(r || "armed");
                 }
                 if (mode === "read") {
-                    // 导航后钩子会丢（页面新文档）——检测并提示重挂
+                    // S258：正常路径 dom-ready 已自动重挂；到这里还丢说明是 start 之前的历史导航
                     const armed = await this._wvExec(wv, "(function(){return !!(window.__netw&&window.__netw.armed);})()");
-                    if (armed !== true) return "network_watch: 钩子未挂/页面已导航丢失 —— 先 mode=start 重新挂钩（导航后需重挂）";
+                    if (armed !== true) return "network_watch: 钩子未挂（本标签从未 start 过）—— mode=start 挂上后，之后每次导航都会自动重挂；导航途中已发出的请求收不到，需要就 start 后 reload 再 read";
                     return String(await this._wvExec(wv, read) || "{}");
                 }
                 // S256：pull 显式放行 512K——默认 60000 网关会把大响应截成碎 JSON
                 if (mode === "pull") return String(await this._wvExec(wv, pull, 524288) || "");
                 if (mode === "stop") {
+                    try { if (wv.__netwRe) { wv.removeEventListener('dom-ready', wv.__netwRe); delete wv.__netwRe; } } catch (e) {}
                     await sleep(0);
                     return String(await this._wvExec(wv, stop) || "stopped");
                 }

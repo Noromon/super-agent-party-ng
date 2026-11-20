@@ -151,7 +151,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S257" in _read("static", "js", "renderer.js")
+        assert "build=S258" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS140:
