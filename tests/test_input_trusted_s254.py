@@ -1,4 +1,4 @@
-# build=S256
+# build=S257
 # S254：CDP 真输入事件（isTrusted wheel/click，命中测试路由=人机等价）+ network_watch 全量 body 落盘
 import asyncio
 import json
@@ -78,7 +78,6 @@ def test_network_watch_body_url_dump(tmp_path, monkeypatch):
         return "armed"
     monkeypatch.setattr(cdp, "call_vue_method", fake)
     monkeypatch.setattr(cdp, "UPLOAD_FILES_DIR", str(tmp_path))
-    monkeypatch.setattr(cdp, "get_host", lambda: "127.0.0.1")
     monkeypatch.setattr(cdp, "get_port", lambda: 3456)
     out = asyncio.run(cdp.network_watch("read", "feed", True))
     d = json.loads(out)

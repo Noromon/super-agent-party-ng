@@ -9,7 +9,7 @@ import requests
 import asyncio
 import websockets
 from py import html_to_md
-from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, get_host, load_settings
+from py.get_setting import UPLOAD_FILES_DIR, LOG_DIR, get_port, load_settings
 from py.proxy_util import active_proxy
 
 # 全局变量，用于保持当前上下文
@@ -411,7 +411,10 @@ async def network_watch(mode="start", pattern="", include_body=False):
     """S253: 内置网络观察器——start 挂 fetch/XHR 钩子（页面导航后需重挂）→ 操作页面 →
     read 增量收割 {url,status[,body 预览≤2KB]}（pattern 子串过滤）；stop 清空并解除。
     S254: include_body=True 时全量响应体留在页面侧，read 中超长正文自动落盘为
-    uploaded_files 文件并回 body_url——完整 JSON 可用 load_files/终端 grep 读，不再 2KB 截断。"""
+    uploaded_files 文件并回 body_url——完整 JSON 可用 load_files/终端 grep 读，不再 2KB 截断。
+    S257: 落盘条目另附 body_path（本地绝对路径，read_file_range_tool_local 直读、免 token）；
+    read 总返回硬性压在 S184 工具输出限额（20KB）之下——超限则收割清单整体落盘回路径，
+    避免被 S184 截断成 .agent/tool_output 相对路径 marker 反而弄丢引用。"""
     if str(mode or "").lower() not in ("start", "read", "stop"):
         return "[Error] network_watch: mode 需 start|read|stop"
     m = str(mode).lower()
@@ -424,7 +427,7 @@ async def network_watch(mode="start", pattern="", include_body=False):
             d = json.loads(res)
             items = d.get("items") if isinstance(d, dict) else None
             overs = [it for it in (items or [])
-                     if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:3]
+                     if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:4]
             origin = str(d.get("origin") or "").strip()
             saved = failed = 0
             for it in overs:
@@ -438,18 +441,24 @@ async def network_watch(mode="start", pattern="", include_body=False):
                         continue
                     _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
                     fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
-                    with open(_os.path.join(UPLOAD_FILES_DIR, fn), "w", encoding="utf-8") as f:
+                    fp = _os.path.join(UPLOAD_FILES_DIR, fn)
+                    with open(fp, "w", encoding="utf-8") as f:
                         f.write(body)
-                    it["body_url"] = f"http://{get_host()}:{get_port()}/uploaded_files/{fn}"
-                    it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_url"
-                                    "（load_files 或 read_file_range 可全文读；b 仅前 2048 预览）")
+                    it["body_path"] = fp
+                    # 127.0.0.1 写死：本机工具调用方，HOST 配成 0.0.0.0/局域网 IP 时反而不可用
+                    it["body_url"] = f"http://127.0.0.1:{get_port()}/uploaded_files/{fn}"
+                    if isinstance(it.get("b"), str):
+                        it["b"] = it["b"][:200]  # 全文已在盘上，预览占位即可（S257 返回瘦身）
+                    it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_path"
+                                    "（read_file_range_tool_local/grep 直读，免鉴权）；"
+                                    "body_url 为同文件 HTTP 形式")
                     saved += 1
                 except Exception:  # noqa: BLE001
                     it["b_err"] = "全文拉取异常，预览 b 仍有效；可稍后重试 read"
                     failed += 1
             extra = ""
             if saved:
-                extra += (f"；{saved} 条超长响应已落盘（见各项 body_url），直接读文件拿完整 JSON，"
+                extra += (f"；{saved} 条超长响应已落盘（各项 body_path/body_url），本地读路径最方便，"
                           "不必再手搓 fetch 钩子")
             if failed:
                 extra += f"；{failed} 条全文拉取失败（b_err 说明），稍后可再 read 重试"
@@ -457,7 +466,35 @@ async def network_watch(mode="start", pattern="", include_body=False):
                 extra += f"；数据抓取自 {origin}——正文里的相对路径资源（如 /emotions/xx.gif）需拼该域名"
             if extra:
                 d["note"] = (str(d.get("note") or "") + extra).lstrip("；")
-                res = json.dumps(d, ensure_ascii=False)
+            payload = json.dumps(d, ensure_ascii=False)
+            if len(payload.encode("utf-8", "ignore")) > 17000 and isinstance(items, list) and items:
+                # S184 限额 20000B——超线会被"output truncated+.agent 相对路径"接管，
+                # 连 body_path 一起丢（S257 事故根因）。改为收割清单整体落盘+紧凑摘要。
+                try:
+                    _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+                    fn2 = ("net_read_" + _hl.md5(payload.encode("utf-8", "ignore")).hexdigest()[:16]
+                           + ".json")
+                    fp2 = _os.path.join(UPLOAD_FILES_DIR, fn2)
+                    with open(fp2, "w", encoding="utf-8") as f:
+                        f.write(payload)
+                    brief = []
+                    for it in items[:8]:
+                        if isinstance(it, dict):
+                            brief.append({k: str(it.get(k))[:120] for k in ("u", "s", "blen")
+                                          if it.get(k) is not None})
+                    d2 = {"total": d.get("total"), "new_items": d.get("new_items"),
+                          "returned": 0, "items": brief,
+                          "note": (f"本次收割 {len(items)} 条超返回限额，完整清单（含各条 "
+                                   f"b 预览与 body_path/body_url）已存 {fp2}"
+                                   "——用 read_file_range_tool_local 或 search_files_tool_local"
+                                   "（path 传该绝对路径）读；想直接拿数据可加大 pattern 缩小增量再 read")}
+                    if origin:
+                        d2["note"] += f"；数据源 {origin}（相对路径资源拼该域名）"
+                    res = json.dumps(d2, ensure_ascii=False)
+                except Exception:  # noqa: BLE001
+                    res = payload
+            else:
+                res = payload
         except Exception:  # noqa: BLE001
             pass
     return res
@@ -998,8 +1035,9 @@ all_cdp_tools = [
                             "页面导航后钩子丢失需重新 start）→ 然后 navigate/滚动/点击让页面自己发请求 → "
                             "read=增量收割 {url,status[,b=body预览2KB]}（pattern 按 URL 子串过滤，如 'newpostlist'；每次只返回上次 read 之后的新条目）。"
                             "适合『页面渲染不出但数据在接口里』的场景：抓列表/详情接口 JSON 直接拿 tid/数据。"
-                            "S254: include_body=true 时响应体全量保留，read 中 blen>2048 的条目自动落盘并附 body_url+blen"
-                            "——完整 JSON 用 load_files/read_file_range 读 body_url 即可，无 2KB 截断，无需再手搓钩子。"
+                            "S254/S257: include_body=true 时响应体全量保留，read 中 blen>2048 的条目自动落盘并附 body_path"
+                            "（本地绝对路径——read_file_range_tool_local/grep 直读，免 token，首选）+body_url+blen，"
+                            "收割总量超返回限额时完整清单自动整体落盘回路径，永不被截断；无需再手搓钩子。"
                             "stop=清空并停用。"),
             "parameters": {
                 "type": "object",

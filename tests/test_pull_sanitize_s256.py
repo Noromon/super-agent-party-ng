@@ -1,4 +1,4 @@
-# build=S256
+# build=S257
 # S256：network_watch 落盘链路加固（pull 截断网关绕过、污染门禁、origin 附注）
 # + scroll_and_find 命中强化（innerText 规范化匹配 + 可点祖先上溯）。
 # 动因：agent 实测贴吧报告——pull 落盘拿到"Vue 包装返回"伪文件、feed 相对路径图片缺 base、
@@ -78,7 +78,6 @@ def test_pull_ok_note_carries_origin_hint(tmp_path, monkeypatch):
         return _read_payload() if args[0] == "read" else body
     monkeypatch.setattr(cdp, "call_vue_method", fake)
     monkeypatch.setattr(cdp, "UPLOAD_FILES_DIR", str(tmp_path))
-    monkeypatch.setattr(cdp, "get_host", lambda: "127.0.0.1")
     monkeypatch.setattr(cdp, "get_port", lambda: 3456)
     out = asyncio.run(cdp.network_watch("read", "f", True))
     d = json.loads(out)
