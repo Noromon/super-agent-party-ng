@@ -204,20 +204,25 @@ Object.assign(vue_methods, {
                     const loaded = isCanvas ? 'canvas' : ((el.complete && nw > 1) ? 'loaded' : 'pending');
                     const off = (rect.bottom < 0 || rect.top > window.innerHeight) ? ' [offscreen]' : '';
                     // S246: 带源 URL，agent 可直接喂 view_images 一手看图（零转述闭环）。
-                    // S258: 懒加载站(贴吧等)的 src 只是占位符，真图地址在 _src/data-actualsrc 等
-                    // 属性——优先解析它们并绝对化；若仍是 data:/blob: 占位则明确标注不冒充真图。
-                    let iurl = '', ph = '';
-                    if (!isCanvas) {
-                        try {
-                            const lz = ['_src', 'data-src', 'data-actualsrc', 'data-original', 'data-lazy-src', 'data-original-src'];
-                            for (let li = 0; li < lz.length; li++) {
-                                const v = el.getAttribute(lz[li]);
-                                if (v && /^(https?:)?\\/\\//i.test(String(v))) {
-                                    try { iurl = new URL(String(v), location.href).href; } catch (e2) { iurl = String(v); }
-                                    break;
+                    // S258: 懒加载站(贴吧等)未渲染时 src 只是占位符，真图地址在 _src/data-actualsrc 等属性。
+                    // S262: 但已渲染页面 src 才是真图(_src 留旧缩略)——http src 优先，懒属性仅回退。
+                        let iurl = '', ph = '';
+                        if (!isCanvas) {
+                            try {
+                                // S262: 帖内页 JS 渲染后 src=真长图、_src 仍是旧缩略——src 已是 http 必取 src；
+                                // 仅未渲染(src 缺失/data:/blob: 占位)才回退懒属性链（列表页懒加载场景）。
+                                const cur = String(el.currentSrc || el.src || '');
+                                if (/^https?:/i.test(cur)) iurl = cur;
+                                if (!iurl) {
+                                    const lz = ['_src', 'data-src', 'data-actualsrc', 'data-original', 'data-lazy-src', 'data-original-src'];
+                                    for (let li = 0; li < lz.length; li++) {
+                                        const v = el.getAttribute(lz[li]);
+                                        if (v && /^(https?:)?\\/\\//i.test(String(v))) {
+                                            try { iurl = new URL(String(v), location.href).href; } catch (e2) { iurl = String(v); }
+                                            break;
+                                        }
+                                    }
                                 }
-                            }
-                            if (!iurl) iurl = String(el.currentSrc || el.src || '');
                             // S259: blob:/data: 等页内源外部永远取不到（喂 view_images 必空手，
                             // 曾把 agent 引去试 canvas——污染死路）。不吐 URL 本体，直导像素路。
                             if (iurl && !/^https?:/i.test(iurl)) {

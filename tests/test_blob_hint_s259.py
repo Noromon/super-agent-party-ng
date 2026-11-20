@@ -1,4 +1,4 @@
-# build=S261
+# build=S262
 # S259：blob 图反馈修复——view_images 对 blob:/javascript: 给专错指引（曾落本地路径分支
 # 报"文件不存在0字节"误导），file:// 正确解析；take_snapshot 非 http 源不吐 URL 本体。
 import asyncio
