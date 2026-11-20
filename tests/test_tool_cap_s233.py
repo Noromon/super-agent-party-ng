@@ -120,4 +120,4 @@ def test_defaults_ui_i18n_stamp():
         for k in ("maxToolIterationsDesc", "maxToolIterationsHint",
                   "toolCapUnlimitedDesc", "toolCapUnlimitedHint"):
             assert k in s, (loc, k)
-    assert "build=S258" in _read("static", "js", "renderer.js")
+    assert "build=S259" in _read("static", "js", "renderer.js")

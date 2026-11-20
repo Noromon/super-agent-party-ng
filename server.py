@@ -1604,6 +1604,22 @@ async def view_images(image_urls: list) -> str:
             break
         try:
             parsed = _urlparse(one)
+            if parsed.scheme == "file":
+                # S259: file:///C:/x.png 这类应能用——解析成本地路径走既有登记通道
+                from urllib.request import url2pathname
+                _fp = url2pathname(parsed.path or "")
+                if parsed.netloc and parsed.netloc not in ("", "localhost"):
+                    _fp = "\\\\" + parsed.netloc + _fp
+                if _fp:
+                    one = _fp
+                    parsed = _urlparse(one)
+            if parsed.scheme in ("blob", "javascript", "about", "mailto", "ws", "wss"):
+                # S259: blob: 只在页面内存有效（take_snapshot 的懒加载图可能是 blob 渲染）——
+                # 外站/后端永远取不到，专错直导像素路，别让 agent 误当文件/魔数问题瞎试
+                errs.append(f"{one[:90]}: {parsed.scheme}: URL 只存在于页面内存（或非资源协议），外部无法获取"
+                            "——看该图渲染像素用 take_screenshot(uid)（元素截图不走 URL）；"
+                            "要可下载的地址就 take_snapshot 找它的 http(s) 源")
+                continue
             if parsed.scheme in ("http", "https"):
                 if ('uploaded_files' in parsed.path or 'tool_temp' in parsed.path) and (
                         parsed.hostname in ("127.0.0.1", "localhost", "0.0.0.0", _gh) or not parsed.hostname):

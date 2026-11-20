@@ -218,7 +218,11 @@ Object.assign(vue_methods, {
                                 }
                             }
                             if (!iurl) iurl = String(el.currentSrc || el.src || '');
-                            if (/^(data:|blob:)/i.test(iurl)) ph = ' [placeholder]';
+                            // S259: blob:/data: 等页内源外部永远取不到（喂 view_images 必空手，
+                            // 曾把 agent 引去试 canvas——污染死路）。不吐 URL 本体，直导像素路。
+                            if (iurl && !/^https?:/i.test(iurl)) {
+                                ph = ' [已渲染但无外部URL：用 take_screenshot(uid) 查看]'; iurl = '';
+                            }
                             iurl = iurl.slice(0, 200);
                         } catch (e) {}
                     }
