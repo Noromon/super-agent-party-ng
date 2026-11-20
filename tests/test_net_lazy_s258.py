@@ -1,4 +1,4 @@
-# build=S259
+# build=S260
 # S258：take_snapshot 懒加载真图解析 + network_watch 导航自动重挂。
 # 动因：agent 实测——"图片 src 压根不在此处，是懒加载 JS 的，接口只给相对占位路径"；
 # "网络钩子会随导航失效需要重新挂"。
@@ -38,7 +38,7 @@ def test_network_watch_arm_expr_extracted_with_guard():
 
 def test_network_watch_auto_rearm_on_navigation():
     i = JS.index("S258：start 后每次导航 dom-ready 自动重挂")
-    seg = JS[i:i + 1100]
+    seg = JS[i:i + 1600]  # S260 后 start 分支加长了（等待加载+tab 配置）
     assert "wv.__netwBody = !!includeBody" in seg
     assert "addEventListener('dom-ready', wv.__netwRe)" in seg
     assert "removeEventListener('dom-ready', wv.__netwRe)" in seg  # 重挂前先摘旧听

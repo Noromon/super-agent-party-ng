@@ -186,4 +186,4 @@ def test_defaults_and_ui_and_i18n():
 
 
 def test_stamp_s232():
-    assert "build=S259" in _read("static", "js", "renderer.js")
+    assert "build=S260" in _read("static", "js", "renderer.js")

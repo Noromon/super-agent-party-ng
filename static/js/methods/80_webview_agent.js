@@ -1238,12 +1238,36 @@ Object.assign(vue_methods, {
         const pull = "(function(){var w=window.__netw;var gi=" + (parseInt(pullIdx) || -1) + ";"
             + "if(!w||gi<0||!w.entries||!w.entries[gi])return '';return String(w.entries[gi].bf||'').slice(0,524288);})()";
         const stop = "(function(){try{if(window.__netw){window.__netw.entries.length=0;window.__netw.armed=false;window.__netw.stopped=true;}return 'stopped';}catch(e){return 'stop_err';}})()";
+        // S260：重挂配置提升到 Vue 实例的 tab 维度（webview 元素会因 mobile↔桌面切换被重建，
+        // S258 挂在元素上的监听随之蒸发）。任何 mode 进入都自愈：该 tab 有配置但当前元素没挂
+        // 监听 → reattach 并给当前文档补 arm（脚本自带幂等守卫）。
+        const tabId = this.currentTabId;
+        this.__netwTabs = this.__netwTabs || {};
+        const cfg = tabId ? this.__netwTabs[tabId] : null;
+        if (cfg && !wv.__netwRe) {
+            try {
+                wv.__netwBody = !!cfg.body;
+                const self0 = this;
+                wv.__netwRe = function () {
+                    try { wv.executeJavaScript(self0._netwArmExpr(wv.__netwBody)); } catch (e) {}
+                };
+                wv.addEventListener('dom-ready', wv.__netwRe);
+                const p = wv.executeJavaScript(this._netwArmExpr(cfg.body));
+                if (p && p.catch) p.catch(function () {});
+            } catch (e) {}
+        }
         return (async () => {
             try {
                 if (mode === "start") {
-                    // S258：start 后每次导航 dom-ready 自动重挂（"导航丢钩子需手动重挂+刷新"是
-                    // agent 反复踩的坑）。配置存 webview 元素（跨导航不丢）；导航进行中就发出的
-                    // 请求收不到——要全量请 start 后 reload 再操作。
+                    // S258：start 后每次导航 dom-ready 自动重挂。
+                    // S260：先等加载停止——导航中 guest executeJavaScript 必抛
+                    // GUEST_VIEW_MANAGER_CALL（start 报 Electron Webview Error 的主因：
+                    // agent 刚 reload 就 start，3 次重试窗口熬不过加载期）。
+                    if (typeof wv.isLoading === "function" && wv.isLoading()) {
+                        const done = await this._waitLoadStop(wv, 8000);
+                        if (!done) return "network_watch start：页面仍在加载（已等 8s），挂钩未生效——加载完成后重试 start（幂等安全）；start 成功后每次导航都会自动重挂";
+                    }
+                    if (tabId) this.__netwTabs[tabId] = { body: !!includeBody };
                     try {
                         wv.__netwBody = !!includeBody;
                         if (wv.__netwRe) { try { wv.removeEventListener('dom-ready', wv.__netwRe); } catch (e) {} }
@@ -1268,6 +1292,7 @@ Object.assign(vue_methods, {
                 if (mode === "pull") return String(await this._wvExec(wv, pull, 524288) || "");
                 if (mode === "stop") {
                     try { if (wv.__netwRe) { wv.removeEventListener('dom-ready', wv.__netwRe); delete wv.__netwRe; } } catch (e) {}
+                    try { if (tabId) delete this.__netwTabs[tabId]; } catch (e) {}
                     await sleep(0);
                     return String(await this._wvExec(wv, stop) || "stopped");
                 }

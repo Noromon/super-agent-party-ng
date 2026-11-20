@@ -420,6 +420,14 @@ async def network_watch(mode="start", pattern="", include_body=False):
     m = str(mode).lower()
     res = await call_vue_method('networkWatch', [m, str(pattern or ""), bool(include_body), 0],
                                 timeout=30)
+    # S260：start 撞上页面加载中 → guest 拒绝执行钩子脚本（GUEST_VIEW_MANAGER_CALL 类），
+    # call_vue_method 重试耗尽回裸 Electron 错误——翻译成可行动指引（幂等重试即可，别弃用本工具）
+    if m == "start" and isinstance(res, str) and (
+            "Electron Webview Error" in res or "GUEST_VIEW_MANAGER_CALL" in res
+            or "Illegal invocation" in res):
+        return ("network_watch start 失败：页面正在加载或渲染进程繁忙，钩子脚本未被接受。"
+                "等导航完成后重试 start 即可（幂等安全，重复 start 不会双重挂钩）；"
+                "mobile/桌面模式切换过的标签同样直接重试——钩子会自动跟随后续所有导航重挂。")
     if m == "read" and isinstance(res, str) and res.strip().startswith("{"):
         try:
             import hashlib as _hl
@@ -1032,7 +1040,8 @@ all_cdp_tools = [
         "function": {
             "name": "network_watch",
             "description": ("S253: 内置网络观察器（替代手搓 XHR/fetch 钩子）。start=给当前标签页挂 fetch/XHR 钩子（幂等；"
-                            "S258: start 过一次之后每次导航 dom-ready 自动重挂，无需再手动 start；"
+                            "S260: start 会自动等页面加载完成再挂，若仍报加载/繁忙类错误直接重试 start 即可；"
+                            "S258: start 过一次之后每次导航 dom-ready 自动重挂（模式切换/元素重建后也已自愈跟随），无需再手动 start；"
                             "导航进行中已发出的请求收不到——要全量就 start 后 reload 再操作）→ 然后 navigate/滚动/点击让页面自己发请求 → "
                             "read=增量收割 {url,status[,b=body预览2KB]}（pattern 按 URL 子串过滤，如 'newpostlist'；每次只返回上次 read 之后的新条目）。"
                             "适合『页面渲染不出但数据在接口里』的场景：抓列表/详情接口 JSON 直接拿 tid/数据。"
