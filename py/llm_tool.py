@@ -215,6 +215,38 @@ async def get_image_media_type(image_url: str, base64_data: str = "") -> str:
         media_type = 'image/png'
     return media_type
 
+
+# S264: 本地推理服务器解码器白名单（127.0.0.1:1234 实测：jpg/png/gif 200，webp 0s 即 400
+# "'url' field must be a base64 encoded image"）。twitter 图默认 webp、avif 是同款地雷。
+_SERVER_IMAGE_OK = {"image/jpeg", "image/png", "image/gif", "image/bmp"}
+
+
+def _normalize_image_for_server(base64_data: str, mime_type: str):
+    """把本地推理服务器拒收的图像格式（webp/avif 等）归一为 JPEG，返回 (b64, mime)。
+    白名单内原样直通；转码失败返回原值（由注入剔行/400 剥图重试兜底，不在此炸）。"""
+    if (mime_type or "").lower() in _SERVER_IMAGE_OK or not base64_data:
+        return base64_data, mime_type
+    try:
+        import io as _io
+        from PIL import Image
+        raw = base64.b64decode(base64_data)
+        img = Image.open(_io.BytesIO(raw))
+        if getattr(img, "is_animated", False):
+            try:
+                img.seek(0)
+            except Exception:
+                pass
+        img = img.convert("RGB")
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        logging.getLogger("app").info(
+            "[S264] 图像格式 %s 本地服务器拒收风险，已转码 JPEG (%d→%d bytes)",
+            mime_type, len(raw), len(buf.getvalue()))
+        return base64.b64encode(buf.getvalue()).decode("utf-8"), "image/jpeg"
+    except Exception as e:
+        logging.getLogger("app").warning("[S264] 图像转码失败（保持原格式）: %s", str(e)[:120])
+        return base64_data, mime_type
+
 async def custom_llm_tool(tool_name, query, image_url=None):
     logging.getLogger("app").info(f"调用LLM工具：{tool_name}")
     settings = await load_settings()

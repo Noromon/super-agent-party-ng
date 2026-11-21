@@ -2779,7 +2779,13 @@ async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> Lis
                             base64_data = await get_image_base64(media_url)
                             # 假设 get_image_media_type 也能正常返回 video/mp4, video/webm 等
                             mime_type = await get_image_media_type(media_url, base64_data)
-                            
+
+                            # S264: 本地推理服务器解码器不认 webp/avif 等格式（400 炸整轮实证），
+                            # 白名单外统一转码 JPEG。主流程与 browser_vision 注入共用本函数=单点全覆盖。
+                            if media_key == 'image_url':
+                                from py.llm_tool import _normalize_image_for_server
+                                base64_data, mime_type = _normalize_image_for_server(base64_data, mime_type)
+
                             item[media_key]["url"] = f"data:{mime_type};base64,{base64_data}"
                             item[media_key]["hash"] = hashlib.md5(item[media_key]["url"].encode()).hexdigest()
                         else:
@@ -5854,7 +5860,9 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             _et252 = str(_lr_e).lower()
             if (not _st.get("img_strip_retried")
                     and ("failed to load image" in _et252 or "image or audio" in _et252
-                         or "load image" in _et252)
+                         or "load image" in _et252
+                         # S264: 格式拒收类 400（本地服务器不认 webp/avif 实证文案）同样剥图降级
+                         or "base64 encoded image" in _et252)
                     and _strip_image_parts_from_messages(request.messages)):
                 _st["img_strip_retried"] = True
                 logging.getLogger("app").warning(
