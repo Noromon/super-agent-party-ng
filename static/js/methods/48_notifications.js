@@ -28,6 +28,14 @@ Object.assign(vue_methods, {
     if (this.notificationItems.some(d => d.id === rec.id)) return;
     this.notificationItems.unshift(rec);
     if (this.notificationItems.length > 200) this.notificationItems.splice(200);
+    // S265：审批/提问待处理 → 宿主(Windows)通知中心弹系统 toast 提醒（人不在
+    // SAP 前也能看见）。窗口聚焦时站内卡本身可见不弹（防打扰）；resolved 不弹。
+    const ex = rec.extra || {};
+    if (rec.category === 'approval' && ex.status === 'pending' && !document.hasFocus()) {
+      try {
+        window.electronAPI?.showNotification?.('等待审批 - Super Agent Party', rec.msg || '有审批正等待你的处理');
+      } catch (e) {}
+    }
   },
 
   notifFilteredItems() {
