@@ -19,7 +19,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 CATEGORIES = ("approval", "generation", "bot", "error", "system")
-MAX_ITEMS = 200
+# S267 审计：FIFO 挤老条目无提示，200 对审批审计链太短；调大一档（json 体量小，代价可忽略）
+MAX_ITEMS = 500
 
 _lock = threading.Lock()
 _items: List[Dict[str, Any]] = []

@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 
 BACKUP_SUBDIR = "backups"
 _SNAP_PREFIX = "snap-"
-_CORE_DIRS = ("memory_cache", "agents", "kb")
+# S267 审计：diary 曾被 500 上限 FIFO 挤压 yet 完全不在快照内（丢失不可恢复，
+# 仅靠手工 bak 救回 85 条）；ext 含用户自装/自建扩展数据。均纳入核心目录。
+_CORE_DIRS = ("memory_cache", "agents", "kb", "diary", "ext")
 _PRUNE_KEEP_MIN = 2
 
 
@@ -85,6 +87,9 @@ def _iter_backup_sources(data_dir: str, include_uploads: bool):
             yield entry, src, "json"
         elif ext == ".db":
             yield entry, src, "db"
+        elif ext == ".txt":
+            # S267: tool_output_workspaces.txt（工作区注册表）曾被扩展白名单漏掉
+            yield entry, src, "txt"
     for d in _CORE_DIRS + (("uploaded_files",) if include_uploads else ()):
         src = os.path.join(data_dir, d)
         if os.path.isdir(src):
@@ -158,7 +163,7 @@ def snapshot_data_dir(data_dir: str, keep: int = 5, include_uploads: bool = Fals
                 manifest["notes"][rel] = how
                 total += os.path.getsize(os.path.join(snap, rel))
                 manifest["files"][rel] = os.path.getsize(os.path.join(snap, rel))
-            elif kind == "json":
+            elif kind in ("json", "txt"):
                 total += _copy_one(src, os.path.join(snap, rel))
                 manifest["files"][rel] = os.path.getsize(os.path.join(snap, rel))
             else:  # dir

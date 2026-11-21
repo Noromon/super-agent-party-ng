@@ -130,7 +130,7 @@ Object.assign(vue_data, {
         proxyMode: 'system', //system or manual or none
       isChinaProxy: false,
     enableShortcuts: true,
-      backupIncludeUploads: false,
+      backupIncludeUploads: true,
       fontScale: 1,
       codeFontScale: 1,
       customCSS: '',

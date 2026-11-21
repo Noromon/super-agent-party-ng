@@ -214,8 +214,11 @@ async def transfer_import(req: ImportReq):
         merged.sort(key=lambda e: str(e.get("time") or ""))
     except Exception:
         pass
-    from py.diary_system import MAX_ENTRIES
-    truncated = max(0, len(merged) - MAX_ENTRIES)
+    # S266/S267：截断随 diarySettings.diaryMaxEntries（0=无上限不截断）；
+    # 实际裁剪在 save_diary_data 内按策略执行（溢出自动归档），此处仅报告口径。
+    from py.diary_system import get_diary_policy
+    _lim267, _ = await get_diary_policy()
+    truncated = max(0, len(merged) - _lim267) if _lim267 else 0
     book_out = {"characterId": req.target_card, "characterName": target_name,
                 "entries": merged}
     await diary_system.save_diary_data(book_out, req.target_card)

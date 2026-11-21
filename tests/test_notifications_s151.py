@@ -57,7 +57,8 @@ def test_emit_ring_and_persistence(tmp_path, monkeypatch):
         for i in range(nc.MAX_ITEMS + 5):
             nc.emit("system", f"ev{i}")
         assert len(nc._items) == nc.MAX_ITEMS
-        assert nc._items[-1]["msg"] == "ev204"
+        # S267: MAX_ITEMS 200→500，端点随容量参数化（不再写死 204/5 对）
+        assert nc._items[-1]["msg"] == f"ev{nc.MAX_ITEMS + 4}"
         assert nc._items[0]["msg"] == "ev5"  # 头部 5 条被环形挤出
         with open(nc._store_path(), encoding="utf-8") as f:
             assert len(json.load(f)) == nc.MAX_ITEMS
@@ -66,7 +67,7 @@ def test_emit_ring_and_persistence(tmp_path, monkeypatch):
         nc._loaded = False
         items = nc.list_items(limit=nc.MAX_ITEMS)
         assert len(items) == nc.MAX_ITEMS
-        assert items[0]["msg"] == "ev204"  # 列表为倒序（新在前）
+        assert items[0]["msg"] == f"ev{nc.MAX_ITEMS + 4}"  # 列表为倒序（新在前）
         assert nc.list_items(category="approval") == []
     finally:
         restore()

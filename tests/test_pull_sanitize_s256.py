@@ -1,4 +1,4 @@
-# build=S266
+# build=S267
 # S256：network_watch 落盘链路加固（pull 截断网关绕过、污染门禁、origin 附注）
 # + scroll_and_find 命中强化（innerText 规范化匹配 + 可点祖先上溯）。
 # 动因：agent 实测贴吧报告——pull 落盘拿到"Vue 包装返回"伪文件、feed 相对路径图片缺 base、

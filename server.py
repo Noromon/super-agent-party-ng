@@ -902,6 +902,9 @@ async def lifespan(app: FastAPI):
     # 2. 解包结果
     global settings, client, reasoner_client, fast_client, local_timezone, logger, locales, scheduler_task, sleep_guard, diary_engine_task, screen_watcher_task
     _, _, locales, settings, local_timezone = results
+
+    # S267: backupIncludeUploads 旧默认残留迁移（一次性；标记落库后尊重用户显式选择）
+    await _migrate_backup_uploads_flag_s267(settings)
     
     # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
     async def _startup_snapshot():
@@ -909,8 +912,12 @@ async def lifespan(app: FastAPI):
             from py.data_backup import snapshot_data_dir
             # 开关持久化域=systemSettings 子对象（前端开关所在层），兼容顶层旧写法
             _s = settings or {}
-            include = bool(((_s.get("systemSettings") or {}).get("backupIncludeUploads")
-                            or _s.get("backupIncludeUploads") or False))
+            # S267: uploaded_files 是用户资产唯一副本（历史附图/生成物/正文落盘），
+            # 未显式配置时默认纳入快照；显式 True/False 一律优先。
+            _raw_inc = ((_s.get("systemSettings") or {}).get("backupIncludeUploads"))
+            if _raw_inc is None:
+                _raw_inc = _s.get("backupIncludeUploads")
+            include = bool(_raw_inc) if _raw_inc is not None else True
             res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include)
             if res.get("ok"):
                 logging.getLogger("app").info(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
@@ -4611,6 +4618,22 @@ async def _bound_tool_output_async(result):
     """无 settings 上下文时的变体（异步工具回注等）。"""
     from py.get_setting import load_settings
     return _bound_tool_output(result, await load_settings())
+
+
+async def _migrate_backup_uploads_flag_s267(settings):
+    """S267: backupIncludeUploads 旧默认残留一次性迁移——S267 前该键不存在，前端
+    data 默认 false 随任意设置保存写入 db（并非用户显式关）。仅此一次翻 true 让
+    用户资产入快照；标记落库后永远尊重用户显式选择。"""
+    try:
+        ss = (settings or {}).setdefault("systemSettings", {})
+        if ss.get("backupIncludeUploads") is False and not ss.get("backupUploadsS267Migrated"):
+            ss["backupIncludeUploads"] = True
+            ss["backupUploadsS267Migrated"] = True
+            from py.get_setting import save_settings
+            await save_settings(settings)
+            logging.info("[S267] backupIncludeUploads 旧默认 false 已迁移为 true（快照纳入 uploaded_files）")
+    except Exception as e:
+        logging.warning("[S267] backupIncludeUploads 迁移失败: %r", e)
 
 
 def _apply_ctx_guardrail(extra, messages, settings):
