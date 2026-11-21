@@ -40,8 +40,29 @@
   50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
 }
 
-.sap-hud-bubble {
+/* S272：消息气泡栈——容器贴角，最新条目紧邻胶囊（胶囊 18px+12px 偏移 → 栈偏移 38px；
+   非胶囊模式 hud-solo 无胶囊占位回到 12px）。n* 方位 column-reverse（新在上靠胶囊），
+   s* 方位 column（新在下靠胶囊），旧条目向外排。 */
+.sap-hud-stack {
   position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+  pointer-events: none;
+}
+.sap-hud-stack.hud-pos-nw { top: 38px; left: 12px; }
+.sap-hud-stack.hud-pos-n  { top: 38px; left: 50%; transform: translateX(-50%); align-items: center; }
+.sap-hud-stack.hud-pos-ne { top: 38px; right: 12px; }
+.sap-hud-stack.hud-pos-sw { bottom: 38px; left: 12px; }
+.sap-hud-stack.hud-pos-s  { bottom: 38px; left: 50%; transform: translateX(-50%); align-items: center; }
+.sap-hud-stack.hud-pos-se { bottom: 38px; right: 12px; }
+.sap-hud-stack.hud-pos-nw, .sap-hud-stack.hud-pos-n, .sap-hud-stack.hud-pos-ne { flex-direction: column-reverse; }
+.sap-hud-stack.hud-solo.hud-pos-nw, .sap-hud-stack.hud-solo.hud-pos-n, .sap-hud-stack.hud-solo.hud-pos-ne { top: 12px; }
+.sap-hud-stack.hud-solo.hud-pos-sw, .sap-hud-stack.hud-solo.hud-pos-s, .sap-hud-stack.hud-solo.hud-pos-se { bottom: 12px; }
+
+.sap-hud-bubble {
+  position: relative;
   max-width: 340px;
   padding: 8px 12px;
   border-radius: 10px;
@@ -55,12 +76,18 @@
   align-items: flex-start;
   gap: 8px;
   opacity: 0;
-  transition: opacity 0.35s ease;
+  transform: translateY(4px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
 }
-.sap-hud-bubble.hud-show { opacity: 1; }
+.sap-hud-bubble.hud-show { opacity: 1; transform: none; }
 .sap-hud-bubble .hud-icon { margin-top: 2px; color: #8ab4ff; }
 .sap-hud-bubble.hud-approval .hud-icon { color: #ffb020; }
 .sap-hud-bubble .hud-text { white-space: pre-wrap; word-break: break-all; }
+/* 指向胶囊的角收窄，气泡与圆点形成"同一物体"的视觉（S272 审美细节） */
+.sap-hud-bubble.hud-corner-nw, .sap-hud-bubble.hud-corner-n { border-top-left-radius: 3px; }
+.sap-hud-bubble.hud-corner-ne { border-top-right-radius: 3px; }
+.sap-hud-bubble.hud-corner-sw, .sap-hud-bubble.hud-corner-s { border-bottom-left-radius: 3px; }
+.sap-hud-bubble.hud-corner-se { border-bottom-right-radius: 3px; }
 
 .hud-pos-nw { top: 12px; left: 12px; }
 .hud-pos-ne { top: 12px; right: 12px; }

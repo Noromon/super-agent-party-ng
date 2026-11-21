@@ -73,7 +73,11 @@ class TestPreviewNoRebuild:
 
 class TestPositionCss:
     def test_no_transform_conflict_on_bubble(self):
-        # hud-pos-n/s 的 translateX(-50%) 不得再被气泡动画 transform 覆盖
-        assert "translateY" not in HUD_CSS
-        seg = _seg(HUD_CSS, ".sap-hud-bubble {", ".sap-hud-bubble.hud-show")
-        assert "transform" not in seg
+        # hud-pos-n/s 的 translateX(-50%) 不得再被气泡动画 transform 覆盖。
+        # S272：居中偏移从气泡迁到栈容器（.sap-hud-stack.hud-pos-n/s）——守卫对象随迁：
+        # 栈容器规则保持纯 translateX，气泡自身 translateY 动画在子元素上不再冲突。
+        assert "translateX(-50%) translateY" not in HUD_CSS
+        seg = _seg(HUD_CSS, ".sap-hud-stack.hud-pos-nw", ".sap-hud-bubble {")
+        assert "translateY" not in seg
+        bseg = _seg(HUD_CSS, ".sap-hud-bubble {", ".sap-hud-bubble.hud-show")
+        assert "translateY(4px)" in bseg  # 淡入动画挂在子气泡，安全

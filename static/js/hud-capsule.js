@@ -5,6 +5,8 @@
   'use strict';
 
   var CFG_KEY = 'sapHudCfg';
+  // S272：pop=消息送达弹出气泡开关（取代 approvalExpand 特殊化）；
+  // holdMs=每条气泡送达后保留时长（到时淡出）；stackMax=同屏最大条数（超限立即撤最老的）。
   var DEFAULTS = {
     enabled: true,        // HUD 总开关（关=不渲染本层）
     capsule: true,        // 胶囊模式：折叠圆点+角标；关=完整气泡
@@ -13,8 +15,11 @@
     idleMs: 5000,         // 空闲判定
     opacity: 0.9,         // 活跃不透明度
     dimOpacity: 0.1,      // 空闲不透明度
-    expandDur: 6000,      // 非胶囊气泡驻留
-    approvalExpand: true, // 胶囊模式下审批类仍展开
+    expandDur: 6000,      // （S272 起弃用，保留兼容旧配置）
+    approvalExpand: true, // （S272 起弃用：pop 统一接管弹出）
+    pop: true,            // 消息送达弹出气泡（胶囊模式下也弹）
+    holdMs: 8000,         // 每条气泡保留时长（淡出前）
+    stackMax: 3,          // 同屏最大条数，超限撤最老（不等保留到期）
     show: { approval: true, generation: true, bot: true, error: true, system: false }
   };
   var ICONS = { approval: 'fa-triangle-exclamation', generation: 'fa-wand-magic-sparkles', bot: 'fa-comment-dots', error: 'fa-circle-exclamation', system: 'fa-bell' };
@@ -38,12 +43,17 @@
     } catch (e) {}
     if (typeof cfg.idleMs !== 'number' || cfg.idleMs < 1000) cfg.idleMs = 5000;
     if (typeof cfg.expandDur !== 'number' || cfg.expandDur < 1000) cfg.expandDur = 6000;
+    if (typeof cfg.holdMs !== 'number' || cfg.holdMs < 2000) cfg.holdMs = 8000;
+    if (cfg.holdMs > 120000) cfg.holdMs = 120000;
+    if (typeof cfg.stackMax !== 'number' || cfg.stackMax < 1) cfg.stackMax = 3;
+    if (cfg.stackMax > 8) cfg.stackMax = 8;
+    cfg.stackMax = Math.round(cfg.stackMax);
     return cfg;
   }
 
   var cfg = loadCfg();
-  var layer = null, capsule = null, badge = null, bubble = null, bubbleText = null, bubbleIcon = null;
-  var unread = 0, idleTimer = null, expandTimer = null, ws = null, wsRetry = null;
+  var layer = null, capsule = null, badge = null, stack = null;
+  var unread = 0, idleTimer = null, ws = null, wsRetry = null;
 
   function el(tag, cls, html) {
     var n = document.createElement(tag);
@@ -57,11 +67,8 @@
     capsule = el('div', 'sap-hud-capsule hud-pos-' + cfg.position);
     capsule.appendChild(el('span', 'hud-badge', '0'));
     badge = capsule.querySelector('.hud-badge');
-    bubble = el('div', 'sap-hud-bubble hud-pos-' + cfg.position);
-    bubbleIcon = el('i', 'hud-icon fa ' + ICONS.system);
-    bubbleText = el('div', 'hud-text', '');
-    bubble.appendChild(bubbleIcon); bubble.appendChild(bubbleText);
-    layer.appendChild(capsule); layer.appendChild(bubble);
+    stack = el('div', 'sap-hud-stack hud-pos-' + cfg.position);
+    layer.appendChild(capsule); layer.appendChild(stack);
     (document.body || document.documentElement).appendChild(layer);
     applyCfg();
     wake();
@@ -76,6 +83,11 @@
       else if (k === 'position') { if (POS.indexOf(u.position) >= 0) cfg.position = u.position; }
       else if (typeof u[k] === typeof DEFAULTS[k]) cfg[k] = u[k];
     }
+    if (typeof cfg.holdMs !== 'number' || cfg.holdMs < 2000) cfg.holdMs = 8000;
+    if (cfg.holdMs > 120000) cfg.holdMs = 120000;
+    if (typeof cfg.stackMax !== 'number' || cfg.stackMax < 1) cfg.stackMax = 3;
+    if (cfg.stackMax > 8) cfg.stackMax = 8;
+    cfg.stackMax = Math.round(cfg.stackMax);
     if (cfg.enabled && !layer) build();
     applyCfg();
     wake();
@@ -89,7 +101,8 @@
     layer.classList.remove('hud-dim');
     capsule.className = 'sap-hud-capsule hud-pos-' + cfg.position + (unread > 0 ? ' hud-has-unread' : '');
     capsule.style.display = cfg.capsule ? '' : 'none';
-    bubble.className = 'sap-hud-bubble hud-pos-' + cfg.position;
+    stack.className = 'sap-hud-stack hud-pos-' + cfg.position + (cfg.capsule ? '' : ' hud-solo');
+    trimStack(); // 远程把 stackMax 调小时即时收敛
     startIdle(); ensureWS();
   }
 
@@ -115,10 +128,9 @@
     cfg.capsule = !cfg.capsule;
     try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) {}
     toast(cfg.capsule ? 'HUD 胶囊模式' : 'HUD 完整模式');
-    if (!cfg.capsule && bubble && bubbleText.textContent) expandBubble(lastIcon, lastText, cfg.expandDur);
+    applyCfg();
     wake();
   }
-  var lastIcon = ICONS.system, lastText = '';
 
   function toast(text) {
     var t = el('div', 'sap-hud-toast', text);
@@ -127,13 +139,48 @@
     setTimeout(function () { t.classList.remove('hud-show'); setTimeout(function () { t.remove(); }, 400); }, 1800);
   }
 
-  function expandBubble(icon, text, dur) {
-    bubbleIcon.className = 'hud-icon fa ' + icon;
-    bubbleText.textContent = text;
-    bubble.classList.toggle('hud-approval', icon === ICONS.approval);
-    bubble.classList.add('hud-show');
-    if (expandTimer) clearTimeout(expandTimer);
-    expandTimer = setTimeout(function () { bubble.classList.remove('hud-show'); }, dur);
+  // ---- S272：消息气泡栈 ----
+  // 最新条目紧邻胶囊点、旧条目向外排（n* 方位向下排=最新在上，s* 方位向上排=最新在下，
+  // 由 hud-s-down / hud-s-up 的 flex-direction 决定）；每条保留 holdMs 后淡出；
+  // 同屏条数超 stackMax 时最老一条立即提前撤下（不等保留到期）。
+  function detachBubble(node) {
+    if (!node || node.__gone) return;
+    node.__gone = true;
+    if (node.__t) clearTimeout(node.__t);
+    node.classList.remove('hud-show');
+    setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 450);
+  }
+
+  function trimStack() {
+    if (!stack) return;
+    // DOM 顺序即时间序（appendChild 新入）——最老恒为首个"未消亡"节点；
+    // 淡出中的节点（__gone）450ms 后才真正移出 DOM，计数须排除，否则本循环永不收敛
+    var guard = 0;
+    while (guard++ < 16) {
+      var live = 0, oldest = null, i;
+      for (i = 0; i < stack.children.length; i++) {
+        var ch = stack.children[i];
+        if (ch.__gone) continue;
+        live++;
+        if (!oldest) oldest = ch;
+      }
+      if (live <= cfg.stackMax || !oldest) break;
+      detachBubble(oldest);
+    }
+  }
+
+  function pushBubble(icon, text, holdOverride) {
+    if (!stack) return;
+    var b = el('div', 'sap-hud-bubble' + (icon === ICONS.approval ? ' hud-approval' : '') + ' hud-corner-' + cfg.position);
+    var i = el('i', 'hud-icon fa ' + icon);
+    var t = el('div', 'hud-text', '');
+    t.textContent = text;
+    b.appendChild(i); b.appendChild(t);
+    stack.appendChild(b);
+    requestAnimationFrame(function () { b.classList.add('hud-show'); });
+    trimStack();
+    var hold = holdOverride || cfg.holdMs;
+    b.__t = setTimeout(function () { detachBubble(b); }, hold);
   }
 
   function onNotify(rec) {
@@ -142,17 +189,15 @@
     if (!cfg.show[cat]) return;
     var text = (rec.msg || '').slice(0, 200);
     var icon = ICONS[cat] || ICONS.system;
-    lastIcon = icon; lastText = text;
     wake();
     if (cfg.capsule) {
       unread += 1;
       badge.textContent = unread > 99 ? '99+' : String(unread);
       capsule.classList.add('hud-has-unread');
       capsule.classList.toggle('hud-alert', cat === 'approval' || rec.level === 'error');
-      if (cat === 'approval' && cfg.approvalExpand) expandBubble(icon, text, cfg.expandDur);
-    } else {
-      expandBubble(icon, text, cfg.expandDur);
     }
+    // S272：弹出不再区分胶囊/完整模式，也不给审批开特例——由 pop 统一开关
+    if (cfg.pop) pushBubble(icon, text);
   }
 
   function clearUnread() {
@@ -194,13 +239,28 @@
   function showDemo() {
     if (!layer) { cfg.enabled = true; build(); }
     wake();
-    lastIcon = ICONS.system;
-    lastText = 'HUD 演示气泡：新通知会像这样弹出（审批类会自动展开）';
-    expandBubble(ICONS.system, lastText, 8000);
+    pushBubble(ICONS.system, 'HUD 演示气泡：新通知会像这样弹出（每条独立保留，超同屏条数时最老的先撤）', 8000);
     toast('HUD 已启用');
   }
 
-  var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim' };
+  var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim', 'sap-hud-pop': 'pop' };
+
+  // S272：数值型控件（保留秒数 / 同屏最大条数）单独钳制读写
+  var NUMCFG = {
+    'sap-hud-hold': { key: 'holdMs', min: 2, max: 120, def: 8 },      // 秒 ↔ holdMs
+    'sap-hud-stack': { key: 'stackMax', min: 1, max: 8, def: 3 }
+  };
+  function numToCfg(id, raw) {
+    var spec = NUMCFG[id]; var v = parseInt(raw, 10);
+    if (isNaN(v)) v = spec.def;
+    v = Math.max(spec.min, Math.min(spec.max, v));
+    return spec.key === 'holdMs' ? v * 1000 : v;
+  }
+  function cfgToNum(id, from) {
+    var spec = NUMCFG[id];
+    var v = spec.key === 'holdMs' ? Math.round((from[spec.key] || spec.def * 1000) / 1000) : from[spec.key];
+    return Math.max(spec.min, Math.min(spec.max, v || spec.def));
+  }
 
   function bindSettings() {
     // 主窗口（chat.html）系统设置页：草稿模式 + 显式保存；保存后岛页经 storage 事件热应用
@@ -217,6 +277,9 @@
       $id('sap-hud-enabled').checked = !!draft.enabled;
       $id('sap-hud-capsule').checked = !!draft.capsule;
       $id('sap-hud-dim').checked = !!draft.dim;
+      if ($id('sap-hud-pop')) $id('sap-hud-pop').checked = !!draft.pop;
+      if ($id('sap-hud-hold')) $id('sap-hud-hold').value = cfgToNum('sap-hud-hold', draft);
+      if ($id('sap-hud-stack')) $id('sap-hud-stack').value = cfgToNum('sap-hud-stack', draft);
       $id('sap-hud-pos').value = draft.position;
       Array.prototype.forEach.call(document.querySelectorAll('.sap-hud-cat'), function (n) {
         n.checked = !!(draft.show && draft.show[n.getAttribute('data-cat')]);
@@ -234,6 +297,7 @@
       if (t.id === 'sap-hud-save' || t.id === 'sap-hud-open' || t.id === 'sap-hud-reset') return;
       if (t.id === 'sap-hud-pos') { draft.position = t.value; }
       else if (t.classList.contains('sap-hud-cat')) { draft.show[t.getAttribute('data-cat')] = !!t.checked; }
+      else if (NUMCFG[t.id]) { draft[NUMCFG[t.id].key] = numToCfg(t.id, t.value); }
       else if (KEYMAP[t.id]) { draft[KEYMAP[t.id]] = !!t.checked; }
       else { return; }
       dirty = true;

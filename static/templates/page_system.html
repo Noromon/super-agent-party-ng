@@ -49,6 +49,13 @@
                 <div style="display:flex;flex-wrap:wrap;gap:14px 26px;align-items:center;padding:6px 2px;">
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-enabled">启用 HUD</label>
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-capsule">胶囊模式（折叠圆点+角标）</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;" title="S272：关闭后消息只累计角标不再弹气泡（原审批类特殊展开也并入此开关）"><input type="checkbox" id="sap-hud-pop">消息送达弹出气泡</label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;" title="每条气泡送达后在屏幕上保留多久（到时淡出）">保留
+                    <input type="number" id="sap-hud-hold" min="2" max="120" step="1" style="width:64px;">秒
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;font-size:13px;" title="同屏最多同时显示的气泡条数；超出时最老一条立即提前撤下（不等保留到期）">同屏最多
+                    <input type="number" id="sap-hud-stack" min="1" max="8" step="1" style="width:52px;">条
+                  </label>
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-dim">空闲时深隐</label>
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;">位置
                     <select id="sap-hud-pos">
