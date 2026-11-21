@@ -53,6 +53,22 @@ async def delete_diary_entry_api(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=f"删除日记失败: {str(e)}")
 
 
+@router.post("/import")
+async def diary_import_api(payload: Dict[str, Any] = Body(...)):
+    """S268：导入日记条目（文件/归档并入共用）。
+    body: {"book_id": "...", "entries": [...], "dry_run": true/false}
+    dry_run=true 只做超限投影不落盘——前端据此在 overflow 时弹确认窗。"""
+    try:
+        from py.diary_system import import_entries
+        book_id = payload.get("book_id", DEFAULT_BOOK_ID) or DEFAULT_BOOK_ID
+        return await import_entries(book_id, payload.get("entries") or [],
+                                    bool(payload.get("dry_run")))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入日记失败: {str(e)}")
+
+
 @router.get("/archive")
 async def diary_archive_api(book_id: str = Query(DEFAULT_BOOK_ID)):
     """S266：查看某日记本的归档条目（溢出的旧条目，只读）。"""

@@ -320,6 +320,52 @@ async def export_book(book_id: str = DEFAULT_BOOK_ID, fmt: str = "json", include
             json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
+# ---- S268：导入（文件/归档并入）+ 超限投影预检 ----
+
+_IMPORT_MAX_PER_CALL = 5000
+
+
+def plan_import(current_entries, incoming_entries, limit, archive_on):
+    """S268 纯函数：不落盘地投影导入结果。
+    返回 {added, total, overflow, dropped_mode}：
+    - added：按 id 去重后净新增条数
+    - total：合并后总条数
+    - overflow：limit>0 时超出上限的条数（=落盘时被挤走的旧条目数）；limit=0 恒 0
+    - dropped_mode：挤走条目的去向——archive=自动归档；drop=永久删除"""
+    merged = merge_entries(current_entries, incoming_entries)
+    total = len(merged)
+    added = total - len([e for e in current_entries if isinstance(e, dict)])
+    overflow = max(0, total - limit) if limit else 0
+    return {"added": max(0, added), "total": total, "overflow": overflow,
+            "dropped_mode": "archive" if archive_on else "drop"}
+
+
+async def import_entries(book_id, incoming_entries, dry_run=False):
+    """S268 导入端点后端：dry_run 只做 plan 投影；否则按当前策略落盘。"""
+    if not isinstance(incoming_entries, list) or not incoming_entries:
+        raise ValueError("entries 需为非空数组")
+    if len(incoming_entries) > _IMPORT_MAX_PER_CALL:
+        raise ValueError(f"单次导入上限 {_IMPORT_MAX_PER_CALL} 条")
+    clean = [e for e in incoming_entries if isinstance(e, dict) and (e.get("content") or e.get("title"))]
+    if not clean:
+        raise ValueError("entries 中无有效条目（需含 content 或 title）")
+    # 外部文件条目缺 id/time 时补发（删除/:key/去重都按 id 寻址，缺位会失稳）
+    for e in clean:
+        if not e.get("id"):
+            e["id"] = shortuuid.uuid()[:10]
+        if not e.get("time"):
+            e["time"] = datetime.now().isoformat()
+    current = await load_diary_data(book_id)
+    limit, archive_on = await get_diary_policy()
+    plan = plan_import(current.get("entries", []), clean, limit, archive_on)
+    if dry_run:
+        return {"ok": True, "dry_run": True, **plan}
+    merged = merge_entries(current.get("entries", []), clean)
+    current["entries"] = merged
+    await save_diary_data(current, book_id)  # 截断/归档策略在 save 内统一执行
+    return {"ok": True, "dry_run": False, **plan}
+
+
 async def delete_diary_entry(entry_id: str, book_id: str = DEFAULT_BOOK_ID):
     """从指定日记本删除一条日记"""
     data = await load_diary_data(book_id)

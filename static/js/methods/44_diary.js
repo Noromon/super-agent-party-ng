@@ -76,6 +76,95 @@ Object.assign(vue_methods, {
       }
     },
 
+    // ---- S268：导入（JSON 文件 / 归档并入主本），超限先弹确认 ----
+    triggerDiaryImport() {
+      const el = this.$refs && this.$refs.diaryImportInput;
+      if (el) el.click();
+    },
+
+    async onDiaryImportFile(ev) {
+      const input = ev.target;
+      const file = input && input.files && input.files[0];
+      if (input) input.value = '';
+      if (!file) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(await file.text());
+      } catch (e) {
+        if (this.$message) this.$message.error(this.t('diaryImportBadJson') || '文件不是有效的 JSON');
+        return;
+      }
+      const entries = Array.isArray(parsed) ? parsed
+        : (parsed && Array.isArray(parsed.entries)) ? parsed.entries : null;
+      if (!entries || !entries.length) {
+        if (this.$message) this.$message.error(this.t('diaryImportNoEntries') || '文件里没有可导入的日记条目');
+        return;
+      }
+      await this.diaryImportFlow(entries, this.t('diaryImportSourceFile') || 'JSON 文件导入');
+    },
+
+    // S268：归档条目并入主本
+    async mergeDiaryArchiveToBook() {
+      if (!this.diaryArchiveItems.length) return;
+      await this.diaryImportFlow(this.diaryArchiveItems, this.t('diaryImportSourceArchive') || '归档并入主本');
+    },
+
+    // 统一导入流：dry_run 预检 → 溢出弹确认（归档/删除两种措辞）→ 确认后落盘
+    async diaryImportFlow(entries, sourceLabel) {
+      const bookId = this.diaryCurrentBook || 'default';
+      const post = async (dryRun) => {
+        const response = await fetch('/api/diary/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ book_id: bookId, entries: entries, dry_run: dryRun }),
+        });
+        if (!response.ok) {
+          let detail = '';
+          try { detail = (await response.json()).detail || ''; } catch (e) { /* ignore */ }
+          throw new Error(detail || ('HTTP ' + response.status));
+        }
+        return response.json();
+      };
+      try {
+        const plan = await post(true);
+        if (plan.overflow > 0) {
+          const base = (this.t('diaryImportOverflowArchive') || '导入后共 {total} 条，超出上限 {limit} 条：最旧的 {n} 条将自动移入归档。')
+            .replace('{total}', plan.total).replace('{n}', plan.overflow);
+          let msg = plan.dropped_mode === 'drop'
+            ? (this.t('diaryImportOverflowDrop') || '导入后共 {total} 条，超出上限：最旧的 {n} 条将被永久删除（自动归档已关闭）！')
+              .replace('{total}', plan.total).replace('{n}', plan.overflow)
+            : base;
+          // 归档并入场景上限未调大 → 旧条目会原样挤回归档，等于没变
+          if (plan.added > 0 && plan.overflow >= plan.added
+              && entries.length === this.diaryArchiveItems.length && this.diaryArchiveVisible) {
+            msg += ' ' + (this.t('diaryImportNoopHint') || '当前上限下并入后旧条目将退回归档；如需真正全部留在主本，请先在系统配置调大上限或设为 0（无上限）。');
+          }
+          try {
+            await this.$confirm(msg, this.t('diaryImportConfirmTitle') || '导入将触发溢出处理，确认继续？', {
+              type: 'warning',
+              confirmButtonText: this.t('confirm') || '确认导入',
+              cancelButtonText: this.t('cancel') || '取消',
+            });
+          } catch (e) { return; }
+        }
+        const res = await post(false);
+        if (this.$message) {
+          this.$message.success((this.t('diaryImportDone') || '导入完成：新增 {n} 条')
+            .replace('{n}', res.added)
+            + (res.overflow > 0
+              ? (res.dropped_mode === 'drop'
+                ? '，' + (this.t('diaryImportDoneDrop') || '最旧 {n} 条已删除').replace('{n}', res.overflow)
+                : '，' + (this.t('diaryImportDoneArchive') || '最旧 {n} 条已移入归档').replace('{n}', res.overflow))
+              : ''));
+        }
+        this.diaryArchiveVisible = false;
+        await this.refreshDiaryView();
+      } catch (error) {
+        console.error('导入日记失败:', error);
+        if (this.$message) this.$message.error((this.t('diaryImportFailed') || '导入失败') + ': ' + (error.message || error));
+      }
+    },
+
     // 日记本的显示名称：优先用角色卡当前名，其次本子里存的名字，default 用兜底文案
     diaryBookLabel(book) {
       if (!book) return '';

@@ -3159,6 +3159,13 @@
                                      :title="t('diaryArchiveTip') || '查看自动归档的溢出旧条目'">
                             <i class="fa-solid fa-box-archive"></i>&nbsp;{{ t('diaryArchive') || '归档' }}<span v-if="diaryArchiveCount">&nbsp;({{ diaryArchiveCount }})</span>
                           </el-button>
+                          <!-- S268：从 JSON 文件导入（导入前自动预检，超限弹确认） -->
+                          <el-button size="small" @click="triggerDiaryImport()"
+                                     :title="t('diaryImportTip') || '从导出的 JSON 文件导入日记条目（自动按 id 去重；超上限前会弹确认）'">
+                            <i class="fa-solid fa-file-import"></i>&nbsp;{{ t('diaryImport') || '导入' }}
+                          </el-button>
+                          <input ref="diaryImportInput" type="file" accept="application/json,.json"
+                                 style="display: none;" @change="onDiaryImportFile($event)">
                         </div>
 
                         <!-- S266：归档查看弹窗（只读） -->
@@ -3175,6 +3182,11 @@
                             </div>
                           </div>
                           <template #footer>
+                            <!-- S268：归档并入主本（超上限会先弹确认） -->
+                            <el-button v-if="diaryArchiveItems.length" type="primary" plain
+                                       @click="mergeDiaryArchiveToBook()">
+                              <i class="fa-solid fa-arrow-up-from-bracket"></i>&nbsp;{{ t('diaryMergeArchiveToBook') || '并入主本' }}
+                            </el-button>
                             <el-button @click="exportDiaryBook('json')"><i class="fa-solid fa-file-export"></i>&nbsp;{{ t('diaryExportJsonTip') || '导出 JSON（含归档）' }}</el-button>
                             <el-button @click="diaryArchiveVisible = false">{{ t('close') || '关闭' }}</el-button>
                           </template>
