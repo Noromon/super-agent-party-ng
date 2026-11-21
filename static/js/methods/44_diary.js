@@ -48,6 +48,34 @@ Object.assign(vue_methods, {
       this.fetchDiaryData();
     },
 
+    // S266：导出当前日记本（json/md，含归档）——浏览器直接下载
+    exportDiaryBook(format) {
+      const bookId = this.diaryCurrentBook || 'default';
+      window.location.href = `/api/diary/export?book_id=${encodeURIComponent(bookId)}`
+        + `&format=${format === 'md' ? 'md' : 'json'}&include_archive=true`;
+    },
+
+    // S266：打开归档查看弹窗（溢出的旧条目，只读）
+    async openDiaryArchive() {
+      this.diaryArchiveVisible = true;
+      await this.fetchDiaryArchive();
+    },
+
+    async fetchDiaryArchive() {
+      try {
+        const bookId = this.diaryCurrentBook || 'default';
+        const response = await fetch(`/api/diary/archive?book_id=${encodeURIComponent(bookId)}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        this.diaryArchiveItems = (data && Array.isArray(data.entries)) ? data.entries : [];
+        this.diaryArchiveCount = this.diaryArchiveItems.length;
+      } catch (error) {
+        console.error("获取归档失败:", error);
+        this.diaryArchiveItems = [];
+        this.diaryArchiveCount = 0;
+      }
+    },
+
     // 日记本的显示名称：优先用角色卡当前名，其次本子里存的名字，default 用兜底文案
     diaryBookLabel(book) {
       if (!book) return '';

@@ -17,8 +17,41 @@ DEFAULT_BOOK_ID = 'default'
 # 旧版单文件日记（用于一次性迁移到 default 日记本）
 LEGACY_DIARY_FILE = os.path.join(DIARY_DIR, 'diary_data.json')
 
-# 每个日记本最多保留的条目数量（防止文件无限膨胀）
+# 每个日记本默认保留的条目数量（S266：实际上限改为可设置——
+# diarySettings.diaryMaxEntries，0=无上限；本常量仅作默认值/兼容旧引用）
 MAX_ENTRIES = 500
+
+
+async def get_diary_policy():
+    """S266：读取 (上限, 自动归档)。上限 0=无上限；设置缺失/异常回退默认(500, 开)。"""
+    try:
+        from py.get_setting import load_settings
+        s = await load_settings()
+        ds = s.get("diarySettings") or {}
+        raw = ds.get("diaryMaxEntries", MAX_ENTRIES)
+        try:
+            limit = max(0, int(raw))
+        except (TypeError, ValueError):
+            limit = MAX_ENTRIES
+        archive_on = ds.get("diaryArchiveEnabled", True)
+        return limit, bool(archive_on)
+    except Exception:
+        return MAX_ENTRIES, True
+
+
+def merge_entries(base_entries, extra_entries):
+    """S266 合并原语：按条目 id 去重（base 优先），按 time 升序排列。"""
+    seen, out = set(), []
+    for e in list(base_entries) + list(extra_entries):
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id") or (str(e.get("time", "")) + "|" + str(e.get("title", ""))[:60])
+        if eid in seen:
+            continue
+        seen.add(eid)
+        out.append(e)
+    out.sort(key=lambda e: str(e.get("time", "")))
+    return out
 
 
 def _safe_book_id(book_id) -> str:
@@ -145,8 +178,17 @@ async def save_diary_data(data, book_id: str = DEFAULT_BOOK_ID):
         data["entries"] = []
     data.setdefault("characterId", None)
     data.setdefault("characterName", "")
-    # 截断，仅保留最近 MAX_ENTRIES 条
-    data["entries"] = data["entries"][-MAX_ENTRIES:]
+    # S266：上限可设置（0=无上限）；溢出不再静默丢弃——自动归档开启时旧条目
+    # 追加进本日记本的归档文件（按 id 去重），关闭时才维持旧丢弃行为。
+    limit, archive_on = await get_diary_policy()
+    if limit and len(data["entries"]) > limit:
+        overflow = data["entries"][:-limit]
+        data["entries"] = data["entries"][-limit:]
+        if archive_on:
+            try:
+                await append_archive(book_id, overflow)
+            except Exception as e:
+                logging.getLogger("app").warning("[Diary] 自动归档失败(保持旧行为丢弃溢出): %r", e)
     # S160：写侧收口——自主日记与 chatSummary 都经此落盘，控制 token 形状不得入本
     for entry in data["entries"]:
         if isinstance(entry, dict):
@@ -186,6 +228,96 @@ async def append_diary_entry(entry_type: str, content: str, title: str = "", pus
     await save_diary_data(data, book_id)
     logging.getLogger("app").info(f"📔 [日记系统] 新增日记 [{book_id}/{entry_type}]: {(title or content)[:30]}")
     return entry
+
+
+# ---- S266：归档与导出 ----
+
+
+def _archive_file(book_id) -> str:
+    return os.path.join(DIARY_DIR, 'archive', f'{_safe_book_id(book_id)}.json')
+
+
+async def load_archive(book_id: str = DEFAULT_BOOK_ID):
+    """读归档条目（文件不存在返回空表）。"""
+    path = _archive_file(book_id)
+    if not os.path.exists(path):
+        return []
+
+    def _read():
+        with open(path, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        return d.get("entries", []) if isinstance(d, dict) else []
+    try:
+        return await asyncio.to_thread(_read)
+    except Exception as e:
+        logging.getLogger("app").error("[Diary] 读归档失败 %s: %s", book_id, e)
+        return []
+
+
+async def append_archive(book_id, entries):
+    """把溢出条目并入归档（id 去重 + time 升序，原子写）。"""
+    if not entries:
+        return 0
+    base = await load_archive(book_id)
+    merged = merge_entries(base, entries)
+    path = _archive_file(book_id)
+
+    def _write():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({"entries": merged}, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    await asyncio.to_thread(_write)
+    logging.getLogger("app").info("[Diary] S266 自动归档 %s: +%d 条 → 共 %d 条",
+                                  book_id, len(entries), len(merged))
+    return len(merged)
+
+
+def _entries_to_markdown(entries, book_id, archived=None):
+    lines = [f"# 日记本导出 · {book_id}", "",
+             f"共 {len(entries)} 条"
+             + (f"（含归档 {archived} 条）" if archived else ""), ""]
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        t = str(e.get("time", "")).replace("T", " ")[:16]
+        title = str(e.get("title") or "").strip()
+        if title:
+            lines.append(f"## {t} · {title}")
+        else:
+            lines.append(f"## {t}")
+        lines.append(f"_type: {e.get('type', '')}_")
+        lines.append("")
+        lines.append(str(e.get("content") or "").strip())
+        lines.append("")
+    return "\n".join(lines)
+
+
+async def export_book(book_id: str = DEFAULT_BOOK_ID, fmt: str = "json", include_archive: bool = False):
+    """导出 (filename, media_type, bytes)。fmt: json|md；include_archive 时合并归档。"""
+    data = await load_diary_data(book_id)
+    entries = list(data.get("entries", []))
+    archived_n = 0
+    if include_archive:
+        arch = await load_archive(book_id)
+        archived_n = sum(1 for e in arch if e.get("id") not in {x.get("id") for x in entries})
+        entries = merge_entries(arch, entries)
+    bid = _safe_book_id(book_id)
+    stamp = datetime.now().strftime("%Y%m%d")
+    if fmt == "md":
+        text = _entries_to_markdown(entries, bid, archived_n if include_archive else 0)
+        return f"diary_{bid}_{stamp}.md", "text/markdown; charset=utf-8", text.encode("utf-8")
+    payload = {
+        "book_id": bid,
+        "characterId": data.get("characterId"),
+        "characterName": data.get("characterName", ""),
+        "exported_at": datetime.now().isoformat(),
+        "includes_archive": bool(include_archive),
+        "entries": entries,
+    }
+    return (f"diary_{bid}_{stamp}.json", "application/json; charset=utf-8",
+            json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
 async def delete_diary_entry(entry_id: str, book_id: str = DEFAULT_BOOK_ID):

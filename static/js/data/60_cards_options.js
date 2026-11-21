@@ -422,6 +422,9 @@ main();`,
         timeoutSeconds: 120,
         retrySeconds: 300,
       },
+      // S266：存储与备份——maxEntries 0=无上限；autoArchive 溢出旧条目自动归档不丢弃
+      diaryMaxEntries: 500,
+      diaryArchiveEnabled: true,
     },
     // 日记系统 UI 状态
     activeDiaryTab: 'config',
@@ -439,6 +442,10 @@ main();`,
     // 多日记本（每个角色一本 + default 兜底本）
     diaryBooks: [],
     diaryCurrentBook: 'default',
+    // S266：归档查看（溢出的旧条目，只读）
+    diaryArchiveVisible: false,
+    diaryArchiveItems: [],
+    diaryArchiveCount: 0,
     // 日记详情抽屉
     diaryDetailVisible: false,
     diaryDetailEntry: null,

@@ -2917,6 +2917,21 @@
                                 {{ t('diaryPauseOnBusyHint') || '对话或长任务进行中时挂起日记触发计时器，结束后约 1 分钟重试，避免互相抢推理' }}
                               </div>
                             </el-form-item>
+                            <!-- S266：存储与备份——上限可设（0=无上限），溢出自动归档 -->
+                            <el-form-item :label="t('diaryMaxEntries') || '日记本条目上限（0 = 无上限）'">
+                              <el-input-number v-model="diarySettings.diaryMaxEntries" :min="0" :max="100000"
+                                               :step="100" @change="autoSaveSettings" style="width: 170px;"></el-input-number>
+                              <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                                {{ t('diaryMaxEntriesHint') || '默认 500。超出上限的旧条目不再被静默删除——配合下方自动归档进入归档区' }}
+                              </div>
+                            </el-form-item>
+                            <el-form-item :label="t('diaryAutoArchive') || '溢出条目自动归档'">
+                              <el-switch v-model="diarySettings.diaryArchiveEnabled" @change="autoSaveSettings"
+                                         style="--el-switch-on-color: #13ce66;"></el-switch>
+                              <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                                {{ t('diaryAutoArchiveHint') || '开启（默认）：被上限挤走的旧条目写入本日记本归档区（可在日记本页查看/导出）；关闭：维持旧行为直接删除' }}
+                              </div>
+                            </el-form-item>
                           </div>
                         </div>
                       </div>
@@ -3131,7 +3146,39 @@
                           <el-button @click="refreshDiaryView" circle :title="t('refresh') || '刷新'">
                             <i class="fa-solid fa-rotate-right"></i>
                           </el-button>
+                          <!-- S266：导出与归档 -->
+                          <el-button size="small" @click="exportDiaryBook('json')"
+                                     :title="t('diaryExportJsonTip') || '导出本日记本为 JSON（含归档条目）'">
+                            <i class="fa-solid fa-file-export"></i>&nbsp;JSON
+                          </el-button>
+                          <el-button size="small" @click="exportDiaryBook('md')"
+                                     :title="t('diaryExportMdTip') || '导出为 Markdown（人类可读，含归档）'">
+                            <i class="fa-solid fa-file-lines"></i>&nbsp;MD
+                          </el-button>
+                          <el-button size="small" @click="openDiaryArchive()"
+                                     :title="t('diaryArchiveTip') || '查看自动归档的溢出旧条目'">
+                            <i class="fa-solid fa-box-archive"></i>&nbsp;{{ t('diaryArchive') || '归档' }}<span v-if="diaryArchiveCount">&nbsp;({{ diaryArchiveCount }})</span>
+                          </el-button>
                         </div>
+
+                        <!-- S266：归档查看弹窗（只读） -->
+                        <el-dialog v-model="diaryArchiveVisible" width="640px"
+                                   :title="t('diaryArchiveTitle') || '日记归档（溢出自动保留，只读）'">
+                          <el-empty v-if="!diaryArchiveItems.length"
+                                    :description="t('diaryArchiveEmpty') || '暂无归档——被条目上限挤走的旧日记会自动进入这里'"></el-empty>
+                          <div v-else style="max-height: 60vh; overflow-y: auto;">
+                            <div v-for="ae in diaryArchiveItems" :key="ae.id" style="border-bottom: 1px dashed #dcdfe6; padding: 8px 2px;">
+                              <div style="font-size: 12px; color: #909399;">
+                                {{ String(ae.time || '').replace('T', ' ').slice(0, 16) }} · {{ ae.title || ae.type || '' }}
+                              </div>
+                              <div style="white-space: pre-wrap; font-size: 13px;">{{ String(ae.content || '').slice(0, 400) }}{{ String(ae.content || '').length > 400 ? '…' : '' }}</div>
+                            </div>
+                          </div>
+                          <template #footer>
+                            <el-button @click="exportDiaryBook('json')"><i class="fa-solid fa-file-export"></i>&nbsp;{{ t('diaryExportJsonTip') || '导出 JSON（含归档）' }}</el-button>
+                            <el-button @click="diaryArchiveVisible = false">{{ t('close') || '关闭' }}</el-button>
+                          </template>
+                        </el-dialog>
 
                         <!-- 空状态 -->
                         <el-empty v-if="!filteredDiaryEntries.length"
