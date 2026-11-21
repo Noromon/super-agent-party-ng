@@ -19,7 +19,18 @@ function mkNode() {
     appendChild(c) { c.parentNode = n; n.children.push(c); return c; },
     removeChild(c) { n.children = n.children.filter(x => x !== c); c.parentNode = null; return c; },
     remove() { if (n.parentNode) n.parentNode.removeChild(n); },
-    querySelector() { return mkNode(); },
+    querySelector(sel) {
+      const cls = String(sel || '').replace(/^\./, '');
+      const walk = (n) => {
+        for (const c of n.children) {
+          if (c._cl.has(cls)) return c;
+          const r = walk(c);
+          if (r) return r;
+        }
+        return null;
+      };
+      return walk(n);
+    },
     addEventListener() {},
     get firstElementChild() { return n.children[0] || null; },
     get lastElementChild() { return n.children[n.children.length - 1] || null; },
@@ -35,7 +46,12 @@ global.localStorage = {
 };
 global.location = { protocol: 'http:', host: 'x.invalid', pathname: '/island.html' };
 let lastWs = null;
-global.WebSocket = function (u) { this.url = u; this.close = () => {}; lastWs = this; };
+let wsCount = 0;
+const wsSockets = [];
+global.WebSocket = function (u) {
+  wsCount++; this.url = u; this.close = () => {};
+  lastWs = this; wsSockets.push(this);
+};
 global.requestAnimationFrame = (fn) => { setTimeout(fn, 0); return 0; };
 
 const src = fs.readFileSync(process.argv[2] || 'static/js/hud-capsule.js', 'utf8');
@@ -71,6 +87,31 @@ const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); i
   await new Promise(r => setTimeout(r, 3800));
   const alive2 = stack.children.filter(c => c._cl.has('hud-show') && !c.__gone);
   ok(alive2.length === 0, '保留到期全部淡出清除: 剩 ' + alive2.length);
+
+  // ===== S273：__SAP_READY 延迟期双 ensureWS 竞态 + 同 id 双投递去重（第二实例）=====
+  let resolveReady;
+  global.window.__SAP_READY = new Promise(res => { resolveReady = res; });
+  global.window.electron = { ipcRenderer: { on: () => {} } };
+  global.window.electronAPI = { getHudCfg: () => Promise.resolve({ enabled: true }) };
+  const wsCountBefore = wsCount;
+  new Function(fs.readFileSync(process.argv[2] || 'static/js/hud-capsule.js', 'utf8'))();
+  await new Promise(r => setTimeout(r, 30)); // build(ensureWS#1) + getHudCfg→mergeCfg(ensureWS#2) 均已排队
+  resolveReady();
+  await new Promise(r => setTimeout(r, 60));
+  ok(wsCount - wsCountBefore === 1, 'S273: ready 前双触发只建一条 WS（实建 ' + (wsCount - wsCountBefore) + ' 条）');
+  const layer2 = body.children.filter(c => c.id === 'sap-hud-layer')[1];
+  ok(!!layer2, 'S273: 第二实例层已建');
+  const stack2 = layer2.children.find(c => c._cl.has('sap-hud-stack'));
+  const ws2 = wsSockets[wsSockets.length - 1];
+  const dup = { id: 'rec-dup-1', category: 'bot', msg: 'dup-msg' };
+  ws2.onmessage({ data: JSON.stringify({ type: 'notification', data: dup }) });
+  ws2.onmessage({ data: JSON.stringify({ type: 'notification', data: dup }) });
+  await new Promise(r => setTimeout(r, 20));
+  const dupCount = stack2.children.filter(c => c.children[1] && c.children[1].textContent === 'dup-msg').length;
+  ok(dupCount === 1, 'S273: 同 id 双投递只弹一次（实弹 ' + dupCount + ' 次）');
+  const badge2 = layer2.children[0].children[0];
+  ok(badge2 && badge2.textContent === '1', 'S273: 角标也不双计（现 ' + (badge2 && badge2.textContent) + '）');
+
   console.log(fail ? 'S272-HARNESS failed=' + fail : 'S272-HARNESS all passed');
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.log('HARNESS_ERR ' + ((e && e.stack) || e)); process.exit(3); });

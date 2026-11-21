@@ -53,7 +53,16 @@
 
   var cfg = loadCfg();
   var layer = null, capsule = null, badge = null, stack = null;
-  var unread = 0, idleTimer = null, ws = null, wsRetry = null;
+  var unread = 0, idleTimer = null, ws = null, wsRetry = null, wsOpening = false;
+  // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
+  var seenIds = [], seenSet = {};
+  function isDup(id) {
+    if (!id) return false;
+    if (seenSet[id]) return true;
+    seenSet[id] = 1; seenIds.push(id);
+    while (seenIds.length > 64) { delete seenSet[seenIds.shift()]; }
+    return false;
+  }
 
   function el(tag, cls, html) {
     var n = document.createElement(tag);
@@ -185,6 +194,7 @@
 
   function onNotify(rec) {
     if (!cfg.enabled || !layer) return;
+    if (isDup(rec && rec.id)) return; // S273：同一记录只消费一次（双投递兜底）
     var cat = rec.category || 'system';
     if (!cfg.show[cat]) return;
     var text = (rec.msg || '').slice(0, 200);
@@ -207,8 +217,14 @@
   }
 
   function ensureWS() {
-    if (ws || !cfg.enabled) return;
+    if (ws || wsOpening || !cfg.enabled) return;
+    // S273：__SAP_READY 未 resolve 前 ws 恒 null——旧版守卫形同虚设：
+    // build 与 getHudCfg→mergeCfg 各排一个 open，token 到手双双建连，
+    // 孤儿 socket 的 onmessage 仍指向 onNotify → 每条通知弹两次（重复气泡根因）。
+    wsOpening = true;
     var open = function () {
+      wsOpening = false;
+      if (ws) return;
       var wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
       var tok = window.__SAP_TOKEN || '';
       try { ws = new WebSocket(tok ? wsUrl + '?sap_token=' + encodeURIComponent(tok) : wsUrl); } catch (e) { return; }
@@ -219,12 +235,15 @@
         } catch (err) {}
       };
       ws.onclose = function () {
+        if (ws !== this) { try { this.close(); } catch (e2) {} return; } // 陈旧 socket 自灭，别碰现行连接
         ws = null;
         if (cfg.enabled && !wsRetry) wsRetry = setTimeout(function () { wsRetry = null; ensureWS(); }, 5000);
       };
       ws.onerror = function () { try { ws.close(); } catch (e) {} };
     };
-    if (window.__SAP_READY && window.__SAP_READY.then) { window.__SAP_READY.then(open); } else { open(); }
+    if (window.__SAP_READY && window.__SAP_READY.then) {
+      window.__SAP_READY.then(open, open); // token 获取失败也照常直连（旧行为）
+    } else { open(); }
   }
 
   function teardownWS() {

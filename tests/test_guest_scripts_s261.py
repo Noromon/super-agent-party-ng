@@ -1,4 +1,4 @@
-# build=S272
+# build=S273
 # S261：拼接 guest 脚本语法防线——arm 脚本 try 缺 catch 令内置 network_watch 自 S253
 # 起从未生效（线上 'GUEST_VIEW_MANAGER_CALL: Missing catch or finally after try'），
 # findExpr 同族缺 catch 令 scroll_and_find 命中检测静默失效（被循环 catch 吞掉，
