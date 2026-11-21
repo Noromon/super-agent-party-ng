@@ -4,7 +4,7 @@ const fs = require('fs');
 const store = {};
 function mkNode() {
   const n = {
-    children: [], parentNode: null, _cl: new Set(), _attrs: {}, style: {},
+    children: [], parentNode: null, _cl: new Set(), _attrs: {}, style: {}, _ev: {},
     textContent: '', innerHTML: '',
     classList: {
       add(...c) { c.forEach(x => n._cl.add(x)); },
@@ -31,15 +31,15 @@ function mkNode() {
       };
       return walk(n);
     },
-    addEventListener() {},
+    addEventListener(t, fn) { (n._ev[t] = n._ev[t] || []).push(fn); },
     get firstElementChild() { return n.children[0] || null; },
     get lastElementChild() { return n.children[n.children.length - 1] || null; },
   };
   return n;
 }
 const body = mkNode();
-global.document = { body, createElement: () => mkNode(), addEventListener() {}, readyState: 'complete' };
-global.window = { addEventListener() {}, electron: undefined, electronAPI: undefined, __SAP_TOKEN: '' };
+global.document = { body, createElement: () => mkNode(), addEventListener(t, fn) { (global.document._ev[t] = global.document._ev[t] || []).push(fn); }, _ev: {}, readyState: 'complete' };
+global.window = { addEventListener(t, fn) { (global.window._ev[t] = global.window._ev[t] || []).push(fn); }, _ev: {}, electron: undefined, electronAPI: undefined, __SAP_TOKEN: '' };
 global.localStorage = {
   getItem: (k) => store[k] ?? null,
   setItem: (k, v) => { store[k] = String(v); },
@@ -111,6 +111,51 @@ const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); i
   ok(dupCount === 1, 'S273: 同 id 双投递只弹一次（实弹 ' + dupCount + ' 次）');
   const badge2 = layer2.children[0].children[0];
   ok(badge2 && badge2.textContent === '1', 'S273: 角标也不双计（现 ' + (badge2 && badge2.textContent) + '）');
+
+  // ===== S274：badge 开关 + 胶囊点击历史面板（第三实例）=====
+  const fire = (n, t, evt) => ((n._ev && n._ev[t]) || []).forEach(fn => fn(evt || { stopPropagation() {} }));
+  store['sapHudCfg'] = JSON.stringify({ enabled: true, capsule: true, badge: false });
+  const fetchCalls = [];
+  global.fetch = async (url, opt) => {
+    fetchCalls.push({ url: String(url), opt: opt || {} });
+    if (String(url).startsWith('/api/notifications?')) {
+      return { ok: true, status: 200, json: async () => ({ items: [
+        { id: 'a1', ts: 1795274824, category: 'bot', level: 'info', msg: 'hist-1' },
+        { id: 'b2', ts: 1795274900, category: 'approval', level: 'warn', msg: 'hist-2' },
+      ] }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  new Function(fs.readFileSync(process.argv[2] || 'static/js/hud-capsule.js', 'utf8'))();
+  await new Promise(r => setTimeout(r, 30));
+  const layer3 = body.children.filter(c => c.id === 'sap-hud-layer')[2];
+  ok(!!layer3, 'S274: 第三实例层已建');
+  const capsule3 = layer3.children[0];
+  ok(capsule3._cl.has('hud-no-badge'), 'S274: badge 关闭 → 角标不渲染（hud-no-badge）');
+  const ws3 = wsSockets[wsSockets.length - 1];
+  ws3.onmessage({ data: JSON.stringify({ type: 'notification', data: { id: 'n-pre', category: 'bot', msg: 'pre-panel' } }) });
+  await new Promise(r => setTimeout(r, 20));
+  ok(capsule3.children[0].textContent === '1', 'S274: 角标关闭时计数仍在累计（仅不显示）');
+  fire(capsule3, 'click');
+  await new Promise(r => setTimeout(r, 50));
+  const panel3 = layer3.children.find(c => c._cl.has('sap-hud-panel'));
+  ok(!!panel3, 'S274: 点击胶囊展开历史面板');
+  ok(global.window.__sapHudHoldMouse === true, 'S274: 面板打开期间持握鼠标（岛窗穿透已关）');
+  ok(fetchCalls.some(c => c.url.startsWith('/api/notifications?limit=50')), 'S274: 面板数据走 GET /api/notifications');
+  const list3 = panel3 && panel3.children.find(c => c._cl.has('hud-p-list'));
+  ok(list3 && list3.children.length === 2, 'S274: 面板渲染历史条数=' + (list3 && list3.children.length));
+  ok(fetchCalls.some(c => c.url === '/api/notifications/read' && c.opt.method === 'POST'), 'S274: 打开面板即标记已读');
+  ok(capsule3.children[0].textContent === '0', 'S274: 打开面板清零本地角标');
+  fire(capsule3, 'click');
+  await new Promise(r => setTimeout(r, 20));
+  ok(panel3 && !panel3._cl.has('hud-show'), 'S274: 再点胶囊收起面板');
+  ok(global.window.__sapHudHoldMouse === false, 'S274: 关闭且不在胶囊上 → 恢复点击穿透');
+  // Esc 兜底（document keydown）
+  fire(capsule3, 'click');
+  await new Promise(r => setTimeout(r, 20));
+  (global.document._ev.keydown || []).forEach(fn => fn({ key: 'Escape' }));
+  const panels3 = layer3.children.filter(c => c._cl.has('sap-hud-panel'));
+  ok(panels3.length > 0 && panels3.every(p => !p._cl.has('hud-show')), 'S274: Esc 关闭面板');
 
   console.log(fail ? 'S272-HARNESS failed=' + fail : 'S272-HARNESS all passed');
   process.exit(fail ? 1 : 0);

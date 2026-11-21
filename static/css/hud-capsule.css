@@ -35,6 +35,9 @@
 }
 .sap-hud-capsule.hud-has-unread .hud-badge { display: block; }
 .sap-hud-capsule.hud-alert { animation: hud-pulse 1.6s ease-in-out infinite; }
+/* S274：胶囊可点击展开历史面板（层整体穿透，仅胶囊吃鼠标）；badge 关闭时数字不渲染 */
+.sap-hud-capsule { pointer-events: auto; cursor: pointer; }
+.sap-hud-capsule.hud-no-badge .hud-badge { display: none !important; }
 @keyframes hud-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.55); }
   50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
@@ -110,3 +113,48 @@
   transition: opacity 0.3s ease;
 }
 .sap-hud-toast.hud-show { opacity: 1; }
+
+/* ---- S274：历史消息面板（贴角展开，打开即标记已读） ---- */
+.sap-hud-panel {
+  position: absolute;
+  width: 320px;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(16, 16, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  backdrop-filter: blur(14px);
+  color: #f2f2f4;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: auto;
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+.sap-hud-panel.hud-show { opacity: 1; }
+.sap-hud-panel.hud-pos-nw { top: 38px; left: 12px; }
+.sap-hud-panel.hud-pos-n  { top: 38px; left: 50%; transform: translateX(-50%); }
+.sap-hud-panel.hud-pos-ne { top: 38px; right: 12px; }
+.sap-hud-panel.hud-pos-sw { bottom: 38px; left: 12px; }
+.sap-hud-panel.hud-pos-s  { bottom: 38px; left: 50%; transform: translateX(-50%); }
+.sap-hud-panel.hud-pos-se { bottom: 38px; right: 12px; }
+.sap-hud-panel.hud-solo.hud-pos-nw, .sap-hud-panel.hud-solo.hud-pos-n, .sap-hud-panel.hud-solo.hud-pos-ne { top: 12px; }
+.sap-hud-panel.hud-solo.hud-pos-sw, .sap-hud-panel.hud-solo.hud-pos-s, .sap-hud-panel.hud-solo.hud-pos-se { bottom: 12px; }
+.hud-p-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0.92; flex: none;
+}
+.hud-p-spacer { flex: 1; }
+.hud-p-close { cursor: pointer; padding: 0 6px; font-size: 15px; line-height: 1; opacity: 0.75; }
+.hud-p-close:hover { opacity: 1; }
+.hud-p-list { overflow-y: auto; padding: 4px 0; }
+.hud-p-item { display: flex; gap: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.45; }
+.hud-p-item + .hud-p-item { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.hud-p-item .hud-icon { margin-top: 2px; color: #8ab4ff; flex: none; }
+.hud-p-err .hud-icon { color: #ff7a7a; }
+.hud-p-text { white-space: pre-wrap; word-break: break-all; }
+.hud-p-time { font-size: 10.5px; opacity: 0.55; margin-top: 2px; }
+.hud-p-empty { padding: 16px; text-align: center; font-size: 12px; opacity: 0.6; }

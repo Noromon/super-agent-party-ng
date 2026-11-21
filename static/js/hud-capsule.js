@@ -20,6 +20,7 @@
     pop: true,            // 消息送达弹出气泡（胶囊模式下也弹）
     holdMs: 8000,         // 每条气泡保留时长（淡出前）
     stackMax: 3,          // 同屏最大条数，超限撤最老（不等保留到期）
+    badge: true,          // S274：数字角标显示与否（关=胶囊纯净，审批脉冲仍在）
     show: { approval: true, generation: true, bot: true, error: true, system: false }
   };
   var ICONS = { approval: 'fa-triangle-exclamation', generation: 'fa-wand-magic-sparkles', bot: 'fa-comment-dots', error: 'fa-circle-exclamation', system: 'fa-bell' };
@@ -54,6 +55,7 @@
   var cfg = loadCfg();
   var layer = null, capsule = null, badge = null, stack = null;
   var unread = 0, idleTimer = null, ws = null, wsRetry = null, wsOpening = false;
+  var panel = null, overCapsule = false; // S274：历史面板与鼠标持握状态
   // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
   var seenIds = [], seenSet = {};
   function isDup(id) {
@@ -78,6 +80,11 @@
     badge = capsule.querySelector('.hud-badge');
     stack = el('div', 'sap-hud-stack hud-pos-' + cfg.position);
     layer.appendChild(capsule); layer.appendChild(stack);
+    // S274：胶囊可点击展开历史面板——岛窗整体点击穿透，仅胶囊/面板吃鼠标；
+    // 悬停期间经 electron 桥临时关闭穿透（island-app 侧有 __sapHudHoldMouse 守卫防抢关）。
+    capsule.addEventListener('mouseenter', function () { overCapsule = true; hudHoldMouse(true); });
+    capsule.addEventListener('mouseleave', function () { overCapsule = false; if (!panel) hudHoldMouse(false); });
+    capsule.addEventListener('click', function () { togglePanel(); });
     (document.body || document.documentElement).appendChild(layer);
     applyCfg();
     wake();
@@ -104,11 +111,12 @@
 
   function applyCfg() {
     if (!layer) return;
-    if (!cfg.enabled) { layer.classList.add('hud-hidden'); teardownWS(); return; }
+    if (!cfg.enabled) { closePanel(); layer.classList.add('hud-hidden'); teardownWS(); return; }
     layer.classList.remove('hud-hidden');
     layer.style.opacity = String(cfg.opacity);
     layer.classList.remove('hud-dim');
-    capsule.className = 'sap-hud-capsule hud-pos-' + cfg.position + (unread > 0 ? ' hud-has-unread' : '');
+    capsule.className = 'sap-hud-capsule hud-pos-' + cfg.position
+      + (unread > 0 ? ' hud-has-unread' : '') + (cfg.badge ? '' : ' hud-no-badge');
     capsule.style.display = cfg.capsule ? '' : 'none';
     stack.className = 'sap-hud-stack hud-pos-' + cfg.position + (cfg.capsule ? '' : ' hud-solo');
     trimStack(); // 远程把 stackMax 调小时即时收敛
@@ -216,6 +224,93 @@
     if (capsule) { capsule.classList.remove('hud-has-unread', 'hud-alert'); }
   }
 
+  // ---- S274：鼠标持握桥 + 历史消息面板 ----
+  function hudHoldMouse(on) {
+    window.__sapHudHoldMouse = !!on;
+    var api = window.electronAPI || {};
+    if (!api.setIgnoreMouseEvents) return;
+    try {
+      if (on) api.setIgnoreMouseEvents(false);
+      else api.setIgnoreMouseEvents(true, { forward: true });
+    } catch (e) {}
+  }
+
+  function fmtTime(ts) {
+    try {
+      var d = new Date(ts * 1000), p = function (x) { return (x < 10 ? '0' : '') + x; };
+      return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return ''; }
+  }
+
+  function closePanel() {
+    if (!panel) return;
+    var p = panel; panel = null;
+    p.classList.remove('hud-show');
+    setTimeout(function () { if (p.parentNode) p.parentNode.removeChild(p); }, 300);
+    if (!overCapsule) hudHoldMouse(false);
+  }
+
+  function togglePanel() {
+    if (panel) { closePanel(); return; }
+    hudHoldMouse(true);
+    panel = el('div', 'sap-hud-panel hud-pos-' + cfg.position + (cfg.capsule ? '' : ' hud-solo'));
+    var head = el('div', 'hud-p-head');
+    var hi = el('i', 'fa fa-clock-rotate-left');
+    var ht = el('span', '', '历史消息');
+    var sp = el('span', 'hud-p-spacer');
+    var cl = el('span', 'hud-p-close', '×');
+    cl.addEventListener('click', function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); closePanel(); });
+    head.appendChild(hi); head.appendChild(ht); head.appendChild(sp); head.appendChild(cl);
+    var list = el('div', 'hud-p-list', '<div class="hud-p-empty">加载中…</div>');
+    panel.appendChild(head); panel.appendChild(list);
+    panel.addEventListener('mouseenter', function () { hudHoldMouse(true); });
+    panel.addEventListener('mouseleave', function () { if (panel) hudHoldMouse(true); }); // 面板开着就一直吃鼠标
+    layer.appendChild(panel);
+    requestAnimationFrame(function () { panel && panel.classList.add('hud-show'); });
+    loadPanelList(list);
+  }
+
+  async function loadPanelList(list) {
+    var myPanel = panel;
+    try {
+      var r = await fetch('/api/notifications?limit=50', { credentials: 'same-origin' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var d = await r.json();
+      if (!panel || panel !== myPanel) return; // 期间被关掉/重开
+      var items = (d && Array.isArray(d.items)) ? d.items : [];
+      list.innerHTML = '';
+      if (!items.length) {
+        list.appendChild(el('div', 'hud-p-empty', '暂无历史消息'));
+        return;
+      }
+      items.forEach(function (it) {
+        var row = el('div', 'hud-p-item' + (it.level === 'error' ? ' hud-p-err' : ''));
+        row.appendChild(el('i', 'hud-icon fa ' + (ICONS[it.category] || ICONS.system)));
+        var wrap = el('div', 'hud-p-body');
+        var tx = el('div', 'hud-p-text', '');
+        tx.textContent = String(it.msg || '').slice(0, 300);
+        wrap.appendChild(tx);
+        wrap.appendChild(el('div', 'hud-p-time', fmtTime(it.ts)));
+        row.appendChild(wrap);
+        list.appendChild(row);
+      });
+      var ids = items.map(function (it) { return it.id; }).filter(Boolean);
+      if (ids.length) {
+        fetch('/api/notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ ids: ids }),
+        }).catch(function () {});
+      }
+      clearUnread(); // 打开面板=用户已见，本地计数清零（服务端也已 mark_read）
+    } catch (e) {
+      if (!panel || panel !== myPanel) return;
+      list.innerHTML = '';
+      list.appendChild(el('div', 'hud-p-empty', '加载失败：' + String((e && e.message) || e)));
+    }
+  }
+
   function ensureWS() {
     if (ws || wsOpening || !cfg.enabled) return;
     // S273：__SAP_READY 未 resolve 前 ws 恒 null——旧版守卫形同虚设：
@@ -262,7 +357,7 @@
     toast('HUD 已启用');
   }
 
-  var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim', 'sap-hud-pop': 'pop' };
+  var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim', 'sap-hud-pop': 'pop', 'sap-hud-badge': 'badge' };
 
   // S272：数值型控件（保留秒数 / 同屏最大条数）单独钳制读写
   var NUMCFG = {
@@ -297,6 +392,7 @@
       $id('sap-hud-capsule').checked = !!draft.capsule;
       $id('sap-hud-dim').checked = !!draft.dim;
       if ($id('sap-hud-pop')) $id('sap-hud-pop').checked = !!draft.pop;
+      if ($id('sap-hud-badge')) $id('sap-hud-badge').checked = draft.badge !== false;
       if ($id('sap-hud-hold')) $id('sap-hud-hold').value = cfgToNum('sap-hud-hold', draft);
       if ($id('sap-hud-stack')) $id('sap-hud-stack').value = cfgToNum('sap-hud-stack', draft);
       $id('sap-hud-pos').value = draft.position;
@@ -377,6 +473,10 @@
       window.electron.ipcRenderer.on('hud-toggle-capsule', toggleCapsule);
       window.electron.ipcRenderer.on('hud-demo', showDemo);
       window.electron.ipcRenderer.on('hud-cfg', function (c) { mergeCfg(c); });
+      // S274：Esc 关闭历史面板（面板打开时岛窗已被点击获焦，keydown 可达）
+      document.addEventListener('keydown', function (e) {
+        if (e && (e.key === 'Escape' || e.keyCode === 27) && panel) closePanel();
+      });
       if (window.electronAPI && window.electronAPI.getHudCfg) {
         Promise.resolve(window.electronAPI.getHudCfg()).then(function (c) { if (c) mergeCfg(c); });
       }

@@ -922,6 +922,9 @@ function createIslandApp() {
       },
 
       setMouseIgnore(ignore) {
+        // S274：HUD 胶囊/历史面板持握鼠标期间（__sapHudHoldMouse），岛侧的"恢复穿透"
+        // 不得抢关——否则 hover 岛的 leave 会把正在点面板的鼠标整体穿透掉
+        if (ignore && window.__sapHudHoldMouse) return;
         if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
           window.electronAPI.setIgnoreMouseEvents(ignore, { forward: true });
         }
