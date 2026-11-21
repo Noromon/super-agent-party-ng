@@ -35,6 +35,7 @@ const ctx = {
 (async () => {
     const m = vue_methods;
     ctx._netwArmExpr = m._netwArmExpr;
+    ctx._makeScroller = m._makeScroller;
     await m.networkWatch.call(ctx, 'start', '', true, -1);
     await m.networkWatch.call(ctx, 'start', '', false, -1);
     await m.networkWatch.call(ctx, 'read', 'frs/section', true, -1);
@@ -43,6 +44,9 @@ const ctx = {
     await m.networkWatch.call(ctx, 'stop', '', false, -1);
     await m.scrollAndFind.call(ctx, '标题片段', 'click', 1, 200, 'data-url');
     await m.scrollAndFind.call(ctx, 'x', 'none', 1, 200, '');
+    await m.collectList.call(ctx, { item: '.thread-card-wrapper', fields: { title: '.thread-title', href: 'a@href', t: 'time[datetime]@datetime' }, max_scrolls: 2, pause_ms: 200, max_items: 50 });
+    await m.collectList.call(ctx, { item: 'li', fields: { text: '' }, max_scrolls: 1, pause_ms: 200, older_than: '2026-01-01', date_field: 'text' });
+    await m._makeScroller.call(ctx, makeWv());
     await m.getWebviewSnapshot.call(ctx, false);
     let fail = 0;
     for (let i = 0; i < CAPTURED.length; i++) {

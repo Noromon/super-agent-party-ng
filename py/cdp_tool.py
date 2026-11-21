@@ -392,6 +392,68 @@ async def scroll_and_find(match, action="none", max_scrolls=30, pause_ms=700, at
                                  [match, action, rounds, pause, attribute], timeout=budget)
 
 
+async def collect_list(item, fields, key="", max_items=120, max_scrolls=40, pause_ms=800,
+                       no_new_rounds=3, older_than="", date_field=""):
+    """S269：虚拟列表收割原语——guest 内循环 滚动→等新卡片挂载→按 fields 抽取→去重，
+    直到 until 条件（够数/连续无新卡/时间线过旧/到底/轮数上限）才返回。
+    一次调用替代 agent 手搓『逐屏 snapshot+人工去重』的几十次往返。
+    结果超 17KB 走 S257 同款落盘通道回 body_path/body_url，永不被 S184 截断。"""
+    import hashlib as _hl
+    import os as _os
+    opts = {"item": str(item or ""), "fields": fields if isinstance(fields, dict) else {}}
+    if key:
+        opts["key"] = str(key)
+    try:
+        opts["max_items"] = max(1, min(int(max_items), 500))
+    except (TypeError, ValueError):
+        opts["max_items"] = 120
+    try:
+        opts["max_scrolls"] = max(1, min(int(max_scrolls), 80))
+    except (TypeError, ValueError):
+        opts["max_scrolls"] = 40
+    try:
+        opts["pause_ms"] = max(200, min(int(pause_ms), 4000))
+    except (TypeError, ValueError):
+        opts["pause_ms"] = 800
+    try:
+        opts["no_new_rounds"] = max(1, min(int(no_new_rounds), 10))
+    except (TypeError, ValueError):
+        opts["no_new_rounds"] = 3
+    if older_than:
+        opts["older_than"] = str(older_than)
+    if date_field:
+        opts["date_field"] = str(date_field)
+    budget = min(opts["max_scrolls"] * (opts["pause_ms"] + 400) // 1000 + 45, 300)
+    res = await call_vue_method('collectList', [opts], timeout=budget)
+    if not isinstance(res, str):
+        return res
+    if not res.strip().startswith("{"):
+        return res  # "Error: ..." 直传
+    try:
+        d = json.loads(res)
+    except (ValueError, TypeError):
+        return res
+    items = d.get("items")
+    if isinstance(items, list) and len(res.encode("utf-8", "ignore")) > 17000:
+        # S184 限额 20000B——预先整体落盘（S257 同款），预览前 10 条回传
+        try:
+            _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+            fn = "collect_" + _hl.md5(res.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
+            fp = _os.path.join(UPLOAD_FILES_DIR, fn)
+            with open(fp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(d, ensure_ascii=False))
+            d["preview_first10"] = items[:10]
+            d["items"] = None
+            d["body_path"] = fp
+            # 127.0.0.1 写死：本机工具调用方（S257 同款约定）
+            d["body_url"] = f"http://127.0.0.1:{get_port()}/uploaded_files/{fn}"
+            d["note"] = (f"完整 {d.get('collected')} 条已整体落盘 body_path"
+                         "（read_file_range_tool_local/grep 直读，免 token）；body_url 为同文件 HTTP 形式")
+        except OSError:
+            pass
+    return json.dumps(d, ensure_ascii=False)
+
+
 _PULL_POLLUTED_PREFIX = ("Error executing", "Failed networkWatch", "networkWatch err:",
                          "浏览器操作超时", '{"jsonrpc"', "[Unknown Tool]", "Success")
 
@@ -1032,6 +1094,38 @@ all_cdp_tools = [
                     "attribute": {"type": "string", "description": "action=extract 时要抠的属性名（如 data-url），省略则抠 href。"}
                 },
                 "required": ["match"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "collect_list",
+            "description": ("S269: 虚拟列表『收割』原语——针对贴吧吧列表/微博热搜/信息流等 SPA 虚拟滚动列表，"
+                            "一次调用完成整个『滚动→等新卡片挂载→按选择器批量抽取→去重』循环（替代逐屏 take_snapshot+人工去重的 N 次往返）。"
+                            "item=卡片根选择器（先 take_snapshot 或 evaluate_script 看清 DOM 结构再定，如贴吧 '.thread-card-wrapper'）；"
+                            "fields={输出字段名: 卡片内选择器}，要属性就在末尾拼 @属性名（如 'a@href'、'time@datetime'，最多 8 个字段）；"
+                            "直到 until 条件才返回：够 max_items 条(stop_reason=max_items)/连续 no_new_rounds 屏无新卡/新采条目时间早于 older_than"
+                            "（配合 date_field，抓『今天/最近』类需求利器——如 older_than='2026-11-21' 抓到跨天即停）/滚到底/达 max_scrolls。"
+                            "去重默认按整条内容，指定 key=某字段名（如 href）按该字段去重更稳。"
+                            "返回 {collected, rounds, stop_reason, scroller_mode, items}；结果超 ~17KB 自动整体落盘回 body_path"
+                            "（read_file_range_tool_local/grep 直读，免 token），预览前 10 条随返回。"
+                            "提示：有公开列表接口的站优先 network_watch(mode=start, trigger_scrolls=2) 直接吃接口 JSON，比 DOM 收割更全更稳。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "卡片根 CSS 选择器（每张卡一个匹配节点）。先用快照/evaluate_script 确认结构。"},
+                    "fields": {"type": "object", "description": "字段名→卡片内选择器；取属性拼 '@属性名'（如 'a@href'）。选择器空串=取卡片根文本。最多 8 项。",
+                               "additionalProperties": {"type": "string"}},
+                    "key": {"type": "string", "description": "去重依据的字段名（如 'href'）；省略则整条内容去重。"},
+                    "max_items": {"type": "integer", "description": "最多收割条数（1-500，默认120）。"},
+                    "max_scrolls": {"type": "integer", "description": "最多滚动轮数（1-80，默认40）。"},
+                    "pause_ms": {"type": "integer", "description": "每轮滚动后等新挂载毫秒数（200-4000，默认800）。慢站调大。"},
+                    "no_new_rounds": {"type": "integer", "description": "连续 K 轮无新条目即停（1-10，默认3）。"},
+                    "older_than": {"type": "string", "description": "时间线闸门（如 '2026-11-21' 或 ISO 时间）：采到早于该时间的条目即停并返回，抓『今天/最近』贴子用。需配 date_field。"},
+                    "date_field": {"type": "string", "description": "fields 中充当时间戳的字段名（其值需可被 Date.parse 解析）。"}
+                },
+                "required": ["item", "fields"]
             }
         }
     },

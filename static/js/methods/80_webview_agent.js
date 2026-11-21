@@ -1210,6 +1210,149 @@ Object.assign(vue_methods, {
         return JSON.stringify({ found: false, scroller_mode: mode, scrolled_to: pos.p, scrollable_max: pos.max, exec_err: execErr || undefined, note: "到底/达轮数上限仍未命中：换 match 措辞、加大 max_scrolls，或用 network_watch 抓列表接口 JSON 拿 tid（页面若被吧务移档则主列表永远刷不出）" + (execErr ? "；注意：探测脚本执行报错(" + execErr + ")，命中检测可能未生效，非目标不存在" : "") });
     },
 
+    // --- 14b. S269：虚拟列表「收割」原语——滚动→等新节点挂载→按 fields 批量抽卡→去重，
+    // 引擎内循环直到 until 条件命中，一次调用替代 agent 手搓逐屏 snapshot+人工去重。 ---
+    // opts:{item(卡片根选择器), fields({字段名:"选择器"|"选择器@属性"}), key(去重字段名,可省),
+    //        max_items, max_scrolls, pause_ms, no_new_rounds, older_than(时间线), date_field}
+    async collectList(opts = {}) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        let o = opts;
+        if (typeof o === "string") { try { o = JSON.parse(o); } catch (e) { o = null; } }
+        if (!o || typeof o !== "object") return "Error: collect_list opts 需为 JSON 对象";
+        const itemSel = String(o.item || "").trim();
+        if (!itemSel) return "Error: collect_list 需要 item（卡片根 CSS 选择器，如 '.thread-card-wrapper'）";
+        let fields = (o.fields && typeof o.fields === "object" && !Array.isArray(o.fields)) ? o.fields : null;
+        if (fields) {
+            const ks = Object.keys(fields);
+            if (ks.length > 8) { const cut = {}; ks.slice(0, 8).forEach(function (k) { cut[k] = fields[k]; }); fields = cut; }
+        }
+        if (!fields || !Object.keys(fields).length) return "Error: collect_list 需要 fields（{字段名: 选择器}，取属性用 '选择器@href'，至少 1 个）";
+        const keyField = String(o.key || "");
+        let maxItems = parseInt(o.max_items) || 120; maxItems = Math.max(1, Math.min(maxItems, 500));
+        let rounds = parseInt(o.max_scrolls) || 40; rounds = Math.max(1, Math.min(rounds, 80));
+        const pause = Math.max(200, Math.min(parseInt(o.pause_ms) || 800, 4000));
+        let noNewK = parseInt(o.no_new_rounds) || 3; noNewK = Math.max(1, Math.min(noNewK, 10));
+        const olderThanMs = o.older_than ? Date.parse(String(o.older_than)) : NaN;
+        const dateField = String(o.date_field || "");
+        const sleepAt = (ms) => new Promise(r => setTimeout(r, ms));
+        const sc = await this._makeScroller(wv);
+        // 每轮扫描：按 item 抽卡→fields 逐项 text/attr（空白规范化、单值≤240字符、单轮≤200卡）
+        const extractExpr = "(function(){var sel=" + JSON.stringify(itemSel) + ";var F=" + JSON.stringify(fields)
+            + ";var nf=function(s){return String(s==null?'':s).replace(/[\\u200b-\\u200f\\u2060\\ufeff\\u00ad]+/g,'').replace(/\\s+/g,' ').trim()};var cards;"
+            + "try{cards=document.querySelectorAll(sel);}catch(e){return JSON.stringify({sel_err:String(e&&e.message||e),recs:[]});}"
+            + "var out=[];for(var i=0;i<cards.length&&out.length<200;i++){var c=cards[i];var rec={};var any=false;"
+            + "for(var k in F){var qs=String(F[k]||'');var at='';var j=qs.lastIndexOf('@');"
+            + "if(j>0&&qs.indexOf(']',j)<0&&qs.indexOf(String.fromCharCode(34),j)<0){var maybe=qs.slice(j+1);"
+            + "if(/^[a-z0-9_:.-]+$/i.test(maybe)){at=maybe;qs=qs.slice(0,j);}}"
+            + "var e2=null;try{e2=qs?c.querySelector(qs):c;}catch(_x){}"
+            + "var v='';if(e2){if(at){try{v=nf(e2.getAttribute(at));}catch(_y){}}else{v=nf(e2.innerText||e2.textContent||'');}}"
+            + "if(v.length>240)v=v.slice(0,240);rec[k]=v;if(v)any=true;}"
+            + "if(any)out.push(rec);}"
+            + "return JSON.stringify({cards:cards.length,recs:out});})()";
+        const map = new Map();
+        let noNew = 0, stop = "", roundsUsed = 0, execErr = "", lastCards = 0;
+        for (let i = 0; i < rounds; i++) {
+            roundsUsed = i + 1;
+            let got = {};
+            try { got = JSON.parse(await this._wvExec(wv, extractExpr) || "{}") || {}; } catch (e) { execErr = String((e && e.message) || e).slice(0, 140); }
+            if (got.sel_err) return JSON.stringify({ error: "item 选择器非法: " + got.sel_err });
+            lastCards = got.cards || 0;
+            const recs = Array.isArray(got.recs) ? got.recs : [];
+            let added = 0, hitOlder = false;
+            for (let rIdx = 0; rIdx < recs.length; rIdx++) {
+                const r = recs[rIdx];
+                let k = (keyField && r && r[keyField]) ? String(r[keyField]) : JSON.stringify(r);
+                if (map.has(k)) continue;
+                map.set(k, r); added++;
+                if (Number.isFinite(olderThanMs) && dateField) {
+                    const t = Date.parse((r && r[dateField]) || "");
+                    if (Number.isFinite(t) && t < olderThanMs) hitOlder = true;
+                }
+                if (map.size >= maxItems) { stop = "max_items"; break; }
+            }
+            if (stop === "max_items") break;
+            if (added === 0) noNew++; else noNew = 0;
+            if (hitOlder) { stop = "older_than"; break; }
+            if (noNew >= noNewK) { stop = "no_new_rounds"; break; }
+            const pos = await sc.readPos();
+            if (pos.p + sc.vh >= pos.max - 6) {
+                if (pos.p === sc.lastP && pos.max === sc.lastMax) { sc.stable++; if (sc.stable >= 2) { stop = "bottom"; break; } } else sc.stable = 0;
+            } else if (pos.p === sc.lastP && pos.max === sc.lastMax && sc.mode === "window" && pos.max === 0) {
+                sc.stable++; if (sc.stable >= 2) { stop = "bottom"; break; }
+            }
+            sc.lastP = pos.p; sc.lastMax = pos.max;
+            await sc.scrollOnce();
+            await sleepAt(pause);
+        }
+        if (!stop) stop = "max_scrolls";
+        const items = Array.from(map.values()).slice(0, maxItems);
+        return JSON.stringify({ collected: items.length, rounds: roundsUsed, stop_reason: stop, scroller_mode: sc.mode, cards_last_scan: lastCards, exec_err: execErr || undefined, items: items });
+    },
+
+    // S269：collectList 专用滚动器——通道探测与 scrollAndFind 同款：
+    // 真轮(CDP isTrusted)优先 → 内层最大可滚容器(打标 data-sap-sc) → window 兜底。
+    async _makeScroller(wv) {
+        const api = window.electronAPI || {};
+        let wcId = 0; try { wcId = wv.getWebContentsId(); } catch (e) {}
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const vpExpr = "(function(){return JSON.stringify({w:window.innerWidth||1,h:window.innerHeight||1});})()";
+        let vp = { w: 1280, h: 800 };
+        try { vp = JSON.parse(await this._wvExec(wv, vpExpr) || "{}") || vp; } catch (e) {}
+        const cx = Math.max(24, Math.round(vp.w * 0.5)), cy = Math.max(24, Math.round(vp.h * 0.55));
+        const stepPx = Math.max(200, Math.round(vp.h * 0.85));
+        const posExpr = "(function(){var se=document.scrollingElement||document.documentElement;"
+            + "var winP=Math.round(se.scrollTop||window.scrollY||0),winM=Math.max(0,se.scrollHeight-window.innerHeight);"
+            + "var c=document.querySelector('[data-sap-sc]');if(c){try{var cp=Math.round(c.scrollTop),cm=Math.max(0,c.scrollHeight-c.clientHeight);"
+            + "if(cp>=winP)return JSON.stringify({p:cp,max:cm});}catch(e){}}"
+            + "return JSON.stringify({p:winP,max:winM});})()";
+        const probeExpr = "(function(){var els=document.querySelectorAll('div,main,ul,section');var best=null,br=0;"
+            + "for(var i=0;i<els.length;i++){var el=els[i];try{var st=window.getComputedStyle(el);if(!/auto|scroll/.test(st.overflowY))continue;"
+            + "var r=el.getBoundingClientRect();if(r.height<200)continue;var rg=el.scrollHeight-el.clientHeight;if(rg>br){br=rg;best=el;}}catch(e){}}"
+            + "var old=document.querySelectorAll('[data-sap-sc]');for(var k=0;k<old.length;k++){try{old[k].removeAttribute('data-sap-sc');}catch(e){}}"
+            + "if(best){try{best.setAttribute('data-sap-sc','1');}catch(e){}}"
+            + "return JSON.stringify({container:!!best,container_range:Math.round(br)});})()";
+        const self = this;
+        const sc = { mode: "window", vh: vp.h || 800, lastP: -1, lastMax: -1, stable: 0 };
+        let pos0 = { p: 0, max: 0 };
+        try { pos0 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || pos0; } catch (e) {}
+        if (api.cdpInputWheel && wcId) {
+            try {
+                const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 });
+                await sleep(450);
+                const pos1 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || {};
+                if (r && r.ok && Math.abs((pos1.p || 0) - (pos0.p || 0)) > 8) sc.mode = "wheel";
+            } catch (e) {}
+        }
+        if (sc.mode !== "wheel") {
+            try {
+                const pr = JSON.parse(await this._wvExec(wv, probeExpr) || "{}") || {};
+                if (pr.container && (pr.container_range || 0) > 100) sc.mode = "container";
+            } catch (e) {}
+        }
+        sc.scrollOnce = async () => {
+            if (sc.mode === "wheel") {
+                try { const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }); if (r && r.ok) return; } catch (e) {}
+                sc.mode = "container";
+            }
+            if (sc.mode === "container") {
+                let ok = "";
+                try { ok = String(await self._wvExec(wv, "(function(){var c=document.querySelector('[data-sap-sc]');if(!c)return 'gone';try{c.scrollBy(0," + stepPx + ");return 'ok';}catch(e){return 'err';}})()") || ""); } catch (e) {}
+                if (ok === "ok") return;
+                let pr = {}; try { pr = JSON.parse(await self._wvExec(wv, probeExpr) || "{}") || {}; } catch (e) {}
+                if (pr.container) { try { await self._wvExec(wv, "(function(){var c=document.querySelector('[data-sap-sc]');if(c){try{c.scrollBy(0," + stepPx + ");}catch(e){}}})()"); } catch (e) {} return; }
+                sc.mode = "window";
+            }
+            try { await self._wvExec(wv, "(function(){window.scrollBy(0," + stepPx + ");})()"); } catch (e) {}
+        };
+        sc.readPos = async () => {
+            let p = { p: 0, max: 0 };
+            try { p = JSON.parse(await self._wvExec(wv, posExpr) || "{}") || p; } catch (e) {}
+            return p;
+        };
+        return sc;
+    },
+
     // --- 15. S253：内置网络观察（替代 agent 手搓 XHR 钩子）：start 挂钩 → 浏览/滚动 → read 增量收割 ---
     // S258：钩子脚本上提为 _netwArmExpr（start 与 dom-ready 自动重挂共用），带幂等守卫。
     // S263：BODY 驻留 CAP 200→80——300KB×200≈60MB/页在贴吧重页上叠加渲染过载（卡顿事故降载）。
