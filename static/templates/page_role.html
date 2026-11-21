@@ -3411,7 +3411,7 @@
                             controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchDailyLimit') || '每日发言上限'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
-                          <el-input-number v-model="screenWatchSettings.speak.dailyLimit" :min="1" :max="20"
+                          <el-input-number v-model="screenWatchSettings.speak.dailyLimit" :min="1" :max="99999"
                             controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchSpeakQuiet') || '发言静默时段（点）'" v-if="screenWatchSettings.speak.enabled">
