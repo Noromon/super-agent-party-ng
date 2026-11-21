@@ -154,6 +154,9 @@ class ScreenWatcher:
         self._cooldown_until = 0.0
         self._last_maintain = 0.0
         self._vlm_missing_warned = False
+        self._warmup_since = 0.0
+        self._warmup_last_on = False
+        self._enabled_last_on = False
 
     def update_config(self, cfg):
         self.config = dict(cfg) if isinstance(cfg, dict) else {}
@@ -169,6 +172,14 @@ class ScreenWatcher:
     def _interval(self):
         return max(2, self._cfg_int("intervalSeconds", 5))
 
+    def _warmup_seconds(self):
+        # S275：预热冷静期时长（0-600 秒；0=立即开始观察）。
+        try:
+            v = int(self.config.get("warmupSeconds", 30))
+        except (TypeError, ValueError):
+            return 30
+        return min(600, max(0, v))
+
     def _privacy_keywords(self):
         kws = self.config.get("privacyKeywords")
         return kws if isinstance(kws, list) else list(DEFAULT_PRIVACY_KEYWORDS)
@@ -178,6 +189,7 @@ class ScreenWatcher:
     async def start(self):
         self._stop_event = asyncio.Event()
         self.is_running = True
+        self._warmup_since = time.time()  # S275：引擎启动即进入预热冷静期
         logging.getLogger("app").info(
             f"[ScreenWatcher] 旁观引擎已启动 (GUI可用: {GUI_AVAILABLE}, 默认未启用)")
         try:
@@ -210,7 +222,18 @@ class ScreenWatcher:
                 await asyncio.to_thread(screen_memory.maintain, self.config)
             except Exception as e:
                 logging.getLogger("app").warning(f"[ScreenWatcher] 记忆层维护异常: {e}")
-        if not self.config.get("enabled", False) or not GUI_AVAILABLE:
+        # S275：预热冷静期——开启后前 N 秒完全不采集（不截图/不进 VLM/不发言），
+        # 防止刚拨开关就被上一秒的残留画面触发观察/发言。start、观察总开关上升沿、
+        # warmupEnabled 上升沿都会重置计时；关闭期间不计时（重新打开必经历完整冷静期）。
+        enabled_on = bool(self.config.get("enabled", False))
+        warm_on = bool(self.config.get("warmupEnabled", False))
+        if enabled_on and warm_on and (not self._warmup_last_on or not self._enabled_last_on):
+            self._warmup_since = now
+        self._warmup_last_on = warm_on
+        self._enabled_last_on = enabled_on
+        if not enabled_on or not GUI_AVAILABLE:
+            return
+        if warm_on and now - self._warmup_since < self._warmup_seconds():
             return
         if now < self._cooldown_until or now - self._last_capture < self._interval():
             return

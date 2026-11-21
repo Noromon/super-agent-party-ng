@@ -469,6 +469,8 @@ window.lang_enUS = {
     'screenWatchVisionWarn': 'Vision model not enabled: the observer is backing off automatically. Enable it under Model Config → Vision to start observing.',
     'screenWatchCooldown': 'Message cooldown (seconds)',
     'screenWatchDailyLimit': 'Daily message limit',
+    'screenWatchWarmup': 'Warm-up cooldown (seconds)',
+    'screenWatchWarmupNotice': 'For the first N seconds after enabling screen watch, the screen is completely ignored (no capture, no evaluation, no speech) so a freshly toggled switch cannot react to stale frames; turning it off and on restarts the countdown.',
     'screenWatchAttach': 'Attach current screen to the message',
     'screenWatchAttachHint': 'When on, a proactive message also hands the current screen (compressed) to the main model so it can literally see the scene before deciding what to say; the image is only used for generation — it never appears in the sent message nor is stored anywhere. Requires turning on "Hand everything to the main model" under Settings → Models, and a vision-capable main model.',
     'screenWatchSpeakQuiet': 'Quiet hours (hour)',

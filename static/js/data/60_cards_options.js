@@ -368,6 +368,8 @@ main();`,
             retentionHours: 48,
             digestRetentionDays: 30,
             digestHour: 4,
+            warmupEnabled: false,
+            warmupSeconds: 30,
             speak: {
                 enabled: false,
                 attachScreenshot: false,

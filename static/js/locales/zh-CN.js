@@ -469,6 +469,8 @@ window.lang_zhCN = {
     'screenWatchVisionWarn': 'Vision 视觉模型未启用：观察引擎正在自动退避，请到「模型配置 → Vision」启用后才会真正观察。',
     'screenWatchCooldown': '发言冷却（秒）',
     'screenWatchDailyLimit': '每日发言上限',
+    'screenWatchWarmup': '预热冷静期（秒）',
+    'screenWatchWarmupNotice': '开启窥屏后的前 N 秒完全忽略屏幕（不截图、不评估、不发言），防止刚打开就被上一秒的旧画面触发；关闭后再开启会重新计时。',
     'screenWatchAttach': '随发言附上当前屏幕画面',
     'screenWatchAttachHint': '开启后，主动发言时把当下屏幕画面（已压缩）一并交给主模型“亲眼看过”再决定怎么说；画面仅用于生成，不会出现在发出的消息里，也不写入任何记录。需先在“设置→模型”开启“全部交给主模型处理”，且主模型支持视觉。',
     'screenWatchSpeakQuiet': '发言静默时段（点）',
