@@ -1,4 +1,4 @@
-# build=S275
+# build=S276
 # S275：窥屏预热冷静期——开启后前 N 秒整帧跳过（不截图/不评估/不发言）；
 # start、enabled 上升沿、warmupEnabled 上升沿均重置计时；关闭期间不计时。
 import asyncio
@@ -141,8 +141,14 @@ class TestStaticWiring:
         role = (_ROOT / "static/templates/page_role.html").read_text(encoding="utf-8-sig")
         assert 'v-model="screenWatchSettings.warmupEnabled"' in role
         assert 'v-model="screenWatchSettings.warmupSeconds"' in role
-        i = role.index('v-model="screenWatchSettings.warmupEnabled"')
-        assert 'v-if="screenWatchSettings.enabled"' in role[i - 400:i]  # 不依赖 speak.enabled
+        # S276：该行必须位于「采集与隐私」卡内（间隔滑条下方），且在「主动发言」卡之前，
+        # 并常显（无 v-if）——S275 首版误藏发言卡内导致用户在设置页找不到。
+        i_cap = role.index("t('screenWatchCapture')")
+        i_warm = role.index("'screenWatchWarmup'")
+        i_speak = role.index("t('screenWatchSpeak')")
+        assert i_cap < i_warm < i_speak, "预热行应在采集与隐私卡内、主动发言卡之前"
+        line = role[role.rindex("<el-form-item", 0, i_warm):role.index(">", i_warm) + 1]
+        assert "v-if" not in line, "预热行必须常显（不依赖窥屏/speak 开关）"
         for p in ("static/js/locales/zh-CN.js", "static/js/locales/en-US.js"):
             s = (_ROOT / p).read_text(encoding="utf-8-sig")
             assert "'screenWatchWarmup'" in s and "'screenWatchWarmupNotice'" in s, p

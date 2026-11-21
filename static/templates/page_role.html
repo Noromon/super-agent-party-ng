@@ -3317,6 +3317,14 @@
                           <el-slider v-model="screenWatchSettings.intervalSeconds" :min="2" :max="60" :step="1"
                             show-input style="width: 100%;" @change="autoSaveSettings"></el-slider>
                         </el-form-item>
+                        <el-form-item :label="t('screenWatchWarmup') || '预热冷静期（秒）'" label-position="left">
+                          <el-switch v-model="screenWatchSettings.warmupEnabled" @change="autoSaveSettings" style="margin-right: 10px;"></el-switch>
+                          <el-input-number v-model="screenWatchSettings.warmupSeconds" :min="0" :max="600" :step="10"
+                            :disabled="!screenWatchSettings.warmupEnabled" controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
+                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
+                            {{ t('screenWatchWarmupNotice') || '开启窥屏后的前 N 秒完全忽略屏幕（不截图、不评估、不发言），防止刚打开就被上一秒的旧画面触发；关闭后再开启会重新计时。' }}
+                          </div>
+                        </el-form-item>
                         <el-form-item :label="t('screenWatchPrivacyKeywords') || '隐私黑名单窗口关键词'">
                           <el-select v-model="screenWatchSettings.privacyKeywords" multiple filterable
                             allow-create default-first-option :reserve-keyword="false" style="width: 100%;"
@@ -3413,14 +3421,6 @@
                         <el-form-item :label="t('screenWatchDailyLimit') || '每日发言上限'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
                           <el-input-number v-model="screenWatchSettings.speak.dailyLimit" :min="1" :max="99999"
                             controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
-                        </el-form-item>
-                        <el-form-item :label="t('screenWatchWarmup') || '预热冷静期（秒）'" v-if="screenWatchSettings.enabled" label-position="left">
-                          <el-switch v-model="screenWatchSettings.warmupEnabled" @change="autoSaveSettings" style="margin-right: 10px;"></el-switch>
-                          <el-input-number v-model="screenWatchSettings.warmupSeconds" :min="0" :max="600" :step="10"
-                            :disabled="!screenWatchSettings.warmupEnabled" controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
-                          <div class="form-tip" style="margin-top: 6px; font-size: 12px; color: #909399;">
-                            {{ t('screenWatchWarmupNotice') || '开启窥屏后的前 N 秒完全忽略屏幕（不截图、不评估、不发言），防止刚打开就被上一秒的旧画面触发；关闭后再开启会重新计时。' }}
-                          </div>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchSpeakQuiet') || '发言静默时段（点）'" v-if="screenWatchSettings.speak.enabled">
                           <el-row :gutter="12" style="width: 100%;">
