@@ -469,19 +469,36 @@ def _pull_polluted(body):
             or s.startswith("Operation completed (Type:"))
 
 
-async def network_watch(mode="start", pattern="", include_body=False):
+async def network_watch(mode="start", pattern="", include_body=False, trigger_scrolls=0, wait_ms=800):
     """S253: 内置网络观察器——start 挂 fetch/XHR 钩子（页面导航后需重挂）→ 操作页面 →
     read 增量收割 {url,status[,body 预览≤2KB]}（pattern 子串过滤）；stop 清空并解除。
     S254: include_body=True 时全量响应体留在页面侧，read 中超长正文自动落盘为
     uploaded_files 文件并回 body_url——完整 JSON 可用 load_files/终端 grep 读，不再 2KB 截断。
     S257: 落盘条目另附 body_path（本地绝对路径，read_file_range_tool_local 直读、免 token）；
     read 总返回硬性压在 S184 工具输出限额（20KB）之下——超限则收割清单整体落盘回路径，
-    避免被 S184 截断成 .agent/tool_output 相对路径 marker 反而弄丢引用。"""
+    避免被 S184 截断成 .agent/tool_output 相对路径 marker 反而弄丢引用。
+    S270: start(trigger_scrolls=N) 一体化『挂钩→自动滚 N 轮触发列表接口→收割首批』，
+    收割结果与 read 同款后处理（超长落盘/整体限额保护）。"""
     if str(mode or "").lower() not in ("start", "read", "stop"):
         return "[Error] network_watch: mode 需 start|read|stop"
     m = str(mode).lower()
-    res = await call_vue_method('networkWatch', [m, str(pattern or ""), bool(include_body), 0],
-                                timeout=30)
+    trig = None
+    if m == "start":
+        try:
+            tn = int(trigger_scrolls or 0)
+        except (TypeError, ValueError):
+            tn = 0
+        if tn > 0:
+            try:
+                tw = int(wait_ms)
+            except (TypeError, ValueError):
+                tw = 800
+            trig = {"scrolls": max(1, min(tn, 20)), "wait_ms": max(300, min(tw, 5000))}
+    budget = 30
+    if trig:
+        budget = 30 + (trig["scrolls"] * (trig["wait_ms"] + 1500)) // 1000 + 20
+    res = await call_vue_method('networkWatch', [m, str(pattern or ""), bool(include_body), 0, trig],
+                                timeout=budget)
     # S260：start 撞上页面加载中 → guest 拒绝执行钩子脚本（GUEST_VIEW_MANAGER_CALL 类），
     # call_vue_method 重试耗尽回裸 Electron 错误——翻译成可行动指引（幂等重试即可，别弃用本工具）
     if m == "start" and isinstance(res, str) and (
@@ -490,84 +507,116 @@ async def network_watch(mode="start", pattern="", include_body=False):
         return ("network_watch start 失败：页面正在加载或渲染进程繁忙，钩子脚本未被接受。"
                 "等导航完成后重试 start 即可（幂等安全，重复 start 不会双重挂钩）；"
                 "mobile/桌面模式切换过的标签同样直接重试——钩子会自动跟随后续所有导航重挂。")
-    if m == "read" and isinstance(res, str) and res.strip().startswith("{"):
+    # S270：start+trigger 的一体化返回里嵌着首批收割——与各 read 走同款后处理
+    if m == "start" and trig and isinstance(res, str) and res.strip().startswith("{"):
         try:
-            import hashlib as _hl
-            import os as _os
             d = json.loads(res)
-            items = d.get("items") if isinstance(d, dict) else None
-            overs = [it for it in (items or [])
-                     if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:4]
-            origin = str(d.get("origin") or "").strip()
-            saved = failed = 0
-            for it in overs:
-                try:
-                    body = await call_vue_method(
-                        'networkWatch', ["pull", "", False, int(it.get("gi") or -1)], timeout=45)
-                    if _pull_polluted(body):
-                        it["b_err"] = ("全文拉取失败（渲染进程忙/被截断，非响应体内容），预览 b 仍有效；"
-                                       "稍后重读 read 再取 body_url")
-                        failed += 1
-                        continue
+            if isinstance(d, dict) and isinstance(d.get("read"), dict):
+                d["read"] = json.loads(await _netw_read_postprocess(d["read"]))
+                payload = json.dumps(d, ensure_ascii=False)
+                if len(payload.encode("utf-8", "ignore")) > 17000:
+                    import hashlib as _hl
+                    import os as _os
                     _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
-                    fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
+                    fn = "net_trig_" + _hl.md5(payload.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
                     fp = _os.path.join(UPLOAD_FILES_DIR, fn)
                     with open(fp, "w", encoding="utf-8") as f:
-                        f.write(body)
-                    it["body_path"] = fp
-                    # 127.0.0.1 写死：本机工具调用方，HOST 配成 0.0.0.0/局域网 IP 时反而不可用
-                    it["body_url"] = f"http://127.0.0.1:{get_port()}/uploaded_files/{fn}"
-                    if isinstance(it.get("b"), str):
-                        it["b"] = it["b"][:200]  # 全文已在盘上，预览占位即可（S257 返回瘦身）
-                    it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_path"
-                                    "（read_file_range_tool_local/grep 直读，免鉴权）；"
-                                    "body_url 为同文件 HTTP 形式")
-                    saved += 1
-                except Exception:  # noqa: BLE001
-                    it["b_err"] = "全文拉取异常，预览 b 仍有效；可稍后重试 read"
-                    failed += 1
-            extra = ""
-            if saved:
-                extra += (f"；{saved} 条超长响应已落盘（各项 body_path/body_url），本地读路径最方便，"
-                          "不必再手搓 fetch 钩子")
-            if failed:
-                extra += f"；{failed} 条全文拉取失败（b_err 说明），稍后可再 read 重试"
-            if origin:
-                extra += f"；数据抓取自 {origin}——正文里的相对路径资源（如 /emotions/xx.gif）需拼该域名"
-            if extra:
-                d["note"] = (str(d.get("note") or "") + extra).lstrip("；")
-            payload = json.dumps(d, ensure_ascii=False)
-            if len(payload.encode("utf-8", "ignore")) > 17000 and isinstance(items, list) and items:
-                # S184 限额 20000B——超线会被"output truncated+.agent 相对路径"接管，
-                # 连 body_path 一起丢（S257 事故根因）。改为收割清单整体落盘+紧凑摘要。
-                try:
-                    _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
-                    fn2 = ("net_read_" + _hl.md5(payload.encode("utf-8", "ignore")).hexdigest()[:16]
-                           + ".json")
-                    fp2 = _os.path.join(UPLOAD_FILES_DIR, fn2)
-                    with open(fp2, "w", encoding="utf-8") as f:
                         f.write(payload)
-                    brief = []
-                    for it in items[:8]:
-                        if isinstance(it, dict):
-                            brief.append({k: str(it.get(k))[:120] for k in ("u", "s", "blen")
-                                          if it.get(k) is not None})
-                    d2 = {"total": d.get("total"), "new_items": d.get("new_items"),
-                          "returned": 0, "items": brief,
-                          "note": (f"本次收割 {len(items)} 条超返回限额，完整清单（含各条 "
-                                   f"b 预览与 body_path/body_url）已存 {fp2}"
-                                   "——用 read_file_range_tool_local 或 search_files_tool_local"
-                                   "（path 传该绝对路径）读；想直接拿数据可加大 pattern 缩小增量再 read")}
-                    if origin:
-                        d2["note"] += f"；数据源 {origin}（相对路径资源拼该域名）"
-                    res = json.dumps(d2, ensure_ascii=False)
-                except Exception:  # noqa: BLE001
+                    rd = d.get("read") or {}
+                    d["read"] = {"total": rd.get("total"), "new_items": rd.get("new_items"),
+                                 "items": [],
+                                 "note": f"首批收割超返回限额，完整清单（含 body_path/body_url）已存 {fp}"}
+                    res = json.dumps(d, ensure_ascii=False)
+                else:
                     res = payload
-            else:
-                res = payload
+        except Exception:  # noqa: BLE001
+            pass
+        return res
+    if m == "read" and isinstance(res, str) and res.strip().startswith("{"):
+        try:
+            d = json.loads(res)
+            if isinstance(d, dict) and isinstance(d.get("items"), list):
+                res = await _netw_read_postprocess(d)
         except Exception:  # noqa: BLE001
             pass
     return res
+
+
+async def _netw_read_postprocess(d):
+    """S254/S257 read 收割后处理（S270 起被 start+trigger 首批收割复用）：
+    超长正文逐条 pull 落盘回 body_path/body_url；总载荷压在 S184 限额下，
+    超限整体落盘+紧凑摘要。传入收割 dict，返回最终字符串载荷。"""
+    import hashlib as _hl
+    import os as _os
+    items = d.get("items") if isinstance(d, dict) else None
+    overs = [it for it in (items or [])
+             if isinstance(it, dict) and int(it.get("blen") or 0) > 2048][:4]
+    origin = str(d.get("origin") or "").strip()
+    saved = failed = 0
+    for it in overs:
+        try:
+            body = await call_vue_method(
+                'networkWatch', ["pull", "", False, int(it.get("gi") or -1)], timeout=45)
+            if _pull_polluted(body):
+                it["b_err"] = ("全文拉取失败（渲染进程忙/被截断，非响应体内容），预览 b 仍有效；"
+                               "稍后重读 read 再取 body_url")
+                failed += 1
+                continue
+            _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+            fn = "net_" + _hl.md5(body.encode("utf-8", "ignore")).hexdigest()[:16] + ".json"
+            fp = _os.path.join(UPLOAD_FILES_DIR, fn)
+            with open(fp, "w", encoding="utf-8") as f:
+                f.write(body)
+            it["body_path"] = fp
+            # 127.0.0.1 写死：本机工具调用方，HOST 配成 0.0.0.0/局域网 IP 时反而不可用
+            it["body_url"] = f"http://127.0.0.1:{get_port()}/uploaded_files/{fn}"
+            if isinstance(it.get("b"), str):
+                it["b"] = it["b"][:200]  # 全文已在盘上，预览占位即可（S257 返回瘦身）
+            it["b_note"] = (f"完整正文 {it.get('blen')} 字节已存 body_path"
+                            "（read_file_range_tool_local/grep 直读，免鉴权）；"
+                            "body_url 为同文件 HTTP 形式")
+            saved += 1
+        except Exception:  # noqa: BLE001
+            it["b_err"] = "全文拉取异常，预览 b 仍有效；可稍后重试 read"
+            failed += 1
+    extra = ""
+    if saved:
+        extra += (f"；{saved} 条超长响应已落盘（各项 body_path/body_url），本地读路径最方便，"
+                  "不必再手搓 fetch 钩子")
+    if failed:
+        extra += f"；{failed} 条全文拉取失败（b_err 说明），稍后可再 read 重试"
+    if origin:
+        extra += f"；数据抓取自 {origin}——正文里的相对路径资源（如 /emotions/xx.gif）需拼该域名"
+    if extra:
+        d["note"] = (str(d.get("note") or "") + extra).lstrip("；")
+    payload = json.dumps(d, ensure_ascii=False)
+    if len(payload.encode("utf-8", "ignore")) > 17000 and isinstance(items, list) and items:
+        # S184 限额 20000B——超线会被"output truncated+.agent 相对路径"接管，
+        # 连 body_path 一起丢（S257 事故根因）。改为收割清单整体落盘+紧凑摘要。
+        try:
+            _os.makedirs(UPLOAD_FILES_DIR, exist_ok=True)
+            fn2 = ("net_read_" + _hl.md5(payload.encode("utf-8", "ignore")).hexdigest()[:16]
+                   + ".json")
+            fp2 = _os.path.join(UPLOAD_FILES_DIR, fn2)
+            with open(fp2, "w", encoding="utf-8") as f:
+                f.write(payload)
+            brief = []
+            for it in items[:8]:
+                if isinstance(it, dict):
+                    brief.append({k: str(it.get(k))[:120] for k in ("u", "s", "blen")
+                                  if it.get(k) is not None})
+            d2 = {"total": d.get("total"), "new_items": d.get("new_items"),
+                  "returned": 0, "items": brief,
+                  "note": (f"本次收割 {len(items)} 条超返回限额，完整清单（含各条 "
+                           f"b 预览与 body_path/body_url）已存 {fp2}"
+                           "——用 read_file_range_tool_local 或 search_files_tool_local"
+                           "（path 传该绝对路径）读；想直接拿数据可加大 pattern 缩小增量再 read")}
+            if origin:
+                d2["note"] += f"；数据源 {origin}（相对路径资源拼该域名）"
+            return json.dumps(d2, ensure_ascii=False)
+        except Exception:  # noqa: BLE001
+            return payload
+    return payload
 
 
 async def wait_for(text=None, selector=None, js=None, timeout=1000):
@@ -1142,13 +1191,19 @@ all_cdp_tools = [
                             "S254/S257: include_body=true 时响应体全量保留，read 中 blen>2048 的条目自动落盘并附 body_path"
                             "（本地绝对路径——read_file_range_tool_local/grep 直读，免 token，首选）+body_url+blen，"
                             "收割总量超返回限额时完整清单自动整体落盘回路径，永不被截断；无需再手搓钩子。"
+                            "S270 接口优先规矩：SPA 列表页（贴吧/微博/信息流）进页面后的第一动作应是 "
+                            "start(include_body=true, pattern=接口关键词, trigger_scrolls=2)——挂钩后引擎自动滚 2 轮"
+                            "触发列表接口并直接随返回收割首批 JSON（read 字段，同款落盘处理），一步到位；"
+                            "接口拿到数据就不要再用 collect_list/take_snapshot 走 DOM 慢路径。"
                             "stop=清空并停用。"),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {"type": "string", "enum": ["start", "read", "stop"], "description": "start 挂钩 / read 增量收割 / stop 清空停用。"},
                     "pattern": {"type": "string", "description": "read 时按 URL 子串过滤（如 'newpostlist'），省略返回全部新条目。"},
-                    "include_body": {"type": "boolean", "description": "start 时是否记录响应体（全量保留；read 回 2KB 预览，超长自动落盘给 body_url）。默认 false。抓数据用 true。"}
+                    "include_body": {"type": "boolean", "description": "start 时是否记录响应体（全量保留；read 回 2KB 预览，超长自动落盘给 body_url）。默认 false。抓数据用 true。"},
+                    "trigger_scrolls": {"type": "integer", "description": "S270 仅 start 生效：挂钩成功后引擎自动滚动触发列表接口的轮数（1-20）。列表页首选 start(trigger_scrolls=2) 一体化拿数据；0=只挂钩不触发（旧行为）。"},
+                    "wait_ms": {"type": "integer", "description": "S270 配 trigger_scrolls：每轮滚动后的等待毫秒（300-5000，默认800）。慢站调大。"}
                 },
                 "required": ["mode"]
             }

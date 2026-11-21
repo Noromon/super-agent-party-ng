@@ -49,7 +49,7 @@ def test_network_watch_validation_and_dispatch():
     assert cdp and asyncio.run(cdp.network_watch(mode="bogus")).startswith("[Error]")
     _run(calls, fake, lambda: cdp.network_watch(mode="READ", pattern="newpostlist", include_body=True))
     m, args, tmo = calls[-1]
-    assert m == "networkWatch" and args == ["read", "newpostlist", True, 0] and tmo == 30  # S254: 第4参 pull idx
+    assert m == "networkWatch" and args == ["read", "newpostlist", True, 0, None] and tmo == 30  # S254: 第4参 pull idx / S270: 第5参 trigger(read 模式恒 None)
 
 
 def test_vue_scroll_and_find_impl():

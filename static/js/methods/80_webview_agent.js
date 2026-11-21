@@ -1368,7 +1368,7 @@ Object.assign(vue_methods, {
             + "if(BODY&&L<E.length){try{var b=x.responseText||'';if(b)E[L].bf=b.slice(0,307200);}catch(e){}}});return os.apply(this,arguments);};"
             + "return 'armed';}catch(e){return 'arm_err:'+String(e&&e.message||e);}})()";
     },
-    networkWatch(mode = "start", pattern = "", includeBody = false, pullIdx = -1) {
+    networkWatch(mode = "start", pattern = "", includeBody = false, pullIdx = -1, trigger = null) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
         const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1427,9 +1427,33 @@ Object.assign(vue_methods, {
                         wv.addEventListener('dom-ready', wv.__netwRe);
                     } catch (e) {}
                     const already = await this._wvExec(wv, "(function(){return !!(window.__netw&&window.__netw.armed);})()");
-                    if (already === true) return JSON.stringify({ ok: true, note: "already armed（保留已收集条目；要清空重收集先 stop 再 start）。导航后会自动重挂，无需手动处理" });
-                    const r = await this._wvExec(wv, arm);
-                    return String(r || "armed");
+                    let armedNote;
+                    if (already === true) {
+                        armedNote = "already armed（保留已收集条目；要清空重收集先 stop 再 start）。导航后会自动重挂，无需手动处理";
+                    } else {
+                        const r = await this._wvExec(wv, arm);
+                        armedNote = String(r || "armed");
+                    }
+                    // S270：一体化编排——挂钩成功后自动滚 N 轮触发列表接口→等待→立即收割首批。
+                    // 目的：把『start→滚动→read』三步压成一步，且从时序上根除"先操作后挂钩"误序。
+                    const trig = (trigger && typeof trigger === "object") ? trigger : null;
+                    let trigN = trig ? (parseInt(trig.scrolls) || 0) : 0;
+                    trigN = trigN > 0 ? Math.min(trigN, 20) : 0;
+                    const trigWait = trig ? Math.max(300, Math.min(parseInt(trig.wait_ms) || 800, 5000)) : 800;
+                    if (!trigN) {
+                        return already === true ? JSON.stringify({ ok: true, note: armedNote }) : armedNote;
+                    }
+                    if (armedNote.indexOf("arm_err") === 0) {
+                        return JSON.stringify({ ok: false, armed: armedNote, note: "钩子脚本执行失败，滚动触发已跳过；修复后重试 start" });
+                    }
+                    const sc = await this._makeScroller(wv);
+                    for (let i = 0; i < trigN; i++) {
+                        await sc.scrollOnce();
+                        await sleep(trigWait);
+                    }
+                    let readData = {};
+                    try { readData = JSON.parse(await this._wvExec(wv, read) || "{}") || {}; } catch (e) {}
+                    return JSON.stringify({ ok: true, armed: armedNote, triggered_rounds: trigN, scroller_mode: sc.mode, read: readData });
                 }
                 if (mode === "read") {
                     // S258：正常路径 dom-ready 已自动重挂；到这里还丢说明是 start 之前的历史导航

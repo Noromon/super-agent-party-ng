@@ -41,6 +41,8 @@ const ctx = {
     await m.networkWatch.call(ctx, 'read', 'frs/section', true, -1);
     await m.networkWatch.call(ctx, 'read', '', false, -1);
     await m.networkWatch.call(ctx, 'pull', '', false, 7);
+    await m.networkWatch.call(ctx, 'start', '', true, -1, { scrolls: 2, wait_ms: 300 });
+    await m.networkWatch.call(ctx, 'start', '', false, -1, null);
     await m.networkWatch.call(ctx, 'stop', '', false, -1);
     await m.scrollAndFind.call(ctx, '标题片段', 'click', 1, 200, 'data-url');
     await m.scrollAndFind.call(ctx, 'x', 'none', 1, 200, '');
