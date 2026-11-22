@@ -63,7 +63,7 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S286';
+  var HUD_REV = 'S287';
   var pollTicks = 0, dbgLogged = false;
   // S286：高 DPI（如 125%）下 OS 光标返回物理像素，与 CSS 坐标错位一个 dpr 倍——
   // 所有命中判定先按原值测，越出视口时再除以 devicePixelRatio 复测（自校准，不猜单位）。
@@ -71,6 +71,8 @@
   function inVp(x, y) { return x >= 0 && y >= 0 && x < (window.innerWidth || Infinity) && y < (window.innerHeight || Infinity); }
   // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
   var seenIds = [], seenSet = {};
+  // S287：气泡溢出改入 FIFO 队列（不再撤展示中的旧条），槽位空出自动补位；上限 50 丢最老
+  var popQueue = [], POP_QMAX = 50;
   function isDup(id) {
     if (!id) return false;
     if (seenSet[id]) return true;
@@ -175,18 +177,31 @@
   // 最新条目紧邻胶囊点、旧条目向外排（n* 方位向下排=最新在上，s* 方位向上排=最新在下，
   // 由 hud-s-down / hud-s-up 的 flex-direction 决定）；每条保留 holdMs 后淡出；
   // 同屏条数超 stackMax 时最老一条立即提前撤下（不等保留到期）。
-  function detachBubble(node) {
+  function detachBubble(node, reason) {
     if (!node || node.__gone) return;
     node.__gone = true;
     if (node.__t) clearTimeout(node.__t);
     node.classList.remove('hud-show');
     setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 450);
+    try { console.info('[HudPop] detach ' + (reason || '?') + ' age=' + (node.__birth ? Math.round((Date.now() - node.__birth) / 100) / 10 : -1) + 's'); } catch (e) {}
+    pumpQueue(); // S287：live 计数已排除 __gone，槽位即时释放即补位
+  }
+
+  // S287：保留时长是承诺——溢出不再撤下展示中的气泡，改由队列等位补发
+  function pumpQueue() {
+    while (popQueue.length && stack) {
+      var live = 0;
+      for (var i = 0; i < stack.children.length; i++) if (!stack.children[i].__gone) live++;
+      if (live >= cfg.stackMax) break;
+      renderBubble(popQueue.shift());
+    }
   }
 
   function trimStack() {
     if (!stack) return;
     // DOM 顺序即时间序（appendChild 新入）——最老恒为首个"未消亡"节点；
     // 淡出中的节点（__gone）450ms 后才真正移出 DOM，计数须排除，否则本循环永不收敛
+    // S287：本函数现仅服务于「远程调小 stackMax」的收敛；推送溢出走队列不进这里
     var guard = 0;
     while (guard++ < 16) {
       var live = 0, oldest = null, i;
@@ -197,22 +212,42 @@
         if (!oldest) oldest = ch;
       }
       if (live <= cfg.stackMax || !oldest) break;
-      detachBubble(oldest);
+      detachBubble(oldest, 'trim');
     }
   }
 
-  function pushBubble(icon, text, holdOverride) {
+  function renderBubble(item) {
     if (!stack) return;
+    var icon = item.icon, text = item.text;
     var b = el('div', 'sap-hud-bubble' + (icon === ICONS.approval ? ' hud-approval' : '') + ' hud-corner-' + cfg.position);
     var i = el('i', 'hud-icon fa ' + icon);
     var t = el('div', 'hud-text', '');
     t.textContent = text;
     b.appendChild(i); b.appendChild(t);
     stack.appendChild(b);
+    b.__birth = Date.now(); // S287：日志显示真实展示时长
     requestAnimationFrame(function () { b.classList.add('hud-show'); });
     trimStack();
-    var hold = holdOverride || cfg.holdMs;
-    b.__t = setTimeout(function () { detachBubble(b); }, hold);
+    var hold = item.hold || cfg.holdMs;
+    b.__t = setTimeout(function () { detachBubble(b, 'timeout'); }, hold);
+    try {
+      var n = 0;
+      for (var q2 = 0; q2 < stack.children.length; q2++) if (!stack.children[q2].__gone) n++;
+      console.info('[HudPop] push hold=' + (hold / 1000) + 's live=' + n + '/' + cfg.stackMax);
+    } catch (e) {}
+  }
+
+  function pushBubble(icon, text, holdOverride, force) {
+    if (!stack) return;
+    var live = 0;
+    for (var i2 = 0; i2 < stack.children.length; i2++) if (!stack.children[i2].__gone) live++;
+    if (!force && live >= cfg.stackMax) {
+      popQueue.push({ icon: icon, text: text, hold: holdOverride });
+      while (popQueue.length > POP_QMAX) popQueue.shift();
+      try { console.info('[HudPop] queue live=' + live + '/' + cfg.stackMax + ' q=' + popQueue.length); } catch (e) {}
+      return;
+    }
+    renderBubble({ icon: icon, text: text, hold: holdOverride });
   }
 
   function onNotify(rec) {
@@ -455,7 +490,7 @@
   function showDemo() {
     if (!layer) { cfg.enabled = true; build(); }
     wake();
-    pushBubble(ICONS.system, 'HUD 演示气泡：新通知会像这样弹出（每条独立保留，超同屏条数时最老的先撤）', 8000);
+    pushBubble(ICONS.system, 'HUD 演示气泡：新通知会像这样弹出（保留期满淡出；同屏满了新消息自动排队补位）', 8000, true);
     toast('HUD rev ' + HUD_REV); // S285：toast 直接暴露岛页实际运行版本（旧缓存一眼识破）
   }
 

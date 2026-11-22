@@ -1,4 +1,4 @@
-# build=S286
+# build=S287
 # S272：HUD 弹出气泡栈——pop 开关/holdMs 保留/stackMax 同屏条数（用户要求：
 # 观战消息不能只加红角标，必须弹出；且保留时长与同屏条数可调）。
 # 行为面由 tests/data/hud_pop_harness_s272.js 驱动（假 DOM 实跑模块），本文件锁
@@ -48,12 +48,16 @@ def test_stack_eviction_and_hold_semantics():
     i = js.index("function trimStack")
     seg = js[i:i + 900]
     # 最老=首个未消亡节点；淡出中(__gone)不计入（否则 while 永不收敛）
-    assert "__gone" in seg and "detachBubble(oldest)" in seg
+    # S287：trim 只服务「远程调小 stackMax」；推送溢出入队不再撤展示中的旧条
+    assert "__gone" in seg and "detachBubble(oldest, 'trim')" in seg
     assert "live <= cfg.stackMax" in seg
     p = js.index("function pushBubble")
     pseg = js[p:p + 900]
-    assert "trimStack()" in pseg  # 新入即收敛
-    assert "b.__t = setTimeout" in pseg and "detachBubble(b)" in js  # 保留到期淡出
+    assert "if (!force && live >= cfg.stackMax) {" in pseg  # 溢出走队列
+    r = js.index("function renderBubble")
+    rseg = js[r:r + 1200]
+    assert "trimStack()" in rseg  # 新入即收敛
+    assert "b.__t = setTimeout" in rseg and "detachBubble(b, 'timeout')" in rseg  # 保留到期淡出
     d = js.index("function detachBubble")
     assert "node.__gone = true" in js[d:d + 400] and "clearTimeout(node.__t)" in js[d:d + 400]
 

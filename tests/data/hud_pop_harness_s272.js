@@ -75,18 +75,17 @@ const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); i
   send({ category: 'bot', msg: 'msg-4' });
   await new Promise(r => setTimeout(r, 20));
   const texts = stack.children.map(c => c.children[1] && c.children[1].textContent);
-  ok(texts.includes('msg-2') && texts.includes('msg-3') && texts.includes('msg-4'), '最新三条在场: ' + JSON.stringify(texts));
-  const oldest = stack.children.find(c => c.children[1] && c.children[1].textContent === 'msg-1');
-  ok(oldest && oldest.__gone && !oldest._cl.has('hud-show'), '超限(stackMax=3)后最老一条被提前撤下（不等保留到期，正在淡出）');
-  ok(texts.length === 4, '淡出中的节点仍短暂在场（450ms 过渡）: ' + texts.length);
-  // 保留时长：默认 8000——5s 后显示中的仍是最新三条
+  ok(texts.includes('msg-1') && texts.includes('msg-2') && texts.includes('msg-3'), 'S287: 展示中三条不再被挤掉: ' + JSON.stringify(texts));
+  ok(!texts.includes('msg-4'), 'S287: 溢出第四条入队等待（不进 DOM）');
+  // 保留时长：默认 8000——5s 后显示中的仍是前三条
   await new Promise(r => setTimeout(r, 5000));
   const alive = stack.children.filter(c => c._cl.has('hud-show'));
-  ok(alive.length === 3, '保留期内最新三条不淡出（holdMs 默认 8000）: ' + alive.length);
-  // 到点全清：msg-2 弹出时刻 ~t0+20ms，8000 保留 + 450 过渡
+  ok(alive.length === 3, '保留期内三条不淡出（holdMs 默认 8000）: ' + alive.length);
+  // 保留到期陆续清空 → 队列补位：msg-4 应自动上屏
   await new Promise(r => setTimeout(r, 3800));
   const alive2 = stack.children.filter(c => c._cl.has('hud-show') && !c.__gone);
-  ok(alive2.length === 0, '保留到期全部淡出清除: 剩 ' + alive2.length);
+  const aliveTxt = alive2.map(c => c.children[1] && c.children[1].textContent);
+  ok(aliveTxt.length === 1 && aliveTxt[0] === 'msg-4', 'S287: 到期后队列补位，此刻仅剩 msg-4 展示: ' + JSON.stringify(aliveTxt));
 
   // ===== S273：__SAP_READY 延迟期双 ensureWS 竞态 + 同 id 双投递去重（第二实例）=====
   let resolveReady;
@@ -157,6 +156,22 @@ const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); i
   (global.document._ev.keydown || []).forEach(fn => fn({ key: 'Escape' }));
   const panels3 = layer3.children.filter(c => c._cl.has('sap-hud-panel'));
   ok(panels3.length > 0 && panels3.every(p => !p._cl.has('hud-show')), 'S274: Esc 关闭面板');
+
+  // ===== S287：短保留+小槽位（2s/2）——队列补位行为专项 =====
+  store['sapHudCfg'] = JSON.stringify({ enabled: true, capsule: true, holdMs: 2000, stackMax: 2 });
+  new Function(fs.readFileSync(process.argv[2] || 'static/js/hud-capsule.js', 'utf8'))();
+  await new Promise(r => setTimeout(r, 30));
+  const layer4 = body.children.filter(c => c.id === 'sap-hud-layer').pop();
+  const stack4 = layer4 && layer4.children.find(c => c._cl.has('sap-hud-stack'));
+  const ws4 = wsSockets[wsSockets.length - 1];
+  const send4 = (id) => ws4.onmessage({ data: JSON.stringify({ type: 'notification', data: { id: id, category: 'bot', msg: id } }) });
+  send4('s1'); send4('s2'); send4('s3');
+  await new Promise(r => setTimeout(r, 20));
+  const t4 = stack4.children.map(c => c.children[1] && c.children[1].textContent);
+  ok(t4.join(',') === 's1,s2', 'S287: 同屏只 2 条展示、s3 排队: ' + t4.join(','));
+  await new Promise(r => setTimeout(r, 2300));
+  const t5 = stack4.children.filter(c => c._cl.has('hud-show') && !c.__gone).map(c => c.children[1] && c.children[1].textContent);
+  ok(t5.includes('s3') && !t5.includes('s1'), 'S287: 保留到期 s3 自动补位上屏: ' + t5.join(','));
 
   console.log(fail ? 'S272-HARNESS failed=' + fail : 'S272-HARNESS all passed');
   process.exit(fail ? 1 : 0);
