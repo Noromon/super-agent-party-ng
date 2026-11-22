@@ -88,7 +88,9 @@ def test_manager_hooks_wired():
         total += n
     assert total == 10  # 9 平台 + qq 双入口（C2C + 群）
 
-    s = io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
+    # S300：IM 快捷指令注入面随提示词装配域迁 py/prompt_builders.py，文本钉合并扫描
+    s = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
+         + io.open(_ROOT / "py" / "prompt_builders.py", encoding="utf-8-sig").read())
     assert "im_shortcuts_enabled" in s
     assert "enableShortcuts" in io.open(_ROOT / "config/settings_template.json", encoding="utf-8-sig").read()
     html = io.open(_ROOT / "static/templates/page_system.html", encoding="utf-8-sig").read()

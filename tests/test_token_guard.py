@@ -129,7 +129,8 @@ class TestWiring:
         assert marker in src, marker + " missing"
 
     def test_server_hooks(self):
-        src = self._src("server.py")
+        # S300：群记忆域迁 py/group_memory.py（store="group-memory" 等随迁），文本钉合并扫描（语义不变）
+        src = self._src("server.py") + self._src("py", "group_memory.py")
         self._func_src(src, 'from py.token_guard import neutralize as _neutralize, neutralize_deep, apply_eos_guard')
         self._func_src(src, 'store="mem0-add"')
         self._func_src(src, 'store="mem0-add-complete"')

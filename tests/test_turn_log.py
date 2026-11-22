@@ -38,7 +38,15 @@ class TestTurnLogShadow:
         r = post_chat(sap, {"messages": [{"role": "user", "content": "list"}],
                             "conversation_id": "conv-shadow-2"})
         collect(sse(r))
-        rows = chain(sap.data_dir, "conv-shadow-2")
+        # S300 竞态治理：DONE 帧后服务端生成器才异步落 shadow（S190 设计即 best-effort），
+        # 旧实现靠时序侥幸；改为有界轮询（上限 3s），断言语义不变
+        import time as _tm
+        rows = []
+        for _ in range(60):
+            rows = chain(sap.data_dir, "conv-shadow-2")
+            if rows:
+                break
+            _tm.sleep(0.05)
         roles = [m["role"] for _, m in rows]
         assert "tool" in roles
         tcs = [m for m in (m for _, m in rows) if m.get("tool_calls")]

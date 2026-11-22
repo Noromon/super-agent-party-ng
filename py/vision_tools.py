@@ -6,7 +6,7 @@
 - 消息注入/剔图：images_in_messages / images_add_in_messages / message_without_images /
   _strip_image_parts_from_messages / _image_magic_ok / _attach_screen_image_for_behavior
 
-server 全局（client/settings/PORT/current_request_messages）经函数内懒 import server 取
+server 全局（client/settings/PORT/current_request_messages）经函数内 py.srv_ref.srv() 取活实例（部署形态 server=__main__，禁 import server）
 （routers 同款惯例）；server 侧保留原名 re-export。行为与搬移前逐字一致。
 """
 import copy
@@ -28,18 +28,18 @@ logger = logging.getLogger("app")
 # S299：server 侧小参数助手与请求上下文——保持运行期单一事实源，函数体保持原样，
 # 经包装惰性取 server 模块属性（server 已完成导入后才会被调用，无环）。
 def _main_param(*a, **k):
-    import server as _srv
-    return _srv._main_param(*a, **k)
+    from py.srv_ref import srv as _srv
+    return _srv()._main_param(*a, **k)
 
 
 def _role_param(*a, **k):
-    import server as _srv
-    return _srv._role_param(*a, **k)
+    from py.srv_ref import srv as _srv
+    return _srv()._role_param(*a, **k)
 
 
 def _append_note(*a, **k):
-    import server as _srv
-    return _srv._append_note(*a, **k)
+    from py.srv_ref import srv as _srv
+    return _srv()._append_note(*a, **k)
 
 
 async def get_image_content(image_url: str) -> str:
@@ -336,8 +336,8 @@ async def review_image(image_url: str, prompt: str) -> str:
     
     # 从 contextvars 获取当前对话历史（S299：ContextVar 本体在 server 模块，
     # 经模块属性运行期取——同一 var 实例 .set()/.get() 配对语义不变）
-    import server as _srv
-    raw_messages = _srv.current_request_messages.get() or []
+    from py.srv_ref import srv as _srv
+    raw_messages = _srv().current_request_messages.get() or []
     
     # 构建上下文消息：只保留文本，去除图片以节省token
     context_messages = [
@@ -438,7 +438,7 @@ async def message_without_images(messages: List[Dict]) -> List[Dict]:
     return messages
 
 async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> List[Dict]:
-    import server as _srv  # S299：PORT 事实源在 server（启动竞态落定后的最终值）
+    from py.srv_ref import srv as _srv  # S299：PORT 事实源在 server（启动竞态落定后的最终值）
     media_items = []
     index = 0
     for message in messages:
@@ -453,7 +453,7 @@ async def images_in_messages(messages: List[Dict], fastapi_base_url: str) -> Lis
                         if item[media_key]["url"].startswith("http"):
                             media_url = item[media_key]["url"]
                             if fastapi_base_url in media_url:
-                                media_url = media_url.replace(fastapi_base_url, f"http://127.0.0.1:{_srv.PORT}/")
+                                media_url = media_url.replace(fastapi_base_url, f"http://127.0.0.1:{_srv().PORT}/")
                             
                             # 假设你的 get_image_base64 同样可以将视频流转为 Base64
                             base64_data = await get_image_base64(media_url)

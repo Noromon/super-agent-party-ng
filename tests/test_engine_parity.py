@@ -16,7 +16,9 @@ SRC = (ROOT / "server.py").read_text(encoding="utf-8")
 def _func_src(name):
     # R1 router migration: endpoint functions may live in py/routers/*.py
     # 批 1: 断点续传中继函数已迁 py/stream_relay.py
-    sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8")] + \
+    # S300: 群记忆域已迁 py/group_memory.py（_extract_group_memories 永不在闸内钉随行）
+    sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8")] + \
         [f.read_text(encoding="utf-8")
          for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
     for src in sources:
@@ -193,7 +195,8 @@ class TestGateBlindSpotClosure:
         # 豁免（钉 (文件,函数) 对，不豁免同名未来新出口）。加闸与否并入引擎战役终评。
         exempt_pairs = {("vision_tools.py", n) for n in (
             "get_image_content", "analyze_image", "analyze_images",
-            "review_image", "images_add_in_messages")}
+            "review_image", "images_add_in_messages")} | \
+            {("group_memory.py", "_extract_group_memories")}  # S300：mem0 侧永不在闸内（同文件 never-gates 钉）
         markers = ("@llm_gate.gated", "llm_gate.gate()")
         bad = []
         for path in sorted((ROOT / "py").glob("*.py")):

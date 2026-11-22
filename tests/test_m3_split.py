@@ -91,6 +91,13 @@ def _module_funcs():
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
+def _pb_funcs():
+    # S300：提示词装配域迁至 py/prompt_builders.py，棘轮随迁（存在性+<300 语义不变）
+    tree = ast.parse((_ROOT / "py" / "prompt_builders.py").read_text(encoding="utf-8-sig"))
+    return [n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
 def test_giant_function_whitelist_only_shrinks():
     found = {}
     for n in _module_funcs():
@@ -112,9 +119,11 @@ def test_tcm_split_helpers_present_and_small():
     funcs = {n.name: n for n in _module_funcs()}
     tcm = funcs["tools_change_messages"]
     assert tcm.end_lineno - tcm.lineno + 1 < 300
+    # S300：装配器本体迁 py/prompt_builders.py（server 侧仅存调用），存在性/尺寸钉改指新源
+    pb = {n.name: n for n in _pb_funcs()}
     for h in TCM_HELPERS:
-        assert h in funcs, "helper %s missing" % h
-        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+        assert h in pb, "helper %s missing" % h
+        assert pb[h].end_lineno - pb[h].lineno + 1 < 300
 
 
 def test_dispatch_split_helpers_and_hooks_literal():

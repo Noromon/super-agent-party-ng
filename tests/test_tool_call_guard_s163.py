@@ -114,7 +114,9 @@ class TestContentAppendWiring:
         def _get(messages, role):
             return next((m for m in reversed(messages) if m.get("role") == role), None)
 
-        node = next(n for n in ast.walk(ast.parse(SRC))
+        # S300：content_append 定义随消息域迁 py/msg_utils.py，AST 抽取钉随迁（体逐字未动）
+        _mu_src = (_ROOT / "py" / "msg_utils.py").read_text(encoding="utf-8-sig")
+        node = next(n for n in ast.walk(ast.parse(_mu_src))
                     if isinstance(n, ast.FunctionDef) and n.name == "content_append")
         ns = {"_get_target_message": _get, "_tcg_neutralize": neutralize_leaked_blocks}
         exec(compile(ast.Module(body=[node], type_ignores=[]), "<ca>", "exec"), ns)
@@ -273,7 +275,9 @@ class TestSecondRoundSelfCorrect:
 
 class TestWiringPins:
     def test_content_append_wired(self):
-        assert "_tcg_neutralize(content)" in SRC
+        # S300：content_append 迁 py/msg_utils.py，防泄漏净化接线钉随迁（内容逐字未动）
+        mu = (_ROOT / "py" / "msg_utils.py").read_text(encoding="utf-8-sig")
+        assert "_tcg_neutralize(content)" in mu
 
     def test_tool_round_append_wired(self):
         assert '"content": _tcg_neutralize(full_content) or ""' in SRC

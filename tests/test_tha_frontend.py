@@ -117,6 +117,7 @@ def test_locale_tha_keys_present():
 
 
 def test_tha_prompt_wiring():
-    src = _read("server.py")
+    # S300：_append_tha_prompt 定义随装配域迁 py/prompt_builders.py，接线钉合并扫描（调用点仍在 server）
+    src = _read("server.py") + _read("py/prompt_builders.py")
     assert "_append_tha_prompt" in src
     assert "THAConfig" in src

@@ -140,6 +140,8 @@ max-complexity = 60
 "py/boot_utils.py" = ["E722"]
 # S299：视觉域逐字搬移，原形无占位 f 前缀保留（server.py 同规则豁免）
 "py/vision_tools.py" = ["F541"]
+# S300：装配域逐字搬移，原形冗余 import 与无占位 f 前缀保留（server.py 同规则豁免）
+"py/prompt_builders.py" = ["F401", "F541"]
 "py/behavior_engine.py" = ["E701", "E722", "F401"]
 "py/blivedm/__init__.py" = ["F403"]
 "py/blivedm/clients/__init__.py" = ["F403"]

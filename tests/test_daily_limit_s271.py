@@ -1,4 +1,4 @@
-# build=S299
+# build=S300
 # S271：屏幕旁观每日发言上限放宽到 99999（用户要求）。后端 _num 从不钳制上限，
 # 唯一门槛一直是这个输入框的 :max=20——放开它即可。
 from pathlib import Path

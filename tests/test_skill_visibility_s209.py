@@ -71,6 +71,9 @@ def skill_env(tmp_path, monkeypatch):
     (ws / ".agent" / "skills" / "wsk" / "SKILL.md").write_text(
         "---\nname: wsk\ndescription: 工作区技能\n---\nWS-DOC-BODY", encoding="utf-8")
     monkeypatch.setattr(server, "SKILLS_DIR", str(gdir))
+    # S300：装配器迁至 py/prompt_builders.py 后，SKILLS_DIR 消费面=该模块全局
+    import py.prompt_builders as _pb
+    monkeypatch.setattr(_pb, "SKILLS_DIR", str(gdir))
 
     async def _sc_on():
         return True
@@ -366,6 +369,7 @@ def test_server_index_call_decoupled_from_engine_gate():
 
 
 def test_m3_append_project_skills_name_preserved():
-    # m3 ratchet 钉名保留（test_m3_split STREAM/TCM helpers 依赖）
-    src = (_ROOT / "server.py").read_text(encoding="utf-8")
+    # m3 ratchet 钉名保留（test_m3_split TCM helpers 依赖）
+    # S300：定义随装配域迁至 py/prompt_builders.py，签名钉随迁（内容逐字未动）
+    src = (_ROOT / "py" / "prompt_builders.py").read_text(encoding="utf-8")
     assert "async def _append_project_skills(request, cwd, cli_settings, visibilityScope):" in src
