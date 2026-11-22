@@ -132,6 +132,8 @@ def test_inject_view_images_text_and_cap3(monkeypatch):
         return out
 
     monkeypatch.setattr(server, "images_in_messages", _fake)
+    import py.stream_engine as _se  # S302a：_maybe_inject_browser_vision 迁引擎，桩钉消费模块
+    monkeypatch.setattr(_se, "images_in_messages", _fake)
 
     class _Req:
         def __init__(self, messages):

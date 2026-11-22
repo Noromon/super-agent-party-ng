@@ -19,7 +19,9 @@ def _func_src(name):
     # S300: 群记忆域已迁 py/group_memory.py（_extract_group_memories 永不在闸内钉随行）
     sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8"),
-               (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")] + \
+               (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8")] + \
         [f.read_text(encoding="utf-8")
          for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
     for src in sources:
@@ -198,6 +200,18 @@ class TestGateBlindSpotClosure:
             "get_image_content", "analyze_image", "analyze_images",
             "review_image", "images_add_in_messages")} | \
             {("group_memory.py", "_extract_group_memories")}  # S300：mem0 侧永不在闸内（同文件 never-gates 钉）
+        # S302a：主链两处手写重试环（裸 create）随轮次引擎迁入——server 扫描面历史上
+        # 从未闸它们（s207“全文裸 create=2”金标准）；迁入即加闸=行为改动，违纯移动。
+        exempt_pairs |= {("stream_engine.py", "_stream_first_round_with_recovery"),
+                         ("stream_engine.py", "_stream_second_round")}
+        # S302a：其余 acreate 包裹的 lambda create 为 server 时代「从未在闸内」的
+        # 引擎调用点（闸在端点层 hold），迁入 py 扫描面即触发；纯移动不加闸，
+        # 显式豁免同名对（加闸与否并入引擎战役终评，同 S299 先例）。
+        exempt_pairs |= {("stream_engine.py", n) for n in (
+            "_stream_drs_round", "_stream_drs_loop_round",
+            "_stream_reasoner_update")} | \
+            {("stream_prep.py", n) for n in (
+                "_stream_deepsearch_pre", "_stream_reasoner_prep")}
         markers = ("@llm_gate.gated", "llm_gate.gate()")
         bad = []
         for path in sorted((ROOT / "py").glob("*.py")):

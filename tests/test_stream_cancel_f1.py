@@ -26,7 +26,8 @@ from py.stream_relay import (  # noqa: E402
 
 def _load_first_pass():
     """ast 抽取 _stream_first_pass（fork 惯例：测试不 import 重型 server 模块）。"""
-    tree = ast.parse((_ROOT / "server.py").read_text(encoding="utf-8-sig"))
+    # S302a：_stream_first_pass 随轮次引擎迁 py/stream_engine.py，AST 抽取钉随迁（体逐字未动）
+    tree = ast.parse((_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8-sig"))
     fn = next(n for n in tree.body
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_stream_first_pass")
     ns = {"asyncio": asyncio, "json": json, "logging": logging,

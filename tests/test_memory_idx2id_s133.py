@@ -99,11 +99,15 @@ class TestMemGuardWarning:
 
 class TestRecallQueryWiring:
     def test_chatrequest_field(self):
-        src = open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+        src = (open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+           + open(os.path.join(ROOT, "py/stream_prep.py"), encoding="utf-8").read()
+           + open(os.path.join(ROOT, "py/stream_engine.py"), encoding="utf-8").read())  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert "\n    recall_query: str = None\n" in src
 
     def test_both_search_sites_use_recall_query(self):
-        src = open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+        src = (open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+           + open(os.path.join(ROOT, "py/stream_prep.py"), encoding="utf-8").read()
+           + open(os.path.join(ROOT, "py/stream_engine.py"), encoding="utf-8").read())  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert src.count('query=(getattr(request, "recall_query", None) or user_prompt)') == 2
 
     def test_diary_engine_passes_seed(self):

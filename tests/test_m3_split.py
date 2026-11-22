@@ -169,7 +169,13 @@ def test_complete_split_helpers_present_and_small():
 def test_stream_split_helpers_present_and_small():
     # M-3 batch 4: stream engine fully split -- shell, the (now module-level)
     # stream_generator and every delegated block stay under 300 lines.
+    # S302a：helper 域迁 py/stream_prep.py + py/stream_engine.py，存在性/尺寸钉合并扫描（体逐字未动）
     funcs = {n.name: n for n in _module_funcs()}
+    for path in (_ROOT / "py" / "stream_prep.py", _ROOT / "py" / "stream_engine.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs.setdefault(n.name, n)
     assert funcs["generate_stream_response"].end_lineno - funcs["generate_stream_response"].lineno + 1 < 300
     for h in STREAM_HELPERS:
         assert h in funcs, "helper %s missing" % h

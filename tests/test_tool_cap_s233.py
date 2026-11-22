@@ -18,7 +18,7 @@ import pytest  # noqa: E402
 from py import tool_cap  # noqa: E402
 
 ROOT = _ROOT
-SERVER_SRC = (ROOT / "server.py").read_text(encoding="utf-8")
+SERVER_SRC = ((ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，源读合并（体逐字未动）
 
 
 def _read(*p):
@@ -120,4 +120,4 @@ def test_defaults_ui_i18n_stamp():
         for k in ("maxToolIterationsDesc", "maxToolIterationsHint",
                   "toolCapUnlimitedDesc", "toolCapUnlimitedHint"):
             assert k in s, (loc, k)
-    assert "build=S301" in _read("static", "js", "renderer.js")
+    assert "build=S302" in _read("static", "js", "renderer.js")

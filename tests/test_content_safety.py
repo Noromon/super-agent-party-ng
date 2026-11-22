@@ -48,7 +48,7 @@ def test_missing_wordlist_disables_guard(tmp_path, monkeypatch):
 
 
 def test_server_wired_hooks_present():
-    src = (ROOT / "server.py").read_text(encoding="utf-8")
+    src = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     assert "from py.guard import load_safety_words, check_content_safety" in src
     assert src.count("check_content_safety(") >= 6  # 流式 helper+入站×2+ws 三处
     assert "_sanitize_conversations_safety" in src

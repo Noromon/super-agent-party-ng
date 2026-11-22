@@ -26,7 +26,7 @@ def _read(rel):
 
 
 def _extract_server_fn(name):
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     tree = ast.parse(src)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == name:
@@ -68,7 +68,7 @@ def test_sample_short_circuits():
 
 
 def test_server_diary_branch_pins():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     assert '_diary_recall_sample(' in src
     assert 'getattr(request, "platform", "") == "diary"' in src
     assert "max(memoryLimit * 3, 6)" in src

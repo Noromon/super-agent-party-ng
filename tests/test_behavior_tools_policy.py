@@ -25,9 +25,10 @@ def _read(rel):
     return io.open(_ROOT / rel, encoding="utf-8-sig").read()
 
 
-# --- 从 server.py 抽取自包含的 _stream_filter_tools（不导入重型 server 模块） ---
+# --- 抽取自包含的 _stream_filter_tools（不导入重型 server 模块） ---
+# S302a：定义随流式准备域迁 py/stream_prep.py，AST 抽取钉随迁（体逐字未动）
 def _load_filter():
-    tree = ast.parse(_read("server.py"))
+    tree = ast.parse(_read("py/stream_prep.py"))
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "_stream_filter_tools")
     ns = {"logging": logging}

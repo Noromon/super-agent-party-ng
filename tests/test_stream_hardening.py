@@ -35,16 +35,18 @@ def test_deep_update_recursive_and_override():
 def _load_fns(names):
     import ast
     import logging
-    tree = ast.parse(_read("server.py"))
+    # S302a：cap helper 随轮次引擎迁 py/stream_engine.py，抽取双源（体逐字未动）
+    trees = [ast.parse(_read("server.py")), ast.parse(_read("py/stream_engine.py"))]
     ns = {"logging": logging}
-    for n in tree.body:
+    for tree in trees:
+     for n in tree.body:
         if isinstance(n, ast.FunctionDef) and n.name in names:
             exec(compile(ast.Module(body=[n], type_ignores=[]), "<extract>", "exec"), ns)
     return ns
 
 
 def test_b1_delta_and_message_guards():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_engine.py")  # S302a：流式两处=engine+ns(server)，合并守恒
     assert src.count("if choice.delta is None") == 2       # 两处流式
     assert "if response.choices[0].message and response.choices[0].message.tool_calls" in src
     assert "while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):" in src
@@ -52,7 +54,7 @@ def test_b1_delta_and_message_guards():
 
 
 def test_b2_2_drs_loop_caps_both_paths():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_engine.py")  # S302a：流式+非流式两路合并守恒
     assert src.count("not _drs_round_cap(") == 2           # 流式+非流式共用单点
     assert src.count('_append_loopcap_hint(request, "') == 2
     # ws 保存重活已 helper 化（棘轮友好）且广播合并后全量

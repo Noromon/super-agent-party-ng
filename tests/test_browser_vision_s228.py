@@ -95,6 +95,8 @@ def _install_fake_images_in_messages(monkeypatch):
         return out
 
     monkeypatch.setattr(server, "images_in_messages", _fake)
+    import py.stream_engine as _se  # S302a：_maybe_inject_browser_vision 迁引擎，桩钉消费模块
+    monkeypatch.setattr(_se, "images_in_messages", _fake)
     return calls
 
 
@@ -173,7 +175,7 @@ def test_take_screenshot_returns_url_format(monkeypatch):
 
 
 def test_server_wires_injection_both_paths():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     assert "async def _maybe_inject_browser_vision(" in src
     assert src.count("images = await _maybe_inject_browser_vision(request, settings, images, fastapi_base_url)") == 2
 

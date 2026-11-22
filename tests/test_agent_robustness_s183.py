@@ -148,7 +148,7 @@ class TestPipesAndPins:
         assert "Topic anchor (hard rule, S183)" in _read("py", "agent_prompt.py")
 
     def test_stream_wiring_pins(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         # 显示拦截两个 pass 都接
         assert s.count("_tcg_show, _st[\"tcg_emit\"], _st[\"tcg_cut\"] = _tcg_display_slice(") == 2
         # raw 累积不再走 delta

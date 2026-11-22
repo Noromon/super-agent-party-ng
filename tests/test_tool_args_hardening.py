@@ -21,7 +21,8 @@ def _read(rel):
 
 
 def _extract_server_fn(name):
-    src = _read("server.py")
+    # S302a：参数解析域迁 py/stream_prep.py，AST 抽取钉随迁（体逐字未动）
+    src = _read("py/stream_prep.py")
     tree = ast.parse(src)
     ns = {"json": json, "copy": copy}
     # 依赖注入：模块级常量与壳解包 helper 先于 parse_tool_arguments 入 ns

@@ -82,6 +82,8 @@ def test_inject_rollback_on_conversion_exception(monkeypatch):
     async def _boom(msgs, base):
         raise RuntimeError("cdn down")
     monkeypatch.setattr(server, "images_in_messages", _boom)
+    import py.stream_engine as _se  # S302a：_maybe_inject_browser_vision 迁引擎，桩钉消费模块
+    monkeypatch.setattr(_se, "images_in_messages", _boom)
     req = _Req([{"role": "user", "content": "q"}, {"role": "assistant", "content": "", "tool_calls": [{}]},
                 _vi_tool(_INT)])
     n0 = len(req.messages)
@@ -111,6 +113,8 @@ def test_inject_second_line_sweeps_http_and_empty_residue(monkeypatch):
         return out
 
     monkeypatch.setattr(server, "images_in_messages", _partial)
+    import py.stream_engine as _se  # S302a：_maybe_inject_browser_vision 迁引擎，桩钉消费模块
+    monkeypatch.setattr(_se, "images_in_messages", _partial)
     req = _Req([{"role": "user", "content": "q"}, _vi_tool(bad_http, good)])
     n0 = len(req.messages)
     out = asyncio.run(server._maybe_inject_browser_vision(req, {}, [], "http://h/"))

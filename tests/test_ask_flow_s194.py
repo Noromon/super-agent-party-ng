@@ -263,7 +263,7 @@ class TestMisc:
 
 class TestSourcePins:
     def test_server_wiring(self):
-        s = (_ROOT / "server.py").read_text(encoding="utf-8")
+        s = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert '_ask_tool_handle(request, args_dict, tool_calls, tool_call_id, _ask_state)' in s
         assert 'ask_flow_is_ask_result(results)' in s
         assert "_stream_ask_hang(request, _st, _ask_state)" in s

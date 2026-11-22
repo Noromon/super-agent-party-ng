@@ -1,4 +1,4 @@
-# build=S301
+# build=S302
 # S282：HUD 胶囊持握状态机——穿透窗下点击失灵的双保险修复。静态锁。
 # 行为面由 hud_hold_harness_s282.js 驱动（7 断言）。
 from pathlib import Path

@@ -51,8 +51,10 @@ def diary_pkg(tmp_path_factory):
 
 def test_server_hooks_present():
     # S301：钩子表构建迁 py/tool_hooks.py，双份挂线计数在合并面上守恒（表体逐字未动）
+    # S302a：流式 finalize 缓冲写入随引擎迁出，合并面再守恒（逐字未动）
     src = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
-           + io.open(_ROOT / "py" / "tool_hooks.py", encoding="utf-8-sig").read())
+           + io.open(_ROOT / "py" / "tool_hooks.py", encoding="utf-8-sig").read()
+           + io.open(_ROOT / "py" / "stream_engine.py", encoding="utf-8-sig").read())
     assert "from py.diary_query_tool import diary_query_tool" in src
     assert '"query_diary": handle_query_diary' in src
     assert '"list_diary_books": handle_list_diary_books' in src

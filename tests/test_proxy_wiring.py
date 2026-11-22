@@ -170,7 +170,7 @@ def test_socks_deps_available(mod):
 # ---------------- 源码接线 pin（防止后续改动悄悄拆线） ----------------
 
 def test_server_wiring_pins():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     # S239：boot 三模式统一 active_proxy（normalize 内聚；trust_env 钉死通道废除）
     assert "proxy_url = active_proxy(settings)" in src
     assert "apply_env_proxy(settings)" in src

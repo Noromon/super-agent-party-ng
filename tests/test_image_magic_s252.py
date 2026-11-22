@@ -116,6 +116,8 @@ def test_sweep_poisoned_image_dropped_with_note(monkeypatch):
         return out
 
     monkeypatch.setattr(server, "images_in_messages", _fake_images)
+    import py.stream_engine as _se  # S302a：_maybe_inject_browser_vision 迁引擎，桩钉消费模块
+    monkeypatch.setattr(_se, "images_in_messages", _fake_images)
     vi = {"role": "tool", "name": "view_images",
           "content": f"Images attached for direct viewing: {poison_url} {good_url}"}
     req = _Req([{"role": "user", "content": "q"}, vi])
@@ -130,11 +132,12 @@ def test_sweep_poisoned_image_dropped_with_note(monkeypatch):
 
 
 def test_retry_layer_wired():
-    # S299 挪锚：三层防御随视觉域迁至 py/vision_tools.py；400 剥图重试层在流式引擎（server）
+    # S299 挪锚：三层防御随视觉域迁至 py/vision_tools.py；400 剥图重试层在流式引擎
+    # S302a：二轮重试层随轮次引擎迁 py/stream_engine.py，srv 钉改读引擎文件
     src = (ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")
     assert "failed to load image" in src.lower()
     assert "已自动剥离图像降级" in src
     i = src.lower().find("failed to load image")
     assert "continue" in src[i:i + 1400]
-    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    srv = (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8")
     assert "img_strip_retried" in srv

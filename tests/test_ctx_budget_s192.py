@@ -133,7 +133,7 @@ class TestBoundaryRecheck:
 
 class TestSourcePins:
     def test_wiring(self):
-        s = (_ROOT / "server.py").read_text(encoding="utf-8")
+        s = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert "_boundary_l1_recheck(request, settings, tools)" in s
         seg = s[s.find("async def _run_context_pipeline"):][:1600]
         assert 'cm["tool_output_budget"]' in seg

@@ -190,7 +190,7 @@ class TestSearchTool:
 
 class TestPins:
     def test_server_wiring(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert "def _bound_tool_output(" in s
         assert "await _bound_tool_output_async(response['result'])" in s
         assert s.count('"content": _bound_tool_output(tool_result_text, settings)') >= 2

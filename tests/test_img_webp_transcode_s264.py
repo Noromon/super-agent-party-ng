@@ -1,4 +1,4 @@
-# build=S301
+# build=S302
 # S264：本地推理服务器拒收 webp/avif 等格式（400 'url' field must be a base64 encoded image
 # 炸整轮实证：twitter 图 format=webp）。注入层单点归一化转码 JPEG + 剥图重试补词兜底。
 import base64
@@ -14,7 +14,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 from py.llm_tool import _normalize_image_for_server, _SERVER_IMAGE_OK  # noqa: E402
 
-SERVER = (ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
 VISION = (ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")  # S299 挪锚：视觉域迁出
 
 

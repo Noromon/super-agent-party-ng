@@ -16,7 +16,7 @@ if str(_ROOT) not in sys.path:
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER = (_ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
 JS_RESUME = (_ROOT / "static" / "js" / "methods" / "13_resume_stream.js").read_text(encoding="utf-8")
 JS_BLOCKS = (_ROOT / "static" / "js" / "methods" / "11_tool_blocks.js").read_text(encoding="utf-8")
 JS_CHAT = (_ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")

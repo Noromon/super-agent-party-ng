@@ -218,7 +218,7 @@ class TestShortcutCatalog:
 
 class TestWiringS150:
     def test_server_chain(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         # S183-M3：登记主体自 _stream_tool_round 抽至 _stream_im_approval_hang，改锚 helper 体
         seg = s[s.find("async def _stream_im_approval_hang"):][:900]
         assert seg and "approval_store.create(" in seg and "has_handlers" in seg

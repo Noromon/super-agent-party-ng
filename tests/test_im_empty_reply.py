@@ -155,7 +155,7 @@ def test_guard_module_contract():
 
 def test_server_no_empty_assistant_append():
     # S163：该闭合段随工具循环轮拆入 _stream_second_round（S68 语义不变）
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     seg = src[src.find("async def _stream_second_round"):]
     assert ("if not tool_calls and full_content:" in seg
             and "content_append(request.messages, 'assistant', full_content)" in seg

@@ -105,8 +105,13 @@ class TestTcgBudgetDecay:
 
 class TestS213Pins:
     def _src(self):
-        with open(os.path.join(REPO, "server.py"), encoding="utf-8") as f:
-            return f.read()
+        # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+        out = ""
+        for rel in ("server.py", os.path.join("py", "stream_prep.py"),
+                    os.path.join("py", "stream_engine.py")):
+            with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+                out += f.read()
+        return out
 
     def test_gate_no_longer_bypassed_by_leak(self):
         s = self._src()
