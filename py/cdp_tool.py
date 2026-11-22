@@ -960,7 +960,7 @@ all_cdp_tools = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to load"},
+                    "url": {"type": "string", "description": "URL to load（可直接写原样中文查询词，Chromium 自动百分号编码；NEVER 手敲 %XX 编码 CJK）"},
                     "timeout": {"type": "integer"},
                     "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"},
                     "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。"},
@@ -1010,7 +1010,7 @@ all_cdp_tools = [
                 "type": "object",
                 "properties": {
                     "type": {"type": "string", "enum": ["url", "back", "forward", "reload"]},
-                    "url": {"type": "string"},
+                    "url": {"type": "string", "description": "S295：目标 URL；查询词可直接写原样中文，Chromium 自动编码——手敲 %XX 编码 CJK 极易出错，禁止"},
                     "ignoreCache": {"type": "boolean"},
                     "timeout": {"type": "integer", "description": "等待页面加载完成的秒数（0-30，默认 8）。加载完成会提前返回；超时返回 (still loading)，可再 wait_for/take_snapshot。0=不等待立即返回。"},
                     "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"},
@@ -1219,7 +1219,7 @@ all_cdp_tools = [
                 "type": "object",
                 "properties": {
                     "mode": {"type": "string", "enum": ["start", "read", "stop"], "description": "start 挂钩 / read 增量收割 / stop 清空停用。"},
-                    "pattern": {"type": "string", "description": "read 时按 URL 子串过滤（如 'newpostlist'），省略返回全部新条目。"},
+                    "pattern": {"type": "string", "description": "read 时按 URL 子串过滤（如 'newpostlist'），省略返回全部新条目。S295：过滤掉的条目不再被游标吞掉可补读；零命中会回 skipped_urls 清单供修正 pattern——首次建议省略 pattern 看全量再定关键词。"},
                     "include_body": {"type": "boolean", "description": "start 时是否记录响应体（全量保留；read 回 2KB 预览，超长自动落盘给 body_url）。默认 false。抓数据用 true。"},
                     "trigger_scrolls": {"type": "integer", "description": "S270 仅 start 生效：挂钩成功后引擎自动滚动触发列表接口的轮数（1-20）。列表页首选 start(trigger_scrolls=2) 一体化拿数据；0=只挂钩不触发（旧行为）。"},
                     "wait_ms": {"type": "integer", "description": "S270 配 trigger_scrolls：每轮滚动后的等待毫秒（300-5000，默认800）。慢站调大。"}

@@ -67,7 +67,7 @@ def test_vue_network_watch_impl():
     seg = JS[i:i + 4600]
     assert "__netw" in seg and "window.fetch" in seg and "XMLHttpRequest.prototype.open" in seg
     assert "slice(0,2048)" in seg and "E.length>=CAP" in seg
-    assert "w.c=E.length" in seg and "o.u.indexOf(pat)<0" in seg  # 游标增量+pattern 过滤
+    assert "w.c=lastHit>=0?lastHit+1:from;" in seg and "o.u.indexOf(pat)<0" in seg  # 游标增量（S295：只前进至末位命中）+pattern 过滤
     assert "not armed" in seg and "导航" in seg  # 导航丢钩子提示
     j = JS.index("_netwArmExpr(bodyOn)")
     assert "return 'armed'" in JS[j:j + 2200]

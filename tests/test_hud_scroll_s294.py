@@ -1,4 +1,4 @@
-# build=S294
+# build=S295
 # S294：面板列表可滚动——CSS flex 滚动容器 + OS 真值滚轮/拖动接线（静态锁）。
 # 行为面由 hud_panel_s291_harness.js 的 S294 场景覆盖（独立进程）。
 from pathlib import Path

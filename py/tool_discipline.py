@@ -60,7 +60,11 @@ _BLOCKS: Dict[str, str] = {
         "releases); cite what you used."),
     "browse": (
         "- Browser tools drive a live page: snapshot first, then click/fill; take a screenshot "
-        "when visual confirmation matters."),
+        "when visual confirmation matters.\n"
+        "- (S295) URLs may contain raw CJK — Chromium encodes them for you; NEVER hand-type "
+        "%XX escapes for CJK (almost always wrong, each bad URL burns a round-trip). Prefer "
+        "browser_lookup for web searches; on captcha/security-check stop automating that "
+        "site and ask the user instead of retrying harder."),
     "info_query": (
         "- For time, weather, place and encyclopedia facts, query the info tools — memory is "
         "not authoritative for the physical world."),

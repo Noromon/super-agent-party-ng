@@ -18,6 +18,7 @@ brave 首批收录、排在 ddg 之后）。
 import asyncio
 import json
 import logging
+import time
 from urllib.parse import quote
 
 def log():
@@ -167,10 +168,14 @@ browser_search_tool = {
 }
 
 
+_ERR_TIPS = ("[引导] 若改用浏览器工具手动搜索：URL 里可直接写原样中文（Chromium 会自动编码）——"
+             "严禁手敲 %XX 百分号编码 CJK（手编极易出错，每个错 URL 都浪费一整轮导航往返）；"
+             "更稳的路径是 take_snapshot → fill 站内搜索表单，而非猜 URL；"
+             "看到 captcha_detected/安全验证 就停下请用户手动通过，勿换标签硬闯。")
+
+
 def _err(msg):
-    return (f"[Error] 浏览器搜索失败：{msg}\n"
-            "[引导] 可改用浏览器工具自行搜索：new_page(搜索URL) → "
-            "take_snapshot 或 evaluate_script 提取；或在设置中更换搜索引擎。")
+    return f"[Error] 浏览器搜索失败：{msg}\n" + _ERR_TIPS
 
 
 async def browser_available():
@@ -196,8 +201,12 @@ async def _read_pages():
 
 
 async def _open_or_reuse(url):
-    """复用同 host 的搜索标签页导航，否则新开标签页。返回是否操作成功。"""
-    from py.cdp_tool import navigate_page, new_page, select_page
+    """复用同 host 的搜索标签页导航，否则新开标签页。返回是否操作成功。
+
+    S295：复用前给导航后的标签做 JS 通道存活探测——僵尸标签复用是 55s 总超时
+    的隐形毒源（导航"成功"但抽取在死通道上白耗整个预算）；探测失败即关闭
+    该标签并改新开，绝不在死标签上烧预算。"""
+    from py.cdp_tool import close_page, evaluate_script, navigate_page, new_page, select_page
     host = url.split("/")[2] if "://" in url else ""
     idx = None
     for p in await _read_pages():
@@ -205,10 +214,29 @@ async def _open_or_reuse(url):
             idx = p.get("index")
             break
     if idx is not None:
-        await select_page(idx)
-        r = await navigate_page(type="url", url=url)
-    else:
-        r = await new_page(url)
+        try:
+            await select_page(idx)
+            r = await navigate_page(type="url", url=url)
+            s = str(r)
+            if not (s.startswith("Error") or s.startswith("Failed")
+                    or s.startswith("Main window not found")):
+                alive = False
+                try:
+                    probe = await asyncio.wait_for(
+                        evaluate_script("function(){return 1;}"), 6.0)
+                    alive = str(probe).strip() in ("1", "Success")
+                except Exception:
+                    alive = False
+                if alive:
+                    return True
+                log().info("browser_search: 复用标签 %s JS 通道无响应 → 关闭改新开", idx)
+                try:
+                    await close_page(idx)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    r = await new_page(url)
     s = str(r)
     return not (s.startswith("Error") or s.startswith("Failed")
                 or s.startswith("Main window not found"))
@@ -249,18 +277,24 @@ def _resolve_target(engine):
 
 
 async def browser_search(query, engine=None, max_results=8):
-    """浏览器搜索入口。engine=None → 默认顺序；显式 → 单引擎。"""
+    """浏览器搜索入口。engine=None → 默认顺序；显式 → 单引擎。
+
+    S295：errs 由调用方持引用下传——总超时被掐时也要把已尝试引擎的死因吐出来
+    （此前超时只回一句空话，模型只能盲试；死因清单让它能定向换 engine/换措辞）。"""
     budget = 20.0 if engine else 55.0
+    tried = []
     try:
         return await asyncio.wait_for(
-            _browser_search(query, engine, max_results), timeout=budget)
+            _browser_search(query, engine, max_results, tried, budget),
+            timeout=budget)
     except asyncio.TimeoutError:
-        return _err(f"总超时（{int(budget)}s），内置浏览器未及时产出结果")
+        detail = "；".join(tried) if tried else "首个引擎尚未回因（导航/抽取阶段即挂起）"
+        return _err(f"总超时（{int(budget)}s）；已尝试：{detail}")
     except Exception as e:
         return _err(f"{type(e).__name__}: {e}")
 
 
-async def _browser_search(query, engine, max_results):
+async def _browser_search(query, engine, max_results, errs, budget=55.0):
     if not await browser_available():
         return _err("内置浏览器通道不可用（此功能仅 Electron 桌面版有效，"
                     "或 CDP 未连接）")
@@ -275,8 +309,14 @@ async def _browser_search(query, engine, max_results):
         order = [(e, e, e) for e in BROWSER_ORDER]
 
     per_engine = 14.0 if engine else 9.0
-    errs = []
-    for name, url_tpl, js_key in order:
+    t0 = time.monotonic()
+    for oi, (name, url_tpl, js_key) in enumerate(order):
+        # S295：预算内自省——剩余预算不够再试一个引擎就明说"未尝试"，
+        # 而不是在外层被 wait_for 掐死后啥也没留下。
+        if len(order) > 1 and (budget - (time.monotonic() - t0)) < 8.0:
+            rest = ",".join(n for n, _, _ in order[oi:])
+            errs.append(f"{rest}: 未尝试（时间预算耗尽）")
+            break
         url = ENGINE_TEMPLATES.get(url_tpl, url_tpl).replace("{q}", q)
         try:
             if not await _open_or_reuse(url):
@@ -318,4 +358,7 @@ def search_result_ok(text):
 GUIDE_HINT = ("\n[引导] 本次网络搜索失败。你可以：1) 调用 browser_lookup 工具经"
               "内置浏览器搜索（可过 DuckDuckGo 等对 HTTP 客户端的风控）；"
               "2) 用浏览器工具 new_page/navigate_page/take_snapshot 自行打开"
-              "搜索引擎页面提取；3) 换更短关键词重试。空结果不代表信息不存在。")
+              "搜索引擎页面提取——URL 可直接写原样中文（Chromium 自动编码），"
+              "严禁手敲 %XX 百分号编码 CJK（手编极易出错）；"
+              "3) 换更短关键词重试；遇 captcha/安全验证 请用户手动通过，勿硬闯。"
+              "空结果不代表信息不存在。")

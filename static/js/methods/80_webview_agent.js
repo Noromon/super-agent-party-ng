@@ -1305,7 +1305,26 @@ Object.assign(vue_methods, {
         }
         if (!stop) stop = "max_scrolls";
         const items = Array.from(map.values()).slice(0, maxItems);
-        return JSON.stringify({ collected: items.length, rounds: roundsUsed, stop_reason: stop, scroller_mode: sc.mode, cards_last_scan: lastCards, exec_err: execErr || undefined, items: items });
+        // S295：零命中不再只回 collected=0——附页面"最像列表容器"的 DOM 骨架，
+        // 让模型一轮就能改对 item/fields 选择器，而不是反复盲试。
+        let skel;
+        if (items.length === 0) {
+            try {
+                skel = await this._wvExec(wv, "(function(){try{if(!document.body)return 'no-body';"
+                    + "function nm(e){var c=(typeof e.className==='string'&&e.className.trim())?'.'+e.className.trim().split(/\\s+/)[0]:'';return e.tagName.toLowerCase()+c;}"
+                    + "var all=document.body.querySelectorAll('*');var best=null,bn=0,n=0;"
+                    + "for(var i=0;i<all.length&&n<3000;i++){var el=all[i];var tg=el.tagName;"
+                    + "if(tg==='DIV'||tg==='UL'||tg==='OL'||tg==='LI'||tg==='TBODY'){n++;if(el.children.length>bn&&el.children.length>=3){bn=el.children.length;best=el;}}}"
+                    + "if(!best)return 'no-repeat-container（页面无 ≥3 子节点的重复结构，item 选择器多半选错层级或页面未加载出列表）';"
+                    + "var lines=['container: '+nm(best)+' children='+best.children.length];"
+                    + "for(var j=0;j<Math.min(best.children.length,5);j++){var ch=best.children[j];var s='  '+nm(ch);var g=[];"
+                    + "for(var k=0;k<Math.min(ch.children.length,6);k++)g.push(nm(ch.children[k]));"
+                    + "if(g.length)s+=' > '+g.join(', ');lines.push(s);}"
+                    + "return lines.join('\\n').slice(0,600);}catch(e){return 'outline_err';}})()");
+            } catch (e) { skel = ''; }
+            if (typeof skel !== 'string') skel = String(skel || '');
+        }
+        return JSON.stringify({ collected: items.length, rounds: roundsUsed, stop_reason: stop, scroller_mode: sc.mode, cards_last_scan: lastCards, exec_err: execErr || undefined, skeleton: skel || undefined, hint: (items.length === 0 ? (lastCards > 0 ? 'cards_last_scan>0 但字段全空：fields 选择器没取到内容，参考 skeleton 修正字段路径' : 'cards_last_scan=0：item 选择器一个卡片都没匹配上，参考 skeleton 换选择器') : undefined), items: items });
     },
 
     // S277：应急复位——清除当前标签的触摸/移动端/UA/视口仿真残留（专治"光标变触摸点、
@@ -1446,12 +1465,16 @@ Object.assign(vue_methods, {
         const arm = this._netwArmExpr(includeBody);
         const read = "(function(){var w=window.__netw;if(!w)return JSON.stringify({error:'not armed — call network_watch(mode=start) first'});"
             + "var pat=" + JSON.stringify(String(pattern || "")) + ";var E=w.entries||[];var from=w.c||0;"
-            + "var items=[];for(var i=from;i<E.length;i++){var o=E[i];if(pat&&o.u.indexOf(pat)<0)continue;"
+            + "var items=[];var lastHit=-1;var skip={};var skipN=0;for(var i=from;i<E.length;i++){var o=E[i];"
+            + "if(pat&&o.u.indexOf(pat)<0){skipN++;if(Object.keys(skip).length<12){try{var x=new URL(o.u,location.href);var k2=x.host+x.pathname;if(!skip[k2])skip[k2]=1;}catch(_e2){}}continue;}"
+            + "lastHit=i;"
             + "var it={gi:i,u:o.u,s:o.s,t:o.t};var full=o.bf||'';"
             + "if(full){it.b=full.slice(0,2048);if(full.length>2048)it.blen=full.length;}"
             + "items.push(it);}"
-            + "w.c=E.length;"
-            + "return JSON.stringify({total:E.length,new_items:items.length,returned:Math.min(items.length,60),origin:String(location.origin||''),items:items.slice(0,60)});})()";
+            + "w.c=lastHit>=0?lastHit+1:from;"
+            + "var out={total:E.length,new_items:items.length,returned:Math.min(items.length,60),origin:String(location.origin||''),items:items.slice(0,60)};"
+            + "if(pat&&items.length===0&&skipN>0){out.skipped_urls=Object.keys(skip);out.note='pattern 命中 0 条，但本窗口有 ' + skipN + ' 个新请求被过滤——对照 skipped_urls 修正 pattern，或省略 pattern 直接 read 全部（S295：被过滤条目不再被游标吞掉，仍可补读）';}"
+            + "return JSON.stringify(out);})()";
         const pull = "(function(){var w=window.__netw;var gi=" + (parseInt(pullIdx) || -1) + ";"
             + "if(!w||gi<0||!w.entries||!w.entries[gi])return '';return String(w.entries[gi].bf||'').slice(0,524288);})()";
         const stop = "(function(){try{if(window.__netw){window.__netw.entries.length=0;window.__netw.armed=false;window.__netw.stopped=true;}return 'stopped';}catch(e){return 'stop_err';}})()";

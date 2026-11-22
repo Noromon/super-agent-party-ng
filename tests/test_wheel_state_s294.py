@@ -1,4 +1,4 @@
-# build=S294
+# build=S295
 # S294：/api/wheel-state 全局滚轮真相通道（WH_MOUSE_LL 钩子累加，拉取即清零）。
 # 测试不拉起真钩子：monkeypatch _wheel_install，直接驱动累加器验证 drain 语义。
 import sys
