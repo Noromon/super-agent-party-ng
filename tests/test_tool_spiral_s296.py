@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S296：相似调用绕圈熔断（贴吧探索事故对症）。纯逻辑单测 + 双侧接线静态锁。
 import sys
 from pathlib import Path

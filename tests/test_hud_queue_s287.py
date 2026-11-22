@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S287：气泡溢出排队（不再撤展示中的旧条）+ [HudPop] 生命周期埋点。静态锁；
 # 行为面（入队/到期补位/视口不越权）由 hud_pop_harness_s272.js 覆盖。
 from pathlib import Path

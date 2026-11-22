@@ -57,7 +57,8 @@ def test_approve_navigation_dispatch(monkeypatch):
 
 
 def test_server_wiring_mirrored():
-    src = _read("server.py")
+    # S301：钩子表构建迁 py/tool_hooks.py，两表镜像计数在合并面上守恒（表体逐字未动）
+    src = _read("server.py") + _read("py/tool_hooks.py")
     for n in ("check_redirect", "approve_navigation"):
         assert src.count(f'"{n}": {n},') == 2, n
     assert src.count("check_redirect, approve_navigation") == 2

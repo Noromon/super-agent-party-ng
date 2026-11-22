@@ -24,6 +24,8 @@ from py.tool_assembly import _plan_hide_blocked_tools  # noqa: E402
 from py.tool_registry import COMPUTER_USE_EXEC_TOOLS, PLAN_BLOCKED_TOOLS  # noqa: E402
 
 _SERVER_SRC = (ROOT / "server.py").read_text(encoding="utf-8-sig")
+# S301：_plan_mode_block 兜底随工具域迁 py/tool_hooks.py，文本钉合并扫描（逐字未动）
+_SERVER_SRC += (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8-sig")
 _ASSEMBLY_SRC = (ROOT / "py" / "tool_assembly.py").read_text(encoding="utf-8-sig")
 
 

@@ -141,7 +141,8 @@ def _src(rel):
 
 
 def test_server_wiring_pins():
-    sv = _src("server.py")
+    # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
+    sv = _src("server.py") + _src("py/tool_hooks.py")
     assert sv.count("websearch_with_fallback(") >= 2
     assert sv.count('"browser_lookup": browser_search') == 2
     assert sv.count("make_engine_with_fallback as _fb") == 2

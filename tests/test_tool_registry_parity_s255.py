@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S255：schema↔dispatch 一致性防线——S253 把 scroll_and_find/network_watch 注册进 schema
 # 却漏了 server.py 两张 _TOOL_HOOKS 映射，模型看得见却一调就 [Unknown Tool]（幽灵工具），
 # 整套测试却全绿。本测试静态解析 server.py 的 _TOOL_HOOKS 块，断言每个 cdp schema 名
@@ -15,7 +15,8 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 import py.cdp_tool as cdp  # noqa: E402
 
-SRC = (ROOT / "server.py").read_text(encoding="utf-8").replace("\r\n", "\n")
+SRC = ((ROOT / "server.py").read_text(encoding="utf-8")
+       + (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")).replace("\r\n", "\n")  # S301：钩子表构建迁出，两表扫描域合并（表体逐字未动）
 
 # 两处 _TOOL_HOOKS 注册表：_build_tool_hooks() 与 execute_approved_tool()。
 # （L510 还有模块级空占位 `_TOOL_HOOKS = {}`，非注册表，按含 cdp 注册过滤掉）

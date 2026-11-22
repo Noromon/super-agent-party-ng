@@ -126,15 +126,23 @@ def test_tcm_split_helpers_present_and_small():
         assert pb[h].end_lineno - pb[h].lineno + 1 < 300
 
 
+def _tk_funcs():
+    # S301：dispatch/钩子/审批预检域迁 py/tool_hooks.py，棘轮随迁（存在性+<300 语义不变）
+    tree = ast.parse((_ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8-sig"))
+    return [n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
 def test_dispatch_split_helpers_and_hooks_literal():
-    funcs = {n.name: n for n in _module_funcs()}
-    assert funcs["dispatch_tool"].end_lineno - funcs["dispatch_tool"].lineno + 1 < 300
+    tk = {n.name: n for n in _tk_funcs()}
+    assert tk["dispatch_tool"].end_lineno - tk["dispatch_tool"].lineno + 1 < 300
     for h in DISPATCH_HELPERS:
-        assert h in funcs, "helper %s missing" % h
-        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+        assert h in tk, "helper %s missing" % h
+        assert tk[h].end_lineno - tk[h].lineno + 1 < 300
     # py/audit_tools.py parses this literal to audit hook-table consistency
-    src = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
-    assert "_TOOL_HOOKS = {" in src
+    # S301：钩子表构建函数已迁出，字面量钉改扫 py/tool_hooks.py（执行侧拷贝仍在 server，S304 随迁）
+    src = (_ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8-sig")
+    assert "_TOOL_HOOKS = {" in src or "_srv()._TOOL_HOOKS = {" in src
 
 
 def test_tool_dispatch_module_helpers_present_and_small():

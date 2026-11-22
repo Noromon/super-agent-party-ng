@@ -173,7 +173,7 @@ class TestWiringPins:
         assert "callTimeout" in src and "mcpCallTimeout" in src
 
     def test_server_passes_settings_to_dispatch(self):
-        assert "call_node_extension_tool, settings)" in self._src("server.py")
+        assert "call_node_extension_tool, settings)" in self._src((ROOT / "py" / "tool_hooks.py"))  # S301：dispatch 域迁出，接线钉随迁
 
     def test_frontend_default_registered(self):
         assert "mcpCallTimeout: 180," in self._src("static/js/settings_schema.js")

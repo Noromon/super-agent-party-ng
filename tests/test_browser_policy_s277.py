@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S277：AI 浏览器失控止血——下载策略接管（永不弹原生另存为）、触摸仿真残留封死
 # （无条件复位助手/detach 记账/ON 半失败补偿）、CDP 输入 IPC 限时免疫、reset_page_state。
 # 行为面：guest_check_harness.js S277 段（假悬挂回退）；本文件锁接线与静态面。
@@ -78,7 +78,9 @@ def test_tool_registered_everywhere():
     cdp = (ROOT / "py/cdp_tool.py").read_text(encoding="utf-8")
     assert "async def reset_page_state(" in cdp
     assert '"name": "reset_page_state"' in cdp
-    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
+    srv = ((ROOT / "server.py").read_text(encoding="utf-8")
+           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8"))
     # 2 imports(×1) + 2 hook 注册行(键+值 ×2) = 6
     assert srv.count("reset_page_state") == 6
     assert srv.count('"reset_page_state": reset_page_state') == 2

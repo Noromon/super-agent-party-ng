@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S291：lpress 快击边沿（采样间点击不丢）+ 面板外一点即收。静态锁；
 # 行为面由独立进程 tests/data/hud_panel_s291_harness.js 覆盖（隔离旧实例对
 # 边沿标志的抢消费）。

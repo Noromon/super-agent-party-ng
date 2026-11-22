@@ -18,7 +18,8 @@ def _func_src(name):
     # 批 1: 断点续传中继函数已迁 py/stream_relay.py
     # S300: 群记忆域已迁 py/group_memory.py（_extract_group_memories 永不在闸内钉随行）
     sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8"),
-               (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8")] + \
+               (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")] + \
         [f.read_text(encoding="utf-8")
          for f in sorted((ROOT / "py" / "routers").glob("*.py"))]
     for src in sources:

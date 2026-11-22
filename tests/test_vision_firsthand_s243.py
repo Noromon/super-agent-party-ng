@@ -45,7 +45,7 @@ def test_schema_dispatch_pathscope_consistent():
     for schema in (lf.analyze_image_tool, lf.review_image_tool, lf.analyze_images_tool, lf.view_images_tool):
         name = schema["function"]["name"]
         assert name in NEW or name == FIRST
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/tool_hooks.py")  # S301：两 dispatch 表跨文件，合并扫描守恒
         assert f'"{name}":' in s, f"dispatch 缺 {name}"
         assert s.count(f'"{name}":') >= 2, f"{name} 应出现在两处 dispatch 表"
         assert name in ps.PATH_SCOPED_TOOLS, f"path_scope 缺 {name}"

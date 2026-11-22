@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S278：AI 浏览器行为策略引擎——下载/上传框/JS弹窗/离页/权限 的可配置自动处置 +
 # 决策记账回报（browser_policy_report）。静态锁：主进程钩子、IPC/桥、设置面、双注册。
 from pathlib import Path
@@ -80,6 +80,8 @@ def test_report_tool_everywhere():
     cdp = (ROOT / "py/cdp_tool.py").read_text(encoding="utf-8")
     assert "async def browser_policy_report(" in cdp
     assert '"name": "browser_policy_report"' in cdp
-    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
+    srv = ((ROOT / "server.py").read_text(encoding="utf-8")
+           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8"))
     assert srv.count("browser_policy_report") == 6  # 2 imports + 2 hook 行(键+值)
     assert srv.count('"browser_policy_report": browser_policy_report') == 2

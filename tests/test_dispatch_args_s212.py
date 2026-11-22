@@ -67,7 +67,9 @@ def probe_hook(monkeypatch):
 
     monkeypatch.setitem(server._TOOL_HOOKS, "s212_probe_tool", s212_probe_tool)
     rec = _RecLogger()
-    monkeypatch.setattr(server, "logger", rec)
+    # S301：dispatch 已迁 py/tool_hooks.py，logger 消费面=该模块全局（消费面诚实，同 S299 先例）
+    import py.tool_hooks as _th
+    monkeypatch.setattr(_th, "logger", rec)
     return rec, calls
 
 

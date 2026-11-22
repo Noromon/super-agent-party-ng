@@ -22,6 +22,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 ROOT = Path(__file__).resolve().parent.parent
 SERVER = (ROOT / "server.py").read_text(encoding="utf-8")
+TOOLHOOKS = (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")  # S301：预检/哨兵定义随工具域迁出
 TOOLDISP = (ROOT / "py" / "tool_dispatch.py").read_text(encoding="utf-8")
 INTEG = (ROOT / "py" / "diary_chat_integration.py").read_text(encoding="utf-8")
 ENGINE = (ROOT / "py" / "diary_engine.py").read_text(encoding="utf-8")
@@ -71,14 +72,16 @@ class TestPendingApprovalAtTailBehavior:
 
 
 def _exec_server_func(name):
-    tree = ast.parse(SERVER)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
-            seg = ast.get_source_segment(SERVER, node)
-            ns = {"json": json, "time": time}
-            exec(compile(seg, "<s172>", "exec"), ns)  # noqa: S102
-            return ns[name]
-    pytest.fail(f"{name} not found in server.py")
+    # S301：_pending_approval_reply_dict 定义迁 py/tool_hooks.py，AST 抽取双源扫描（体逐字未动）
+    for _src_txt in (SERVER, TOOLHOOKS):
+        tree = ast.parse(_src_txt)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                seg = ast.get_source_segment(_src_txt, node)
+                ns = {"json": json, "time": time}
+                exec(compile(seg, "<s172>", "exec"), ns)  # noqa: S102
+                return ns[name]
+    pytest.fail(f"{name} not found in server.py/tool_hooks.py")
 
 
 class TestPendingApprovalReplyDict:
@@ -93,9 +96,9 @@ class TestPendingApprovalReplyDict:
 
 class TestAsyncApprovalPrecheck:
     def test_helpers_defined(self):
-        assert "def _approval_precheck(" in SERVER
-        assert "_sensitive_approval(tool_name, tool_params, settings)" in SERVER
-        assert "path_scope.evaluate(" in SERVER
+        assert "def _approval_precheck(" in TOOLHOOKS  # S301：定义随工具域迁出（文本逐字未动）
+        assert "_sensitive_approval(tool_name, tool_params, settings)" in TOOLHOOKS
+        assert "path_scope.evaluate(" in TOOLHOOKS  # S301：路径门调用点随 dispatch 迁出
 
     def test_precheck_runs_before_async_spawn(self):
         i = SERVER.index("if settings['tools']['asyncTools']['enabled']:")
@@ -130,10 +133,11 @@ class TestNudgeAndRouteGate:
 
     def test_pathscope_log_honest(self):
         # S182(T4): 文案再分线——哨兵/参数错误分开报，各自只陈述成立的状态
-        assert "审批哨兵已回注模型" in SERVER
-        assert "非审批、无批复等待" in SERVER
-        assert "进入批复等待（Web 审批卡" not in SERVER
-        assert "等待用户路径授权" not in SERVER
+        # S301：分线文案随 dispatch 迁 py/tool_hooks.py，正/反钉改扫迁移域+server 合并面
+        assert "审批哨兵已回注模型" in TOOLHOOKS
+        assert "非审批、无批复等待" in TOOLHOOKS
+        assert "进入批复等待（Web 审批卡" not in SERVER + TOOLHOOKS
+        assert "等待用户路径授权" not in SERVER + TOOLHOOKS
 
 
 class TestDiarySummaryStorm:

@@ -1,4 +1,4 @@
-# build=S300
+# build=S301
 # S279：guest 崩溃/挂起看门狗 + 崩溃自动重载（crashReload 可配）+ reset_page_state 审计。
 # 全部经 _policyNote → browser_policy_report 对 agent 可见。
 from pathlib import Path

@@ -234,7 +234,9 @@ class TestPermissionMode:
 class TestWiringS153:
     def test_server(self):
         s = _read("server.py")
-        seg = s[s.find("# S153: 路径门（工作区外本地路径"):][:900]  # S182(T4): 分线日志加长，窗口放宽
+        # S301：dispatch 路径门随工具域迁 py/tool_hooks.py，接线段钉随迁（段逐字未动）
+        tk = _read("py/tool_hooks.py")
+        seg = tk[tk.find("# S153: 路径门（工作区外本地路径"):][:900]  # S182(T4): 分线日志加长，窗口放宽
         assert "path_scope.evaluate(" in seg and "set_grants" in seg
         ex = s[s.find("async def execute_approved_tool("):][:1600]
         assert "approved_call_grants" in ex and "add_dirs_to_project_config" in ex

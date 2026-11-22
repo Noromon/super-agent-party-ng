@@ -94,7 +94,8 @@ class TestOutsideSentinelPipelineS182:
 
 class TestLogLineSplitS182:
     def test_server_log_lines(self):
-        s = _read("server.py")
+        # S301：dispatch 路径门随工具域迁 py/tool_hooks.py，日志分线钉随迁（段逐字未动）
+        s = _read("py", "tool_hooks.py")
         a = s.find("# S182(T4) 日志分线")
         seg = s[a:s.find("if _ps.grants:", a)]
         assert a > 0 and "if _ps.payload is not None:" in seg
