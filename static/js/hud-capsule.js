@@ -62,6 +62,9 @@
   var ISLAND_HOST = typeof location !== 'undefined' && String(location.pathname || '').indexOf('island') >= 0;
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
+  // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
+  var HUD_REV = 'S285';
+  var pollTicks = 0;
   // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
   var seenIds = [], seenSet = {};
   function isDup(id) {
@@ -236,6 +239,7 @@
   function hudHoldMouse(on) {
     if (!ISLAND_HOST) return; // 主窗(index.html 同源加载)整窗天然吃鼠标，绝不允许碰穿透 API
     window.__sapHudHoldMouse = !!on;
+    try { console.info('[HudHold] ' + (on ? 'ON' : 'OFF') + ' dom=' + domOver + ' poll=' + pollOver + ' panel=' + !!panel); } catch (e) {}
     var api = window.electronAPI || {};
     if (!api.setIgnoreMouseEvents) return;
     try {
@@ -288,6 +292,7 @@
     if (pollTimer || !ISLAND_HOST) return;
     // OS 光标真相同路：即便合成事件整体失灵（本次事故形态），也能解锁首击。
     pollTimer = setInterval(function () {
+      pollTicks++;
       var api = window.electronAPI || {};
       if (!api.getCursorScreenPoint || typeof window.screenX !== 'number') return;
       Promise.resolve(api.getCursorScreenPoint()).then(function (p) {
@@ -430,7 +435,7 @@
     if (!layer) { cfg.enabled = true; build(); }
     wake();
     pushBubble(ICONS.system, 'HUD 演示气泡：新通知会像这样弹出（每条独立保留，超同屏条数时最老的先撤）', 8000);
-    toast('HUD 已启用');
+    toast('HUD rev ' + HUD_REV); // S285：toast 直接暴露岛页实际运行版本（旧缓存一眼识破）
   }
 
   var KEYMAP = { 'sap-hud-enabled': 'enabled', 'sap-hud-capsule': 'capsule', 'sap-hud-dim': 'dim', 'sap-hud-pop': 'pop', 'sap-hud-badge': 'badge' };
@@ -496,7 +501,7 @@
     });
     document.addEventListener('click', function (e) {
       var t = e.target;
-      while (t && t.id !== 'sap-hud-save' && t.id !== 'sap-hud-open' && t.id !== 'sap-hud-reset') { t = t.parentElement; }
+      while (t && t.id !== 'sap-hud-save' && t.id !== 'sap-hud-open' && t.id !== 'sap-hud-reset' && t.id !== 'sap-hud-diag') { t = t.parentElement; }
       if (!t) return;
       if (t.id === 'sap-hud-save') {
         try {
@@ -525,6 +530,18 @@
         } else {
           status('预览需在桌面端主窗口中使用');
         }
+      } else if (t.id === 'sap-hud-diag') {
+        // S285：拉取岛窗 HUD 状态快照（旧缓存页会回显 HUD_REV_ABSENT=直接裁决代码版本问题）
+        var dapi = window.electronAPI || {};
+        var out = $id('sap-hud-diag-out');
+        if (!dapi.hudDiag) {
+          if (out) { out.style.display = 'block'; out.textContent = 'electronAPI.hudDiag 缺失（需重启主程序更新 preload）'; }
+          return;
+        }
+        if (out) { out.style.display = 'block'; out.textContent = '诊断中…'; }
+        Promise.resolve(dapi.hudDiag()).then(function (r) {
+          if (out) out.textContent = JSON.stringify(r, null, 1);
+        }).catch(function (err) { if (out) out.textContent = '诊断失败：' + err; });
       }
     });
     // 持续回填：Vue v-if 每次切回都会重建卡片 DOM，一次性 observer 会导致控件回到默认态（S167 根因）
@@ -540,6 +557,26 @@
   function init() {
     var isIsland = location.pathname.indexOf('island') >= 0;
     if (!isIsland) { bindSettings(); return; }
+    // S285：诊断快照（主窗「胶囊诊断」按钮经主进程 executeJavaScript 调用）
+    window.__hudDiag = function () {
+      var r = null;
+      try {
+        if (capsule && capsule.getBoundingClientRect) {
+          var rr = capsule.getBoundingClientRect();
+          r = { l: rr.left, t: rr.top, w: rr.width, h: rr.height };
+        }
+      } catch (e) {}
+      return {
+        rev: HUD_REV, host: ISLAND_HOST, layer: !!layer,
+        hidden: !!(layer && layer.classList.contains('hud-hidden')),
+        enabled: cfg.enabled, capsuleMode: cfg.capsule, position: cfg.position,
+        holdActive: holdActive, domOver: domOver, pollOver: pollOver, pollTicks: pollTicks,
+        rect: r, screenXY: [window.screenX, window.screenY],
+        apiSet: !!(window.electronAPI && window.electronAPI.setIgnoreMouseEvents),
+        apiCursor: !!(window.electronAPI && window.electronAPI.getCursorScreenPoint),
+        unread: unread, panelOpen: !!panel
+      };
+    };
     if (!window.electron || !window.electron.ipcRenderer || typeof window.electron.ipcRenderer.on !== 'function') {
       // 无 preload 环境（纯浏览器）：降级为快捷键切换
       window.addEventListener('keydown', function (e) {

@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.invoke('set-ignore-mouse-events', ignore, options),
   getIgnoreMouseStatus: () => ipcRenderer.invoke('get-ignore-mouse-status'),
   getCursorScreenPoint: () => ipcRenderer.invoke('get-cursor-screen-point'),
+  hudDiag: () => ipcRenderer.invoke('hud-diag'),
   downloadFile: (payload) => ipcRenderer.invoke('download-file', payload),
   // 修改：添加回调参数
   getWindowConfig: (callback) => {

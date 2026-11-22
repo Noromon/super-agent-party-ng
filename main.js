@@ -1975,6 +1975,92 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
       return !!(minimalWindow && !minimalWindow.isDestroyed());
     });
 
+    // === S285: HUD 胶囊看门狗（主进程兜底）+ 岛窗 console 转发 ===
+    // 岛窗穿透态下光标进入胶囊热点矩形 → 临时解除穿透。主进程轮询不依赖岛页 JS
+    // 新旧/Blink 事件转发是否可靠（S282 页内双保险在部分机器上双双失效，见排障
+    // 记录）；他人（island-app/HUD 页）自行解除的穿透完全不介入——"自己放的自己收"。
+    const _hudWatch = { cfg: null, cfgMtime: 0, releasedBy: null, timer: null, probeTs: 0, probeHold: false };
+    function _hudWatchCfg() {
+      let st = null;
+      try { st = fs.statSync(path.join(app.getPath('userData'), 'hud_cfg.json')); } catch (e) {}
+      if (st && st.mtimeMs !== _hudWatch.cfgMtime) {
+        try {
+          _hudWatch.cfg = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'hud_cfg.json'), 'utf8'));
+          _hudWatch.cfgMtime = st.mtimeMs;
+        } catch (e) { _hudWatch.cfg = null; }
+      }
+      // 文件缺失=前端 DEFAULTS（enabled/capsule 开、se 角）
+      const c = _hudWatch.cfg || {};
+      const pos = ['nw', 'ne', 'sw', 'se', 'n', 's'];
+      return {
+        enabled: c.enabled !== false,
+        capsule: c.capsule !== false,
+        position: pos.indexOf(c.position) >= 0 ? c.position : 'se',
+      };
+    }
+    function _rectHas(r, p) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
+    function _hudHotspot(b, position) {
+      // CSS 契约：.hud-pos-* 偏移 12px，胶囊 18px；容差 10px 补偿边缘悬停丢失
+      const PAD = 10, SIZE = 18, OFF = 12;
+      let x, y;
+      if (position === 'n' || position === 's') x = b.x + Math.round(b.width / 2 - SIZE / 2);
+      else if (position === 'ne' || position === 'se') x = b.x + b.width - OFF - SIZE;
+      else x = b.x + OFF;
+      if (position === 'nw' || position === 'n' || position === 'ne') y = b.y + OFF;
+      else y = b.y + b.height - OFF - SIZE;
+      return { x: x - PAD, y: y - PAD, w: SIZE + PAD * 2, h: SIZE + PAD * 2 };
+    }
+    function _hudZone(b, position) {
+      // 释放判定大区：覆盖胶囊+历史面板（面板 320 宽 / 62vh 高 + 头部余量）
+      const W = 360, H = Math.round(b.height * 0.66) + 40;
+      if (position === 'n' || position === 's') {
+        return { x: b.x + b.width / 2 - W / 2, y: position === 'n' ? b.y : b.y + b.height - H, w: W, h: H };
+      }
+      return {
+        x: position === 'nw' || position === 'sw' ? b.x : b.x + b.width - W,
+        y: position === 'nw' || position === 'n' || position === 'ne' ? b.y : b.y + b.height - H,
+        w: W, h: H,
+      };
+    }
+    function hudCapsuleWatchdogTick() {
+      try {
+        const win = dynamicIslandWindow;
+        if (!win || win.isDestroyed() || !app.isReady()) return;
+        const cfg = _hudWatchCfg();
+        if (!cfg.enabled || !cfg.capsule) return;
+        let ignore = false;
+        try { ignore = win.isIgnoreMouseEvents(); } catch (e) { return; }
+        const cur = screen.getCursorScreenPoint();
+        if (!ignore) {
+          if (_hudWatch.releasedBy !== 'watchdog') return; // 别人解除的穿透不抢管
+          const b = win.getBounds();
+          if (_rectHas(_hudZone(b, cfg.position), cur)) return; // 角落大区=用户可能正在用面板
+          const now = Date.now();
+          if (now - _hudWatch.probeTs > 400) {
+            _hudWatch.probeTs = now;
+            win.webContents.executeJavaScript('!!window.__sapHudHoldMouse')
+              .then((hold) => { _hudWatch.probeHold = !!hold; })
+              .catch(() => { _hudWatch.probeHold = false; });
+          }
+          if (!_hudWatch.probeHold) {
+            try {
+              win.setIgnoreMouseEvents(true, { forward: true });
+              _hudWatch.releasedBy = null;
+              console.log('[HudWatch] 光标离开角落且页面无持握 → 恢复穿透');
+            } catch (e) {}
+          }
+          return;
+        }
+        if (_rectHas(_hudHotspot(win.getBounds(), cfg.position), cur)) {
+          try {
+            win.setIgnoreMouseEvents(false);
+            _hudWatch.releasedBy = 'watchdog';
+            console.log('[HudWatch] 胶囊热点命中 → 解除穿透 (' + cur.x + ',' + cur.y + ')');
+          } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
     // === S139(R6)：灵动岛窗口 (全屏覆盖层)，上游终态；webSecurity:false 已剥离（S137 cookie 教训） ===
     let islandOpening = false;
     ipcMain.handle('open-island-window', async () => {
@@ -2035,6 +2121,17 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
           }
         });
 
+        // S285：岛窗 console 转发到终端——岛窗生产构建无 devtools，[HudHold]/[HudRev] 等
+        // 前端诊断日志全靠这条路可见（debug 级不转，防爆量）
+        win.webContents.on('console-message', (a, b, c) => {
+          try {
+            const modern = !!(a && typeof a === 'object' && typeof a.message === 'string');
+            const lvl = modern ? a.level : b;
+            if (lvl === 'debug' || lvl === 'verbose') return;
+            console.log('[Island:' + lvl + '] ' + (modern ? a.message : c));
+          } catch (e) {}
+        });
+
         if (isLinux) {
           win.setIgnoreMouseEvents(true);
         } else {
@@ -2059,6 +2156,9 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
             clearInterval(_islandReassert);
           }
         }, 30000);
+
+        // S285：胶囊看门狗（全进程单例；tick 内部对岛窗存活/开关态自守卫）
+        if (!_hudWatch.timer) _hudWatch.timer = setInterval(hudCapsuleWatchdogTick, 120);
 
         // S166：Alt+Shift+H 全局切换胶囊模式（无焦点可用；独占全屏的 raw input 抓取下可能失效，属平台限制）
         try {
@@ -2238,6 +2338,18 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
     // S282：HUD 胶囊持握兜底——渲染层以 OS 光标真相对照自身命中区（穿透态下合成事件可能整体失灵）
     ipcMain.handle('get-cursor-screen-point', () => {
         try { return screen.getCursorScreenPoint(); } catch (e) { return null; }
+    });
+    // S285：胶囊诊断——主窗一键取岛窗 HUD 状态快照；旧缓存页无 __hudDiag 时返回 HUD_REV_ABSENT
+    ipcMain.handle('hud-diag', async () => {
+      const win = dynamicIslandWindow;
+      if (!win || win.isDestroyed()) return { ok: false, reason: 'island_window_absent' };
+      try {
+        const diag = await Promise.race([
+          win.webContents.executeJavaScript('(window.__hudDiag ? window.__hudDiag() : "HUD_REV_ABSENT")'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('diag_timeout')), 1500)),
+        ]);
+        return { ok: true, diag, watchdog: { releasedBy: _hudWatch.releasedBy } };
+      } catch (e) { return { ok: false, reason: String((e && e.message) || e) }; }
     });
     ipcMain.handle('dialog:openDirectory', async () => {
       const { dialog } = require('electron');

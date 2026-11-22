@@ -79,6 +79,11 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   env.efp = badge;
   (global.document._ev.mousemove || []).forEach(fn => fn({ clientX: 109, clientY: 109 }));
   ok(last(env.calls, false) !== null, 'S282: mousemove 命中胶囊 → 立即解除穿透');
+  ok(typeof global.window.__hudDiag === 'function', 'S285: 岛宿主已暴露 __hudDiag');
+  {
+    const d = global.window.__hudDiag();
+    ok(d.rev === 'S285' && d.host === true && d.layer === true && d.apiSet === true, 'S285: 诊断快照 rev/host/layer/api 正常: ' + d.rev);
+  }
   env.efp = null;
   (global.document._ev.mousemove || []).forEach(fn => fn({ clientX: 300, clientY: 300 }));
   ok(last(env.calls, false) !== null && last(env.calls, true) === null, 'S282: 离开走迟滞，250ms 内不立刻恢复穿透');

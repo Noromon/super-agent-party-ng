@@ -1,4 +1,4 @@
-# build=S284
+# build=S285
 # S265：审批/提问 pending → 宿主(Windows)通知中心系统 toast。
 # 链路：approval_store.emit("approval", extra.status=pending) → WS → onWsNotification →
 # window.electronAPI.showNotification（R2-5 既有桥）。窗口聚焦不弹、resolved 不弹。

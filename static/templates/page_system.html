@@ -44,8 +44,10 @@
                 </el-alert>
                 <div style="display:flex;gap:12px;align-items:center;padding:2px 0 8px;">
                   <button type="button" id="sap-hud-open" class="el-button el-button--small" style="cursor:pointer;">打开灵动岛并预览 HUD</button>
-                  <span style="font-size:12px;opacity:.65;">预览会打开（或重开）灵动岛窗口并弹出一条演示气泡。</span>
+                  <button type="button" id="sap-hud-diag" class="el-button el-button--small" style="cursor:pointer;">胶囊诊断</button>
+                  <span style="font-size:12px;opacity:.65;">预览会打开（或重开）灵动岛窗口并弹出一条演示气泡（气泡旁提示 HUD rev=岛页实际运行版本）。诊断需灵动岛已打开。</span>
                 </div>
+                <pre id="sap-hud-diag-out" style="display:none;margin:0 0 8px;padding:8px 10px;background:rgba(127,127,127,.12);border-radius:6px;font-size:11px;line-height:1.5;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;"></pre>
                 <div style="display:flex;flex-wrap:wrap;gap:14px 26px;align-items:center;padding:6px 2px;">
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-enabled">启用 HUD</label>
                   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="sap-hud-capsule">胶囊模式（折叠圆点+角标）</label>
