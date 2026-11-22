@@ -671,16 +671,67 @@
                     <el-button type="primary" :loading="backupNowRunning" @click="backupNow">
                       {{ t('dataGuardBackupNow') }}
                     </el-button>
+                    <el-button @click="loadBackupEstimate" :loading="backupEstimateLoading">{{ t('dataGuardPlan') }}</el-button>
                     <el-button @click="loadBackupList" :loading="backupListLoading">{{ t('dataGuardRefresh') }}</el-button>
                     <span style="font-size:12px; opacity:.7;">{{ t('dataGuardAutoNote') }}</span>
                   </div>
                 </el-form-item>
-                <el-form-item class="form-item-align">
-                  <el-switch v-model="systemSettings.backupIncludeUploads" @change="autoSaveSettings" />
-                  <span style="margin-left:8px; font-size:13px;">{{ t('dataGuardIncludeUploads') }}</span>
-                </el-form-item>
+                <!-- S281：内容构成与容量面板（自动列=持久策略，手选列=仅本次） -->
+                <div v-if="backupEstimate"
+                     style="border:1px solid var(--el-border-color, #dcdfe6); border-radius:6px; padding:8px 10px; margin:2px 0 8px;">
+                  <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                    <thead>
+                      <tr style="opacity:.75; text-align:left;">
+                        <th style="padding:3px 6px;">{{ t('dataGuardColItem') }}</th>
+                        <th style="padding:3px 6px;">{{ t('dataGuardColBytes') }}</th>
+                        <th style="padding:3px 6px;">{{ t('dataGuardColCnt') }}</th>
+                        <th style="padding:3px 6px;">{{ t('dataGuardColAuto') }}</th>
+                        <th style="padding:3px 6px;">{{ t('dataGuardColManual') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="it in (backupEstimate.items || [])" :key="it.id">
+                        <td style="padding:3px 6px;">{{ backupItemLabel(it.id) }}</td>
+                        <td style="padding:3px 6px;">{{ formatBackupBytes(it.bytes) }}</td>
+                        <td style="padding:3px 6px;">{{ it.files }}</td>
+                        <td style="padding:3px 6px;">
+                          <el-checkbox :model-value="backupSelAuto.includes(it.id)"
+                                       @change="v => setBackupSel('auto', it.id, v)" />
+                        </td>
+                        <td style="padding:3px 6px;">
+                          <el-checkbox :model-value="backupSelManual.includes(it.id)"
+                                       @change="v => setBackupSel('manual', it.id, v)" />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+                    <el-button type="primary" size="small" :loading="backupNowRunning" @click="backupNow">
+                      {{ t('dataGuardBackupWithSel') }}
+                    </el-button>
+                    <span style="font-size:12px;">{{ t('dataGuardProjTotal') }}: {{ formatBackupBytes(backupEstimate.total) }}</span>
+                    <span style="font-size:12px; opacity:.7;">{{ t('dataGuardDiskFree') }}: {{ formatBackupBytes(backupEstimate.disk_free) }}</span>
+                  </div>
+                  <div style="font-size:12px; opacity:.6; margin-top:4px;">{{ t('dataGuardPlanNote') }}</div>
+                </div>
                 <el-table :data="backupSnapshots" stripe size="small" style="margin-top:8px;" max-height="260">
+                  <el-table-column type="expand">
+                    <template #default="scope">
+                      <div style="padding:4px 24px; font-size:12px; line-height:1.9;">
+                        <span v-if="!scope.row.items || !Object.keys(scope.row.items).length"
+                              style="opacity:.6;">{{ t('dataGuardNoItemsInfo') }}</span>
+                        <span v-for="(b, k) in (scope.row.items || {})" :key="k"
+                              style="margin-right:14px;">{{ backupItemLabel(k) }}: {{ formatBackupBytes(b) }}</span>
+                      </div>
+                    </template>
+                  </el-table-column>
                   <el-table-column prop="name" :label="t('dataGuardColSnap')" min-width="230"></el-table-column>
+                  <el-table-column :label="t('dataGuardColTrigger')" width="100">
+                    <template #default="scope">
+                      <el-tag v-if="scope.row.trigger === 'manual'" type="warning" size="small">{{ t('dataGuardManual') }}</el-tag>
+                      <el-tag v-else size="small">{{ t('dataGuardAuto') }}</el-tag>
+                    </template>
+                  </el-table-column>
                   <el-table-column :label="t('dataGuardColSize')" width="100">
                     <template #default="scope">{{ formatBackupBytes(scope.row.bytes) }}</template>
                   </el-table-column>

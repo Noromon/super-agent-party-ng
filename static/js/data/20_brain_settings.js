@@ -143,6 +143,7 @@ Object.assign(vue_data, {
       isChinaProxy: false,
     enableShortcuts: true,
       backupIncludeUploads: true,
+      backupAutoItems: null,  // S281：自动备份内容项（null=按遗留开关推导）
       fontScale: 1,
       codeFontScale: 1,
       customCSS: '',
@@ -182,6 +183,17 @@ Object.assign(vue_data, {
     backupListLoading: false,
 
     verifyBackupName: '',
+
+    // --- S281：备份内容构成与容量面板（运行时状态，不进 payload）---
+    backupEstimate: null,
+
+    backupEstimateLoading: false,
+
+    backupSelAuto: [],
+
+    backupSelManual: [],
+
+    backupSelInit: false,
 
     networkOptions:[
       { value: 'local', label: 'local' }, 

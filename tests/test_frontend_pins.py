@@ -130,7 +130,6 @@ class TestBackupUiPins:
 
     def test_ui_buttons_connected(self):
         for hook in ('@click="backupNow"', '@click="loadBackupList"',
-                     'v-model="systemSettings.backupIncludeUploads"',
                      'formatBackupBytes(scope.row.bytes)'):
             assert hook in self.HTML
 
