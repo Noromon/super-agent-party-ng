@@ -1,4 +1,4 @@
-# build=S288
+# build=S289
 # S285：主进程胶囊看门狗 + HUD 诊断台。静态锁（行为面=看门狗依赖 Electron 运行时，
 # 现场验证；页内新增面由 hud_hold_harness_s282.js 的 S285 断言覆盖）。
 from pathlib import Path
@@ -30,7 +30,9 @@ def test_diag_bridge():
 
 
 def test_hud_capsule_observability():
-    assert "var HUD_REV = 'S287';" in HUD
+    # rev 具体值随票号走（S286 起 harness 已锁 rev 格式），此处只锁存在性，免逐票翻修
+    import re
+    assert re.search(r"var HUD_REV = 'S\d{3}';", HUD)
     assert "pollTicks++;" in HUD
     assert "window.__hudDiag = function ()" in HUD
     assert "'[HudHold] '" in HUD

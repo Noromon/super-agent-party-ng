@@ -63,8 +63,13 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S287';
+  var HUD_REV = 'S289';
   var pollTicks = 0, dbgLogged = false;
+  // S289：物理点击通道——高 DPI 机 Blink 内部鼠标坐标错位时 DOM 点击命中整体失效，
+  // 持握期间拉取后端全局左键态，配合 OS 光标真值合成点击（原生点击可达时自动让位）。
+  var lastLbtn = false, lbtnDownTs = 0, msFail = 0, msMuteUntil = 0;
+  var lastNativeClickTs = 0, nativeEnterTs = 0, lastEv = null, lastHudEvLog = 0;
+  var lastPollP = null, panelCloseEl = null;
   // S286：高 DPI（如 125%）下 OS 光标返回物理像素，与 CSS 坐标错位一个 dpr 倍——
   // 所有命中判定先按原值测，越出视口时再除以 devicePixelRatio 复测（自校准，不猜单位）。
   function dpr() { var d = window.devicePixelRatio || 1; return d > 0 ? d : 1; }
@@ -97,9 +102,15 @@
     layer.appendChild(capsule); layer.appendChild(stack);
     // S274：胶囊可点击展开历史面板——岛窗整体点击穿透，仅胶囊/面板吃鼠标；
     // S282：持握改由状态机裁决（mouseenter 仅作加速器，不再独任解锁职责）。
-    capsule.addEventListener('mouseenter', function () { overCapsule = true; domOver = true; updateHold(); });
+    capsule.addEventListener('mouseenter', function () { nativeEnterTs = Date.now(); overCapsule = true; domOver = true; updateHold(); });
     capsule.addEventListener('mouseleave', function () { overCapsule = false; if (!panel) { domOver = false; } updateHold(); });
-    capsule.addEventListener('click', function () { togglePanel(); });
+    capsule.addEventListener('click', function () { lastNativeClickTs = Date.now(); togglePanel(); });
+    // S289：捕获层只记账不打印（O(1)），[HudEv] 裁决 Blink 事件送达形态时用
+    document.addEventListener('mousemove', function (e) {
+      if (!e) return;
+      var t = e.target;
+      lastEv = { x: e.clientX, y: e.clientY, t: Date.now(), tgt: (t && (t.className || t.tagName)) || '' };
+    }, true);
     (document.body || document.documentElement).appendChild(layer);
     document.addEventListener('mousemove', onDocMove);
     startPoll();
@@ -362,13 +373,60 @@
         if (hit) pollTrusted = true; // 换算命中=本窗坐标映射可信（含 S286 缩放候选）
         if (hit !== pollOver) { pollOver = hit; updateHold(); }
         if (!hit && pollTrusted && !panel && domOver) { domOver = false; updateHold(); } // 可信后 OS 真相可纠正 DOM 态
+        // S289：OS 光标在圈上=手型光标兜底（Blink 视口外查询回退根元素样式）；
+        // 持握但无原生 enter → [HudEv] 记录事件送达形态（错位送达 vs 裁剪丢弃）留证
+        lastPollP = { x: x, y: y };
+        try { document.documentElement.style.cursor = hit ? 'pointer' : ''; } catch (e4) {}
+        if (hit && holdActive && lastEv && (Date.now() - nativeEnterTs > 2000) && (Date.now() - lastHudEvLog > 2000)) {
+          lastHudEvLog = Date.now();
+          console.info('[HudEv] no-native-enter lastEv=' + lastEv.x + ',' + lastEv.y +
+            ' tgt=' + String(lastEv.tgt).slice(0, 40) + ' dpr=' + dpr() + ' inner=' + window.innerWidth + 'x' + window.innerHeight);
+        }
       }).catch(function () {});
+      if (holdActive) pollMouseState(); else { lastLbtn = false; lbtnDownTs = 0; }
     }, 150);
+  }
+
+  // ---- S289：物理点击通道（后端全局左键态 + OS 光标真值命中判定） ----
+  function pollMouseState() {
+    if (Date.now() < msMuteUntil) return;
+    Promise.resolve(fetch('/api/mouse-state', { credentials: 'same-origin' })).then(function (r) {
+      if (!r || !r.ok) throw new Error('http');
+      return r.json();
+    }).then(function (j) {
+      msFail = 0;
+      var down = !!(j && j.lbtn);
+      if (down && !lastLbtn) lbtnDownTs = Date.now();
+      if (!down && lastLbtn && lbtnDownTs) {
+        var held = Date.now() - lbtnDownTs;
+        lbtnDownTs = 0;
+        if (held <= 1500) routePhysicalClick(); // 长按/拖拽不算 HUD 点击
+      }
+      lastLbtn = down;
+    }).catch(function () {
+      msFail++;
+      if (msFail >= 5) { msFail = 0; msMuteUntil = Date.now() + 5000; } // 旧后端无端点=静默重试
+    });
+  }
+
+  function routePhysicalClick() {
+    setTimeout(function () {
+      // 让位判据：原生 click 通道可达时（正常 DPI 机器）Blink 早已完成命中，勿双触发
+      if (Date.now() - lastNativeClickTs < 450 || !holdActive || !lastPollP) return;
+      var p = lastPollP, d = dpr();
+      var inBoth = function (el) {
+        if (!el || !el.getBoundingClientRect) return false;
+        var r = el.getBoundingClientRect();
+        return inRect(p.x, p.y, r, 10) || inRect(p.x / d, p.y / d, r, 10);
+      };
+      if (panel && inBoth(panelCloseEl)) { closePanel(); return; }
+      if (inBoth(capsule)) togglePanel();
+    }, 120); // 等一拍原生事件落账再裁决，防健康机双切换
   }
 
   function stopPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    pollOver = false; pollTrusted = false;
+    pollOver = false; pollTrusted = false; lastLbtn = false; lbtnDownTs = 0; lastPollP = null;
   }
 
   function fmtTime(ts) {
@@ -380,7 +438,7 @@
 
   function closePanel() {
     if (!panel) return;
-    var p = panel; panel = null;
+    var p = panel; panel = null; panelCloseEl = null;
     p.classList.remove('hud-show');
     setTimeout(function () { if (p.parentNode) p.parentNode.removeChild(p); }, 300);
     // S282：关面板后由 mousemove/轮询重新裁决在位性；250ms 迟滞内可无感点回胶囊
@@ -395,8 +453,9 @@
     var ht = el('span', '', '历史消息');
     var sp = el('span', 'hud-p-spacer');
     var cl = el('span', 'hud-p-close', '×');
-    cl.addEventListener('click', function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); closePanel(); });
-    head.appendChild(hi); head.appendChild(ht); head.appendChild(sp); head.appendChild(cl);
+    cl.addEventListener('click', function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); lastNativeClickTs = Date.now(); closePanel(); });
+    head.appendChild(hi); head.appendChild(ht); head.appendChild(sp); cl && head.appendChild(cl);
+    panelCloseEl = cl; // S289：物理通道需要关闭按钮矩形做命中判定
     var list = el('div', 'hud-p-list', '<div class="hud-p-empty">加载中…</div>');
     panel.appendChild(head); panel.appendChild(list);
     panel.addEventListener('mouseenter', function () { domOver = true; updateHold(); });

@@ -1,4 +1,4 @@
-# build=S288
+# build=S289
 # S267 备份加固审计：diary/ext 曾不在快照核心目录、.txt 不在扩展白名单
 # （tool_output_workspaces.txt 漏备）、uploaded_files 默认不入快照（用户资产
 # 唯一副本裸奔）、transfer 导入按死上限截断、notification FIFO 200 偏短。

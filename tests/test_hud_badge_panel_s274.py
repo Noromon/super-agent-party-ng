@@ -1,4 +1,4 @@
-# build=S288
+# build=S289
 # S274：HUD 角标可选 + 胶囊点击展开历史面板（鼠标桥/冲突守卫/标记已读/穿透恢复）。
 # 行为面由 hud_pop_harness_s272.js 第四段驱动；本文件锁接线与静态面。
 from pathlib import Path
@@ -29,7 +29,7 @@ def test_badge_toggle_cfg_and_render():
 
 def test_capsule_clickable_and_panel_events():
     js = _js()
-    assert "capsule.addEventListener('click', function () { togglePanel(); });" in js
+    assert "capsule.addEventListener('click', function () { lastNativeClickTs = Date.now(); togglePanel(); });" in js
     assert "mouseenter" in js and "hudHoldMouse(true)" in js
     b = _css()
     assert ".sap-hud-capsule { pointer-events: auto; cursor: pointer; }" in b

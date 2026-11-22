@@ -1,4 +1,4 @@
-# build=S288
+# build=S289
 # S264：本地推理服务器拒收 webp/avif 等格式（400 'url' field must be a base64 encoded image
 # 炸整轮实证：twitter 图 format=webp）。注入层单点归一化转码 JPEG + 剥图重试补词兜底。
 import base64

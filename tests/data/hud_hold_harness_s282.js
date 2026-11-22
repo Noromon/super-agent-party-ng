@@ -132,6 +132,40 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   (global.document._ev.mousemove || []).forEach(fn => fn({ clientX: 1890, clientY: 990 }));
   ok(env.calls.filter(c => c.ig === false).length > nUn2, 'S286: 越界事件坐标 /dpr 复判 → mousemove 救援生效');
 
+  // ===== 段 4：S289 物理点击通道（Blink 命中失效时，全局左键态+OS 光标真值兜底）=====
+  env = freshEnv();
+  let mouseDown = false;
+  global.window.devicePixelRatio = 1.25;
+  global.window.innerWidth = 1536; global.window.innerHeight = 816;
+  global.fetch = async (url) => {
+    if (String(url).indexOf('mouse-state') >= 0) return { ok: true, status: 200, json: async () => ({ lbtn: mouseDown }) };
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  };
+  new Function(src)();
+  await sleep(60);
+  const capsule5 = env.body.children[0].children[0];
+  const layer5 = env.body.children[0];
+  capsule5.getBoundingClientRect = () => ({ left: 1506, top: 786, right: 1524, bottom: 804 });
+  env.efp = null;
+  env.cursor = { x: 1890, y: 990 }; // 物理像素在圈上→缩放候选命中→持握
+  await sleep(450);
+  ok(last(env.calls, false) !== null, 'S289: 前置持握已建立（物理像素光标）');
+  mouseDown = true; await sleep(220); mouseDown = false; await sleep(600);
+  let panel5 = layer5.children.find(c => c._cl.has('sap-hud-panel'));
+  ok(!!panel5, 'S289: 原生点击不可达时按键循环→物理通道展开面板');
+  const cl5 = panel5 && panel5.querySelector('.hud-p-close');
+  ok(!!cl5, 'S289: 面板关闭按钮存在');
+  cl5.getBoundingClientRect = () => ({ left: 1490, top: 270, right: 1504, bottom: 284 });
+  env.cursor = { x: 1871, y: 346 }; // 1.25× 错位坐标，缩放候选应命中关闭钮
+  mouseDown = true; await sleep(220); mouseDown = false; await sleep(650);
+  ok(!layer5.children.includes(panel5), 'S289: 光标在关闭钮(缩放候选)→物理通道收起面板');
+  // 去重：原生 click 可达（健康机）时物理通道必须让位，不得双切换
+  ((capsule5._ev.click) || []).forEach(fn => fn({}));
+  mouseDown = true; await sleep(60); mouseDown = false; await sleep(700);
+  panel5 = layer5.children.find(c => c._cl.has('sap-hud-panel') && c._cl.has('hud-show'));
+  ok(!!panel5, 'S289: 原生 click 450ms 内物理通道让位（面板未被二次切换关掉）');
+  ok((layer5.children.filter(c => c._cl.has('sap-hud-panel')).length) === 1, 'S289: 全程仅一个面板实例');
+
   console.log(fail ? 'S282-HARNESS failed=' + fail : 'S282-HARNESS all passed');
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.log('HARNESS_ERR ' + ((e && e.stack) || e)); process.exit(3); });
