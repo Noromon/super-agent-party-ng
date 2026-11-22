@@ -150,7 +150,11 @@
 .hud-p-spacer { flex: 1; }
 .hud-p-close { cursor: pointer; padding: 0 6px; font-size: 15px; line-height: 1; opacity: 0.75; }
 .hud-p-close:hover { opacity: 1; }
-.hud-p-list { overflow-y: auto; padding: 4px 0; }
+/* S294：flex 子项默认 min-height:auto 不收缩——列表盒被内容撑满、永不内部溢出，
+   滚动条根本不存在（滚轮/拖动全灭的根因①）。必须显式允许收缩才有内部滚动。 */
+.hud-p-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 0; scrollbar-width: thin; }
+.hud-p-list::-webkit-scrollbar { width: 6px; }
+.hud-p-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 3px; }
 .hud-p-item { display: flex; gap: 8px; padding: 7px 10px; font-size: 12px; line-height: 1.45; }
 .hud-p-item + .hud-p-item { border-top: 1px solid rgba(255, 255, 255, 0.06); }
 .hud-p-item .hud-icon { margin-top: 2px; color: #8ab4ff; flex: none; }

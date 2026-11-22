@@ -1,4 +1,4 @@
-# build=S293
+# build=S294
 # S258：take_snapshot 懒加载真图解析 + network_watch 导航自动重挂。
 # 动因：agent 实测——"图片 src 压根不在此处，是懒加载 JS 的，接口只给相对占位路径"；
 # "网络钩子会随导航失效需要重新挂"。

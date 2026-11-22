@@ -19,6 +19,7 @@ import platform
 import re
 import socket
 import subprocess
+import threading
 from datetime import datetime
 
 import aiohttp
@@ -319,6 +320,71 @@ def _mouse_state():
 async def get_mouse_state():
     down, press = _mouse_state()
     return {"lbtn": down, "lpress": press}
+
+
+# ---- S294：全局滚轮真相通道（WH_MOUSE_LL 低级钩子，惰性安装，drain 语义）----
+# 高 DPI 故障机 Blink 的 wheel 命中同样错位（与点击事故同根源），面板滚动改走
+# OS 真值：钩子只累加增量，消费端（HUD 面板）拉取即清零；页面侧自带开面冲刷。
+_wheel_lock = threading.Lock()
+_wheel_delta = 0
+_wheel_installed = False
+_wheel_cb_ref = None  # 回调必须持强引用：GC 掉原生钩子指针=随机崩溃
+
+
+def _wheel_install():
+    """首次调用拉起钩子线程（daemon）；装败不重试（重试会反复起线程）。非 Windows 静默。"""
+    global _wheel_installed, _wheel_cb_ref
+    if _wheel_installed:
+        return
+    _wheel_installed = True
+    if platform.system() != "Windows":
+        return
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        def _pump():
+            global _wheel_delta
+            user32 = ctypes.windll.user32
+            proto = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_int, wt.LPARAM)
+
+            def _proc(nCode, wParam, lParam):
+                global _wheel_delta
+                if nCode == 0 and wParam == 0x020A:  # HC_ACTION + WM_MOUSEWHEEL
+                    try:
+                        # MSLLHOOKSTRUCT: {POINT pt; DWORD mouseData; ...} mouseData 高16位=带符号滚量
+                        md = ctypes.cast(lParam, ctypes.POINTER(ctypes.c_uint32))[2]
+                        d = (md >> 16) & 0xFFFF
+                        if d >= 0x8000:
+                            d -= 0x10000
+                        with _wheel_lock:
+                            _wheel_delta += d
+                    except Exception:
+                        pass
+                return user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+            cb = proto(_proc)
+            _wheel_cb_ref = cb
+            h = user32.SetWindowsHookExW(14, cb, ctypes.windll.kernel32.GetModuleHandleW(None), 0)
+            if not h:
+                return
+            msg = wt.MSG()
+            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+
+        threading.Thread(target=_pump, daemon=True, name="wheel-hook").start()
+    except Exception:
+        pass
+
+
+@router.get("/api/wheel-state")
+async def get_wheel_state():
+    _wheel_install()
+    global _wheel_delta
+    with _wheel_lock:
+        d, _wheel_delta = _wheel_delta, 0
+    return {"delta": d}
 
 
 @router.get("/cur_language")

@@ -59,16 +59,27 @@ const src = fs.readFileSync(process.argv[2] || 'static/js/hud-capsule.js', 'utf8
 let fail = 0;
 const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); if (!cond) fail++; };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const until = async (fn, ms, step = 80) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(step); }
+  return false;
+};
 const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (calls[i].ig === ig) return calls[i]; return null; };
 
 (async () => {
   global.location = { protocol: 'http:', host: 'x.invalid', pathname: '/island.html' };
   const env = freshEnv();
   let pressFlag = false; // 读到即消耗（同 GetAsyncKeyState 低位语义）
+  let downFlag = false;  // S294：按住态（高位语义，拖动场景用）
+  let wheelDelta = 0;    // S294：滚轮增量（drain 语义：拉取即清零）
   global.fetch = async (url) => {
     if (String(url).indexOf('mouse-state') >= 0) {
       const p = pressFlag; pressFlag = false;
-      return { ok: true, status: 200, json: async () => ({ lbtn: false, lpress: p }) };
+      return { ok: true, status: 200, json: async () => ({ lbtn: downFlag, lpress: p }) };
+    }
+    if (String(url).indexOf('wheel-state') >= 0) {
+      const w = wheelDelta; wheelDelta = 0;
+      return { ok: true, status: 200, json: async () => ({ delta: w }) };
     }
     return { ok: true, status: 200, json: async () => ({ items: [] }) };
   };
@@ -135,6 +146,31 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   (global.document._ev.click || []).forEach(fn => fn({ target: outside }));
   await sleep(150);
   ok(!!shownPanel(), 'S292: 通道存活幻影外部 click → 捕获层让位（面板不被抢关）');
+
+  // ===== S294：列表滚轮 + 物理拖动平移（OS 真值通道） =====
+  env.cursor = { x: 700, y: 400 }; pressFlag = true; await sleep(450); // 面板外按下收起
+  ok(!shownPanel(), 'S294: 前置——面板已收起');
+  wheelDelta = -600; // 开面板之前在桌面滚过的陈旧增量
+  env.cursor = { x: 1890, y: 990 }; await sleep(300);
+  pressFlag = true; await sleep(420);
+  const panel4 = shownPanel();
+  ok(!!panel4, 'S294: 前置——面板已打开');
+  const listEl = panel4.children[1];
+  listEl.getBoundingClientRect = () => ({ left: 1176, top: 290, right: 1496, bottom: 790 });
+  await sleep(400); // 让滚轮轮询多拍通过
+  ok(!listEl.scrollTop, 'S294: 开面冲刷——陈旧滚轮增量不闪跳列表');
+  env.cursor = { x: 1700, y: 700 }; await sleep(700); // 光标稳定进入 lastPollP（负载余量）
+  wheelDelta = -240;
+  ok(await until(() => (listEl.scrollTop || 0) >= 180, 2500),
+    'S294: 光标在列表上滚轮下滚 → scrollTop+180（OS 真值滚轮）');
+  // 物理拖动：列表内按住上移 200 物理px → +160 CSS px；随后释放不得误关面板
+  downFlag = true; await sleep(450);                       // 按下沿落账=起拖
+  env.cursor = { x: 1700, y: 500 }; await sleep(750);      // 位移跨拍采样
+  downFlag = false;
+  ok(await until(() => (listEl.scrollTop || 0) >= 340, 2500), 'S294: 物理拖动平移列表（+160）');
+  await sleep(400);
+  ok(!!shownPanel(), 'S294: 拖动释放不误关面板（点击路由被抑制）');
+  wheelDelta = 0;
 
   // —— S292：通道断（旧后端/掉线）→ 捕获层原生语义兜底接管 ——
   global.fetch = async (url) => {

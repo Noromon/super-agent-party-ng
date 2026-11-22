@@ -1,4 +1,4 @@
-# build=S293
+# build=S294
 # S291：lpress 快击边沿（采样间点击不丢）+ 面板外一点即收。静态锁；
 # 行为面由独立进程 tests/data/hud_panel_s291_harness.js 覆盖（隔离旧实例对
 # 边沿标志的抢消费）。
@@ -61,4 +61,5 @@ def test_behavior_harness_green():
         capture_output=True, text=True, timeout=60,
     )
     out = (r.stdout or "") + (r.stderr or "")
-    assert r.returncode == 0 and "all passed" in out, out[-600:]
+    bad = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
+    assert r.returncode == 0 and "all passed" in out, "; ".join(bad) or out[-600:]

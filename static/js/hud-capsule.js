@@ -63,7 +63,7 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S293';
+  var HUD_REV = 'S294';
   var pollTicks = 0, dbgLogged = false;
   // S289：物理点击通道——高 DPI 机 Blink 内部鼠标坐标错位时 DOM 点击命中整体失效，
   // 持握期间拉取后端全局左键态，配合 OS 光标真值合成点击（原生点击可达时自动让位）。
@@ -73,6 +73,9 @@
   // S292：物理通道存活窗（最近一次成功键态采样）。存活期间 click-away 全归物理
   // 通道——高 DPI 故障机上 Blink 会派发 target 错位的"幻影 click"，捕获层若同管必双行动。
   var msOkTs = 0;
+  // S294：面板列表滚动（OS 真值通道）——wheelCarry 分数累积防丢步；drag* 物理拖动平移态
+  var panelListEl = null, wheelCarry = 0;
+  var dragList = null, dragLastY = 0, dragMoved = 0, dragSkipRoute = false;
   // S286：高 DPI（如 125%）下 OS 光标返回物理像素，与 CSS 坐标错位一个 dpr 倍——
   // 所有命中判定先按原值测，越出视口时再除以 devicePixelRatio 复测（自校准，不猜单位）。
   function dpr() { var d = window.devicePixelRatio || 1; return d > 0 ? d : 1; }
@@ -422,14 +425,19 @@
       var press = !!(j && j.lpress); // S291：系统级按下边沿——采样间隔内的快击也不丢
       if (press && !down) {
         lbtnDownTs = 0;              // 已松开：释放沿不再对同一次按键补发
+        dragList = null;             // S294：快击不涉拖动
         routePhysicalClick(80);      // 快击直达路由（80ms 仅作原生事件落账窗）
       } else if (down && !lastLbtn) {
         lbtnDownTs = Date.now();
+        beginDrag();                 // S294：按下沿若落在列表内 → 起拖
       } else if (!down && lastLbtn && lbtnDownTs) {
         var held = Date.now() - lbtnDownTs;
         lbtnDownTs = 0;
+        endDrag();                   // S294：真拖过 → 抑制释放沿路由（拖出面板≠外部点击关闭）
         if (held <= 1500) routePhysicalClick(); // 长按/拖拽不算 HUD 点击
       }
+      if (down && dragList) dragStep(); // S294：按住期间每拍平移
+      if (panel) pollWheel();           // S294：滚轮轮询随同节拍（仅面板在场时）
       lastLbtn = down;
     }).catch(function () {
       msFail++;
@@ -439,6 +447,7 @@
 
   function routePhysicalClick(settleMs) {
     setTimeout(function () {
+      if (dragSkipRoute) { dragSkipRoute = false; return; } // S294：刚完成一次拖动，本手势不再走点击语义
       // 让位判据：原生 click 通道可达时（正常 DPI 机器）Blink 早已完成命中，勿双触发
       if (Date.now() - lastNativeClickTs < 450 || !holdActive || !lastPollP) return;
       var p = lastPollP, d = dpr();
@@ -457,6 +466,64 @@
   function stopPoll() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     pollOver = false; pollTrusted = false; lastLbtn = false; lbtnDownTs = 0; lastPollP = null;
+    dragList = null; dragSkipRoute = false; // S294
+  }
+
+  // ---- S294：面板列表滚动 OS 真值通道（Blink wheel 命中错位时代偿）----
+  function flushWheelEdge() {
+    try { fetch('/api/wheel-state', { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
+  }
+
+  function overList() {
+    if (!panelListEl || !lastPollP) return false;
+    var p = lastPollP, d = dpr(), r = null;
+    try { r = panelListEl.getBoundingClientRect && panelListEl.getBoundingClientRect(); } catch (e) {}
+    if (!r) return false;
+    return inRect(p.x, p.y, r, 0) || inRect(p.x / d, p.y / d, r, 0);
+  }
+
+  function scrollBy(px) {
+    wheelCarry += px;
+    var iv = Math.round(wheelCarry);
+    if (!iv) return;
+    wheelCarry -= iv;
+    try {
+      var t = dragList || panelListEl;
+      if (t) t.scrollTop = (t.scrollTop || 0) + iv;
+    } catch (e) {}
+  }
+
+  function pollWheel() {
+    if (!panelListEl) return;
+    Promise.resolve(fetch('/api/wheel-state', { credentials: 'same-origin' })).then(function (r) {
+      if (!r || !r.ok) throw new Error('http');
+      return r.json();
+    }).then(function (j) {
+      var d = j && j.delta;
+      if (!d || !panelListEl) return;
+      if (!overList()) return; // 光标 OS 真值在列表内才滚（面板头/他处不误滚）
+      scrollBy(-(d / 120) * 90); // 每 notch≈90px（≈3 行）；下滚 delta<0 → scrollTop 增
+    }).catch(function () {});
+  }
+
+  function beginDrag() {
+    dragList = null;
+    if (!panelListEl || !overList()) return;
+    dragList = panelListEl; dragLastY = lastPollP.y; dragMoved = 0; wheelCarry = 0;
+  }
+
+  function dragStep() {
+    if (!dragList || !lastPollP) return;
+    var dy = lastPollP.y - dragLastY;
+    dragLastY = lastPollP.y;
+    if (!dy) return;
+    dragMoved += Math.abs(dy);
+    scrollBy(-dy / dpr()); // 物理位移→CSS；下拖 dy>0 内容跟手（scrollTop 减）
+  }
+
+  function endDrag() {
+    if (dragList && dragMoved > 6) dragSkipRoute = true;
+    dragList = null; dragMoved = 0;
   }
 
   function fmtTime(ts) {
@@ -469,6 +536,7 @@
   function closePanel() {
     if (!panel) return;
     var p = panel; panel = null; panelCloseEl = null;
+    panelListEl = null; dragList = null; // S294
     p.classList.remove('hud-show');
     setTimeout(function () { if (p.parentNode) p.parentNode.removeChild(p); }, 300);
     // S282：关面板后由 mousemove/轮询重新裁决在位性；250ms 迟滞内可无感点回胶囊
@@ -487,6 +555,10 @@
     head.appendChild(hi); head.appendChild(ht); head.appendChild(sp); cl && head.appendChild(cl);
     panelCloseEl = cl; // S289：物理通道需要关闭按钮矩形做命中判定
     var list = el('div', 'hud-p-list', '<div class="hud-p-empty">加载中…</div>');
+    // S294：滚轮/拖动平移以列表容器为操作对象；开面即冲刷陈旧滚轮增量（S293 教训）
+    panelListEl = list;
+    wheelCarry = 0; dragList = null; dragMoved = 0; dragSkipRoute = false;
+    flushWheelEdge();
     panel.appendChild(head); panel.appendChild(list);
     panel.addEventListener('mouseenter', function () { domOver = true; updateHold(); });
     // S282：面板在场=状态机硬持握（mouseleave 不再需要续持）
