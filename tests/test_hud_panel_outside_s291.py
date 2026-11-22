@@ -1,4 +1,4 @@
-# build=S291
+# build=S292
 # S291：lpress 快击边沿（采样间点击不丢）+ 面板外一点即收。静态锁；
 # 行为面由独立进程 tests/data/hud_panel_s291_harness.js 覆盖（隔离旧实例对
 # 边沿标志的抢消费）。
@@ -27,6 +27,17 @@ def test_outside_close_both_channels():
     assert j < HUD.index("if (!inBoth(panel)) closePanel();")
     # 健康机原生通道：document 捕获层点击，面板/胶囊之外即收
     assert "while (n) { if (n === panel || n === capsule) break; n = n.parentNode; }" in HUD
+
+
+def test_s292_ownership_split():
+    # 物理通道存活窗：心跳打点 + 捕获层让位（幻影 click 不得双行动）
+    assert "msOkTs = Date.now();" in HUD
+    assert "if (Date.now() - msOkTs < 3000) return;" in HUD
+    i = HUD.index("if (Date.now() - msOkTs < 3000) return;")
+    j = HUD.index("closePanel();", i)
+    assert i < j, "让位判断必须先于捕获层 close"
+    HARNESS = (ROOT / "tests" / "data" / "hud_panel_s291_harness.js").read_text(encoding="utf-8")
+    assert "关了又开=回归" in HARNESS and "捕获层恢复掌控" in HARNESS
 
 
 def test_harness_covers_s291():

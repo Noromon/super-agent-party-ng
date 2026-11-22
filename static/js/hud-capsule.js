@@ -63,13 +63,16 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S291';
+  var HUD_REV = 'S292';
   var pollTicks = 0, dbgLogged = false;
   // S289：物理点击通道——高 DPI 机 Blink 内部鼠标坐标错位时 DOM 点击命中整体失效，
   // 持握期间拉取后端全局左键态，配合 OS 光标真值合成点击（原生点击可达时自动让位）。
   var lastLbtn = false, lbtnDownTs = 0, msFail = 0, msMuteUntil = 0;
   var lastNativeClickTs = 0, nativeEnterTs = 0, lastEv = null, lastHudEvLog = 0;
   var lastPollP = null, panelCloseEl = null;
+  // S292：物理通道存活窗（最近一次成功键态采样）。存活期间 click-away 全归物理
+  // 通道——高 DPI 故障机上 Blink 会派发 target 错位的"幻影 click"，捕获层若同管必双行动。
+  var msOkTs = 0;
   // S286：高 DPI（如 125%）下 OS 光标返回物理像素，与 CSS 坐标错位一个 dpr 倍——
   // 所有命中判定先按原值测，越出视口时再除以 devicePixelRatio 复测（自校准，不猜单位）。
   function dpr() { var d = window.devicePixelRatio || 1; return d > 0 ? d : 1; }
@@ -112,11 +115,14 @@
       lastEv = { x: e.clientX, y: e.clientY, t: Date.now(), tgt: (t && (t.className || t.tagName)) || '' };
     }, true);
     // S291：面板外原生点击=一点即收（健康机通道；故障机原生不达时由物理路由同语义兜底）
+    // S292：物理通道存活时本监听让位——故障机幻影 click（错位命中→target=body）
+    // 若照单执行会抢先 close，随后物理路由再 toggle=关了又开；click-away 归一化。
     document.addEventListener('click', function (e) {
       if (!panel) return;
       var n = e && e.target;
       while (n) { if (n === panel || n === capsule) break; n = n.parentNode; }
       if (n === panel || n === capsule) return; // 面板内（含×）/胶囊交给各自处理器
+      if (Date.now() - msOkTs < 3000) return;   // 物理通道存活=它负责 click-away
       closePanel();
     }, true);
     (document.body || document.documentElement).appendChild(layer);
@@ -403,6 +409,7 @@
       return r.json();
     }).then(function (j) {
       msFail = 0;
+      msOkTs = Date.now(); // S292：物理通道心跳（捕获层让位判据）
       var down = !!(j && j.lbtn);
       var press = !!(j && j.lpress); // S291：系统级按下边沿——采样间隔内的快击也不丢
       if (press && !down) {

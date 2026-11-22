@@ -110,6 +110,41 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   await sleep(400);
   ok(layer.children.includes(panel) && !panel.__gone, 'S291: 面板内按下不触发外部收起');
 
+  // —— S292：通道存活时幻影 click（错位命中 target=body）让位物理通道；
+  //    复现并锁死「点胶囊关闭却关了又开」的双重行动序列 ——
+  const outside = mkNode(); // 游离节点=不在面板/胶囊链上（幻影事件的典型 target）
+  env.cursor = { x: 1890, y: 990 }; // 光标回到胶囊上（真实用户动作）
+  await sleep(180);                 // 等新位置进入 lastPollP 记账
+  pressFlag = true; // 胶囊上按下（面板此刻开着）
+  await sleep(10);  // 现实时序：幻影 click 先于下一次键态采样到达
+  (global.document._ev.click || []).forEach(fn => fn({ target: outside }));
+  await sleep(450);
+  ok(!shownPanel(), 'S292: 幻影click+物理路由点胶囊 → 仅关闭一次（关了又开=回归）');
+  (global.document._ev.click || []).forEach(fn => fn({ target: outside }));
+  await sleep(120);
+  ok(!shownPanel(), 'S292: 通道存活期间幻影 click 持续静默（面板保持关闭）');
+  // 面板开+幻影外部 click 不得抢关（物理通道全权期）
+  pressFlag = true;
+  await sleep(400);
+  ok(!!shownPanel(), 'S292: 前置：物理再按下开面板');
+  (global.document._ev.click || []).forEach(fn => fn({ target: outside }));
+  await sleep(150);
+  ok(!!shownPanel(), 'S292: 通道存活幻影外部 click → 捕获层让位（面板不被抢关）');
+
+  // —— S292：通道断（旧后端/掉线）→ 捕获层原生语义兜底接管 ——
+  global.fetch = async (url) => {
+    if (String(url).indexOf('mouse-state') >= 0) return { ok: false, status: 503 };
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  };
+  await sleep(3200); // 3s 存活窗过期
+  if (shownPanel()) { ((capsule._ev.click) || []).forEach(fn => fn({})); await sleep(350); } // 归零到关闭态
+  ((capsule._ev.click) || []).forEach(fn => fn({}));
+  await sleep(30);
+  ok(!!shownPanel(), 'S292: 通道断场景前置：面板已打开');
+  (global.document._ev.click || []).forEach(fn => fn({ target: outside }));
+  await sleep(150);
+  ok(!shownPanel(), 'S292: 通道断 → 捕获层恢复掌控，外部点击一点即收（旧后端不回归）');
+
   console.log(fail ? 'S291-HARNESS failed=' + fail : 'S291-HARNESS all passed');
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.log('HARNESS_ERR ' + ((e && e.stack) || e)); process.exit(3); });
