@@ -1,4 +1,4 @@
-# build=S292
+# build=S293
 # S291：lpress 快击边沿（采样间点击不丢）+ 面板外一点即收。静态锁；
 # 行为面由独立进程 tests/data/hud_panel_s291_harness.js 覆盖（隔离旧实例对
 # 边沿标志的抢消费）。
@@ -41,9 +41,17 @@ def test_s292_ownership_split():
 
 
 def test_harness_covers_s291():
-    assert "S291: lpress 边沿不丢" in HARNESS
+    assert "S293: 武装即冲刷" in HARNESS and "首击必死回归锁" in HARNESS
+    assert "首次真实点击即时生效" in HARNESS
     assert "面板外物理按下 → 一点即收" in HARNESS
     assert "让位（面板未被抢关）" in HARNESS and "面板内按下不触发外部收起" in HARNESS
+
+
+def test_s293_flush_on_arm():
+    # 武装即冲刷：holdActive 置位处必须冲刷累积边沿
+    i = HUD.index("holdActive = true; hudHoldMouse(true); flushMouseEdge();")
+    assert HUD.index("function flushMouseEdge()") < i
+    assert "'/api/mouse-state'" in HUD[HUD.index("function flushMouseEdge()"):i]
 
 
 def test_behavior_harness_green():

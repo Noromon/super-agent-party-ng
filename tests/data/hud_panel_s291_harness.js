@@ -77,15 +77,20 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   const capsule = env.body.children[0].children[0];
   const layer = env.body.children[0];
   capsule.getBoundingClientRect = () => ({ left: 1506, top: 786, right: 1524, bottom: 804 });
-  env.cursor = { x: 1890, y: 990 }; // 125% 机物理像素：正落在圈上（CSS 1512,792）
-  await sleep(450);
-  ok(last(env.calls, false) !== null, 'S291: 前置持握已建立（物理像素光标）');
   const shownPanel = () => layer.children.find(c => c._cl.has('sap-hud-panel') && c._cl.has('hud-show'));
 
-  // —— lpress 快击：按下+松开完整周期落在采样间隙，仅边沿标志可见 ——
-  pressFlag = true;
-  await sleep(400);
-  ok(!!shownPanel(), 'S291: lpress 边沿不丢——采样间快击也展开面板');
+  // —— S293：持握空窗期累积的陈旧 lpress 不得在武装时幽灵开面板（首击必死回归锁）——
+  env.cursor = { x: 700, y: 400 };
+  pressFlag = true; // 用户落位前在别处点过左键：无采样期边沿持续累积
+  await sleep(420);
+  ok(!shownPanel() && last(env.calls, false) === null, 'S293: 空窗期不消费：陈旧边沿滞留、无持握无面板');
+  env.cursor = { x: 1890, y: 990 }; // 悬停落到圈上（还没点）
+  await sleep(550);
+  ok(!shownPanel(), 'S293: 武装即冲刷→陈旧边沿被清,悬停本身不幽灵开面板');
+  ok(last(env.calls, false) !== null, 'S293: 持握已正常武装（物理像素光标）');
+  pressFlag = true; // 落位后的第一次真实点击
+  await sleep(420);
+  ok(!!shownPanel(), 'S293: 悬停后首次真实点击即时生效（快击路径无恙）');
 
   // —— 面板外按下 → 一点即收 ——
   env.cursor = { x: 700, y: 400 };

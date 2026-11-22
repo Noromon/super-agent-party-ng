@@ -63,7 +63,7 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S292';
+  var HUD_REV = 'S293';
   var pollTicks = 0, dbgLogged = false;
   // S289：物理点击通道——高 DPI 机 Blink 内部鼠标坐标错位时 DOM 点击命中整体失效，
   // 持握期间拉取后端全局左键态，配合 OS 光标真值合成点击（原生点击可达时自动让位）。
@@ -314,10 +314,18 @@
 
   function hudHoldWanted() { return !!panel || domOver || pollOver; }
 
+  // S293：lpress 是粘滞边沿——持握空窗期（无采样）在别处的左键会累积，
+  // 武装后第一次采样会把它当"刚发生的快击"消费→面板被幽灵自开、用户首击变关。
+  // 武装即冲刷：一发即忘调用把累积边沿原子清空，其后 lpress 必为悬停之后的真实点击。
+  function flushMouseEdge() {
+    if (Date.now() < msMuteUntil) return;
+    try { fetch('/api/mouse-state', { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
+  }
+
   function updateHold() {
     if (hudHoldWanted()) {
       if (holdReleaseT) { clearTimeout(holdReleaseT); holdReleaseT = null; }
-      if (!holdActive) { holdActive = true; hudHoldMouse(true); }
+      if (!holdActive) { holdActive = true; hudHoldMouse(true); flushMouseEdge(); }
       return;
     }
     if (holdActive && !holdReleaseT) {
