@@ -4,7 +4,8 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MAIN = (ROOT / "main.js").read_text(encoding="utf-8")
+MAIN = ((ROOT / "main.js").read_text(encoding="utf-8")
+        + (ROOT / "main_lib" / "sap_emulation.js").read_text(encoding="utf-8"))  # S305：策略/仿真域迁出，合并扫描守恒（体逐字未动）
 
 
 def test_policy_schema_and_defaults():

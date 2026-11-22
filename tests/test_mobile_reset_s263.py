@@ -7,12 +7,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "main.js").read_text(encoding="utf-8")
+# S305：S277 策略/仿真域迁 main_lib/sap_emulation.js，本体钉改指迁出文件（体逐字未动）
+SAP = (ROOT / "main_lib" / "sap_emulation.js").read_text(encoding="utf-8")
 
 
 def _off_seg():
     # S277：OFF 分支复位逻辑收拢进 sapResetEmulation（无条件助手），锚点随迁。
-    i = MAIN.index("async function sapResetEmulation")
-    return MAIN[i:i + 1600]
+    i = SAP.index("async function sapResetEmulation")
+    return SAP[i:i + 1600]
 
 
 def test_off_disables_emit_touch_explicitly():
@@ -32,9 +34,9 @@ def test_off_reset_not_gated_by_set_membership():
 
 
 def test_wheel_click_attach_uses_separate_set():
-    assert "_sapInputDbg" in MAIN
-    # mobile 专属集合不再收 wheel/click 的临时 attach
-    assert MAIN.count("_sapInputDbg.add(wcId)") >= 2
+    assert "_sapInputDbg" in SAP  # S305：集合本体随域迁出
+    # mobile 专属集合不再收 wheel/click 的临时 attach（attach 点跨两文件，计数合并）
+    assert MAIN.count("_sapInputDbg.add(wcId)") + SAP.count("_sapInputDbg.add(wcId)") >= 2
     seg = MAIN[MAIN.index("cdp-input-wheel"):MAIN.index("cdp-input-click")]
     assert "_sapMobileDbg" not in seg
 

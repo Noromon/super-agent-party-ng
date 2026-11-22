@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = (ROOT / "main.js").read_text(encoding="utf-8")
+# S305：S277 策略/仿真域迁 main_lib/sap_emulation.js，本体钉改指迁出文件（体逐字未动）
+SAP = (ROOT / "main_lib" / "sap_emulation.js").read_text(encoding="utf-8")
 
 
 def _dl_seg():
@@ -27,16 +29,17 @@ def test_download_policy_gate():
 
 
 def test_reset_emulation_helper_unconditional():
-    i = MAIN.index("async function sapResetEmulation")
-    seg = MAIN[i:i + 1800]
+    i = SAP.index("async function sapResetEmulation")
+    seg = SAP[i:i + 1800]
     assert "!opts.force && !wasAttached && !known" in seg   # 记账命中可补 attach
     assert "Emulation.setEmitTouchEventsForMouse', { enabled: false }" in seg
     assert "Emulation.setTouchEmulationEnabled', { enabled: false" in seg
     assert "Emulation.clearDeviceMetricsOverride" in seg
     assert "Emulation.clearUserAgentOverride" in seg
     # detach 记账监听：attach 处全挂
-    assert "function sapWatchDetach" in MAIN
-    assert MAIN.count("sapWatchDetach(wc)") >= 4  # on/mobile-on/wheel/click/reset
+    assert "function sapWatchDetach" in SAP
+    # 跨两文件计数（本体+调用点在 main 事件层，S305 拆分后合并守恒）
+    assert (MAIN.count("sapWatchDetach(wc)") + SAP.count("sapWatchDetach(wc)")) >= 4
 
 
 def test_on_branch_touch_compensation():

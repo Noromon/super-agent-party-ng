@@ -68,7 +68,8 @@ class TestNarrowLayoutS144:
 
 class TestWindowSizeMemoryS142:
     def test_main_bounds_persistence(self):
-        s = _read("main.js")
+        # S305：config/尺寸记忆域迁 main_lib/config_store.js，合并扫描（体逐字未动）
+        s = _read("main.js") + _read("main_lib", "config_store.js")
         assert "WINDOW_BOUNDS_FILE" in s
         assert "window-bounds.json" in s
         for fn in ("loadWindowBounds", "writeWindowBounds", "validBounds", "saveWindowBounds", "persistMaximized"):

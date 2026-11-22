@@ -8,7 +8,7 @@
     "start": "node start.js",
     "dev": "node start.js",
     "lint": "npm run lint:js && npm run lint:py",
-    "lint:js": "eslint static/js main.js start.js",
+    "lint:js": "eslint static/js main.js main_lib start.js",
     "lint:py": "uv run --no-sync ruff check .",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "electron-builder -mwl",
@@ -41,6 +41,7 @@
     },
     "files": [
       "main.js",
+      "main_lib/",
       "LICENSE",
       "README.md",
       "dist/",

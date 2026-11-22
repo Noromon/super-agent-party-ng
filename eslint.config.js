@@ -73,7 +73,7 @@ module.exports = [
         ],
     },
     {
-        files: ["static/js/**/*.js", "main.js", "start.js"],
+        files: ["static/js/**/*.js", "main.js", "start.js", "main_lib/**/*.js"],
         languageOptions: {
             ecmaVersion: 2022,
             sourceType: "script",
@@ -87,7 +87,8 @@ module.exports = [
     },
     {
         // Electron / preload 文件运行在 Node 环境
-        files: ["main.js", "start.js", "static/js/webview-preload.js",
+        files: ["main.js", "start.js", "main_lib/**/*.js",
+                "static/js/webview-preload.js",
                 "static/js/preload.js", "static/js/shotPreload.js"],
         languageOptions: {
             // CommonJS 顶层允许 return（main.js 存在该写法）

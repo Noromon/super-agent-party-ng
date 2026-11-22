@@ -28,7 +28,7 @@ def test_no_undef_fixes_in_place():
 
 def test_eslint_zero_errors():
     r = subprocess.run(
-        ["npx", "eslint", "static/js", "main.js", "start.js"],
+        ["npx", "eslint", "static/js", "main.js", "main_lib", "start.js"],
         capture_output=True, text=True, cwd=str(ROOT), timeout=600, shell=True,
     )
     assert r.returncode == 0, (r.stdout or "")[-2500:]
