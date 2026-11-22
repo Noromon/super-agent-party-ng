@@ -151,7 +151,7 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S283" in _read("static", "js", "renderer.js")
+        assert "build=S284" in _read("static", "js", "renderer.js")
 
 
 class TestIslandProxyFallbackS283:
@@ -314,3 +314,127 @@ class TestIslandProxyFallbackS283:
         j_sticky = block.find('_proxy_state.get("sticky")')
         j_ext = block.find("_external_get_json")
         assert j_sticky != -1 and j_sticky < j_ext
+
+
+class TestIslandRaceS284:
+    """S284：并发竞速引擎+islandFetchRace 开关；串行引擎原样保留可回退。"""
+
+    @staticmethod
+    def _module():
+        import importlib
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+            del sys.modules["py"]
+        return importlib.import_module("py.routers.island")
+
+    def test_engine_split_static(self):
+        s = _read("py", "routers", "island.py")
+        for anchor in ("async def _serial_get_json", "async def _race_get_json",
+                       "islandFetchRace", "FIRST_COMPLETED", "await asyncio.sleep(0.5)",
+                       "type(e).__name__}({detail})"):
+            assert anchor in s, anchor
+
+    def _wire(self, monkeypatch, m, attempt_fn, settings):
+        async def fake_settings():
+            return settings
+        monkeypatch.setattr(m, "_attempt_get", attempt_fn)
+        monkeypatch.setattr(m, "_settings_cached", fake_settings)
+
+    def test_race_first_success_wins(self, monkeypatch):
+        import asyncio
+        import time
+        m = self._module()
+        m._proxy_state["sticky"] = None
+        calls = []
+
+        async def slow_direct(strat, url, params=None):
+            calls.append(strat)
+            if strat == ("direct",):
+                await asyncio.sleep(1.0)
+                return {"late": True}, None
+            await asyncio.sleep(0.02)
+            return {"fast": True}, None
+
+        self._wire(monkeypatch, m, slow_direct, {"systemSettings": {}})
+        loop = asyncio.new_event_loop()
+        try:
+            t0 = time.monotonic()
+            r = loop.run_until_complete(m._external_get_json("https://example.invalid/x"))
+            dt = time.monotonic() - t0
+            assert r == {"fast": True} and dt < 0.6  # 慢路不拖累（串行必 >=1s）
+            assert ("direct4",) in calls  # 全路都发了
+        finally:
+            loop.close()
+        m._proxy_state["sticky"] = None
+
+    def test_serial_when_toggle_off(self, monkeypatch):
+        import asyncio
+        import time
+        m = self._module()
+        m._proxy_state["sticky"] = None
+        order = []
+
+        async def slow_first(strat, url, params=None):
+            order.append(strat)
+            if strat == ("direct",):
+                await asyncio.sleep(0.5)
+                return {"serial": 1}, None
+            return {"other": 1}, None
+
+        self._wire(monkeypatch, m, slow_first, {"systemSettings": {"islandFetchRace": False}})
+        loop = asyncio.new_event_loop()
+        try:
+            t0 = time.monotonic()
+            r = loop.run_until_complete(m._external_get_json("https://example.invalid/x"))
+            dt = time.monotonic() - t0
+            # 串行=按序等首路成功，不并发抢先
+            assert r == {"serial": 1} and dt >= 0.45
+            assert order == [("direct",)]
+        finally:
+            loop.close()
+        m._proxy_state["sticky"] = None
+
+    def test_race_retries_round2(self, monkeypatch):
+        import asyncio
+        m = self._module()
+        m._proxy_state["sticky"] = None
+        seen = {}
+
+        async def flaky(strat, url, params=None):
+            n = seen.get(strat, 0) + 1
+            seen[strat] = n
+            await asyncio.sleep(0.01)
+            if n == 1:
+                return None, f"{strat[0]}=flaky"
+            return {"round": n}, None
+
+        self._wire(monkeypatch, m, flaky, {"systemSettings": {}})
+        loop = asyncio.new_event_loop()
+        try:
+            r = loop.run_until_complete(m._external_get_json("https://example.invalid/x"))
+            assert r == {"round": 2}  # 首轮全败→500ms 后二轮扳回
+            assert all(v >= 2 for v in seen.values())
+        finally:
+            loop.close()
+        m._proxy_state["sticky"] = None
+
+    def test_attempt_err_detail(self, monkeypatch):
+        import asyncio
+        m = self._module()
+
+        class Boom(Exception):
+            pass
+
+        def exploding_session(strat):
+            raise Boom("socks handshake reset by peer")
+
+        monkeypatch.setattr(m, "_make_session", exploding_session)
+        loop = asyncio.new_event_loop()
+        try:
+            payload, err = loop.run_until_complete(m._attempt_get(("direct",), "https://x.invalid"))
+            assert payload is None
+            assert "Boom" in err and "handshake reset" in err  # 不再光报类型名
+        finally:
+            loop.close()

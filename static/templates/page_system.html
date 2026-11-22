@@ -606,6 +606,12 @@
                   <div class="form-tip" style="width: 100%;">{{ t('proxyBypassHint') }}</div>
                 </el-form-item>
 
+                <!-- S284：灵动岛外联并发竞速开关（默认开；关=回退逐路串行） -->
+                <el-form-item :label="t('islandFetchRace')" class="form-item-align" label-position="left">
+                  <el-switch v-model="systemSettings.islandFetchRace" @change="autoSaveSettings" />
+                  <div class="form-tip" style="width: 100%;">{{ t('islandFetchRaceHint') }}</div>
+                </el-form-item>
+
                 <el-form-item :label="t('httpUserAgent')" class="form-item-align" label-position="left">
                   <el-input
                     v-model="systemSettings.httpUserAgent"

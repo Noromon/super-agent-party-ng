@@ -1,4 +1,4 @@
-# build=S283
+# build=S284
 # S262：take_snapshot 图片 URL 解析——已渲染 src 优先，懒属性仅回退。
 # 动因：S258 把 _src/data-actualsrc 排在 src 之前是回归——贴吧帖内页 JS 渲染后
 # src=真长图、_src 仍是旧缩略，agent 刷图贴只能拿到"贴"占位/缩略（取证落盘图仅 4.2KB）。

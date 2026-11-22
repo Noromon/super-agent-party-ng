@@ -144,6 +144,7 @@ Object.assign(vue_data, {
     enableShortcuts: true,
       backupIncludeUploads: true,
       backupAutoItems: null,  // S281：自动备份内容项（null=按遗留开关推导）
+      islandFetchRace: true,  // S284：灵动岛外联并发竞速（false=回退逐路串行）
       fontScale: 1,
       codeFontScale: 1,
       customCSS: '',

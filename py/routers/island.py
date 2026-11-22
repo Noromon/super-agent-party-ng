@@ -11,6 +11,7 @@ notify_island_reply_done()：AI 回复完成后热力图+1 并广播 island_ai_r
 媒体执行在 py/dynamic_island.py（三平台自适应）；LLM 工具由 island-app.js 经
 register_node_extension_mcp(ext_id=dynamic_island) 自注册，本模块仅桥媒体/剪贴板/待办。
 """
+import asyncio
 import json
 import logging
 import os
@@ -101,31 +102,105 @@ def _make_session(strat):
     return aiohttp.ClientSession(trust_env=True), None
 
 
-async def _external_get_json(url: str, params: dict = None):
-    """GET 外联 JSON：逐路尝试；成功返回解析 JSON 并粘滞该路，全败返回 None。"""
-    settings = await _settings_cached()
+def _tag_of(strat):
+    return (f"proxy:{proxy_util.mask_proxy_url(strat[1])}"
+            if strat[0] == "proxy" else strat[0])
+
+
+async def _attempt_get(strat, url: str, params: dict = None):
+    """单路 GET：返回 (payload|None, err|None)。S284：错误附 str() 摘要（排障可见根因）。"""
+    tag = _tag_of(strat)
+    try:
+        session, proxy_kw = _make_session(strat)
+        async with session:
+            kw = {"timeout": aiohttp.ClientTimeout(total=_PROXY_TIMEOUT)}
+            if proxy_kw:
+                kw["proxy"] = proxy_kw
+            async with session.get(url, params=params, **kw) as resp:
+                if resp.status == 200:
+                    return await resp.json(), None
+                return None, f"{tag}=HTTP{resp.status}"
+    except Exception as e:
+        detail = str(e).replace("\n", " ")[:120]
+        return None, (f"{tag}={type(e).__name__}({detail})" if detail
+                      else f"{tag}={type(e).__name__}")
+
+
+def _note_sticky(strat, tag):
+    if _proxy_state.get("sticky") != strat:
+        _proxy_state["sticky"] = strat
+        _logger.info(f"[IslandProxy] 外联出口切换：{tag}")
+
+
+async def _serial_get_json(url, params, cands):
+    """S283 串行链：逐路尝试（粘滞优先），全败清粘滞。"""
     errs = []
-    for strat in _plan_attempts(settings, _proxy_state.get("sticky")):
-        tag = (f"proxy:{proxy_util.mask_proxy_url(strat[1])}"
-               if strat[0] == "proxy" else strat[0])
-        try:
-            session, proxy_kw = _make_session(strat)
-            async with session:
-                kw = {"timeout": aiohttp.ClientTimeout(total=_PROXY_TIMEOUT)}
-                if proxy_kw:
-                    kw["proxy"] = proxy_kw
-                async with session.get(url, params=params, **kw) as resp:
-                    if resp.status == 200:
-                        if _proxy_state.get("sticky") != strat:
-                            _proxy_state["sticky"] = strat
-                            _logger.info(f"[IslandProxy] 外联出口切换：{tag}")
-                        return await resp.json()
-                    errs.append(f"{tag}=HTTP{resp.status}")
-        except Exception as e:
-            errs.append(f"{tag}={type(e).__name__}")
+    for strat in cands:
+        payload, err = await _attempt_get(strat, url, params)
+        if err is None:
+            _note_sticky(strat, _tag_of(strat))
+            return payload
+        errs.append(err)
     _proxy_state["sticky"] = None
     _logger.warning(f"[IslandProxy] 全路径失败 {url}: " + " | ".join(errs))
     return None
+
+
+async def _race_get_json(url, params, cands):
+    """S284 并发竞速：全路同发、先 200 者胜败者取消；首轮全败 500ms 后二竞速
+    （实证网络时通时断，浏览器即靠并发+重试幸存）。胜路粘滞，全败清粘滞。"""
+    errs = []
+    for round_no in (1, 2):
+        errs = []
+        tasks = {asyncio.ensure_future(_attempt_get(s, url, params)): s for s in cands}
+        pending = set(tasks)
+        winner = None
+        try:
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, timeout=_PROXY_TIMEOUT + 2, return_when=asyncio.FIRST_COMPLETED)
+                if not done:
+                    errs.append("race=wait-timeout")
+                    break
+                hit = False
+                for t in done:
+                    try:
+                        payload, err = t.result()
+                    except Exception as e:
+                        errs.append(f"task={type(e).__name__}")
+                        continue
+                    if err is None:
+                        winner = (tasks[t], payload)
+                        hit = True
+                        break
+                    errs.append(err)
+                if hit:
+                    break
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks.keys(), return_exceptions=True)
+        if winner:
+            strat, payload = winner
+            _note_sticky(strat, _tag_of(strat))
+            return payload
+        if round_no == 1:
+            await asyncio.sleep(0.5)
+    _proxy_state["sticky"] = None
+    _logger.warning(f"[IslandProxy] 竞速两轮全败 {url}: " + " | ".join(errs))
+    return None
+
+
+async def _external_get_json(url: str, params: dict = None):
+    """GET 外联 JSON。S284：systemSettings.islandFetchRace（缺省 True）=并发竞速；
+    显式 False 回退 S283 串行逐路。成功返回解析 JSON，全败返回 None。"""
+    settings = await _settings_cached()
+    ss = settings.get("systemSettings") or {}
+    if ss.get("islandFetchRace") is False:
+        return await _serial_get_json(url, params,
+                                      _plan_attempts(settings, _proxy_state.get("sticky")))
+    return await _race_get_json(url, params, _plan_attempts(settings))
 
 # 上游 server.py 逐字（12231-12316 域）
 _ip_city_cache = None
