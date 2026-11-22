@@ -1,4 +1,4 @@
-# build=S289
+# build=S290
 # S289：HUD 物理点击通道静态锁（行为面=点圈开面板/点关闭钮收起/原生去重，
 # 由 hud_hold_harness_s282.js 段 4 覆盖）。
 from pathlib import Path

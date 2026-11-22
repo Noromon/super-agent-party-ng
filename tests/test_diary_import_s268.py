@@ -1,4 +1,4 @@
-# build=S289
+# build=S290
 # S268：日记导入（文件/归档并入）——plan_import 超限投影 + import_entries dry_run/落盘。
 # 用户要求：合并后超上限将触发归档/删除时，必须先弹确认（后端职责=给出精确投影数）。
 import asyncio

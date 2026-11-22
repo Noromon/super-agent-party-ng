@@ -161,6 +161,11 @@ class ScreenWatcher:
     def update_config(self, cfg):
         self.config = dict(cfg) if isinstance(cfg, dict) else {}
         self._vlm_missing_warned = False
+        # S290：配置保存=用户手动干预——观察退避立即清零（曾故障：远端错误后
+        # 300s 退避期内拨开关完全无效，用户只能干等或重启）
+        if self.config.get("enabled") and self._cooldown_until:
+            self._cooldown_until = 0.0
+            logging.getLogger("app").info("[ScreenWatcher] 配置已更新，观察退避已清除（即时重试）")
 
     def _cfg_int(self, name, default):
         try:
@@ -235,6 +240,10 @@ class ScreenWatcher:
             return
         if warm_on and now - self._warmup_since < self._warmup_seconds():
             return
+        # S290：退避到期显式复归并留痕（曾静默，用户无从判断引擎死活）
+        if self._cooldown_until and now >= self._cooldown_until:
+            self._cooldown_until = 0.0
+            logging.getLogger("app").info("[ScreenWatcher] 退避到期，恢复观察尝试")
         if now < self._cooldown_until or now - self._last_capture < self._interval():
             return
         if self._observe_task is not None and not self._observe_task.done():
@@ -243,6 +252,9 @@ class ScreenWatcher:
         self._observe_task = asyncio.create_task(self._observe_once())
 
     async def _observe_once(self):
+        # S290：场景水印快照——失败时回滚。曾死锁：hash 在调 VLM 前已更新，
+        # 失败退避期间画面未变 → 到期重试被场景门控吞掉，静止画面下永不重试。
+        _prev_pair = (self._last_hash, self._last_rgb)
         try:
             settings = await load_settings()
             # S226：观察/判断 VLM 的路由与请求参数独立解析；auto 模式完全委托 vision_model_cfg
@@ -283,6 +295,7 @@ class ScreenWatcher:
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            self._last_hash, self._last_rgb = _prev_pair  # S290：回滚，退避到期必再进 VLM
             cd = self._cfg_int("vlmFailCooldownSeconds", 300)
             self._cooldown_until = time.time() + cd
             logging.getLogger("app").warning(
