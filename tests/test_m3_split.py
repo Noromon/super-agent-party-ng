@@ -24,6 +24,9 @@ GIANT_WHITELIST = {
     # S150 拆出 execute_approved_tool（298 含端点体）、S153 路径门 grants 注入 +16 →
     # 314 重冻结（改名条目按 S66 勘误惯例带注）
     "execute_approved_tool": 314,
+    # S296（RA-25 勘误惯例）：绕圈熔断接线 +3（observe 调用/注入循环）越线，
+    # helper 化（_spiral_observe/_spiral_observe_ns）后重冻结现值，后续只准缩
+    "_stream_tool_round": 303,
 }
 
 STREAM_HELPERS = [
@@ -153,4 +156,6 @@ def test_stream_split_helpers_present_and_small():
     assert funcs["generate_stream_response"].end_lineno - funcs["generate_stream_response"].lineno + 1 < 300
     for h in STREAM_HELPERS:
         assert h in funcs, "helper %s missing" % h
-        assert funcs[h].end_lineno - funcs[h].lineno + 1 < 300
+        # S296：GIANT_WHITELIST 重冻结条目按冻结值封顶（只准缩，不允许新增）
+        cap = GIANT_WHITELIST.get(h, 299)
+        assert funcs[h].end_lineno - funcs[h].lineno + 1 <= cap

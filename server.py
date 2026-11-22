@@ -103,6 +103,7 @@ def _assemble_toolkit():
 
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                         arg_error_text, append_missing_results)
+from py.tool_spiral import SpiralWatch  # S296：相似调用绕圈熔断
 from py.task_tools import query_task_progress
 from py.ws_manager import ws_manager
 from py import llm_gate
@@ -6026,6 +6027,20 @@ async def _todo_stats_event_chunk():
         return None
 
 
+def _spiral_observe(_st, name, args_dict):
+    """S296：绕圈记账（任务态挂 _st）；命中收集提示，轮末对闭合后统一注入。"""
+    _sp = _st.get("_spiral") or _st.setdefault("_spiral", SpiralWatch())
+    _hint = _sp.observe(name, args_dict)
+    if _hint:
+        _st.setdefault("_spiral_hints", []).append(_hint)
+
+
+def _spiral_drain(request, _st):
+    """S296：绕圈警示注入（必须在 tool_calls 对闭合后调用；元频道 system_note 不进时间线）。"""
+    for _sp_hint in _st.pop("_spiral_hints", None) or []:
+        request.messages.append({"role": "user", "content": _sp_hint, "name": "system_note"})
+
+
 async def _stream_tool_round(_st, request, settings, user_prompt, full_content, tool_calls, reasoner_messages):
     """While-loop tool round: ack, dispatch, SSE results, abort/cancel signals.
 
@@ -6267,6 +6282,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
 
         if "todo_write" in str(getattr(response_content, "name", "") or ""):  # S183(T-C) todo 记账轮
             _st["turn_used_todo"] = True
+        _spiral_observe(_st, str(response_content.name), args_dict)  # S296：绕圈熔断观测
         # 如果工具返回审批请求：停止执行本轮后续调用并跳出循环，等待前端手动调用恢复
         # T-9: 结构化哨兵判定（非子串嗅探），命中即断
         if _is_approval_result(results) is not None or ask_flow_is_ask_result(results) is not None:
@@ -6276,6 +6292,7 @@ async def _stream_tool_round(_st, request, settings, user_prompt, full_content, 
 
     # 为未执行的调用补上说明性 tool 结果，保证 tool_calls 与 tool 消息成对闭合
     append_missing_results(request.messages, assistant_tool_calls, acked_ids)
+    _spiral_drain(request, _st)  # S296：绕圈警示（对闭合后注入）
 
     # S194：提问卡轮末挂起登记（快照已含哨兵+补全对）；ask 轮不走审批登记面
     if pending_abort and _ask_state.get("ask_qs") is not None:
@@ -8132,7 +8149,20 @@ async def _complete_drs_step(client, model, extra_params, request, user_prompt, 
     return DRS_STAGE, search_not_done, search_task
 
 
-async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, response):
+def _spiral_observe_ns(spiral, name, args_dict, hints):
+    """S296：非流式绕圈记账（watch 由 impl 任务态传入）。"""
+    _hint = spiral.observe(name, args_dict)
+    if _hint:
+        hints.append(_hint)
+
+
+def _spiral_drain_ns(request, hints):
+    """S296：非流式绕圈警示注入（元频道 system_note，同流式路径）。"""
+    for _sp_hint in hints:
+        request.messages.append({"role": "user", "content": _sp_hint, "name": "system_note"})
+
+
+async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=None):
     """Non-stream tool_calls round: dispatch, ack, approval abort. Returns abort."""
     from py.know_base import rerank_knowledge_base
     assistant_message = response.choices[0].message
@@ -8154,6 +8184,7 @@ async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, resp
     })
     ns_pending_abort = False
     ns_acked_ids = set()
+    _sp_hints = []  # S296：本绕圈提示收集，对闭合后注入
     for _ti, _tc in enumerate(assistant_message.tool_calls):
         # T-8: 取消围栏——取消后不再调度任何工具
         _cur_entry = _current_stream_entry.get()
@@ -8223,12 +8254,16 @@ async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, resp
             "role": "user",
             "content": f"{response_content.name}工具结果：" + truncate_tool_result(tool_result_text, 8000),
         })
+        # S296：绕圈熔断观测（与流式路径同源；轮末注入）
+        if spiral is not None:
+            _spiral_observe_ns(spiral, str(response_content.name), args_dict, _sp_hints)
         # T-9: 结构化哨兵判定（与 stream 路径同源）
         if _is_approval_result(results) is not None:
             ns_pending_abort = True
             break
     # 为未执行的调用补上说明性 tool 结果，保证成对闭合
     append_missing_results(request.messages, ns_tool_calls_meta, ns_acked_ids)
+    _spiral_drain_ns(request, _sp_hints)  # S296：绕圈警示（对闭合后注入，同流式）
     if ns_pending_abort:
         # S172：非流式审批中断同样走 IM 挂起登记（与流式路径对齐；非 IM 渠道自动跳过）
         _tail_m = next((m for m in reversed(request.messages) if get_role(m) == "tool"), None)
@@ -8609,6 +8644,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         reasoner_messages = copy.deepcopy(request.messages)
         _ns_loop_count = 0
         ns_force_no_tools = False
+        _ns_spiral = SpiralWatch()  # S296：绕圈熔断（任务态，与流式 _st._spiral 对位）
         while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):  # B1: None 守卫
             _ns_loop_count += 1
             _ns_max_iterations = _tool_cap.effective_limit()  # S233：轮边界动态上限（调值/破限即时生效）
@@ -8625,7 +8661,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 ns_force_no_tools = True
                 response.choices[0].message.tool_calls = None
             if response.choices[0].message.tool_calls:
-                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response)
+                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=_ns_spiral)
                 if abort:
                     break
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':

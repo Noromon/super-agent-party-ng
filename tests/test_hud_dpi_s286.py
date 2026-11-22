@@ -1,4 +1,4 @@
-# build=S295
+# build=S296
 # S286：高 DPI 坐标系错位修复的静态锁。行为面（125% 物理像素光标解锁/无误伤/mousemove 救援）
 # 由 hud_hold_harness_s282.js 段 3 覆盖；本文件锁实现锚点，防止后续重构悄悄删掉候选映射。
 from pathlib import Path
