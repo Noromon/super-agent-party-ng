@@ -620,13 +620,16 @@ setInterval(async () => {
 }, 1000);
 
 function setupHideModel() {
+  // S298（no-undef 首跑即抓获）：isHidden 全文件从未声明——ReferenceError 只在
+  // mouseenter/mouseleave 触发时爆，静默死功能。门控语义取同文件在用的
+  // isModelHiddenByHover（自动隐藏已生效，悬停调暗才有意义）。
   app.view.addEventListener('mouseenter', () => {
-    if (!isHidden) return;
+    if (!isModelHiddenByHover) return;
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => { app.stage.alpha = 0.08; }, 300);
   });
   app.view.addEventListener('mouseleave', () => {
-    if (!isHidden) return;
+    if (!isModelHiddenByHover) return;
     clearTimeout(hideTimer);
     app.stage.alpha = 1;
   });

@@ -1,4 +1,4 @@
-# build=S297
+# build=S298
 # S255：schema↔dispatch 一致性防线——S253 把 scroll_and_find/network_watch 注册进 schema
 # 却漏了 server.py 两张 _TOOL_HOOKS 映射，模型看得见却一调就 [Unknown Tool]（幽灵工具），
 # 整套测试却全绿。本测试静态解析 server.py 的 _TOOL_HOOKS 块，断言每个 cdp schema 名

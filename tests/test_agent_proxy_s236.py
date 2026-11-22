@@ -64,7 +64,7 @@ def test_js_partition_plumbing():
 
 
 def test_stamp_s236():
-    assert "build=S297" in _read("static", "js", "renderer.js")
+    assert "build=S298" in _read("static", "js", "renderer.js")
 
 
 _AST_SCRIPT = (

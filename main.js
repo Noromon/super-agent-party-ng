@@ -504,23 +504,28 @@ function createSkeletonWindow() {
 // DevTools 打不开，必须从外部拿证据）。profile 落 %TEMP%，控制台打 [FreezeDiag] 路径。
 // S98b: Electron 39 起 debugger 是 webContents 实例属性（顶层 require('electron').debugger
 // 已不存在=顶层解构得 undefined，实测踩爆）。
+// S235 证据落盘——渲染侧白名单行与主进程 [FreezeDiag]/[Win*]/[AgentProxy] 诊断行进同一
+// frontend-evidence.log 按时序对账（S104：诊断只写开发者终端=不可见即不存在）。
+// S298：自 attachFreezeProbe 内部上提为模块级——S239 曾在 probe 外调用函数内符号，
+// ReferenceError 被调用点自身 try 吞掉（eslint no-undef 因 flat 迁移漏跑 tha.js 同期失明）。
+const evidenceAppend = (msg) => {
+  try {
+    const logDir = process.env.SAP_LOG_DIR || path.join(app.getPath('userData'), 'logs')
+    const fsx = require('fs')
+    fsx.mkdirSync(logDir, { recursive: true })
+    const f = path.join(logDir, 'frontend-evidence.log')
+    try { if (fsx.statSync(f).size > 5 * 1024 * 1024) fsx.renameSync(f, f + '.1') } catch (_) {}
+    fsx.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n')
+  } catch (_) {}
+}
+
 function attachFreezeProbe(win) {
   // S104: 幂等——历史上两条建窗路径都会 attach，导致每个证据行双份回显
   if (win.__freezeProbeOn) return
   win.__freezeProbeOn = true
   // S105: 证据落盘——渲染侧白名单行与主进程自身 [FreezeDiag]/[Win*] 行进同一
-  // frontend-evidence.log。S104 抓取通道全灭却无从知晓，正因主进程诊断行只写
-  // 开发者终端（不可见即不存在）。
-  const evidenceAppend = (msg) => {
-    try {
-      const logDir = process.env.SAP_LOG_DIR || path.join(app.getPath('userData'), 'logs')
-      const fsx = require('fs')
-      fsx.mkdirSync(logDir, { recursive: true })
-      const f = path.join(logDir, 'frontend-evidence.log')
-      try { if (fsx.statSync(f).size > 5 * 1024 * 1024) fsx.renameSync(f, f + '.1') } catch (_) {}
-      fsx.appendFileSync(f, new Date().toISOString() + ' ' + msg + '\n')
-    } catch (_) {}
-  }
+  // frontend-evidence.log。S104: 主进程诊断行只写开发者终端（不可见即不存在）。
+  // S298: evidenceAppend 已上提模块级（此处直接复用）。
   const fdiag = (msg) => { console.log('[FreezeDiag]', msg); evidenceAppend('[FreezeDiag] ' + msg) }
   const requestCapture = (why) => {
     if (win.__freezeCaptureBusy) return

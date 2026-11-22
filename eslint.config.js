@@ -61,6 +61,7 @@ const appGlobals = {
     ExcelJS: "readonly",            // libs/exceljs.min.js
     vad: "readonly",                // libs/bundle.min.js（@ricky0123/vad-web）
     chrome: "readonly",             // Electron renderer 的 chrome.* API
+    PIXI: "readonly",               // S298：libs/pixi/pixi.min.js（tha.html 专用窗）
 };
 
 module.exports = [
@@ -93,5 +94,13 @@ module.exports = [
             sourceType: "commonjs",
             globals: { ...globals.node, ...appGlobals },
         },
+    },
+    {
+        // S298：tha.js 是 tha.html 的 <script type="module"> 入口（合法 ESM）。
+        // flat 初版（3efce0aa）即被 script sourceType 罩住报 Parsing error——CI 只查
+        // diff 文件 + 该文件 S91 后零改动 = 从未被 lint 过（RA-37 门禁失明的活样本）。
+        // 按真实装载形态豁免为 module；no-undef 保持开启。
+        files: ["static/js/tha.js"],
+        languageOptions: { sourceType: "module" },
     },
 ];
