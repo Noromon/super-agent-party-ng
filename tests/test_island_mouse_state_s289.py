@@ -1,4 +1,4 @@
-# build=S296
+# build=S297
 # S289：/api/mouse-state 全局左键态端点（高 DPI 机 Blink 点击失效时 HUD 物理点击
 # 通道的后端数据源）。端点逻辑必须薄——判定语义全在页面侧。
 import sys

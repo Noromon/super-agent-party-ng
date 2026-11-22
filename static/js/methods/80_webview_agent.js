@@ -21,6 +21,25 @@ function _inputTmo(p, ms) {
     });
   });
 }
+
+// S297：验证码域级熔断。贴吧事故里验证页被撞了几十次点击/填写——此前快照只给
+// 提示语、全靠模型自觉。现改硬熔断：快照检出 captcha 即把该 host 拉入熔断名单，
+// 交互方法（click/fill/fill_form/drag/hover/press_key）直接回拒；同 host 干净
+// 快照自动解除。导航与只读不受影响——离开该域和用户过关都需要通道，不做自动重试。
+const _captchaFrozen = new Set();
+function _captchaHostOf(wv) {
+    try { return new URL(wv.getURL ? (wv.getURL() || wv.src || '') : (wv.src || '')).hostname; } catch (e) { return ''; }
+}
+function _captchaGuard(wv) {
+    const h = _captchaHostOf(wv);
+    if (h && _captchaFrozen.has(h)) {
+        return '[Error] captcha 域级熔断：' + h + ' 已检出验证码页，交互已熔断。'
+            + '重复点击/填写只会撞同一堵墙——请提示用户在该内置浏览器标签手动完成验证，'
+            + '之后任意一次 take_snapshot 见 captcha 消失即自动恢复，无需别的操作。';
+    }
+    return '';
+}
+
 Object.assign(vue_methods, {
 
     // S106: guest 端结果截断网关。MB 级页面内容原样回传宿主时，DOMWebSocket
@@ -279,7 +298,13 @@ Object.assign(vue_methods, {
                 + "return nodes.length>0||/(安全验证|拖动滑块|滑动验证|完成验证|点击按钮开始验证|输入验证码后|请完成下方验证)/.test(t);"
                 + "}catch(e){return false;}})()";
             const hit = await this._wvExec(wv, probe);
-            if (hit === true) captchaNote = '\n[page-meta] captcha_detected=true —— 检测到验证码/安全验证页：需人工处理。请提示用户在内置浏览器标签中手动完成验证（移动端视口裁剪与坐标已修复，可直接点击），你应暂停交互、勿用 evaluate_script 硬解，通过后再 take_snapshot 重试。';
+            const _ch = _captchaHostOf(wv);
+            if (hit === true && _ch) _captchaFrozen.add(_ch);
+            if (hit === true) captchaNote = '\n[page-meta] captcha_detected=true —— 检测到验证码/安全验证页：需人工处理，该域交互已熔断（click/fill/press_key 会直接被拒）。请提示用户在内置浏览器标签中手动完成验证（移动端视口裁剪与坐标已修复，可直接点击），勿用 evaluate_script 硬解，通过后再 take_snapshot（captcha 消失即解除熔断）。';
+            else if (_ch && _captchaFrozen.has(_ch)) {
+                _captchaFrozen.delete(_ch);
+                captchaNote = '\n[page-meta] captcha_cleared=true —— ' + _ch + ' 验证码已消失，交互熔断已解除。';
+            }
         } catch (e) {}
 
         try {
@@ -294,6 +319,7 @@ Object.assign(vue_methods, {
     async webviewClick(uid, dblClick = false) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
         const script = `
         (async function() {
@@ -362,6 +388,7 @@ Object.assign(vue_methods, {
     async webviewFill(uid, value) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
         // 注意：这里需要把 value 传给 JS，使用 JSON.stringify 确保安全
         const script = `
@@ -439,6 +466,7 @@ Object.assign(vue_methods, {
     async webviewFillForm(elements) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
         const dataStr = JSON.stringify(elements); 
 
@@ -472,6 +500,7 @@ Object.assign(vue_methods, {
     async webviewDrag(fromUid, toUid) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
         const script = `
         (function() {
@@ -514,6 +543,7 @@ Object.assign(vue_methods, {
     async webviewHover(uid) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
         const script = `
         (function() {
@@ -559,6 +589,7 @@ Object.assign(vue_methods, {
     async webviewPressKey(keyCombo, uid) {
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
+        const _cg = _captchaGuard(wv); if (_cg) return _cg;  // S297
         wv.focus();
 
         // 1. 获取元素坐标 (JS 只负责告诉我们它在哪)

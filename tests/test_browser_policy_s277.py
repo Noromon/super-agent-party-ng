@@ -1,4 +1,4 @@
-# build=S296
+# build=S297
 # S277：AI 浏览器失控止血——下载策略接管（永不弹原生另存为）、触摸仿真残留封死
 # （无条件复位助手/detach 记账/ON 半失败补偿）、CDP 输入 IPC 限时免疫、reset_page_state。
 # 行为面：guest_check_harness.js S277 段（假悬挂回退）；本文件锁接线与静态面。
