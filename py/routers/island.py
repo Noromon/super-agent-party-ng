@@ -15,12 +15,15 @@ import json
 import logging
 import os
 import platform
+import re
+import socket
 import subprocess
 from datetime import datetime
 
 import aiohttp
 from fastapi import APIRouter, WebSocket
 
+from py import proxy_util
 from py.dynamic_island import (get_island_tools, island_disable,
                                island_enable as dynamic_island_enable,
                                island_music_next, island_music_pause,
@@ -34,46 +37,94 @@ from py.ws_manager import ws_manager
 router = APIRouter()
 _logger = logging.getLogger("app")
 
-# S140：部分网络环境下 aiohttp 直连 open-meteo/ip-api 不稳，且 aiohttp 不读系统
-# 代理配置。外联统一走 _external_get_json：直连（trust_env 尊重标准代理环境变量，
-# 含设置中已应用的代理）→ 显式代理回退（SAP_PROXY 指定），成功后粘滞。
+# S283（取代 S140 出口策略）：外联接进 SAP 代理体系。S140 只试「直连(trust_env)→
+# SAP_PROXY」两路，无视 设置→代理（S85 proxy_util），socks5 又按 S87 规范不入 env，
+# 导致开了代理的用户天气/geo 全 timeout。现尝试序：粘滞 → 配置出口
+# active_proxy(manual/旧库/system 注册表探测) → 直连(trust_env) → SAP_PROXY →
+# direct4(强制 IPv4，治浏览器 Happy-Eyeballs 能开而 python 卡 AAAA 黑洞)。
+# socks 型经 aiohttp_socks ProxyConnector 显式接线；settings 缓存 20s；逐路日志；
+# 全败清粘滞（出口可能已断，下轮重估）。
 _PROXY_TIMEOUT = 8
-_FALLBACK_PROXIES = ()  # 无内置默认代理；需显式回退时经 SAP_PROXY 配置
-_proxy_state = {"sticky": None}
+_settings_cache = {"data": None, "ts": 0.0}
+_proxy_state = {"sticky": None}  # ("proxy", url) | ("direct",) | ("direct4",) | None
 
 
-def _attempt_order():
-    env = os.environ.get("SAP_PROXY")
-    fallbacks = [env] if env else list(_FALLBACK_PROXIES)
-    sticky = _proxy_state.get("sticky")
+async def _settings_cached():
+    import time
+    now = time.time()
+    if _settings_cache["data"] is None or now - _settings_cache["ts"] > 20:
+        try:
+            _settings_cache["data"] = await load_settings()
+            _settings_cache["ts"] = now
+        except Exception:
+            pass  # 拉取失败继续沿用旧缓存，外联不因设置层抖动而停摆
+    return _settings_cache["data"] or {}
+
+
+def _plan_attempts(settings, sticky=None):
+    """尝试序（去重保序）：粘滞 → 配置代理 → 直连 → SAP_PROXY → 强制 IPv4 直连。"""
+    cands = []
     if sticky:
-        return [sticky, None] + [p for p in fallbacks if p != sticky]
-    return [None] + fallbacks
+        cands.append(sticky if isinstance(sticky, tuple) else ("proxy", sticky))
+    px = proxy_util.active_proxy(settings)
+    if px:
+        cands.append(("proxy", px))
+    cands.append(("direct",))
+    env_raw = os.environ.get("SAP_PROXY")
+    if env_raw:
+        env_px = proxy_util.normalize_proxy_url(env_raw, warn=False)
+        if env_px:
+            cands.append(("proxy", env_px))
+    cands.append(("direct4",))
+    out, seen = [], set()
+    for s in cands:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
 
 
-def _note_success(proxy):
-    if _proxy_state.get("sticky") != proxy:
-        _proxy_state["sticky"] = proxy
-        _logger.info(f"[IslandProxy] 外联出口切换：{'direct' if not proxy else proxy}")
+def _make_session(strat):
+    """(session, proxy_kwarg)——socks 走 ProxyConnector，http 代理走 kw，direct4 限 AF_INET。"""
+    kind = strat[0]
+    if kind == "proxy" and strat[1].split("://", 1)[0].startswith("socks"):
+        from aiohttp_socks import ProxyConnector
+        # 装机版 aiohttp_socks 仅认 socks4/socks5；h/a 远端解析变体按协议语义等价降档
+        purl = re.sub(r"^socks([45])[ah]://", r"socks\1://", strat[1], count=1)
+        return aiohttp.ClientSession(connector=ProxyConnector.from_url(purl),
+                                     trust_env=False), None
+    if kind == "proxy":
+        return aiohttp.ClientSession(trust_env=False), strat[1]
+    if kind == "direct4":
+        return aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(family=socket.AF_INET), trust_env=False), None
+    return aiohttp.ClientSession(trust_env=True), None
 
 
 async def _external_get_json(url: str, params: dict = None):
-    """GET 外联 JSON：按 _attempt_order 逐路尝试；成功返回解析 JSON，全败返回 None。"""
-    last_err = None
-    for proxy in _attempt_order():
+    """GET 外联 JSON：逐路尝试；成功返回解析 JSON 并粘滞该路，全败返回 None。"""
+    settings = await _settings_cached()
+    errs = []
+    for strat in _plan_attempts(settings, _proxy_state.get("sticky")):
+        tag = (f"proxy:{proxy_util.mask_proxy_url(strat[1])}"
+               if strat[0] == "proxy" else strat[0])
         try:
-            async with aiohttp.ClientSession(trust_env=True) as session:
+            session, proxy_kw = _make_session(strat)
+            async with session:
                 kw = {"timeout": aiohttp.ClientTimeout(total=_PROXY_TIMEOUT)}
-                if proxy:
-                    kw["proxy"] = proxy
+                if proxy_kw:
+                    kw["proxy"] = proxy_kw
                 async with session.get(url, params=params, **kw) as resp:
                     if resp.status == 200:
-                        _note_success(proxy)
+                        if _proxy_state.get("sticky") != strat:
+                            _proxy_state["sticky"] = strat
+                            _logger.info(f"[IslandProxy] 外联出口切换：{tag}")
                         return await resp.json()
-                    last_err = f"HTTP {resp.status}"
+                    errs.append(f"{tag}=HTTP{resp.status}")
         except Exception as e:
-            last_err = type(e).__name__
-    _logger.warning(f"[IslandProxy] 全路径失败 {url}: {last_err}")
+            errs.append(f"{tag}={type(e).__name__}")
+    _proxy_state["sticky"] = None
+    _logger.warning(f"[IslandProxy] 全路径失败 {url}: " + " | ".join(errs))
     return None
 
 # 上游 server.py 逐字（12231-12316 域）
@@ -133,9 +184,10 @@ async def get_ip_city():
     global _ip_city_cache
     if _ip_city_cache is not None:
         return _ip_city_cache
-    # S140：走统一代理回退出口（原实现 5s 直连无回退）。出口为本机代理时 IP 定位=
-    # 代理出口城市（非用户位置），禁用该兜底，让前端保留默认城市/用户手选城市。
-    if _proxy_state.get("sticky"):
+    # S283：代理出口粘滞时 IP 定位=代理出口城市（非用户位置），禁用该兜底，
+    # 让前端保留默认城市/用户手选城市；direct/direct4 直连粘滞=真实出口，可定位。
+    _sticky = _proxy_state.get("sticky")
+    if isinstance(_sticky, tuple) and _sticky[0] == "proxy":
         return {"city": "", "regionName": "", "country": "", "lat": None, "lon": None}
     data = await _external_get_json("http://ip-api.com/json/")
     if data and data.get("status") == "success":

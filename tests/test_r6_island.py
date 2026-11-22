@@ -151,41 +151,160 @@ class TestIslandUiS139:
             assert val in z and "dynamicIslandClose" in z
 
     def test_stamp_s139(self):
-        assert "build=S282" in _read("static", "js", "renderer.js")
+        assert "build=S283" in _read("static", "js", "renderer.js")
 
 
-class TestIslandProxyFallbackS140:
-    """S140：外联不稳环境下走 直连(trust_env)→显式代理(SAP_PROXY) 回退。"""
+class TestIslandProxyFallbackS283:
+    """S283（取代 S140 出口）：外联接 SAP 代理体系（active_proxy/socks/IPv4/逐路日志）。"""
+
+    @staticmethod
+    def _module():
+        import importlib
+        import sys
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+            del sys.modules["py"]  # site-packages py.py 影子
+        return importlib.import_module("py.routers.island")
 
     def test_router_has_fallback_helper(self):
         s = _read("py", "routers", "island.py")
         assert "_external_get_json" in s
         assert "trust_env=True" in s
-        assert "SAP_PROXY" in s and "_FALLBACK_PROXIES = ()" in s
+        assert "SAP_PROXY" in s and "_FALLBACK_PROXIES" not in s
+        # S283：接 S85 代理解析 + socks 显式接线 + direct4 治 AAAA 黑洞 + 脱敏日志
+        for anchor in ("proxy_util.active_proxy", "aiohttp_socks",
+                       "socket.AF_INET", "mask_proxy_url"):
+            assert anchor in s, anchor
         # 三个外联端点统一走回退出口
         for url in ("http://ip-api.com/json/", "api.open-meteo.com/v1/forecast",
                     "geocoding-api.open-meteo.com/v1/search"):
             assert url in s
         assert "total=5" not in s  # 上游 5s 超时全部移除
 
-    def test_attempt_order_direct_then_proxy(self, monkeypatch):
-        import importlib
-
-        m = importlib.import_module("py.routers.island")
+    def test_plan_attempts_order(self, monkeypatch):
+        m = self._module()
         monkeypatch.delenv("SAP_PROXY", raising=False)
         m._proxy_state["sticky"] = None
-        order = m._attempt_order()
-        assert order == [None]  # 默认无内置代理口，仅直连
-        # 粘滞：代理成功后优先该代理，直连降为次选
-        m._proxy_state["sticky"] = "http://127.0.0.1:5555"
-        order = m._attempt_order()
-        assert order[0] == "http://127.0.0.1:5555" and order[1] is None
-        # SAP_PROXY 显式指定时只用它
+        # 未配代理：直连(trust_env)为主，direct4 兜底
+        assert m._plan_attempts({}) == [("direct",), ("direct4",)]
+        # manual 配置出口优先于直连
+        ss = {"systemSettings": {"proxyMode": "manual", "proxy": "http://127.0.0.1:7890"}}
+        assert m._plan_attempts(ss)[:2] == [("proxy", "http://127.0.0.1:7890"), ("direct",)]
+        # 粘滞最前（tuple 形与旧库字符串形兼容）
+        assert m._plan_attempts({}, ("proxy", "http://127.0.0.1:5555"))[0] == ("proxy", "http://127.0.0.1:5555")
+        assert m._plan_attempts(ss, "http://127.0.0.1:5555")[0] == ("proxy", "http://127.0.0.1:5555")
+        # SAP_PROXY 显式兜底入列且去重
         monkeypatch.setenv("SAP_PROXY", "http://127.0.0.1:9999")
+        order = m._plan_attempts({})
+        assert ("proxy", "http://127.0.0.1:9999") in order and order[-1] == ("direct4",)
+        assert order.count(("proxy", "http://127.0.0.1:9999")) == 1
+        monkeypatch.setenv("SAP_PROXY", "http://127.0.0.1:7890")
+        assert m._plan_attempts(ss).count(("proxy", "http://127.0.0.1:7890")) == 1
         m._proxy_state["sticky"] = None
-        order = m._attempt_order()
-        assert order == [None, "http://127.0.0.1:9999"]
+
+    def test_session_branches(self):
+        import asyncio
+        m = self._module()
+
+        async def main():
+            out = {}
+            for key, strat in (("socks", ("proxy", "socks5h://127.0.0.1:7891")),
+                               ("http", ("proxy", "http://127.0.0.1:7890")),
+                               ("d4", ("direct4",)),
+                               ("direct", ("direct",))):
+                sess, kw = m._make_session(strat)
+                out[key] = (kw, sess.connector is not None, sess.trust_env)  # 关前捕获
+                await sess.close()
+            return out
+
+        loop = asyncio.new_event_loop()
+        try:
+            out = loop.run_until_complete(main())
+        finally:
+            loop.close()
+        assert out["http"][0] == "http://127.0.0.1:7890"
+        assert out["socks"][0] is None and out["socks"][1] is True  # ProxyConnector 已挂
+        assert out["socks"][2] is False
+        assert out["d4"][0] is None and out["d4"][2] is False
+        assert out["direct"][2] is True
+
+    def test_external_get_fallback_and_sticky(self, monkeypatch):
+        import asyncio
+        m = self._module()
         m._proxy_state["sticky"] = None
+
+        class FakeResp:
+            def __init__(self, status, payload):
+                self.status = status
+                self._p = payload
+
+            async def json(self):
+                return self._p
+
+        class FakeCtx:
+            def __init__(self, resp):
+                self._resp = resp
+
+            async def __aenter__(self):
+                return self._resp
+
+            async def __aexit__(self, *a):
+                return False
+
+        class FakeSession:
+            def __init__(self, results, strat):
+                self.results = results
+                self.strat = strat
+
+            def get(self, url, **kw):
+                key = self.strat[0] if self.strat[0] in self.results else "any"
+                status, payload = self.results[key]
+                return FakeCtx(FakeResp(status, payload))
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        calls = []
+
+        def routing_make(results):
+            def f(strat):
+                calls.append(strat)
+                return (FakeSession(results, strat),
+                        (strat[1] if strat[0] == "proxy" else None))
+            return f
+
+        async def go(results, settings=None):
+            monkeypatch.setattr(m, "_make_session", routing_make(results))
+
+            async def fake_settings():
+                return settings or {}
+            monkeypatch.setattr(m, "_settings_cached", fake_settings)
+            return await m._external_get_json("https://example.invalid/x")
+
+        loop = asyncio.new_event_loop()
+        try:
+            # 直连失败→manual 代理成功 → 粘滞=代理
+            m._proxy_state["sticky"] = None
+            ss = {"systemSettings": {"proxyMode": "manual", "proxy": "http://127.0.0.1:7890"}}
+            r = loop.run_until_complete(go({"direct": (500, {}), "proxy": (200, {"v": 1})}, ss))
+            assert r == {"v": 1}
+            assert m._proxy_state["sticky"] == ("proxy", "http://127.0.0.1:7890")
+            # 全败 → None 且清粘滞、direct/direct4 都试过
+            calls.clear()
+            r = loop.run_until_complete(go({"any": (599, {})}))
+            assert r is None and m._proxy_state["sticky"] is None
+            assert ("direct",) in calls and ("direct4",) in calls
+            # 直连成功 → 粘滞=direct
+            m._proxy_state["sticky"] = None
+            r = loop.run_until_complete(go({"direct": (200, {"ok": 2})}))
+            assert r == {"ok": 2} and m._proxy_state["sticky"] == ("direct",)
+            m._proxy_state["sticky"] = None
+        finally:
+            loop.close()
 
     def test_proxy_exit_disables_ip_city(self):
         # 代理出口下 IP 定位=代理城市，禁用兜底（前端保留默认/手选城市）

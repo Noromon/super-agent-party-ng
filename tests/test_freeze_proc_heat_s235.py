@@ -50,4 +50,4 @@ def test_screenshot_pipeline_off_main_thread():
 
 
 def test_stamp_s235():
-    assert "build=S282" in _read("static", "js", "renderer.js")
+    assert "build=S283" in _read("static", "js", "renderer.js")
