@@ -36,7 +36,8 @@ def _load_fns(names):
     import ast
     import logging
     # S302a：cap helper 随轮次引擎迁 py/stream_engine.py，抽取双源（体逐字未动）
-    trees = [ast.parse(_read("server.py")), ast.parse(_read("py/stream_engine.py"))]
+    trees = [ast.parse(_read("server.py")), ast.parse(_read("py/stream_engine.py")),
+         ast.parse(_read("py/stream_response.py")), ast.parse(_read("py/complete_engine.py"))]  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     ns = {"logging": logging}
     for tree in trees:
      for n in tree.body:
@@ -46,7 +47,8 @@ def _load_fns(names):
 
 
 def test_b1_delta_and_message_guards():
-    src = _read("server.py") + _read("py/stream_engine.py")  # S302a：流式两处=engine+ns(server)，合并守恒
+    src = (_read("server.py") + _read("py/stream_engine.py") + _read("py/stream_response.py")
+       + _read("py/complete_engine.py"))  # S302a/S304：两处=engine/prep 侧+装配侧，合并守恒
     assert src.count("if choice.delta is None") == 2       # 两处流式
     assert "if response.choices[0].message and response.choices[0].message.tool_calls" in src
     assert "while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):" in src
@@ -54,7 +56,8 @@ def test_b1_delta_and_message_guards():
 
 
 def test_b2_2_drs_loop_caps_both_paths():
-    src = _read("server.py") + _read("py/stream_engine.py")  # S302a：流式+非流式两路合并守恒
+    src = (_read("server.py") + _read("py/stream_engine.py") + _read("py/complete_engine.py")
+       + _read("py/stream_response.py"))  # S302a/S304：流式+非流式两路合并守恒
     assert src.count("not _drs_round_cap(") == 2           # 流式+非流式共用单点
     assert src.count('_append_loopcap_hint(request, "') == 2
     # ws 保存重活已 helper 化（棘轮友好）且广播合并后全量
@@ -84,7 +87,7 @@ def test_b2_2_cap_helpers_behavior():
 # ---------------- B8 server/routers 源 pin ----------------
 
 def test_b8_ws_save_merged_and_storage_safe():
-    src = _read("server.py")
+    src = _read("server.py") + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert "deep_update(current, settings_dict)" in src
     # S146（M5 期）：save 移入 RMW 锁内，签名加 _rmw_held（合并写语义不变）
     assert "await save_settings(current, _rmw_held=True)" in src

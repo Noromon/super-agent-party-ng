@@ -54,7 +54,10 @@ def test_server_hooks_present():
     # S302a：流式 finalize 缓冲写入随引擎迁出，合并面再守恒（逐字未动）
     src = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
            + io.open(_ROOT / "py" / "tool_hooks.py", encoding="utf-8-sig").read()
-           + io.open(_ROOT / "py" / "stream_engine.py", encoding="utf-8-sig").read())
+           + io.open(_ROOT / "py" / "stream_engine.py", encoding="utf-8-sig").read()
+           + io.open(_ROOT / "py" / "stream_response.py", encoding="utf-8-sig").read()
+           + io.open(_ROOT / "py" / "complete_engine.py", encoding="utf-8-sig").read()
+           + io.open(_ROOT / "py" / "approval_exec.py", encoding="utf-8-sig").read())  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert "from py.diary_query_tool import diary_query_tool" in src
     assert '"query_diary": handle_query_diary' in src
     assert '"list_diary_books": handle_list_diary_books' in src
@@ -110,7 +113,8 @@ def test_api_router_wiring():
     for ep in ["/books", "/get_data", "/save_data", "/delete", "/query"]:
         assert f'"{ep}"' in src, ep
     # server 必须在 status 之后 include（/api/diary 无鉴权豁免需求，走常规中间件）
-    ssrc = io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
+    ssrc = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()
+        + io.open(_ROOT / "py" / "stream_response.py", encoding="utf-8-sig").read())  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert ssrc.index("app.include_router(status.router)") < ssrc.index("include_router(diary_router)")
     assert inspect  # noqa: F401
 

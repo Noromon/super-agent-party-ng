@@ -175,7 +175,8 @@ def test_take_screenshot_returns_url_format(monkeypatch):
 
 
 def test_server_wires_injection_both_paths():
-    src = _read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+    src = (_read("server.py") + _read("py/stream_prep.py") + _read("py/stream_engine.py")
+           + _read("py/complete_engine.py") + _read("py/stream_response.py"))  # S304：注入两处随装配/complete 域迁出，合并守恒  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     assert "async def _maybe_inject_browser_vision(" in src
     assert src.count("images = await _maybe_inject_browser_vision(request, settings, images, fastapi_base_url)") == 2
 

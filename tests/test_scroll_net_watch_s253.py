@@ -75,7 +75,7 @@ def test_vue_network_watch_impl():
 
 def test_schemas_registered_and_guided():
     # S255 教训：schema 注册≠可执行，dispatch 表注册由 test_tool_registry_parity_s255.py 把关
-    sys_src = (ROOT / "server.py").read_text(encoding="utf-8")
+    sys_src = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert '"scroll_and_find": scroll_and_find' in sys_src and '"network_watch": network_watch' in sys_src
     names = {t["function"]["name"] for t in cdp.all_cdp_tools}
     assert {"scroll_and_find", "network_watch"} <= names

@@ -74,7 +74,9 @@ def test_s66_hygiene_pins():
     for f in ("files.py", "media.py", "system.py"):
         s = (ROUTERS / f).read_text(encoding="utf-8")
         assert "_srv = _sys.modules" not in s, f"RA-14 {f} 死绑定回填"
-    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    # S304：RA-11 标记随响应装配层迁出，扫描面并入（反钉更严）
+    srv = ((ROOT / "server.py").read_text(encoding="utf-8")
+           + (ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))
     for dead in ("import struct", "FUNASR_WS_URL", "from io import BytesIO",
                  "import websockets", "_release_consumer"):
         assert dead not in srv, f"RA-15 死 import 回填: {dead}"

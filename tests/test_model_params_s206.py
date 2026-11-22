@@ -15,7 +15,9 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 import py.model_params as mp  # noqa: E402
 
-SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8")
+          + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8")
+          + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
 PROVIDERS_JS = (_ROOT / "static" / "js" / "methods" / "22_providers.js").read_text(encoding="utf-8")
 MODEL_CFG = (_ROOT / "static" / "templates" / "page_model-config.html").read_text(encoding="utf-8")
 

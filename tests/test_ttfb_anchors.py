@@ -14,7 +14,7 @@ def _read(p):
 
 
 def test_ttfb_anchors_present():
-    sp = _read("server.py")
+    sp = _read("server.py") + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert "_TTFB_T0 = contextvars.ContextVar" in sp
     assert "[TTFBbrk] endpoint-enter +" in sp
     assert "[TTFBbrk] pre-stream +" in sp
@@ -25,7 +25,7 @@ def test_ttfb_anchors_present():
 def test_s124_perf_blades_reverted():
     # 回滚自证：预热/降优先级不得残留；套件页 v-if 分支内禁 v-for-v-memo
     # （S122/S122b 卡死事故红线，前缀必要不充分已实证）
-    sp = _read("server.py")
+    sp = _read("server.py") + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert "_mem0_prewarm" not in sp
     assert "_lower_thread_priority" not in _read("py/llm_gate.py")
     for f in ("page_api-group.html", "page_deploy-bot.html",

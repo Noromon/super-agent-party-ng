@@ -16,7 +16,9 @@ if str(_ROOT) not in sys.path:
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8")
+          + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8")
+          + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
 DIARY = (_ROOT / "py" / "diary_engine.py").read_text(encoding="utf-8")
 
 

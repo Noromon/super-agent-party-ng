@@ -98,9 +98,42 @@ def _pb_funcs():
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
+# S304（RA-25 勘误惯例）：S300-S304 域拆分后，函数行数为唯一事实源——
+# 棘轮扫描面并入迁出模块（server re-export 仅 import 行）；新增上限见
+# test_composition_root_line_budgets（composition root 总量锁 + 引擎单文件封顶）。
+
+# S304：composition root 终态锁——server.py 为端点/lifespan/全局状态装配层，
+# 只准缩不许涨（re-export import 行浮动在预算内）；引擎文件同法冻结现值。
+FILE_LINE_BUDGETS = {
+    "server.py": 3150,
+    "py/stream_engine.py": 1750,   # S302 勘误：纯移动后现值 1725
+    "py/stream_prep.py": 1475,
+    "py/complete_engine.py": 1010,
+    "py/prompt_builders.py": 935,
+    "py/stream_response.py": 650,
+    "py/vision_tools.py": 600,
+    "py/tool_hooks.py": 590,
+    "py/group_memory.py": 410,
+    "py/approval_exec.py": 350,
+}
+
+
+def test_composition_root_line_budgets():
+    for rel, cap in FILE_LINE_BUDGETS.items():
+        n = len((_ROOT / rel).read_text(encoding="utf-8-sig").splitlines())
+        assert n <= cap, "%s grew: %d -> %d lines (cap %d) -- 引擎域只准缩" % (rel, cap, n, cap)
+
+
 def test_giant_function_whitelist_only_shrinks():
     found = {}
-    for n in _module_funcs():
+    nodes = list(_module_funcs())
+    # S304：execute_approved_tool/stream_generator 等 >=300 行巨体随域拆分迁出，
+    # 冻结值随迁扫描（体逐字未动；只准缩语义不变）
+    for rel in ("py/stream_response.py", "py/approval_exec.py"):
+        tree = ast.parse((_ROOT / rel).read_text(encoding="utf-8-sig"))
+        nodes += [n for n in tree.body
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for n in nodes:
         size = n.end_lineno - n.lineno + 1
         if size >= 300:
             found[n.name] = size
@@ -175,9 +208,10 @@ def test_complete_split_helpers_present_and_small():
 def test_stream_split_helpers_present_and_small():
     # M-3 batch 4: stream engine fully split -- shell, the (now module-level)
     # stream_generator and every delegated block stay under 300 lines.
-    # S302a：helper 域迁 py/stream_prep.py + py/stream_engine.py，存在性/尺寸钉合并扫描（体逐字未动）
+    # S302a/S304：helper 域与响应装配层已迁出，存在性/尺寸钉合并扫描（体逐字未动）
     funcs = {n.name: n for n in _module_funcs()}
-    for path in (_ROOT / "py" / "stream_prep.py", _ROOT / "py" / "stream_engine.py"):
+    for path in (_ROOT / "py" / "stream_prep.py", _ROOT / "py" / "stream_engine.py",
+                 _ROOT / "py" / "stream_response.py"):
         tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         for n in tree.body:
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):

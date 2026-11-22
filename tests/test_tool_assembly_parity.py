@@ -14,7 +14,9 @@ import sqlite3
 from test_contract_sse import post_chat, collect, sse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SERVER_SRC = open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+SERVER_SRC = (open(os.path.join(ROOT, "server.py"), encoding="utf-8").read()
+              + open(os.path.join(ROOT, "py/stream_response.py"), encoding="utf-8").read()
+              + open(os.path.join(ROOT, "py/complete_engine.py"), encoding="utf-8").read())  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 
 
 def _mutate_settings(data_dir, mutate):
@@ -144,8 +146,9 @@ class TestNonDefaultConfigDrift:
         """E-1b end-state ratchet: both engines call build_llm_tools and the
         server file carries no inline assembly copies anymore (the old drift
         surface: complete missed node-extension tools entirely)."""
+        # S304：两处调用随装配/complete 域迁出，中间参 _srv() 化（文档化改写）——钉随体更新
         assert SERVER_SRC.count("await build_llm_tools(request, settings, "
-                                "_assemble_toolkit())") == 2
+                                "_srv()._assemble_toolkit())") == 2
         assert 'tools = request.tools or []' not in SERVER_SRC
         # the node-extension announce loop lives exactly once, in the module
         asm = open(os.path.join(ROOT, "py", "tool_assembly.py"),

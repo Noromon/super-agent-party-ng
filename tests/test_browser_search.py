@@ -143,7 +143,8 @@ def _src(rel):
 def test_server_wiring_pins():
     # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
     sv = (_src("server.py") + _src("py/tool_hooks.py") + _src("py/stream_prep.py")
-          + _src("py/stream_engine.py") + _src("py/complete_engine.py"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+          + _src("py/stream_engine.py") + _src("py/complete_engine.py")
+          + _src("py/stream_response.py") + _src("py/approval_exec.py"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
     assert sv.count("websearch_with_fallback(") >= 2
     assert sv.count('"browser_lookup": browser_search') == 2
     assert sv.count("make_engine_with_fallback as _fb") == 2

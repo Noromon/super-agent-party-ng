@@ -233,7 +233,7 @@ class TestPermissionMode:
 
 class TestWiringS153:
     def test_server(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/approval_exec.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _read("py/approval_exec.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _read("py/approval_exec.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
         # S301：dispatch 路径门随工具域迁 py/tool_hooks.py，接线段钉随迁（段逐字未动）
         tk = _read("py/tool_hooks.py")
         seg = tk[tk.find("# S153: 路径门（工作区外本地路径"):][:900]  # S182(T4): 分线日志加长，窗口放宽

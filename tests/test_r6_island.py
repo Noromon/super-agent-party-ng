@@ -87,7 +87,7 @@ class TestIslandBackendS139:
             assert '"%s"' % h in s
 
     def test_server_wiring(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _read("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
         assert "app.include_router(island_router)" in s
         assert 'elif msg_type.startswith("island_"):' in s
         assert "await _ws_island(websocket, msg_type, data)" in s

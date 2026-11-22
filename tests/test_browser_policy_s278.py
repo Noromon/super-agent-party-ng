@@ -80,8 +80,9 @@ def test_report_tool_everywhere():
     cdp = (ROOT / "py/cdp_tool.py").read_text(encoding="utf-8")
     assert "async def browser_policy_report(" in cdp
     assert '"name": "browser_policy_report"' in cdp
-    # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
+    # S301/S304：钩子表构建与执行侧拷贝表已迁出，计数在合并面上守恒（表体逐字未动）
     srv = ((ROOT / "server.py").read_text(encoding="utf-8")
-           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8"))
+           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8")
+ + (ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8"))
     assert srv.count("browser_policy_report") == 6  # 2 imports + 2 hook 行(键+值)
     assert srv.count('"browser_policy_report": browser_policy_report') == 2

@@ -105,7 +105,7 @@ def test_stop_and_escape(monkeypatch):
 
 def test_server_wiring_mirrored():
     # S301：钩子表构建迁 py/tool_hooks.py，两表镜像计数在合并面上守恒（表体逐字未动）
-    src = _read("server.py") + _read("py/tool_hooks.py")
+    src = (_read("server.py") + _read("py/tool_hooks.py") + _read("py/approval_exec.py"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     for n in ("clean_dom", "remove_element", "stop_loading", "escape_back", "get_page_markdown"):
         assert src.count(f'"{n}": {n},') == 2, n
     assert src.count("clean_dom, remove_element,") == 2

@@ -16,6 +16,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 import py.cdp_tool as cdp  # noqa: E402
 
 SRC = ((ROOT / "server.py").read_text(encoding="utf-8")
+       + (ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8")  # S304：执行侧拷贝表随迁
        + (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")).replace("\r\n", "\n")  # S301：钩子表构建迁出，两表扫描域合并（表体逐字未动）
 
 # 两处 _TOOL_HOOKS 注册表：_build_tool_hooks() 与 execute_approved_tool()。

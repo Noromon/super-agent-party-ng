@@ -19,6 +19,9 @@ def _func_src(name):
     # S300: 群记忆域已迁 py/group_memory.py（_extract_group_memories 永不在闸内钉随行）
     sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8"),
@@ -218,7 +221,8 @@ class TestGateBlindSpotClosure:
                 "_stream_deepsearch_pre", "_stream_reasoner_prep")} | \
             {("complete_engine.py", n) for n in (
                 "_complete_reasoner_prep", "_complete_drs_step",
-                "_ns_reasoner_pass")}  # S303：同 S302a 先例，server 时代从未在闸内
+                "_ns_reasoner_pass",
+                "_generate_complete_impl")}  # S303/S304：同 S302a 先例，server 时代从未在闸内
         markers = ("@llm_gate.gated", "llm_gate.gate()")
         bad = []
         for path in sorted((ROOT / "py").glob("*.py")):

@@ -24,7 +24,8 @@ from py.tool_call_guard import (  # noqa: E402
     declared_tool_names, detect_leaked_calls, neutralize_leaked_blocks,
 )
 
-SRC = ((_ROOT / "server.py").read_text(encoding="utf-8-sig") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+SRC = ((_ROOT / "server.py").read_text(encoding="utf-8-sig") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8")
+ + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）（S304 追加装配层）
 
 LEAKED = (
     "让我继续修改配置。\n"

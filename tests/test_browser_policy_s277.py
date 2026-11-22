@@ -78,9 +78,10 @@ def test_tool_registered_everywhere():
     cdp = (ROOT / "py/cdp_tool.py").read_text(encoding="utf-8")
     assert "async def reset_page_state(" in cdp
     assert '"name": "reset_page_state"' in cdp
-    # S301：钩子表构建迁 py/tool_hooks.py，两表计数在合并面上守恒（表体逐字未动）
+    # S301/S304：钩子表构建与执行侧拷贝表已迁出，计数在合并面上守恒（表体逐字未动）
     srv = ((ROOT / "server.py").read_text(encoding="utf-8")
-           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8"))
+           + (ROOT / "py/tool_hooks.py").read_text(encoding="utf-8")
+ + (ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8"))
     # 2 imports(×1) + 2 hook 注册行(键+值 ×2) = 6
     assert srv.count("reset_page_state") == 6
     assert srv.count('"reset_page_state": reset_page_state') == 2

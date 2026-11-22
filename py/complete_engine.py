@@ -9,6 +9,8 @@ _role_param/_main_param=参数解析；原语义即 server 模块全局调用期
 等）来自 py/stream_prep（S302a 同族）；_generate_complete_impl/_chat_endpoint_impl
 属端点编排层留 server（与 stream 侧 stream_generator 同等待遇，S304 终评）。
 """
+from __future__ import annotations
+
 import asyncio
 import copy
 import datetime
@@ -17,25 +19,37 @@ import logging
 import random
 import re
 import uuid
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
 
-from py import llm_gate
+from py import llm_gate, tool_cap as _tool_cap
+from fastapi.responses import JSONResponse
+
+if TYPE_CHECKING:  # S304：impl 注解引用 server 侧模型，仅静态检查期导入（group_memory 同法）
+    from server import ChatRequest
+
 from py.context_builder import sanitize_tool_chains_logged
-from py.llm_recovery import acreate, llm_retry_cfg
+from py.llm_recovery import acreate, llm_retry_cfg, retry_suffix
 from py.model_params import effective_main_params, effective_role_params
 from py.msg_utils import content_append, content_prepend
 from py.srv_ref import srv as _srv
+from py.stream_engine import (_append_loopcap_hint, _drs_round_cap,
+                              _maybe_inject_browser_vision)
 from py.stream_prep import (_bound_tool_output, _cm_context_enabled,
+                            _run_context_pipeline, append_resume_nudge,
                             ensure_thinking_fields, get_drs_stage,
                             get_drs_stage_system_message, get_role,
                             parse_tool_arguments, truncate_tool_result)
 from py.stream_relay import _current_stream_entry
-from py.token_guard import neutralize as _neutralize, neutralize_deep
-from py.tool_dispatch import _is_approval_result
+from py.token_guard import apply_eos_guard, neutralize as _neutralize, neutralize_deep
+from py.tool_dispatch import _is_approval_result, pending_approval_at_tail
+from py.tool_assembly import build_llm_tools
 from py.tool_hooks import _im_approval_hangup, dispatch_tool
+from py.tool_spiral import SpiralWatch
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                           append_missing_results, arg_error_text)
-from py.vision_tools import images_add_in_messages
+from py.vision_tools import (_attach_screen_image_for_behavior,
+                             images_add_in_messages, images_in_messages,
+                             message_without_images)
 
 
 def _apply_context_compression(request, DRS_STAGE):
@@ -672,3 +686,296 @@ def _ns_behavior_sanitize(response_dict):
     except Exception:
         pass
     return response_dict
+
+
+async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, settings: dict,fastapi_base_url,enable_thinking,enable_deep_research,enable_web_search):
+    # (global decl cleared: migrated to py/app_state.py)
+    
+    # 设置对话上下文，供 secondhand_review_image 等工具使用
+    _srv().current_request_messages.set(request.messages)
+    
+    DRS_STAGE = 1 # 1: 明确用户需求阶段 2: 工具调用阶段 3: 生成结果阶段
+    DRS_STAGE = _apply_context_compression(request, DRS_STAGE)
+        # =========================================================================
+
+    from py.load_files import get_files_content,file_tool,image_tool,analyze_image_tool,review_image_tool,analyze_images_tool,view_images_tool
+    from py.web_search import (
+        DDGsearch, 
+        searxng, 
+        Tavily_search,
+        Bing_search,
+        Google_search,
+        Brave_search,
+        Exa_search,
+        Serper_search,
+        bochaai_search,
+        youcom_search,
+        duckduckgo_tool, 
+        searxng_tool, 
+        tavily_tool, 
+        bing_tool,
+        google_tool,
+        brave_tool,
+        exa_tool,
+        serper_tool,
+        bochaai_tool,
+        youcom_tool,
+        jina_crawler_tool, 
+        simple_fetch_tool,
+        Crawl4Ai_tool,
+        firecrawl_tool,
+        markdown_new_tool,
+    )
+    from py.know_base import kb_tool,query_knowledge_base,rerank_knowledge_base
+    from py.agent_tool import get_agent_tool
+    from py.a2a_tool import get_a2a_tool
+    from py.llm_tool import get_llm_tool
+    from py.pollinations import pollinations_image_tool,openai_image_tool,openai_chat_image_tool
+    from py.code_interpreter import e2b_code_tool,local_run_code_tool
+    from py.utility_tools import time_tool
+    from py.utility_tools import (
+        time_tool, 
+        weather_tool,
+        location_tool,
+        timer_weather_tool,
+        wikipedia_summary_tool,
+        wikipedia_section_tool,
+        arxiv_tool
+    ) 
+    from py.autoBehavior import auto_behavior_tool
+    from py.cli_tool import get_tools_for_mode,get_local_tools_for_mode,get_tools_for_permission,get_local_tools_for_permission
+    from py.cdp_tool import all_cdp_tools
+    from py.random_topic import random_topics_tools
+    from py.computer_use_tool import computer_use_tools,mouse_use_tools,keyboard_use_tools,desktopVision_use_tools
+    
+    from py.mode_change import mode_change_tool
+    from py.acpx_tools import acp_agent_tool
+    m0 = None
+    memoryId = None
+    cur_memory = None
+    if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
+        memoryId = settings["memorySettings"]["selectedMemory"]
+        cur_memory = None
+        for memory in settings["memories"]:
+            if memory["id"] == memoryId:
+                cur_memory = memory
+                break
+        if cur_memory and cur_memory["providerId"]:
+            logging.getLogger("app").info("长期记忆启用")
+            m0 = llm_gate.get_mem0_instance(memoryId, cur_memory, settings)
+    images = await images_in_messages(request.messages,fastapi_base_url)
+    request.messages = await message_without_images(request.messages)
+    open_tag = "<think>"
+    close_tag = "</think>"
+    tools = await build_llm_tools(request, settings, _srv()._assemble_toolkit())
+    _srv()._inject_tool_discipline(request, tools)  # S204: 纪律随有效声明集（stream/ns 两处）
+    extra = {}
+    reasoner_extra = {}
+    # S160 L0a：本地推理引擎软压制（eosGuard.enabled 且 base_url 为回环时生效）
+    apply_eos_guard(reasoner_extra, settings, str(getattr(reasoner_client, "base_url", "") or ""))
+    search_not_done = False
+    search_task = ""
+    try:
+        model = settings['model']
+        _eff_main = effective_main_params(settings)  # S206：每模型推理参数（卡片覆盖 > 角色默认）
+        extra_params = _eff_main.get('extra_params') or []
+        # 移除extra_params这个list中"name"不包含非空白符的键值对
+        if extra_params:
+            for extra_param in extra_params:
+                if not extra_param['name'].strip():
+                    extra_params.remove(extra_param)
+            # 列表转换为字典
+            extra_params = _srv().process_extra_params(extra_params)
+        else:
+            extra_params = {}
+        if request.fileLinks:
+            # 异步获取文件内容
+            files_content = await get_files_content(request.fileLinks)
+            system_message = f"\n\n相关文件内容：{files_content}"
+            
+            # 修复字符串拼接错误
+            content_append(request.messages, 'system', system_message)
+        kb_list = []
+        user_prompt = request.messages[-1].get('content') or ""
+        if settings["memorySettings"]["is_memory"] and settings["memorySettings"]["selectedMemory"] and settings["memorySettings"]["selectedMemory"] != "":
+            await _complete_character_context(request, settings, user_prompt, cur_memory, memoryId, m0)
+        if settings["knowledgeBases"]:
+            for kb in settings["knowledgeBases"]:
+                if kb["enabled"] and kb["processingStatus"] == "completed":
+                    kb_list.append({"kb_id":kb["id"],"name": kb["name"],"introduction":kb["introduction"]})
+        if settings["KBSettings"]["when"] == "before_thinking" or settings["KBSettings"]["when"] == "both":
+            if kb_list:
+                all_kb_content = []
+                # 用query_knowledge_base函数查询kb_list中所有的知识库
+                for kb in kb_list:
+                    kb_content = await query_knowledge_base(kb["kb_id"],user_prompt)
+                    all_kb_content.extend(kb_content)
+                    if settings["KBSettings"]["is_rerank"]:
+                        all_kb_content = await rerank_knowledge_base(user_prompt,all_kb_content)
+                if all_kb_content:
+                    kb_message = f"\n\n可参考的知识库内容：{all_kb_content}"
+                    content_append(request.messages, 'user',  f"{kb_message}\n\n用户：{user_prompt}")
+        if settings["KBSettings"]["when"] == "after_thinking" or settings["KBSettings"]["when"] == "both":
+            if kb_list:
+                kb_list_message = f"\n\n可调用的知识库列表：{json.dumps(kb_list, ensure_ascii=False)}"
+                content_append(request.messages, 'system', kb_list_message)
+        else:
+            kb_list = []
+        request = await _srv().tools_change_messages(request, settings)
+        # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
+        if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
+            request.messages[0]['content'] = "you are a helpful assistant."
+        if pending_approval_at_tail(request.messages) is None: append_resume_nudge(request.messages)  # S172: 待批复审批尾部不附继续催办
+        chat_vendor = 'OpenAI'
+        reasoner_vendor = 'OpenAI'
+        for modelProvider in settings['modelProviders']: 
+            if modelProvider['id'] == settings['selectedProvider']:
+                chat_vendor = modelProvider['vendor']
+                break
+        for modelProvider in settings['modelProviders']: 
+            if modelProvider['id'] == settings['reasoner']['selectedProvider']:
+                reasoner_vendor = modelProvider['vendor']
+                break
+        if chat_vendor == 'Dify':
+            try:
+                if len(request.messages) >= 3:
+                    if request.messages[2]['role'] == 'user':
+                        if request.messages[1]['role'] == 'assistant':
+                            request.messages[2]['content'] = "你上一次的发言：\n" +request.messages[0]['content'] + "\n你上一次的发言结束\n\n用户：" + request.messages[2]['content']
+                        if request.messages[0]['role'] == 'system':
+                            request.messages[2]['content'] = "系统提示：\n" +request.messages[0]['content'] + "\n系统提示结束\n\n" + request.messages[2]['content']
+                elif len(request.messages) >= 2:
+                    if request.messages[1]['role'] == 'user':
+                        if request.messages[0]['role'] == 'system':
+                            request.messages[1]['content'] = "系统提示：\n" +request.messages[0]['content'] + "\n系统提示结束\n\n用户：" + request.messages[1]['content']
+            except Exception as e:
+                logging.getLogger("app").warning(f"Dify error: {e}")
+        await _complete_web_search_setup(request, settings, user_prompt, tools, enable_web_search)
+        if kb_list:
+            tools.append(kb_tool)
+        if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            deepsearch_messages = copy.deepcopy(request.messages)
+            content_append(deepsearch_messages, 'user',  "\n\n将用户提出的问题或给出的当前任务拆分成多个步骤，每一个步骤用一句简短的话概括即可，无需回答或执行这些内容，直接返回总结即可，但不能省略问题或任务的细节。如果用户输入的只是闲聊或者不包含任务和问题，直接把用户输入重复输出一遍即可。如果是非常简单的问题，也可以只给出一个步骤即可。一般情况下都是需要拆分成多个步骤的。")
+            response = await acreate(
+                lambda: client.chat.completions.create(
+                model=model,
+                messages=deepsearch_messages,
+                temperature=0.5, 
+                extra_body = extra_params, # 其他参数
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
+            user_prompt = response.choices[0].message.content
+            content_append(request.messages, 'user',  f"\n\n如果用户没有提出问题或者任务，直接闲聊即可，如果用户提出了问题或者任务，任务描述不清晰或者你需要进一步了解用户的真实需求，你可以暂时不完成任务，而是分析需要让用户进一步明确哪些需求。")
+        if settings['reasoner']['enabled'] or enable_thinking:
+            vendor = await _complete_reasoner_prep(request, reasoner_client, settings, chat_vendor, reasoner_vendor, images, tools, extra, reasoner_extra, open_tag, close_tag, enable_deep_research, enable_thinking, DRS_STAGE, user_prompt)
+        if settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            content_append(request.messages, 'user',  f"\n\n可参考的步骤：{user_prompt}\n\n")
+            drs_msg = get_drs_stage(DRS_STAGE)
+            if drs_msg:
+                content_append(request.messages, 'user',  f"\n\n{drs_msg}\n\n")
+        # ===== 上下文管理管线：L1 修剪 -> L2 自动摘要（agent 模式；非流式通道不下发事件） =====
+        await _run_context_pipeline(request, settings, client, model, extra_params, reasoner_client, tools)
+        # S203：行为/主动外发轮（8 个 IM manager 的 execute_behavior_event 通道）——产出
+        # 将原样送 IM 对端，声明工具只会诱导模型把调用块写进正文被整块发出（ns 尸块事故）。
+        # 此轮强制零工具并注记只输出 plain 文本；_ns_behavior_sanitize 兜底中和漏网尸块。
+        if getattr(request, "behavior_trigger", False):
+            tools = []
+            request.messages.append({
+                "role": "user", "name": "system_note",
+                "content": ("本轮为计划外主动外发：你的输出会被原样转达给 IM 对端，"
+                            "只输出要对 TA 说的 plain 文本，不要调用任何工具，"
+                            "也不要在正文里书写任何形式的工具调用标记。"),
+            })
+        msg = await images_add_in_messages(request.messages, images,settings)
+        _attach_screen_image_for_behavior(msg, request, settings)  # S225：旁观发言附截图（仅改 deepcopy，主模型原生读图，不入 request.messages/落盘）
+        if request.top_p != 1 or _eff_main.get('top_p') != 1:
+            extra['top_p'] = request.top_p or _eff_main.get('top_p')
+        if tools:
+            response = await acreate(
+                lambda: client.chat.completions.create(
+                model=model,
+                messages=msg,  # 添加图片信息到消息
+                temperature=request.temperature or _eff_main.get('temperature'),
+                tools=tools,
+                stream=False,
+                extra_body = extra_params, # 其他参数
+                **extra
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
+        else:
+            response = await acreate(
+                lambda: client.chat.completions.create(
+                model=model,
+                messages=msg,  # 添加图片信息到消息
+                temperature=request.temperature or _eff_main.get('temperature'),
+                stream=False,
+                extra_body = extra_params, # 其他参数
+                **extra
+            ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
+        if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: message 可能为 None
+            pass
+        elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+            DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=True)
+        reasoner_messages = copy.deepcopy(request.messages)
+        _ns_loop_count = 0
+        ns_force_no_tools = False
+        _ns_spiral = SpiralWatch()  # S296：绕圈熔断（任务态，与流式 _st._spiral 对位）
+        while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):  # B1: None 守卫
+            _ns_loop_count += 1
+            _ns_max_iterations = _tool_cap.effective_limit()  # S233：轮边界动态上限（调值/破限即时生效）
+            # T-8: 取消围栏——后续 LLM 轮次前检查（cancel 端点可停不可停工具链的漏洞封堵）
+            _cur_entry = _current_stream_entry.get()
+            if _cur_entry and _cur_entry.get("cancelled"):
+                break
+            if not _drs_round_cap(_ns_loop_count, _ns_max_iterations, search_not_done, response.choices[0].message.tool_calls, "非流式"):
+                search_not_done = False
+                response.choices[0].message.tool_calls = None
+                break
+            if response.choices[0].message.tool_calls and _ns_loop_count > _ns_max_iterations:
+                _append_loopcap_hint(request, "非流式")
+                ns_force_no_tools = True
+                response.choices[0].message.tool_calls = None
+            if response.choices[0].message.tool_calls:
+                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=_ns_spiral)
+                if abort:
+                    break
+            if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
+                content_append(request.messages, 'user',  f"\n对于联网搜索的结果，如果联网搜索的信息不足以回答问题时，你可以进一步使用联网搜索查询还未给出的必要信息。如果已经足够回答问题，请直接回答问题。")
+            if settings['reasoner']['enabled'] or enable_thinking:
+                vendor = await _ns_reasoner_pass(request, reasoner_client, reasoner_messages, settings, images, reasoner_extra, open_tag, close_tag, tools, vendor)
+            images = await _maybe_inject_browser_vision(request, settings, images, fastapi_base_url)  # S228：浏览器截图直注主模型
+            msg = await images_add_in_messages(request.messages, images,settings)
+            if request.top_p != 1 or _eff_main.get('top_p') != 1:
+                extra['top_p'] = request.top_p or _eff_main.get('top_p')
+            if tools and not ns_force_no_tools:
+                response = await acreate(
+                    lambda: client.chat.completions.create(
+                    model=model,
+                    messages=msg,  # 添加图片信息到消息
+                    temperature=request.temperature or _eff_main.get('temperature'),
+                    tools=tools,
+                    stream=False,
+                    extra_body = extra_params, # 其他参数
+                    **extra
+                ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
+            else:
+                response = await acreate(
+                    lambda: client.chat.completions.create(
+                    model=model,
+                    messages=msg,  # 添加图片信息到消息
+                    temperature=request.temperature or _eff_main.get('temperature'),
+                    stream=False,
+                    extra_body = extra_params, # 其他参数
+                    **extra
+                ), attempts=llm_retry_cfg(settings)[0], base_delay=llm_retry_cfg(settings)[1], label="s207-_generate_complete_impl")
+            if response.choices[0].message and response.choices[0].message.tool_calls:  # B1: 再生成后 message 可能为 None
+                pass
+            elif settings['tools']['deepsearch']['enabled'] or enable_deep_research: 
+                DRS_STAGE, search_not_done, search_task = await _complete_drs_step(client, model, extra_params, request, user_prompt, response, DRS_STAGE, search_not_done, search_task, none_to_empty=False)
+       # 处理响应内容
+        response_dict = await _complete_finalize(request, settings, response, m0, memoryId, cur_memory, user_prompt, open_tag, close_tag)
+        if getattr(request, "behavior_trigger", False) or getattr(request, "sanitize_plain_output", False):
+            response_dict = _ns_behavior_sanitize(response_dict)  # S203/S204 兜底：尸块剥除
+        return JSONResponse(content=response_dict)
+    except Exception as e:
+        return JSONResponse(
+            content={"error": {"message": str(e) + retry_suffix(e), "type": "api_error"}}
+        )

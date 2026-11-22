@@ -161,7 +161,7 @@ def test_schema_registered_local_md():
 
 def test_server_wiring_mirrored():
     # S301：钩子表构建迁 py/tool_hooks.py，两表镜像计数在合并面上守恒（表体逐字未动）
-    src = _read("server.py") + _read("py/tool_hooks.py")
+    src = (_read("server.py") + _read("py/tool_hooks.py") + _read("py/approval_exec.py"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert src.count('"web_render": web_render,') == 2
     assert src.count("handle_dialog, web_render, clean_dom,") == 2
 

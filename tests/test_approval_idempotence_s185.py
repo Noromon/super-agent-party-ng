@@ -17,7 +17,8 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVER = (ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((ROOT / "server.py").read_text(encoding="utf-8")
+          + (ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 TASKS = (ROOT / "py" / "routers" / "tasks.py").read_text(encoding="utf-8")
 CHAT_JS = (ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")
 RESUME_JS = (ROOT / "static" / "js" / "methods" / "13_resume_stream.js").read_text(encoding="utf-8")

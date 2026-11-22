@@ -46,7 +46,7 @@ def _src(rel):
 
 
 def test_server_stream_error_logging_pin():
-    sv = _src("server.py")
+    sv = _src("server.py") + _src("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _src("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动） + _src("py/stream_response.py")  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     assert "[StreamError]" in sv
     assert "exc_info=True" in sv
     assert 'logger.error(f"{request.messages}")' not in sv

@@ -22,7 +22,8 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 import py.llm_recovery as lr  # noqa: E402
 
-SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8")
+ + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
 _VT = (_ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")  # S299：视觉域迁出，计数合并
 _GM = (_ROOT / "py" / "group_memory.py").read_text(encoding="utf-8")  # S300：群记忆域迁出，计数合并
 CHAT_JS = (_ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")

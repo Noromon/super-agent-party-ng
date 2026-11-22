@@ -21,7 +21,8 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVER = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+SERVER = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8")
+ + (ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
 TOOLHOOKS = (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8")  # S301：预检/哨兵定义随工具域迁出
 TOOLDISP = (ROOT / "py" / "tool_dispatch.py").read_text(encoding="utf-8")
 INTEG = (ROOT / "py" / "diary_chat_integration.py").read_text(encoding="utf-8")

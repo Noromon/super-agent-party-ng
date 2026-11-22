@@ -22,7 +22,9 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 from py import screen_memory as sm  # noqa: E402
 
-_SERVER_SRC = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
+_SERVER_SRC = ((_ROOT / "server.py").read_text(encoding="utf-8-sig")
+               + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8-sig")
+               + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8-sig"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 # S300：_inject_screen_context 定义随提示词装配域迁至 py/prompt_builders.py（AST 抽取钉随迁）
 _PROMPT_SRC = (_ROOT / "py" / "prompt_builders.py").read_text(encoding="utf-8-sig")
 

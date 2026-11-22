@@ -19,7 +19,7 @@ if str(_ROOT) not in sys.path:
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER_SRC = (_ROOT / "server.py").read_text(encoding="utf-8")
+SERVER_SRC = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 
 
 def _mk_item():

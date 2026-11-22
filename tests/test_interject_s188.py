@@ -12,7 +12,7 @@ sys.path.insert(0, str(_ROOT))
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER = (_ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 TASKS = (_ROOT / "py" / "routers" / "tasks.py").read_text(encoding="utf-8")
 STORE = (_ROOT / "py" / "approval_store.py").read_text(encoding="utf-8")
 CHAT_JS = (_ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")
@@ -107,7 +107,9 @@ class TestDrainInject:
 
 class TestBackendWiring:
     def test_register_at_stream_creation(self):
-        assert "_interject.register_stream(request, stream_id, _active_streams[stream_id])" in SERVER
+        # S304：注册行随装配层迁出，_active_streams 改 _srv() 懒访问（文档化改写）——钉随体更新
+        assert ("_interject.register_stream(request, stream_id, "
+                '_srv()._active_streams[stream_id])') in SERVER
 
     def test_drain_at_round_boundary(self):
         i_abort = SERVER.index('if _st.pop("w1_abort", False):')

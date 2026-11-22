@@ -195,7 +195,9 @@ class TestXmppMergeInflight:
 
 class TestSourcePins:
     def test_server_checkpoint_and_traffic_tags(self):
-        s = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+        s = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (_ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8")
+ + (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8")
+ + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
         assert '#inflight' in s and "_tool_loop_count % 5 == 0" in s
         assert 'user="sap-reasoner"' in s and s.count('user="sap-reasoner"') == 4
         assert s.count('user="sap-main"') == 2

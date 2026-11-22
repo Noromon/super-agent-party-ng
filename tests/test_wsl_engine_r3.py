@@ -65,7 +65,8 @@ class TestCliToolWsl:
 class TestServerWiring:
     def setup_method(self):
         # S301：钩子表/审批门/plan 兜底随工具域迁 py/tool_hooks.py，跨域计数在合并面上守恒
-        self.src = _read("server.py") + _read("py/tool_hooks.py")
+        self.src = (_read("server.py") + _read("py/tool_hooks.py")
+                    + _read("py/approval_exec.py") + _read("py/stream_response.py"))  # S304：stream 分支随装配层迁出，跨域计数合并守恒  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
 
     def test_hooks_registered_both_domains(self):
         assert self.src.count('"shell_tool_wsl": shell_tool_wsl,') >= 2

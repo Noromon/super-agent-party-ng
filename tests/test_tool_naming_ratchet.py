@@ -21,7 +21,7 @@ _CONFLICT_CAP = 165  # 2026-10-21 S65-A10 上游 youcom_search 移植（*_search
 
 
 def _hook_names():
-    src = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
+    src = ((_ROOT / "server.py").read_text(encoding="utf-8-sig") + (_ROOT / "py" / "approval_exec.py").read_text(encoding="utf-8-sig"))  # S304：响应装配/批复执行域迁出，合并面守恒（体逐字未动）
     names = set()
     for m in re.finditer(r"_TOOL_HOOKS\s*=\s*\{", src):
         depth, i = 1, m.end()
