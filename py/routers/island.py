@@ -301,22 +301,24 @@ async def proxy_geocode(city: str, lang: str = "zh"):
     return {"error": "geocode_failed"}
 
 
-def _lbtn_down() -> bool:
-    """S289：全局左键即时状态（user32 GetAsyncKeyState 高位=当前按下）。
-    高 DPI 机器上岛窗内 Blink 鼠标坐标错位（×缩放比），DOM 点击命中失效；
-    HUD 持握期间以本物理键态 + OS 光标真相合成「物理点击」兜底。非 Windows 恒 False。"""
+def _mouse_state():
+    """S289：全局左键态。高位=当前按下；S291：低位=自上次调用以来按下过
+    （系统级边沿标志，比采样周期还短的快速点击也不会漏；本端点是全机唯一
+    消费者，无争用）。返回 (down, press)；非 Windows 恒 (False, False)。"""
     if platform.system() != "Windows":
-        return False
+        return False, False
     try:
         import ctypes
-        return bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        v = ctypes.windll.user32.GetAsyncKeyState(0x01) & 0xFFFF
+        return bool(v & 0x8000), bool(v & 0x0001)
     except Exception:
-        return False
+        return False, False
 
 
 @router.get("/api/mouse-state")
 async def get_mouse_state():
-    return {"lbtn": _lbtn_down()}
+    down, press = _mouse_state()
+    return {"lbtn": down, "lpress": press}
 
 
 @router.get("/cur_language")

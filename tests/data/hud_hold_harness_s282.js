@@ -83,7 +83,7 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   ok(typeof global.window.__hudDiag === 'function', 'S285: 岛宿主已暴露 __hudDiag');
   {
     const d = global.window.__hudDiag();
-    ok(/^S28\d$/.test(d.rev) && d.host === true && d.layer === true && d.apiSet === true, 'S28x: 诊断快照 rev/host/layer/api 正常: ' + d.rev);
+    ok(/^S2\d\d$/.test(d.rev) && d.host === true && d.layer === true && d.apiSet === true, 'S28x: 诊断快照 rev/host/layer/api 正常: ' + d.rev);
     ok(typeof global.window.__hudDiagLite === 'function' && d.dpr === 1, 'S286: __hudDiagLite 已暴露且 dpr 上报');
   }
   env.efp = null;

@@ -63,7 +63,7 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S289';
+  var HUD_REV = 'S291';
   var pollTicks = 0, dbgLogged = false;
   // S289：物理点击通道——高 DPI 机 Blink 内部鼠标坐标错位时 DOM 点击命中整体失效，
   // 持握期间拉取后端全局左键态，配合 OS 光标真值合成点击（原生点击可达时自动让位）。
@@ -110,6 +110,14 @@
       if (!e) return;
       var t = e.target;
       lastEv = { x: e.clientX, y: e.clientY, t: Date.now(), tgt: (t && (t.className || t.tagName)) || '' };
+    }, true);
+    // S291：面板外原生点击=一点即收（健康机通道；故障机原生不达时由物理路由同语义兜底）
+    document.addEventListener('click', function (e) {
+      if (!panel) return;
+      var n = e && e.target;
+      while (n) { if (n === panel || n === capsule) break; n = n.parentNode; }
+      if (n === panel || n === capsule) return; // 面板内（含×）/胶囊交给各自处理器
+      closePanel();
     }, true);
     (document.body || document.documentElement).appendChild(layer);
     document.addEventListener('mousemove', onDocMove);
@@ -396,8 +404,13 @@
     }).then(function (j) {
       msFail = 0;
       var down = !!(j && j.lbtn);
-      if (down && !lastLbtn) lbtnDownTs = Date.now();
-      if (!down && lastLbtn && lbtnDownTs) {
+      var press = !!(j && j.lpress); // S291：系统级按下边沿——采样间隔内的快击也不丢
+      if (press && !down) {
+        lbtnDownTs = 0;              // 已松开：释放沿不再对同一次按键补发
+        routePhysicalClick(80);      // 快击直达路由（80ms 仅作原生事件落账窗）
+      } else if (down && !lastLbtn) {
+        lbtnDownTs = Date.now();
+      } else if (!down && lastLbtn && lbtnDownTs) {
         var held = Date.now() - lbtnDownTs;
         lbtnDownTs = 0;
         if (held <= 1500) routePhysicalClick(); // 长按/拖拽不算 HUD 点击
@@ -409,7 +422,7 @@
     });
   }
 
-  function routePhysicalClick() {
+  function routePhysicalClick(settleMs) {
     setTimeout(function () {
       // 让位判据：原生 click 通道可达时（正常 DPI 机器）Blink 早已完成命中，勿双触发
       if (Date.now() - lastNativeClickTs < 450 || !holdActive || !lastPollP) return;
@@ -419,9 +432,11 @@
         var r = el.getBoundingClientRect();
         return inRect(p.x, p.y, r, 10) || inRect(p.x / d, p.y / d, r, 10);
       };
-      if (panel && inBoth(panelCloseEl)) { closePanel(); return; }
-      if (inBoth(capsule)) togglePanel();
-    }, 120); // 等一拍原生事件落账再裁决，防健康机双切换
+      if (inBoth(capsule)) { togglePanel(); return; }
+      if (!panel) return; // 面板不在场：外部点击本就不属于 HUD，无状态可改
+      if (inBoth(panelCloseEl)) { closePanel(); return; }
+      if (!inBoth(panel)) closePanel(); // S291：面板外点击=一点即收（该点击被透明层吞掉=全屏 overlay 固有）
+    }, settleMs || 120);
   }
 
   function stopPoll() {

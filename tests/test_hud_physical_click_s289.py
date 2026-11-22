@@ -1,4 +1,4 @@
-# build=S290
+# build=S291
 # S289：HUD 物理点击通道静态锁（行为面=点圈开面板/点关闭钮收起/原生去重，
 # 由 hud_hold_harness_s282.js 段 4 覆盖）。
 from pathlib import Path
@@ -11,14 +11,15 @@ HARNESS = (ROOT / "tests" / "data" / "hud_hold_harness_s282.js").read_text(encod
 
 def test_physical_channel_plumbing():
     for anchor in ("fetch('/api/mouse-state', { credentials: 'same-origin' })",
-                   "function pollMouseState()", "function routePhysicalClick()",
+                   "function pollMouseState()", "function routePhysicalClick(settleMs)",
                    "if (holdActive) pollMouseState();",
                    "Date.now() - lastNativeClickTs < 450 || !holdActive || !lastPollP",
                    "panelCloseEl = cl;", "panelCloseEl = null;",
                    "lastNativeClickTs = Date.now(); togglePanel();"):
         assert anchor in HUD, anchor
-    # 让位窗必须存在且带 120ms 结算延迟（等原生事件落账）
-    assert "}, 120); // 等一拍原生事件落账再裁决" in HUD
+    # 让位窗必须存在且带可配置结算延迟（S291 默认 120ms / 快击 80ms）
+    assert "}, settleMs || 120);" in HUD
+    assert "routePhysicalClick(80);" in HUD
     # 端点缺失静默（旧后端不刷屏）
     assert "msMuteUntil = Date.now() + 5000;" in HUD
 

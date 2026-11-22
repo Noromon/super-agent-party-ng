@@ -1,4 +1,4 @@
-# build=S290
+# build=S291
 # S289：/api/mouse-state 全局左键态端点（高 DPI 机 Blink 点击失效时 HUD 物理点击
 # 通道的后端数据源）。端点逻辑必须薄——判定语义全在页面侧。
 import sys
@@ -18,6 +18,7 @@ def test_endpoint_shape():
     assert '@router.get("/api/mouse-state")' in SRC
     assert "GetAsyncKeyState(0x01)" in SRC
     assert "& 0x8000" in SRC
+    assert "& 0x0001" in SRC  # S291：低位=自上次调用以来按下过的边沿标志
     assert 'platform.system() != "Windows"' in SRC  # 非 win 恒 False（Linux/Docker 语义）
 
 
@@ -33,3 +34,4 @@ def test_endpoint_returns_bool():
     assert r.status_code == 200
     body = r.json()
     assert isinstance(body.get("lbtn"), bool), body
+    assert isinstance(body.get("lpress"), bool), body  # S291

@@ -1,0 +1,45 @@
+# build=S291
+# S291：lpress 快击边沿（采样间点击不丢）+ 面板外一点即收。静态锁；
+# 行为面由独立进程 tests/data/hud_panel_s291_harness.js 覆盖（隔离旧实例对
+# 边沿标志的抢消费）。
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+HUD = (ROOT / "static" / "js" / "hud-capsule.js").read_text(encoding="utf-8")
+HARNESS = (ROOT / "tests" / "data" / "hud_panel_s291_harness.js").read_text(encoding="utf-8")
+
+
+def test_lpress_edge_paths():
+    assert "var press = !!(j && j.lpress);" in HUD
+    # 三路互斥：快击直达 / 按下沿记时 / 释放沿长按语义——lpress 消费后清 lbtnDownTs 防双发
+    i = HUD.index("if (press && !down) {")
+    seg = HUD[i:i + 520]
+    assert "lbtnDownTs = 0;" in seg and "routePhysicalClick(80);" in seg
+    assert "} else if (down && !lastLbtn) {" in seg
+    assert "} else if (!down && lastLbtn && lbtnDownTs) {" in seg
+
+
+def test_outside_close_both_channels():
+    # 物理路由：面板外一点即收（胶囊优先短路在外判之前）
+    assert "if (!inBoth(panel)) closePanel();" in HUD
+    j = HUD.index("if (inBoth(capsule)) { togglePanel(); return; }")
+    assert j < HUD.index("if (!inBoth(panel)) closePanel();")
+    # 健康机原生通道：document 捕获层点击，面板/胶囊之外即收
+    assert "while (n) { if (n === panel || n === capsule) break; n = n.parentNode; }" in HUD
+
+
+def test_harness_covers_s291():
+    assert "S291: lpress 边沿不丢" in HARNESS
+    assert "面板外物理按下 → 一点即收" in HARNESS
+    assert "让位（面板未被抢关）" in HARNESS and "面板内按下不触发外部收起" in HARNESS
+
+
+def test_behavior_harness_green():
+    r = subprocess.run(
+        ["node", str(ROOT / "tests/data/hud_panel_s291_harness.js"),
+         str(ROOT / "static/js/hud-capsule.js")],
+        capture_output=True, text=True, timeout=60,
+    )
+    out = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0 and "all passed" in out, out[-600:]
