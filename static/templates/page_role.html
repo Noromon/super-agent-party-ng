@@ -3415,7 +3415,7 @@
                           </div>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchCooldown') || '发言冷却（秒）'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">
-                          <el-input-number v-model="screenWatchSettings.speak.cooldownSeconds" :min="60" :max="7200" :step="60"
+                          <el-input-number v-model="screenWatchSettings.speak.cooldownSeconds" :min="5" :max="7200" :step="5"
                             controls-position="right" style="width: 160px;" @change="autoSaveSettings"></el-input-number>
                         </el-form-item>
                         <el-form-item :label="t('screenWatchDailyLimit') || '每日发言上限'" v-if="screenWatchSettings.speak.enabled" class="form-item-align" label-position="left">

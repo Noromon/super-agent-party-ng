@@ -1,4 +1,4 @@
-# build=S287
+# build=S288
 # S263：mobile touch 仿真复位加固——残留曾致触摸圆点/首击被吞/右键菜单消失/wheel 失真。
 # 根因：desktop off 从不显式关 setEmitTouchEventsForMouse（只靠 detach 隐式清理，
 # detach 可失败），且整套清理被 isAttached&&_sapMobileDbg.has 双条件闸住直接跳过；
