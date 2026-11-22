@@ -74,7 +74,8 @@ Object.assign(vue_data, {
       download: 'save',
       fileInput: 'block',
       jsDialog: 'dismiss',
-      beforeUnload: true
+      beforeUnload: true,
+      crashReload: true
     },
 
     sqlSettings:{

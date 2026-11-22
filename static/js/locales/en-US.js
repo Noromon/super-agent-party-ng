@@ -980,6 +980,8 @@ window.lang_enUS = {
     'browserPolicyFileInput': 'Page requests a file upload',
     'browserPolicyJsDialog': 'Page opens alert/confirm',
     'browserPolicyBeforeUnload': 'Auto-allow leaving page',
+    'browserPolicyCrashReload': 'Auto-reload on page crash',
+    'browserPolicyCrashReloadHint': 'After a renderer crash the page reloads once (suppressed within 30s) and the event is journaled for the agent; unresponsiveness is always journal-only.',
     'browserPolicyOptSave': 'Auto-save (browser_downloads)',
     'browserPolicyOptCancel': 'Auto-cancel (no disk write)',
     'browserPolicyOptAsk': 'Ask as before (native dialog)',

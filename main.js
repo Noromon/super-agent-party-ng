@@ -908,7 +908,7 @@ async function waitForBackend() {
 // 根因治理：原生另存为/上传框等系统模态会禁用宿主窗口并挂死 CDP/executeJavaScript，
 // agent 彻底失去页面控制且触摸/输入状态可能永久残留。默认策略直接接管这些事件。
 if (!global.browserPolicy) {
-  global.browserPolicy = { enabled: true, download: 'save', fileInput: 'block', jsDialog: 'dismiss', beforeUnload: true };
+  global.browserPolicy = { enabled: true, download: 'save', fileInput: 'block', jsDialog: 'dismiss', beforeUnload: true, crashReload: true };
   // S278：启动时合并用户持久化（config.json browserPolicySettings，由 set-browser-policy IPC 写入）
   try {
     const saved = (typeof globalConfig === 'object' && globalConfig) ? globalConfig.browserPolicySettings : null;
@@ -918,6 +918,7 @@ if (!global.browserPolicy) {
       if (['block', 'ask'].includes(saved.fileInput)) global.browserPolicy.fileInput = saved.fileInput;
       if (['dismiss', 'accept', 'ask'].includes(saved.jsDialog)) global.browserPolicy.jsDialog = saved.jsDialog;
       if (typeof saved.beforeUnload === 'boolean') global.browserPolicy.beforeUnload = saved.beforeUnload;
+      if (typeof saved.crashReload === 'boolean') global.browserPolicy.crashReload = saved.crashReload;
     }
   } catch (_) {}
 }
@@ -1541,7 +1542,9 @@ app.whenReady().then(async () => {
         if (!id) return { ok: false, err: 'no-wcid' };
         const wc = webContents.fromId(id);
         if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
-        return await sapResetEmulation(wc, id, { force: true, defaultUA: true, detachInput: true });
+        const rr = await sapResetEmulation(wc, id, { force: true, defaultUA: true, detachInput: true });
+        if (rr.ok) _policyNote(id, 'reset', 'reset_page_state executed (emulation cleared, stale debugger detached)');
+        return rr;
       } catch (err) { return { ok: false, err: String((err && err.message) || err) }; }
     });
 
@@ -1555,8 +1558,9 @@ app.whenReady().then(async () => {
         pol.fileInput = ['block', 'ask'].includes(o.fileInput) ? o.fileInput : 'block';
         pol.jsDialog = ['dismiss', 'accept', 'ask'].includes(o.jsDialog) ? o.jsDialog : 'dismiss';
         pol.beforeUnload = o.beforeUnload !== false;
+        pol.crashReload = o.crashReload !== false;
         try {
-          saveEnvVariable('browserPolicySettings', { enabled: pol.enabled, download: pol.download, fileInput: pol.fileInput, jsDialog: pol.jsDialog, beforeUnload: pol.beforeUnload });
+          saveEnvVariable('browserPolicySettings', { enabled: pol.enabled, download: pol.download, fileInput: pol.fileInput, jsDialog: pol.jsDialog, beforeUnload: pol.beforeUnload, crashReload: pol.crashReload });
         } catch (_) {}
         sapReconcileDialogWatch();
         return true;
@@ -3251,6 +3255,25 @@ app.on('web-contents-created', (event, contents) => {
         _policyNote(contents.id, 'jsdialog', 'auto-closed(fallback) ' + String(ev.type || '') + ': ' + String(ev.messageText || ev.message || '').slice(0, 80));
       });
       contents.once('destroyed', () => { _sapDlgDbg.delete(contents.id); });
+      // S279：guest 进程异常看门狗。崩溃：记账 + 自动重载一次（30s 防循环，可经策略关闭）；
+      // 挂起/恢复：记账（agent 可 reset_page_state reload=true 自救）。一切经 policy_report 可见。
+      let _sapGoneAt = 0;
+      contents.on('render-process-gone', (ev, details) => {
+        const reason = String((details && details.reason) || '') + '/' + String((details && typeof details.exitCode !== 'undefined') ? details.exitCode : '?');
+        _policyNote(contents.id, 'crash', 'render process gone: ' + reason);
+        const pol = global.browserPolicy || {};
+        if (pol.crashReload === false) return;
+        const nowG = Date.now();
+        if (nowG - _sapGoneAt < 30000) { _policyNote(contents.id, 'crash', 'auto-reload skipped (30s anti-loop)'); return; }
+        _sapGoneAt = nowG;
+        try { contents.reload(); _policyNote(contents.id, 'crash', 'auto-reload issued'); } catch (_) {}
+      });
+      contents.on('unresponsive', () => {
+        _policyNote(contents.id, 'freeze', 'renderer unresponsive (可 reset_page_state reload=true 自救)');
+      });
+      contents.on('responsive', () => {
+        _policyNote(contents.id, 'freeze', 'renderer responsive again');
+      });
       const pol0 = global.browserPolicy || {};
       if (pol0.enabled !== false && pol0.jsDialog !== 'ask') sapEnsureDialogWatch(contents);
     }

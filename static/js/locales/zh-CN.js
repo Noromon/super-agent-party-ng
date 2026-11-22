@@ -984,6 +984,8 @@ window.lang_zhCN = {
     'browserPolicyFileInput': '页面请求上传文件',
     'browserPolicyJsDialog': '页面弹 alert/confirm',
     'browserPolicyBeforeUnload': '离页确认自动放行',
+    'browserPolicyCrashReload': '页面崩溃自动重载',
+    'browserPolicyCrashReloadHint': '浏览器页面进程崩溃时自动重载一次（30 秒内不重复），并记账供 agent 对账；挂起（无响应）始终只记账。',
     'browserPolicyOptSave': '自动存盘（browser_downloads）',
     'browserPolicyOptCancel': '自动取消（不落盘）',
     'browserPolicyOptAsk': '照常询问（原生对话框）',

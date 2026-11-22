@@ -41,4 +41,4 @@ def test_loadfiles_empty_internal_artifact_rejected():
 
 
 def test_stamp_s238():
-    assert "build=S278" in _read("static", "js", "renderer.js")
+    assert "build=S279" in _read("static", "js", "renderer.js")
