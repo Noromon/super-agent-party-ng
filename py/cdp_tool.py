@@ -790,6 +790,15 @@ async def escape_back():
     return await call_vue_method('escapeBack', [])
 
 
+async def reset_page_state(reload=False):
+    """S277：应急复位——清除当前标签的触摸/移动端/UA/视口仿真残留。
+
+    症状对治：鼠标在浏览器区域变成触摸圆点、单击被吞需要双击、右键菜单消失、
+    滚轮失真——这些都是移动端仿真（CDP Emulation）没复位干净的典型表现。
+    顺带释放被占用的陈旧调试器；reload=true 时复位后重载页面。"""
+    return await call_vue_method('resetPageState', [bool(reload)], timeout=30)
+
+
 _WALL_PAT = re.compile(r"(扫码登录|请先登录|登录后查看|登录后可见|登录查看全部|登录查看更多"
                        r"|please log\s?in|sign\s?in to (view|continue))", re.I)
 
@@ -1388,6 +1397,22 @@ all_cdp_tools = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reset_page_state",
+            "description": ("应急复位当前标签页：清除移动端/触摸/UA/视口仿真残留并释放陈旧调试器。"
+                            "当你发现输入异常（点击需双击、光标变触摸点、滚轮失真、右键菜单消失）或用户抱怨"
+                            "浏览器交互怪异时立即调用；它不影响页面内容，只清仿真状态。reload=true 复位后顺带重载。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reload": {"type": "boolean", "description": "true=复位后重载页面。默认 false。"},
+                },
                 "required": []
             }
         }

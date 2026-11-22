@@ -1,4 +1,4 @@
-# build=S276
+# build=S277
 # S263：mobile touch 仿真复位加固——残留曾致触摸圆点/首击被吞/右键菜单消失/wheel 失真。
 # 根因：desktop off 从不显式关 setEmitTouchEventsForMouse（只靠 detach 隐式清理，
 # detach 可失败），且整套清理被 isAttached&&_sapMobileDbg.has 双条件闸住直接跳过；
@@ -10,8 +10,9 @@ MAIN = (ROOT / "main.js").read_text(encoding="utf-8")
 
 
 def _off_seg():
-    i = MAIN.index("S263: touch 仿真残留事故")
-    return MAIN[i:i + 1400]
+    # S277：OFF 分支复位逻辑收拢进 sapResetEmulation（无条件助手），锚点随迁。
+    i = MAIN.index("async function sapResetEmulation")
+    return MAIN[i:i + 1600]
 
 
 def test_off_disables_emit_touch_explicitly():
@@ -23,10 +24,11 @@ def test_off_disables_emit_touch_explicitly():
 
 def test_off_reset_not_gated_by_set_membership():
     seg = _off_seg()
-    # 复位以 isAttached 为闸，set 成员只决定 detach 归属
-    assert "if (wc.debugger.isAttached())" in seg
-    assert "isAttached() && _sapMobileDbg.has(wcId)" not in seg
-    assert "if (_sapMobileDbg.has(wcId))" in seg
+    # S277 强化：复位不再以"当时恰好 isAttached"为闸——记账命中即可强制补 attach；
+    # 仅"未 attach 且无记账且非 force"（无覆盖可残）才跳过。
+    assert "if (!opts.force && !wasAttached && !known) return" in seg
+    assert "wc.debugger.attach('1.3'); attachedHere = true" in seg
+    assert "if (wc.debugger.isAttached()) {" not in seg
 
 
 def test_wheel_click_attach_uses_separate_set():

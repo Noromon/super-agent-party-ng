@@ -948,6 +948,7 @@
   "resetForm",
   "resetMessage",
   "resetNewMemory",
+  "resetPageState",
   "resetPanelSizes",
   "resetStickerForm",
   "resetTaskForm",

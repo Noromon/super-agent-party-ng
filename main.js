@@ -904,8 +904,101 @@ async function waitForBackend() {
   }
   throw new Error('后端已启动但健康检查响应超时');
 }
+// ---- S277: AI 浏览器行为策略与安全复位（模块级共享：whenReady 回调与事件均在模块求值后运行） ----
+// 根因治理：原生另存为/上传框等系统模态会禁用宿主窗口并挂死 CDP/executeJavaScript，
+// agent 彻底失去页面控制且触摸/输入状态可能永久残留。默认策略直接接管这些事件。
+if (!global.browserPolicy) {
+  global.browserPolicy = { enabled: true, download: 'save', fileInput: 'block', jsDialog: 'dismiss', beforeUnload: true };
+}
+// 自动决策记账（按 webContents 环形≤20 条；S278 browser_policy_report 取走回报给 agent）
+const _policyLog = new Map();
+function _policyNote(wcId, kind, note) {
+  try {
+    if (!wcId) return;
+    let a = _policyLog.get(wcId);
+    if (!a) { a = []; _policyLog.set(wcId, a); }
+    a.push({ ts: Math.round(Date.now() / 1000), kind: String(kind), note: String(note).slice(0, 300) });
+    if (a.length > 20) a.splice(0, a.length - 20);
+  } catch (_) {}
+}
+const _sapSafeName = (n) => (String(n || 'download').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').replace(/^\.+/, '') || 'download').slice(0, 180);
+function _sapUniquePath(dir, name) {
+  const base = _sapSafeName(name);
+  let p = path.join(dir, base);
+  const dot = base.lastIndexOf('.');
+  for (let i = 1; fs.existsSync(p) && i < 1000; i++) {
+    p = dot > 0 ? path.join(dir, base.slice(0, dot) + ' (' + i + ')' + base.slice(dot)) : path.join(dir, base + ' (' + i + ')');
+  }
+  return p;
+}
+// 调试器记账：_sapMobileDbg=移动端仿真来源；_sapInputDbg=wheel/click 临时 attach（S263 分离）。
+// S277 提升到模块级：复位助手与 detach 监听需要跨 whenReady/事件访问。
+const _sapMobileDbg = new Set();
+const _sapInputDbg = new Set();
+// detach 时 Chromium 会隐式清掉全部 CDP 覆盖——只需同步记账；每 wc 只挂一次监听。
+function sapWatchDetach(wc) {
+  if (!wc || wc._sapDetachWatched) return;
+  try {
+    wc._sapDetachWatched = true;
+    wc.debugger.on('detach', () => { _sapMobileDbg.delete(wc.id); _sapInputDbg.delete(wc.id); });
+  } catch (_) {}
+}
+// S277：无条件仿真复位（触摸/emit/视口/UA 覆盖全清）。S263 教训：复位绝不能依赖
+// "当时恰好 attach 且 set 命中"——调试器被 wheel/click 顶替 attach、模态框期间复位失败
+// 都会让触摸仿真永久残留（光标变触摸点、首击被吞）。未 attach 且记账无命中时无覆盖残留，
+// 直接跳过避免无谓 attach；opts.force=应急通道（reset_page_state 工具）无视记账强制清。
+async function sapResetEmulation(wc, wcId, opts) {
+  opts = opts || {};
+  if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+  let wasAttached = false;
+  try { wasAttached = wc.debugger.isAttached(); } catch (_) {}
+  const known = _sapMobileDbg.has(wcId) || _sapInputDbg.has(wcId);
+  if (!opts.force && !wasAttached && !known) return { ok: true, skipped: true };
+  let attachedHere = false;
+  if (!wasAttached) {
+    try { wc.debugger.attach('1.3'); attachedHere = true; sapWatchDetach(wc); } catch (_) { return { ok: false, err: 'devtools-busy' }; }
+  }
+  try {
+    try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false }); } catch (_) {}
+    try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
+    try { await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride'); } catch (_) {}
+    try { await wc.debugger.sendCommand('Emulation.clearUserAgentOverride'); } catch (_) {}
+    if (opts.defaultUA) { try { wc.setUserAgent(''); } catch (_) {} }
+    if (attachedHere || _sapMobileDbg.has(wcId) || (opts.detachInput && _sapInputDbg.has(wcId))) {
+      try { await wc.debugger.detach(); } catch (_) {}
+    }
+    _sapMobileDbg.delete(wcId);
+    _sapInputDbg.delete(wcId);
+    return { ok: true, detached: attachedHere || undefined };
+  } catch (e) {
+    return { ok: false, err: String((e && e.message) || e).slice(0, 140) };
+  }
+}
 // 通用下载处理函数
 function handleDownloadItem(event, item, webContents) {
+  // S277：AI 浏览器（webview guest）下载策略——默认自动存盘/丢弃，永不弹原生另存为框。
+  // 只处置 guest 发起且尚未指定路径的下载；应用自身与已显式设路径的下载零影响。
+  try {
+    const isGuest = webContents && !webContents.isDestroyed() && webContents.getType && webContents.getType() === 'webview';
+    const pol = global.browserPolicy || {};
+    if (isGuest && pol.enabled !== false && !item.getSavePath()) {
+      const act = String(pol.download || 'save');
+      const fname = item.getFilename();
+      if (act === 'cancel') {
+        _policyNote(webContents.id, 'download', 'auto-discarded: ' + fname);
+        item.cancel();
+        return;
+      }
+      if (act === 'save') {
+        const dir = path.join(app.getPath('userData'), 'Super-Agent-Party', 'browser_downloads');
+        try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+        const full = _sapUniquePath(dir, fname);
+        item.setSavePath(full);
+        _policyNote(webContents.id, 'download', 'auto-saved: ' + full);
+      }
+      // act === 'ask' → 维持原生另存为（用户显式选择的现状档）
+    }
+  } catch (_) {}
   // ✅ 修复：直接使用全局定义的 mainWindow，而不是 getAllWindows()[0]
   if (!mainWindow || mainWindow.isDestroyed()) {
       console.log('主窗口不存在或已销毁，无法发送下载状态');
@@ -1257,7 +1350,6 @@ app.whenReady().then(async () => {
     // S229: 内置浏览器移动端仿真（Android Chrome UA + 手机视口 + 触摸）。
     // 优先走 CDP Emulation（真视口/触摸）；调试器被 DevTools 占用时回退为仅 setUA，渲染层会另设 414 宽视口。
     const SAP_MOBILE_UA = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
-    const _sapMobileDbg = new Set();
     ipcMain.handle('set-webview-mobile', async (e, payload) => {
       try {
         const wcId = Number(payload && payload.wcId);
@@ -1267,11 +1359,13 @@ app.whenReady().then(async () => {
         const wc = webContents.fromId(wcId);
         if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
         if (mobile) {
+          let touchOn = false;
           try { wc.setUserAgent(SAP_MOBILE_UA); } catch (_) {}
           try {
             if (!wc.debugger.isAttached()) {
               wc.debugger.attach('1.3');
               _sapMobileDbg.add(wcId);
+              sapWatchDetach(wc);
               wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); });
             }
             await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: SAP_MOBILE_UA, acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8', platform: 'Android' });
@@ -1281,34 +1375,25 @@ app.whenReady().then(async () => {
             try { const _sz = wc.getContentSize(); if (_sz && _sz[1] > 240) _vh = Math.round(_sz[1]); } catch (_) {}
             await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 414, height: _vh, deviceScaleFactor: 0, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
             await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+            touchOn = true;
             try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }); } catch (_) {}
             return { ok: true, cdp: true };
           } catch (ce) {
+            // S277：触摸已开启但后续步骤失败 → 立即全量补偿复位并如实报错，
+            // 杜绝"渲染层以为成功、实际残留触摸态"。未触及触摸的失败仍走 S229 UA 降级。
+            if (touchOn) {
+              try { await sapResetEmulation(wc, wcId, { force: true }); } catch (_) {}
+              try { if (desktopUA) wc.setUserAgent(desktopUA); } catch (_) {}
+              return { ok: false, cdp: false, err: 'emulation-failed-touch-reset: ' + String((ce && ce.message) || ce) };
+            }
             return { ok: true, cdp: false, err: 'emulation-fallback: ' + String((ce && ce.message) || ce) };
           }
         } else {
-          // S263: touch 仿真残留事故（触摸圆点/首击被吞/右键菜单消失/wheel 失真）——
-          // 复位不能依赖 detach 隐式清理或 set 命中（detach 可能因 devtools 忙失败；
-          // set 不命中曾直接跳过整套清理）。只要 attach 着就无条件发全套显式复位，
-          // emitTouchEventsForMouse 必须显式关。detach/清 set 仅对 mobile 来源 attach。
-          try {
-            if (wc.debugger.isAttached()) {
-              try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false }); } catch (_) {}
-              try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
-              try { await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride'); } catch (_) {}
-              try { await wc.debugger.sendCommand('Emulation.clearUserAgentOverride'); } catch (_) {}
-              if (_sapMobileDbg.has(wcId)) {
-                try { await wc.debugger.detach(); } catch (_) {}
-                _sapMobileDbg.delete(wcId);
-              } else if (_sapInputDbg.has(wcId)) {
-                // S263: wheel/click 的临时 attach 桌面模式下无保留价值，顺手释放调试器
-                try { await wc.debugger.detach(); } catch (_) {}
-                _sapInputDbg.delete(wcId);
-              }
-            }
-          } catch (_) {}
+          // S263 → S277：复位改为无条件助手调用（记账命中即可强制补 attach），失败如实
+          // 携带 reset-err 上报渲染层，不再静默吞——触摸残留事故的直接封堵。
+          const rr = await sapResetEmulation(wc, wcId, { detachInput: true });
           try { if (desktopUA) wc.setUserAgent(desktopUA); } catch (_) {}
-          return { ok: true, cdp: false };
+          return { ok: true, cdp: false, reset: rr.ok ? 'ok' : ('reset-failed: ' + (rr.err || '?')) };
         }
       } catch (err) {
         return { ok: false, err: String((err && err.message) || err) };
@@ -1319,9 +1404,9 @@ app.whenReady().then(async () => {
     // 解决 AI 侧 window.scrollBy 滚不动内层容器（如贴吧 uniapp .uni-frs）、el.click()
     // untrusted 卡片无响应的人机差异问题。DevTools 占用调试器时返回 devtools-busy 由渲染层回退。
     const _sapInputErr = (e) => String((e && e.message) || e || '').slice(0, 140);
-    // S263: wheel/click 的临时 attach 用独立集合——混进 _sapMobileDbg 会让 desktop off
-    // 误认 mobile 来源，且原 off 双条件闸不命中时整套复位被跳过（touch 残留事故根因之一）。
-    const _sapInputDbg = new Set();
+    // S263: wheel/click 的临时 attach 用独立集合（_sapInputDbg，S277 起为模块级）——混进
+    // _sapMobileDbg 会让 desktop off 误认 mobile 来源，且原 off 双条件闸不命中时整套复位
+    // 被跳过（touch 残留事故根因之一）。
     ipcMain.handle('cdp-input-wheel', async (e, payload) => {
       try {
         const wcId = Number(payload && payload.wcId);
@@ -1332,7 +1417,7 @@ app.whenReady().then(async () => {
         const dy = Math.round(Number(payload.deltaY) || 300);
         const steps = Math.max(1, Math.min(12, Number(payload.steps) || 6));
         try {
-          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); sapWatchDetach(wc); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
         } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
         const per = Math.round(dy / steps);
         for (let i = 0; i < steps; i++) {
@@ -1352,7 +1437,7 @@ app.whenReady().then(async () => {
         const x = Math.max(0, Math.round(Number(payload.x) || 0));
         const y = Math.max(0, Math.round(Number(payload.y) || 0));
         try {
-          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
+          if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); _sapInputDbg.add(wcId); sapWatchDetach(wc); wc.once('destroyed', () => { _sapInputDbg.delete(wcId); }); }
         } catch (ae) { return { ok: false, err: 'devtools-busy: ' + _sapInputErr(ae) }; }
         const base = { x, y, button: 'left', clickCount: 1 };
         try {
@@ -1362,6 +1447,19 @@ app.whenReady().then(async () => {
         } catch (se) { return { ok: false, err: _sapInputErr(se) }; }
         return { ok: true, x, y };
       } catch (err) { return { ok: false, err: _sapInputErr(err) }; }
+    });
+
+    // S277：应急仿真复位（agent 工具 reset_page_state / 设置页自救按钮共用）。
+    // force：无视记账强制清全套 CDP 覆盖并恢复默认 UA——专治"移动端早已关掉但光标仍是
+    // 触摸点/点击要双击"的残留态。
+    ipcMain.handle('webview-emulation-reset', async (e, wcId) => {
+      try {
+        const id = Number(wcId);
+        if (!id) return { ok: false, err: 'no-wcid' };
+        const wc = webContents.fromId(id);
+        if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+        return await sapResetEmulation(wc, id, { force: true, defaultUA: true, detachInput: true });
+      } catch (err) { return { ok: false, err: String((err && err.message) || err) }; }
     });
 
     // 添加获取端口信息的 IPC 处理

@@ -106,6 +106,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // S254: CDP 真输入事件（isTrusted wheel/click，命中测试路由=与人手等价）
   cdpInputWheel: (payload) => ipcRenderer.invoke('cdp-input-wheel', payload),
   cdpInputClick: (payload) => ipcRenderer.invoke('cdp-input-click', payload),
+  emulationReset: (wcId) => ipcRenderer.invoke('webview-emulation-reset', wcId),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
   // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈

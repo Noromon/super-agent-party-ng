@@ -722,16 +722,20 @@ Object.assign(vue_methods, {
                 res = { ok: false, err: 'no-ipc-bridge' };
             }
         } catch (e) { res = { ok: false, err: String((e && e.message) || e) }; }
-        if (tab) tab.mobile = !!enable;
+        // S277：主进程报 ok:false（触摸已开但仿真半失败，主进程已强制复位）→ 渲染层同步
+        // 回滚为桌面，杜绝"开关以为开了、实际 CDP 已被清"的不一致残留态。
+        const applied = !(res && res.ok === false);
+        if (tab) tab.mobile = !!enable && applied;
         try {
-            if (enable) { wv.style.flex = '0 1 414px'; wv.style.width = '414px'; wv.style.alignSelf = 'center'; }
+            if (enable && applied) { wv.style.flex = '0 1 414px'; wv.style.width = '414px'; wv.style.alignSelf = 'center'; }
             else { wv.style.flex = ''; wv.style.width = ''; wv.style.alignSelf = ''; }
         } catch (e) {}
-        if (reload !== false) { try { wv.reload(); } catch (e) {} }
+        if (applied && reload !== false) { try { wv.reload(); } catch (e) {} }
+        if (!applied) return 'mobile ' + (enable ? 'ON' : 'OFF') + ' failed: ' + ((res && res.err) || 'unknown') + '（已回滚为桌面模式）';
         const how = (res && res.cdp) ? 'CDP' : 'UA/viewport';
         let out = (enable ? 'mobile ON' : 'mobile OFF') + ' [' + how + ']';
-        if (res && res.ok === false) out += ' (degraded: ' + (res.err || '') + ')';
-        else if (res && res.cdp === false && enable) out += ' (emulation limited: UA/viewport only)';
+        if (res && res.cdp === false && enable) out += ' (emulation limited: UA/viewport only)';
+        else if (res && res.reset && res.reset !== 'ok') out += ' (warn: ' + res.reset + '，可用 reset_page_state 应急复位)';
         return out;
     },
 

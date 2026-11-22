@@ -4,6 +4,23 @@
 const WALLS_SEL = '[class*=open-app],[class*=openapp],[class*=callapp],[class*=call-native],[class*=call_native],[class*=download-app],[class*=downloadapp],[class*=app-download],[class*=app-banner],[class*=appopen],[class*=OpenApp],[class*=AppDownload],[class*=AppBanner],[class*=login-mask],[class*=loginMask],[class*=LoginMask],[id*=loginbox],[class*=scan-login],[class*=scanlogin],[class*=qrcode-login],[class*=QRLogin],[class*=modal-backdrop],[class*=interstitial],[class*=downloadTop],[id*=downloadTop]';
 // S230：软档反广告选择器上提为常量，_applyAdblock 与 getPageHtml（markdown 路径）共用。
 const AD_SOFT_SEL = '#onetrust-consent-sdk,#onetrust-banner-sdk,#onetrust-popup,.qc-cmp2-container,#cmpwrapper,#cookie-banner,#cookieConsent,.cookie-consent,.cookie-banner,[id^="didomi-"],#didomi-host,#didomi-consent,.adns-popup,.adns-overlay,iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adservice"],iframe[src*="amazon-adsystem"],ins.adsbygoogle,.adsbygoogle,div[id^="google_ads_"],div[class*="ad-slot"],[aria-label="Advertisement"]';
+// S277：CDP 输入 IPC 超时护栏。原生模态框（另存为/上传框）会禁用宿主窗口并使
+// cdp-input-* 的 invoke 无限悬挂；不加守卫则滚动/点击第一通道卡死整条 promise 链
+// （30s 后端超时），JS 回退通道永远轮不到。返回值恒为对象（超时/异常 → ok:false），
+// 调用方按 falsy 走回退。window.__SAP_INPUT_TMO 可整体调低（行为测试用）。
+function _inputTmo(p, ms) {
+  let lim = Math.max(50, Number(ms) || 1500);
+  try { const o = Number(window.__SAP_INPUT_TMO); if (o > 0) lim = Math.max(20, o); } catch (e) {}
+  return new Promise((res) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; res({ ok: false, err: 'input-timeout' }); } }, lim);
+    Promise.resolve(p).then((r) => {
+      if (!done) { done = true; clearTimeout(t); res(r && typeof r === 'object' ? r : { ok: false, err: 'input-null-resp' }); }
+    }, (e) => {
+      if (!done) { done = true; clearTimeout(t); res({ ok: false, err: String((e && e.message) || e) }); }
+    });
+  });
+}
 Object.assign(vue_methods, {
 
     // S106: guest 端结果截断网关。MB 级页面内容原样回传宿主时，DOMWebSocket
@@ -1098,7 +1115,8 @@ Object.assign(vue_methods, {
         try { pos0 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || pos0; } catch (e) {}
         if (api.cdpInputWheel && wcId) {
             try {
-                const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 });
+                // S277：探测必须限时——弹窗期间该 IPC 会永挂，无限 await 会吞掉全部 JS 回退。
+                const r = await _inputTmo(api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 }), 1200);
                 await sleep(450);
                 const pos1 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || {};
                 if (r && r.ok && Math.abs((pos1.p || 0) - (pos0.p || 0)) > 8) mode = "wheel";
@@ -1112,7 +1130,7 @@ Object.assign(vue_methods, {
         }
         const doScroll = async () => {
             if (mode === "wheel") {
-                try { const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }); if (r && r.ok) return; } catch (e) {}
+                try { const r = await _inputTmo(api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }), 2500); if (r && r.ok) return; } catch (e) {}
                 mode = "container";
             }
             if (mode === "container") {
@@ -1157,7 +1175,7 @@ Object.assign(vue_methods, {
         };
         const trustedOrSyntheticClick = async (x, y) => {
             if (api.cdpInputClick && wcId && x > 0 && y > 0) {
-                try { const r = await api.cdpInputClick({ wcId, x, y }); if (r && r.ok) return "trusted"; } catch (e) {}
+                try { const r = await _inputTmo(api.cdpInputClick({ wcId, x, y }), 3000); if (r && r.ok) return "trusted"; } catch (e) {}
             }
             try { await this._wvExec(wv, "(function(){try{window.__sapInner&&window.__sapInner.click();}catch(e){}})()"); } catch (e) {}
             return "synthetic";
@@ -1290,6 +1308,28 @@ Object.assign(vue_methods, {
         return JSON.stringify({ collected: items.length, rounds: roundsUsed, stop_reason: stop, scroller_mode: sc.mode, cards_last_scan: lastCards, exec_err: execErr || undefined, items: items });
     },
 
+    // S277：应急复位——清除当前标签的触摸/移动端/UA/视口仿真残留（专治"光标变触摸点、
+    // 点击需双击"）。主进程 force 清全套 CDP 覆盖并恢复默认 UA；渲染层同步 tab.mobile
+    // 与 414px 收窄样式。reload=true 时顺带重载页面（默认否，先救输入再决定要不要刷页面）。
+    async resetPageState(reload) {
+        const wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        let wcId = 0; try { wcId = wv.getWebContentsId(); } catch (e) {}
+        if (!wcId) return "Error: could not resolve webContents id";
+        const api = window.electronAPI || {};
+        if (!api.emulationReset) return "Error: emulation reset bridge unavailable";
+        let r = {};
+        try { r = (await _inputTmo(api.emulationReset(wcId), 8000)) || {}; } catch (e) { r = { ok: false, err: String((e && e.message) || e) }; }
+        if (!r.ok) return "reset_page_state failed: " + (r.err || "unknown") + "（DevTools 可能占用调试器：关闭 DevTools 后重试）";
+        try {
+            const tab = (this.browserTabs || []).find(t => t.id === this.currentTabId);
+            if (tab && tab.mobile) tab.mobile = false;
+            wv.style.flex = ''; wv.style.width = ''; wv.style.alignSelf = '';
+        } catch (e) {}
+        if (reload === true || reload === "true") { try { wv.reload(); } catch (e) {} }
+        return "reset_page_state: touch/UA/viewport emulation cleared" + (reload ? " + reloaded" : "") + "（如页面外观仍是移动版，reload 后生效）";
+    },
+
     // S269：collectList 专用滚动器——通道探测与 scrollAndFind 同款：
     // 真轮(CDP isTrusted)优先 → 内层最大可滚容器(打标 data-sap-sc) → window 兜底。
     async _makeScroller(wv) {
@@ -1318,7 +1358,8 @@ Object.assign(vue_methods, {
         try { pos0 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || pos0; } catch (e) {}
         if (api.cdpInputWheel && wcId) {
             try {
-                const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 });
+                // S277：限时探测（同 scrollAndFind），悬挂时立即落到 JS 滚动阶梯。
+                const r = await _inputTmo(api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: 480, steps: 4 }), 1200);
                 await sleep(450);
                 const pos1 = JSON.parse(await this._wvExec(wv, posExpr) || "{}") || {};
                 if (r && r.ok && Math.abs((pos1.p || 0) - (pos0.p || 0)) > 8) sc.mode = "wheel";
@@ -1332,7 +1373,7 @@ Object.assign(vue_methods, {
         }
         sc.scrollOnce = async () => {
             if (sc.mode === "wheel") {
-                try { const r = await api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }); if (r && r.ok) return; } catch (e) {}
+                try { const r = await _inputTmo(api.cdpInputWheel({ wcId, x: cx, y: cy, deltaY: stepPx, steps: 4 }), 2500); if (r && r.ok) return; } catch (e) {}
                 sc.mode = "container";
             }
             if (sc.mode === "container") {
