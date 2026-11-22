@@ -133,12 +133,28 @@ async def backup_list() -> dict:
 
 
 @router.post("/api/backup/now")
-async def backup_now() -> dict:
-    from py.data_backup import snapshot_data_dir
-    cur_settings = await load_settings()
-    include = bool(((cur_settings.get("systemSettings") or {}).get("backupIncludeUploads")
-                    or cur_settings.get("backupIncludeUploads") or False))
-    return await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include, 0.0)
+async def backup_now(body: dict = Body(default=None)) -> dict:
+    """S280：手动快照。body {include:[内容项id...]} 裁剪构成，缺省=全选；
+    trigger=manual → 永久保留，不参与自动修剪。"""
+    from py.data_backup import BACKUP_ITEM_IDS, snapshot_data_dir
+    sel = (body or {}).get("include") if isinstance(body, dict) else None
+    if sel is None:
+        include = list(BACKUP_ITEM_IDS)
+    elif isinstance(sel, list):
+        include = [str(x) for x in sel if str(x) in BACKUP_ITEM_IDS]
+        if not include:
+            raise HTTPException(status_code=400, detail="include 为空或全部非法内容项")
+    else:
+        raise HTTPException(status_code=400, detail="include 需为内容项 id 数组")
+    return await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, True, 0.0,
+                                   None, "manual", include)
+
+
+@router.get("/api/backup/estimate")
+async def backup_estimate() -> dict:
+    """S280：备份内容构成与占地评估（按项实时字节/文件数 + 预计合计 + 磁盘余量）。"""
+    from py.data_backup import estimate_sizes
+    return await asyncio.to_thread(estimate_sizes, USER_DATA_DIR)
 
 
 @router.post("/api/backup/verify")

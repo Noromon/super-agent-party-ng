@@ -1,4 +1,4 @@
-# build=S279
+# build=S280
 # S267 备份加固审计：diary/ext 曾不在快照核心目录、.txt 不在扩展白名单
 # （tool_output_workspaces.txt 漏备）、uploaded_files 默认不入快照（用户资产
 # 唯一副本裸奔）、transfer 导入按死上限截断、notification FIFO 200 偏短。
@@ -23,9 +23,13 @@ def test_txt_sources_included_and_copied():
 
 
 def test_snapshot_uploads_default_true_when_unset():
-    i = SERVER.index("S267: uploaded_files 是用户资产唯一副本")
-    seg = SERVER[i:i + 500]
+    # S280 后启动构成由 backupAutoItems 解析，但未配置任何键时的缺省仍必须纳入
+    # 上传文件（S267 语义延续：uploaded_files 是用户资产唯一副本）
+    i = SERVER.index("S280: 自动备份构成")
+    seg = SERVER[i:i + 900]
     assert "_raw_inc is not None else True" in seg
+    assert 'x != "uploads"' in seg
+    assert "backupAutoItems" in seg
 
 
 def test_legacy_false_migrated_once():

@@ -909,16 +909,22 @@ async def lifespan(app: FastAPI):
     # --- [M4-lite: 启动数据快照（滚动5份、1h 节流、失败不阻塞启动）] ---
     async def _startup_snapshot():
         try:
-            from py.data_backup import snapshot_data_dir
-            # 开关持久化域=systemSettings 子对象（前端开关所在层），兼容顶层旧写法
+            from py.data_backup import BACKUP_ITEM_IDS, snapshot_data_dir
+            # S280: 自动备份构成 = systemSettings.backupAutoItems；未配置时按旧开关
+            # backupIncludeUploads 推导（False→排除上传文件），缺省全选（S267 语义延续）
             _s = settings or {}
-            # S267: uploaded_files 是用户资产唯一副本（历史附图/生成物/正文落盘），
-            # 未显式配置时默认纳入快照；显式 True/False 一律优先。
-            _raw_inc = ((_s.get("systemSettings") or {}).get("backupIncludeUploads"))
-            if _raw_inc is None:
-                _raw_inc = _s.get("backupIncludeUploads")
-            include = bool(_raw_inc) if _raw_inc is not None else True
-            res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, include)
+            _auto = ((_s.get("systemSettings") or {}).get("backupAutoItems"))
+            if _auto is None:
+                _auto = _s.get("backupAutoItems")
+            include = [x for x in (_auto or []) if x in BACKUP_ITEM_IDS]
+            if not include:
+                _raw_inc = ((_s.get("systemSettings") or {}).get("backupIncludeUploads"))
+                if _raw_inc is None:
+                    _raw_inc = _s.get("backupIncludeUploads")
+                inc_up = bool(_raw_inc) if _raw_inc is not None else True
+                include = list(BACKUP_ITEM_IDS) if inc_up else [x for x in BACKUP_ITEM_IDS if x != "uploads"]
+            res = await asyncio.to_thread(snapshot_data_dir, USER_DATA_DIR, 5, True,
+                                          3600.0, None, "auto", include)
             if res.get("ok"):
                 logging.getLogger("app").info(f"[Backup] 启动快照完成: {os.path.basename(res.get('snap', ''))} ({res.get('files')} 文件 / {res.get('bytes')} B)")
             elif res.get("skipped"):

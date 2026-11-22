@@ -240,8 +240,10 @@ class TestC5C15Pins:
         assert '"X-Stream-Id"' in SRC
 
     def test_backup_toggle_domain_consistency(self):
-        # Data Guard switch persists under systemSettings (frontend domain);
-        # both backend readers (startup snapshot in server + backup_now in the
-        # status router since the R1 migration) must read it there
-        both = SRC + (ROOT / "py" / "routers" / "status.py").read_text(encoding="utf-8")
-        assert both.count('("systemSettings") or {}).get("backupIncludeUploads"') >= 2
+        # S280: 手动快照的构成随请求 body 直传（后端不再读键）；自动快照两个设置键
+        # （主键 backupAutoItems / 遗留键 backupIncludeUploads）都必须读
+        # systemSettings 域（前端持久化域），顶层旧写法仅作兼容回退
+        assert '("systemSettings") or {}).get("backupAutoItems"' in SRC
+        assert '("systemSettings") or {}).get("backupIncludeUploads"' in SRC
+        status_src = (ROOT / "py" / "routers" / "status.py").read_text(encoding="utf-8")
+        assert '(body or {}).get("include")' in status_src
