@@ -1,4 +1,4 @@
-# build=S277
+# build=S278
 # S257：network_watch read 返回必须压在 S184 工具输出限额（20000B）之下——曾被
 # _bound_tool_output 截断成 .agent/tool_output 相对路径 marker，把 body_url 引用一起弄丢
 # （agent 三轮反馈"body_url 是相对路径"的真因）。落盘条目另附本地 body_path（免 token）。

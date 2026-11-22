@@ -1,6 +1,6 @@
 // S100: 代码身份回显——终端 [Version](static 指纹) + 本行([Probe]) 两线对照即证明
 // 加载的就是当前仓库前端（曾有整轮修复因"运行的哪份代码存疑"而空转）。
-console.warn('[Probe] renderer build=S277 loaded');
+console.warn('[Probe] renderer build=S278 loaded');
 
 // S103: 长任务归因探针（临时取证，凶手落网后拆）——LoAF 只报
 // TimerHandler:setTimeout@:?:? 匿名归属，无法点名。包装 setTimeout：
@@ -817,6 +817,17 @@ const app = Vue.createApp({
     };
     _pushGuardFlag();
     setTimeout(_pushGuardFlag, 2000);
+
+    // S278：AI 浏览器行为策略同步主进程（同款双推：立即 + 设置加载后）
+    const _pushBrowserPolicy = () => {
+      try {
+        if (window.electronAPI && window.electronAPI.setBrowserPolicy) {
+          window.electronAPI.setBrowserPolicy(JSON.parse(JSON.stringify(this.browserPolicySettings || {})));
+        }
+      } catch (e) {}
+    };
+    _pushBrowserPolicy();
+    setTimeout(_pushBrowserPolicy, 2000);
 
     window.handleToolApproval = (toolCallId, action) => {
         console.log('Global approval triggered:', toolCallId, action); // 调试日志

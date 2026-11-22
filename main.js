@@ -909,6 +909,17 @@ async function waitForBackend() {
 // agent 彻底失去页面控制且触摸/输入状态可能永久残留。默认策略直接接管这些事件。
 if (!global.browserPolicy) {
   global.browserPolicy = { enabled: true, download: 'save', fileInput: 'block', jsDialog: 'dismiss', beforeUnload: true };
+  // S278：启动时合并用户持久化（config.json browserPolicySettings，由 set-browser-policy IPC 写入）
+  try {
+    const saved = (typeof globalConfig === 'object' && globalConfig) ? globalConfig.browserPolicySettings : null;
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.enabled === 'boolean') global.browserPolicy.enabled = saved.enabled;
+      if (['save', 'cancel', 'ask'].includes(saved.download)) global.browserPolicy.download = saved.download;
+      if (['block', 'ask'].includes(saved.fileInput)) global.browserPolicy.fileInput = saved.fileInput;
+      if (['dismiss', 'accept', 'ask'].includes(saved.jsDialog)) global.browserPolicy.jsDialog = saved.jsDialog;
+      if (typeof saved.beforeUnload === 'boolean') global.browserPolicy.beforeUnload = saved.beforeUnload;
+    }
+  } catch (_) {}
 }
 // 自动决策记账（按 webContents 环形≤20 条；S278 browser_policy_report 取走回报给 agent）
 const _policyLog = new Map();
@@ -973,6 +984,64 @@ async function sapResetEmulation(wc, wcId, opts) {
   } catch (e) {
     return { ok: false, err: String((e && e.message) || e).slice(0, 140) };
   }
+}
+// ---- S278：JS 弹窗策略执行（CDP Page 域主管；attach 失败退 Electron 事件兜底=只关不确认）----
+// 主管原因：Electron 的 javascript-dialog-opening 只能 cancel（关），无法"确认"；accept 语义
+// 必须 CDP Page.handleJavaScriptDialog。代价：watch 期间 guest 调试器被占用（DevTools 互斥），
+// 策略改为"询问"或总开关关时自动 Page.disable+detach 释放。
+const _sapDlgDbg = new Map(); // wcId -> { attachedHere }
+async function sapEnsureDialogWatch(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  const id = wc.id;
+  if (_sapDlgDbg.has(id)) return;
+  try {
+    const rec = { attachedHere: false };
+    if (!wc.debugger.isAttached()) {
+      wc.debugger.attach('1.3');
+      rec.attachedHere = true;
+      sapWatchDetach(wc);
+    }
+    _sapDlgDbg.set(id, rec);
+    if (!wc._sapDlgMsg) {
+      wc._sapDlgMsg = true;
+      wc.debugger.on('message', (event, method, params) => {
+        if (method !== 'Page.javascriptDialogOpening') return;
+        const pol = global.browserPolicy || {};
+        if (pol.enabled === false || pol.jsDialog === 'ask') return;
+        const accept = pol.jsDialog === 'accept';
+        const type = String((params && params.type) || '');
+        try { wc.debugger.sendCommand('Page.handleJavaScriptDialog', { accept, promptText: '' }).catch(() => {}); } catch (_) {}
+        _policyNote(id, 'jsdialog', (accept ? 'auto-confirmed ' : 'auto-closed ') + type + ': ' + String((params && params.message) || '').slice(0, 80));
+      });
+    }
+    await wc.debugger.sendCommand('Page.enable');
+  } catch (_) { _sapDlgDbg.delete(id); }
+}
+function sapDropDialogWatch(wc) {
+  if (!wc || wc.isDestroyed()) return;
+  const rec = _sapDlgDbg.get(wc.id);
+  if (!rec) return;
+  _sapDlgDbg.delete(wc.id);
+  try { wc.debugger.sendCommand('Page.disable').catch(() => {}); } catch (_) {}
+  if (rec.attachedHere) {
+    // 若 wheel/click/mobile 还记账着这份 attach，则只关 Page 域不 detach
+    if (!_sapMobileDbg.has(wc.id) && !_sapInputDbg.has(wc.id)) {
+      try { wc.debugger.detach(); } catch (_) {}
+    }
+  }
+}
+function sapReconcileDialogWatch() {
+  const pol = global.browserPolicy || {};
+  const want = pol.enabled !== false && pol.jsDialog !== 'ask';
+  try {
+    webContents.getAllWebContents().forEach((wc) => {
+      try {
+        if (!wc || wc.isDestroyed() || !wc.getType || wc.getType() !== 'webview') return;
+        if (want) { if (!_sapDlgDbg.has(wc.id)) sapEnsureDialogWatch(wc); }
+        else if (_sapDlgDbg.has(wc.id)) sapDropDialogWatch(wc);
+      } catch (_) {}
+    });
+  } catch (_) {}
 }
 // 通用下载处理函数
 function handleDownloadItem(event, item, webContents) {
@@ -1250,6 +1319,20 @@ app.whenReady().then(async () => {
             console.log('捕获到下载请求 (来自 Webview/Session):', item.getFilename());
             handleDownloadItem(event, item, webContents);
         });
+        // S278：权限请求显式化——行为与 Electron 默认一致（一律拒绝），但对 AI 浏览器
+        // guest 的请求额外记账，让 agent 通过 browser_policy_report 知道"页面要过权限被拒"。
+        try {
+            sess.setPermissionRequestHandler((wc, permission, callback, details) => {
+                try {
+                    if (wc && !wc.isDestroyed() && wc.getType && wc.getType() === 'webview'
+                        && (global.browserPolicy || {}).enabled !== false) {
+                        _policyNote(wc.id, 'permission', 'denied: ' + String(permission || '')
+                            + (details && details.requestingUrl ? ' <- ' + String(details.requestingUrl).slice(0, 80) : ''));
+                    }
+                } catch (_) {}
+                callback(false);
+            });
+        } catch (_) {}
     });
     session.defaultSession.on('will-download', (event, item, webContents) => {
         console.log('捕获到下载请求 (来自主窗口):', item.getFilename());
@@ -1460,6 +1543,40 @@ app.whenReady().then(async () => {
         if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
         return await sapResetEmulation(wc, id, { force: true, defaultUA: true, detachInput: true });
       } catch (err) { return { ok: false, err: String((err && err.message) || err) }; }
+    });
+
+    // S278：行为策略热更新 + 持久化（渲染层设置页调用；config.json 落盘供下次启动）
+    ipcMain.handle('set-browser-policy', (e, raw) => {
+      try {
+        const pol = global.browserPolicy;
+        const o = (raw && typeof raw === 'object') ? raw : {};
+        pol.enabled = o.enabled !== false;
+        pol.download = ['save', 'cancel', 'ask'].includes(o.download) ? o.download : 'save';
+        pol.fileInput = ['block', 'ask'].includes(o.fileInput) ? o.fileInput : 'block';
+        pol.jsDialog = ['dismiss', 'accept', 'ask'].includes(o.jsDialog) ? o.jsDialog : 'dismiss';
+        pol.beforeUnload = o.beforeUnload !== false;
+        try {
+          saveEnvVariable('browserPolicySettings', { enabled: pol.enabled, download: pol.download, fileInput: pol.fileInput, jsDialog: pol.jsDialog, beforeUnload: pol.beforeUnload });
+        } catch (_) {}
+        sapReconcileDialogWatch();
+        return true;
+      } catch (err) { console.error('set-browser-policy failed:', err); return false; }
+    });
+
+    // S278：取走并清空某 guest 的自动决策记账（browser_policy_report 工具后端）
+    ipcMain.handle('policy-take', (e, wcId) => {
+      try {
+        const id = Number(wcId) || 0;
+        if (!id) {
+          const all = [];
+          _policyLog.forEach((arr, k) => { arr.forEach((x) => all.push(Object.assign({ wc: k }, x))); });
+          _policyLog.clear();
+          return all;
+        }
+        const a = _policyLog.get(id) || [];
+        _policyLog.delete(id);
+        return a;
+      } catch (_) { return []; }
     });
 
     // 添加获取端口信息的 IPC 处理
@@ -3108,6 +3225,37 @@ setupRedirectGuard();
 // });
 
 app.on('web-contents-created', (event, contents) => {
+  // S278：AI 浏览器 guest 的失控事件策略化处置（上传框/离页确认/JS 弹窗），全部记账回报。
+  try {
+    if (contents.getType && contents.getType() === 'webview') {
+      contents.on('file-input', (ev) => {
+        const pol = global.browserPolicy || {};
+        if (pol.enabled !== false && pol.fileInput === 'block') {
+          try { ev.preventDefault(); } catch (_) {}
+          _policyNote(contents.id, 'fileinput', 'file picker auto-blocked (需人工上传时请用户操作或改用 fill)');
+        }
+      });
+      contents.on('will-prevent-unload', (ev) => {
+        const pol = global.browserPolicy || {};
+        if (pol.enabled !== false && pol.beforeUnload) {
+          try { ev.allow(); } catch (_) {}
+          _policyNote(contents.id, 'unload', 'beforeunload auto-allowed (放行离页)');
+        }
+      });
+      // CDP watch 未建立（devtools 忙等）时的兜底：只能自动关闭（confirm 视作取消）
+      contents.on('javascript-dialog-opening', (ev) => {
+        const pol = global.browserPolicy || {};
+        if (pol.enabled === false || pol.jsDialog === 'ask') return;
+        if (_sapDlgDbg.has(contents.id)) return; // CDP 主管中
+        try { ev.cancel(); } catch (_) {}
+        _policyNote(contents.id, 'jsdialog', 'auto-closed(fallback) ' + String(ev.type || '') + ': ' + String(ev.messageText || ev.message || '').slice(0, 80));
+      });
+      contents.once('destroyed', () => { _sapDlgDbg.delete(contents.id); });
+      const pol0 = global.browserPolicy || {};
+      if (pol0.enabled !== false && pol0.jsDialog !== 'ask') sapEnsureDialogWatch(contents);
+    }
+  } catch (_) {}
+
   // 拦截所有新窗口请求（包括 <webview> 内部的 window.open 和 target="_blank"）
   contents.setWindowOpenHandler((details) => {
     const { url } = details;

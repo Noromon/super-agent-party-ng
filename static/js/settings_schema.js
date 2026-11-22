@@ -61,6 +61,7 @@
     ['ocSettings', 'ocSettings'],
     ['HASettings', 'HASettings'],
     ['chromeMCPSettings', 'chromeMCPSettings'],
+    ['browserPolicySettings', 'browserPolicySettings'],
     ['sqlSettings', 'sqlSettings'],
     ['KBSettings', 'KBSettings'],
     ['textFiles', 'textFiles'],

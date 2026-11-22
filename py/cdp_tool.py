@@ -795,8 +795,18 @@ async def reset_page_state(reload=False):
 
     症状对治：鼠标在浏览器区域变成触摸圆点、单击被吞需要双击、右键菜单消失、
     滚轮失真——这些都是移动端仿真（CDP Emulation）没复位干净的典型表现。
-    顺带释放被占用的陈旧调试器；reload=true 时复位后重载页面。"""
+    顺带释放被占用的陈旧调试器；    reload=true 时复位后重载页面。"""
     return await call_vue_method('resetPageState', [bool(reload)], timeout=30)
+
+
+async def browser_policy_report(page_index=None):
+    """S278：取回并清空本标签的"行为策略自动决策"记账。
+
+    当下载被自动存盘/丢弃、上传对话框被拦、alert/confirm 被自动处置、beforeunload
+    被放行、权限被拒时，主进程都会记一笔。这些事件不会打断你的操作流，但可能改变
+    页面预期状态——怀疑"点了没反应/东西去哪了"时调用本工具对账。读了就消。"""
+    args = [] if page_index in (None, "") else [int(page_index)]
+    return await call_vue_method('browserPolicyReport', args, timeout=30)
 
 
 _WALL_PAT = re.compile(r"(扫码登录|请先登录|登录后查看|登录后可见|登录查看全部|登录查看更多"
@@ -1412,6 +1422,22 @@ all_cdp_tools = [
                 "type": "object",
                 "properties": {
                     "reload": {"type": "boolean", "description": "true=复位后重载页面。默认 false。"},
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_policy_report",
+            "description": ("取回并清空当前标签页的行为策略自动决策记账：下载自动存盘/丢弃、上传框拦截、"
+                            "JS 弹窗处置、离页放行、权限拒绝都会留一笔。当页面行为与你预期不符（下载没弹框、"
+                            "上传点了没反应、确认框自己消失了）时先调本工具对账，再决定下一步。"),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page_index": {"type": "integer", "description": "可选：list_pages 的页序号；缺省=当前活动标签。"},
                 },
                 "required": []
             }

@@ -1,4 +1,4 @@
-# build=S277
+# build=S278
 # S275：窥屏预热冷静期——开启后前 N 秒整帧跳过（不截图/不评估/不发言）；
 # start、enabled 上升沿、warmupEnabled 上升沿均重置计时；关闭期间不计时。
 import asyncio

@@ -18,6 +18,12 @@ Object.assign(vue_methods, {
     async autoSaveSettings() {
       if (this.isElectron) {
         await window.electronAPI.saveChromeSettings(JSON.parse(JSON.stringify(this.chromeMCPSettings)));
+        // S278：行为策略随设置保存同步到主进程（下载/上传框/JS弹窗/离页）
+        try {
+          if (window.electronAPI.setBrowserPolicy) {
+            window.electronAPI.setBrowserPolicy(JSON.parse(JSON.stringify(this.browserPolicySettings || {})));
+          }
+        } catch (e) {}
       }
       return new Promise((resolve, reject) => {
         this.ensureConversationGroups();

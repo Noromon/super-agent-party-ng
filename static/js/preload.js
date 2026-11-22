@@ -107,6 +107,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cdpInputWheel: (payload) => ipcRenderer.invoke('cdp-input-wheel', payload),
   cdpInputClick: (payload) => ipcRenderer.invoke('cdp-input-click', payload),
   emulationReset: (wcId) => ipcRenderer.invoke('webview-emulation-reset', wcId),
+  setBrowserPolicy: (obj) => ipcRenderer.invoke('set-browser-policy', obj),
+  browserPolicyTake: (wcId) => ipcRenderer.invoke('policy-take', wcId),
   //重启app
   restartApp: () => ipcRenderer.invoke('restart-app'),
   // S104: 渲染侧饥饿自证——心跳检测到主线程被长任务冻结时请主进程当场抓断点栈

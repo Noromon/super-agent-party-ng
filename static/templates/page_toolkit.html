@@ -474,6 +474,39 @@
                           <span class="form-tip" style="font-size: 12px; color: #909399;">{{ t('chromeMCPGuardHint') }}</span>
                         </div>
                       </el-form-item>
+                      <!-- S278：AI 浏览器行为策略——下载/上传框/JS弹窗/离页的系统级事件不再打断 agent -->
+                      <el-divider content-position="left" style="margin: 14px 0 8px;"><span style="font-size: 12px; color: #909399;">{{ t('browserPolicyTitle') }}</span></el-divider>
+                      <el-form-item :label="t('browserPolicyEnabled')" class="form-item-align" label-position="left">
+                        <div class="d-flex align-items-center gap-2" style="flex-wrap: wrap;">
+                          <el-switch :model-value="browserPolicySettings.enabled !== false" @change="v => { browserPolicySettings.enabled = v; autoSaveSettings(); }"/>
+                          <span class="form-tip" style="font-size: 12px; color: #909399;">{{ t('browserPolicyNote') }}</span>
+                        </div>
+                      </el-form-item>
+                      <template v-if="browserPolicySettings.enabled !== false">
+                        <el-form-item :label="t('browserPolicyDownload')" class="form-item-align" label-position="left">
+                          <el-select v-model="browserPolicySettings.download" style="width: 220px;" @change="autoSaveSettings">
+                            <el-option :label="t('browserPolicyOptSave')" value="save"></el-option>
+                            <el-option :label="t('browserPolicyOptCancel')" value="cancel"></el-option>
+                            <el-option :label="t('browserPolicyOptAsk')" value="ask"></el-option>
+                          </el-select>
+                        </el-form-item>
+                        <el-form-item :label="t('browserPolicyFileInput')" class="form-item-align" label-position="left">
+                          <el-select v-model="browserPolicySettings.fileInput" style="width: 220px;" @change="autoSaveSettings">
+                            <el-option :label="t('browserPolicyOptBlock')" value="block"></el-option>
+                            <el-option :label="t('browserPolicyOptAsk')" value="ask"></el-option>
+                          </el-select>
+                        </el-form-item>
+                        <el-form-item :label="t('browserPolicyJsDialog')" class="form-item-align" label-position="left">
+                          <el-select v-model="browserPolicySettings.jsDialog" style="width: 220px;" @change="autoSaveSettings">
+                            <el-option :label="t('browserPolicyOptDismiss')" value="dismiss"></el-option>
+                            <el-option :label="t('browserPolicyOptAccept')" value="accept"></el-option>
+                            <el-option :label="t('browserPolicyOptAsk')" value="ask"></el-option>
+                          </el-select>
+                        </el-form-item>
+                        <el-form-item :label="t('browserPolicyBeforeUnload')" class="form-item-align" label-position="left">
+                          <el-switch :model-value="browserPolicySettings.beforeUnload !== false" @change="v => { browserPolicySettings.beforeUnload = v; autoSaveSettings(); }"/>
+                        </el-form-item>
+                      </template>
                       <el-alert type="info" :closable="false" class="mb-2" v-if="chromeMCPSettings.type=='external'">
                         <div class="alert-content">
                           {{ t('browserNotice6') }}

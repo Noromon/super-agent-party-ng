@@ -1330,6 +1330,33 @@ Object.assign(vue_methods, {
         return "reset_page_state: touch/UA/viewport emulation cleared" + (reload ? " + reloaded" : "") + "（如页面外观仍是移动版，reload 后生效）";
     },
 
+    // S278：取回本标签的自动决策记账并清空（下载接管/上传框拦截/弹窗处置/离页放行/权限拒绝）。
+    // 语义同 check_redirect：读了就消，之后新事件再累积。pageIndex 可选（缺省=当前活动标签）。
+    async browserPolicyReport(pageIndex) {
+        let wv = null;
+        try {
+            const idx = parseInt(pageIndex);
+            if (!isNaN(idx)) {
+                const tab = (this.browserTabs || [])[idx];
+                if (tab) wv = this.getWebview(tab.id);
+            }
+        } catch (e) {}
+        if (!wv) wv = this.getWebview();
+        if (!wv) return "Error: No active webview";
+        let wcId = 0; try { wcId = wv.getWebContentsId(); } catch (e) {}
+        if (!wcId) return "Error: could not resolve webContents id";
+        const api = window.electronAPI || {};
+        if (!api.browserPolicyTake) return "Error: policy bridge unavailable";
+        let r = [];
+        try { r = (await _inputTmo(api.browserPolicyTake(wcId), 5000)) || []; } catch (e) { return "browser_policy_report failed: " + String((e && e.message) || e); }
+        if (!Array.isArray(r) || !r.length) return "browser_policy_report: no auto-decisions on this tab";
+        const lines = r.map((x) => {
+            let hm = ''; try { hm = new Date(x.ts * 1000).toTimeString().slice(0, 5) + ' '; } catch (e) {}
+            return hm + '[' + x.kind + '] ' + x.note;
+        });
+        return "[policy] " + lines.join("\n") + "\n(共 " + lines.length + " 条，本次已清空；后续新事件可再次查询)";
+    },
+
     // S269：collectList 专用滚动器——通道探测与 scrollAndFind 同款：
     // 真轮(CDP isTrusted)优先 → 内层最大可滚容器(打标 data-sap-sc) → window 兜底。
     async _makeScroller(wv) {

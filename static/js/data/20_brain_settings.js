@@ -66,6 +66,17 @@ Object.assign(vue_data, {
       guardRedirect: false
     },
 
+    // S278：AI 浏览器行为策略（主进程消费，经 set-browser-policy IPC 热更+config.json 持久化）。
+    // download: save=自动存到 browser_downloads / cancel=丢弃 / ask=弹原生另存为
+    // fileInput: block=拦原生上传框 / ask=放行；jsDialog: dismiss|accept|ask；beforeUnload: 自动放行离页
+    browserPolicySettings: {
+      enabled: true,
+      download: 'save',
+      fileInput: 'block',
+      jsDialog: 'dismiss',
+      beforeUnload: true
+    },
+
     sqlSettings:{
       enabled: false,
       engine: "sqlite",
