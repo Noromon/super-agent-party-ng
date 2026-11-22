@@ -1,4 +1,4 @@
-# build=S298
+# build=S299
 # S259：blob 图反馈修复——view_images 对 blob:/javascript: 给专错指引（曾落本地路径分支
 # 报"文件不存在0字节"误导），file:// 正确解析；take_snapshot 非 http 源不吐 URL 本体。
 import asyncio
@@ -34,7 +34,9 @@ def test_view_images_javascript_scheme_prefetch():
 def test_view_images_file_url_goes_local_channel(tmp_path, monkeypatch):
     img = tmp_path / "shot.webp"
     img.write_bytes(base64.b64decode(_WEBP_B64) + b"\x00" * 8)
-    monkeypatch.setattr(server, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
+    # S299 挪模块：view_images 迁至 py/vision_tools.py 后，其读的是本模块全局
+    import py.vision_tools as VT
+    monkeypatch.setattr(VT, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
     out = asyncio.run(server.view_images([img.as_uri()]))
     assert "view_" in out  # 已登记为内部 URL
     assert "文件不存在" not in out and "非图片格式" not in out

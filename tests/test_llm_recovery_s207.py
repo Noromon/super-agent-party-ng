@@ -23,6 +23,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 import py.llm_recovery as lr  # noqa: E402
 
 SERVER = (_ROOT / "server.py").read_text(encoding="utf-8")
+_VT = (_ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")  # S299：视觉域迁出，计数合并
 CHAT_JS = (_ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")
 RESUME_JS = (_ROOT / "static" / "js" / "methods" / "13_resume_stream.js").read_text(encoding="utf-8")
 TEMPLATE = (_ROOT / "config" / "settings_template.json").read_text(encoding="utf-8")
@@ -208,9 +209,10 @@ class TestFrames:
 class TestWiring:
     def test_all_creates_wrapped_or_looped(self):
         # 31 处 create：28 机械 acreate + 主链 2 手写重试环 + fast 手写 acreate
-        assert SERVER.count("acreate(") >= 28
+        # （S299：视觉域 5 处 acreate 随迁 py/vision_tools.py，计数并入）
+        assert SERVER.count("acreate(") + _VT.count("acreate(") >= 28
         assert SERVER.count("_lr_attempt") >= 8  # 两个手写环
-        plain = [ln for ln in SERVER.splitlines()
+        plain = [ln for ln in (SERVER + _VT).splitlines()
                  if "await " in ln and "chat.completions.create(" in ln
                  and "lambda:" not in ln]
         # 手写环内 create 均为裸调用：全文裸 create 行数必须为 2（first-pass/second_round）

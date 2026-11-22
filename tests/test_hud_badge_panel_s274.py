@@ -1,4 +1,4 @@
-# build=S298
+# build=S299
 # S274：HUD 角标可选 + 胶囊点击展开历史面板（鼠标桥/冲突守卫/标记已读/穿透恢复）。
 # 行为面由 hud_pop_harness_s272.js 第四段驱动；本文件锁接线与静态面。
 from pathlib import Path

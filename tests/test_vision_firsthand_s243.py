@@ -160,7 +160,7 @@ def _img(tmp, name="p.png"):
 def test_view_images_local_path_registered(monkeypatch, tmp_path):
     from py import get_setting
     monkeypatch.setattr(get_setting, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     monkeypatch.setattr(S, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
     monkeypatch.setattr(get_setting, "get_host", lambda: "127.0.0.1")
     monkeypatch.setattr(get_setting, "get_port", lambda: 3456)
@@ -172,7 +172,7 @@ def test_view_images_local_path_registered(monkeypatch, tmp_path):
 
 
 def test_view_images_rejects_bad_inputs(monkeypatch, tmp_path):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     monkeypatch.setattr(S, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
     txt = tmp_path / "a.txt"
     txt.write_text("hi")
@@ -183,7 +183,7 @@ def test_view_images_rejects_bad_inputs(monkeypatch, tmp_path):
 
 
 def test_view_images_zero_byte_internal_url_rejected(monkeypatch, tmp_path):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     up = tmp_path / "up"
     up.mkdir()
     (up / "e.png").write_bytes(b"")

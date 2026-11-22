@@ -21,7 +21,7 @@ def test_no_undef_fixes_in_place():
     assert "evidenceAppend('[AgentProxy] setProxy direct" in main_js
     tha = (ROOT / "static" / "js" / "tha.js").read_text(encoding="utf-8-sig")
     # 未声明 isHidden 已根除（剥注释行防自吞），门控改用文件内真实状态位
-    body = "\n".join(l for l in tha.splitlines() if not l.strip().startswith("//"))
+    body = "\n".join(ln for ln in tha.splitlines() if not ln.strip().startswith("//"))
     assert "isHidden" not in body.replace("isModelHiddenByHover", "")
     assert "if (!isModelHiddenByHover) return;" in tha
 

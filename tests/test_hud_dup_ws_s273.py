@@ -1,4 +1,4 @@
-# build=S298
+# build=S299
 # S273：HUD 重复弹出修复——ensureWS 在 __SAP_READY resolve 前 ws 恒 null 的防重入空窗
 # （build+mergeCfg 双排队双建连，孤儿 socket 双 onNotify），加 opening 标志 + rec.id 去重。
 # 用户现场：胶囊模式下旁观主动消息同刻弹出两条重复。

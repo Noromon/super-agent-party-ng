@@ -133,7 +133,9 @@ class TestInjectHelper:
 # ---------------------------------------------------------------- 接线 + M3
 class TestWiring:
     def test_def_and_single_call_site(self):
-        assert "def _attach_screen_image_for_behavior" in SERVER_SRC
+        # S299 挪锚：定义随视觉域迁至 py/vision_tools.py；调用点仍必须只在 server 一处
+        vt = (_ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")
+        assert "def _attach_screen_image_for_behavior" in vt
         assert SERVER_SRC.count("_attach_screen_image_for_behavior(msg, request, settings)") == 1
 
     def test_generate_complete_impl_within_m3(self):

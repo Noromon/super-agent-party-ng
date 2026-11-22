@@ -50,7 +50,7 @@ def test_strip_image_parts():
 
 
 def _run_vi(monkeypatch, tmp_path, b64val):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     from py import get_setting
     monkeypatch.setattr(S, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
     monkeypatch.setattr(get_setting, "get_host", lambda: "127.0.0.1")
@@ -77,7 +77,7 @@ def test_external_real_image_still_ok(monkeypatch, tmp_path):
 
 
 def test_internal_poisoned_file_blocked(monkeypatch, tmp_path):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     from py import get_setting
     up = tmp_path / "up"
     up.mkdir()
@@ -130,9 +130,11 @@ def test_sweep_poisoned_image_dropped_with_note(monkeypatch):
 
 
 def test_retry_layer_wired():
-    src = (ROOT / "server.py").read_text(encoding="utf-8")
-    assert "img_strip_retried" in src
+    # S299 挪锚：三层防御随视觉域迁至 py/vision_tools.py；400 剥图重试层在流式引擎（server）
+    src = (ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")
     assert "failed to load image" in src.lower()
-    assert "已剥离图像降级" in src
-    i = src.find("img_strip_retried")
+    assert "已自动剥离图像降级" in src
+    i = src.lower().find("failed to load image")
     assert "continue" in src[i:i + 1400]
+    srv = (ROOT / "server.py").read_text(encoding="utf-8")
+    assert "img_strip_retried" in srv

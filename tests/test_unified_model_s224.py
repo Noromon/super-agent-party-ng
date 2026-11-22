@@ -50,7 +50,8 @@ class TestVisionModelCfg:
 
 class TestBackendDispatchPins:
     def test_vision_enabled_gated_five(self):
-        src = _read("server.py")
+        # S299：images_add_in_messages 门控随视觉域迁至 py/vision_tools.py，5 处=两边合并
+        src = _read("server.py") + _read("py/vision_tools.py")
         assert src.count("if settings['vision']['enabled'] and not settings.get('unifiedModel'):") == 5
         # 不再有未门控的独立 vision 分支
         assert "if settings['vision']['enabled']:" not in src

@@ -1,4 +1,4 @@
-# build=S298
+# build=S299
 # S272：HUD 弹出气泡栈——pop 开关/holdMs 保留/stackMax 同屏条数（用户要求：
 # 观战消息不能只加红角标，必须弹出；且保留时长与同屏条数可调）。
 # 行为面由 tests/data/hud_pop_harness_s272.js 驱动（假 DOM 实跑模块），本文件锁

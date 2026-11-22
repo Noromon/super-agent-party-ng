@@ -153,4 +153,4 @@ def test_main_menu_branches_and_locales():
 
 
 def test_stamp_s240():
-    assert "build=S298" in _read("static", "js", "renderer.js")
+    assert "build=S299" in _read("static", "js", "renderer.js")

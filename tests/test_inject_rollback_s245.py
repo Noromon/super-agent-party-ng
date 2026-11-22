@@ -44,7 +44,7 @@ def _no_http_images(msgs):
 # ---------------- ① 外链落地化 ----------------
 
 def test_view_images_external_url_lands_internally(monkeypatch, tmp_path):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     from py import get_setting
     monkeypatch.setattr(S, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
     monkeypatch.setattr(get_setting, "get_host", lambda: "127.0.0.1")
@@ -66,7 +66,7 @@ def test_view_images_external_url_lands_internally(monkeypatch, tmp_path):
 
 
 def test_view_images_external_download_failure_reported(monkeypatch, tmp_path):
-    import server as S
+    import py.vision_tools as S  # S299：view_images 迁出后桩须钉消费模块
     monkeypatch.setattr(S, "UPLOAD_FILES_DIR", str(tmp_path / "up"))
 
     async def _fail(u):

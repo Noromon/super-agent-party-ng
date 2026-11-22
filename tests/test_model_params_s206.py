@@ -99,10 +99,13 @@ class TestServerWiring:
             assert probe not in SERVER, probe
 
     def test_reasoner_vision_use_role_param(self):
+        # S299：vision 参数读取随视觉域迁至 py/vision_tools.py，存在性/缺席性双面合并
+        _vt = (_ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")
         assert "_role_param(settings, 'reasoner', 'temperature')" in SERVER
-        assert "_role_param(settings, 'vision', 'temperature')" in SERVER
+        assert "_role_param(settings, 'vision', 'temperature')" in _vt
         assert "settings['reasoner']['temperature']" not in SERVER
         assert "settings['vision']['temperature']" not in SERVER
+        assert "settings['vision']['temperature']" not in _vt
 
     def test_fast_single_point(self):
         i = SERVER.index("使用 fast 配置覆盖当前配置")

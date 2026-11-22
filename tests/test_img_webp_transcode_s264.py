@@ -1,4 +1,4 @@
-# build=S298
+# build=S299
 # S264：本地推理服务器拒收 webp/avif 等格式（400 'url' field must be a base64 encoded image
 # 炸整轮实证：twitter 图 format=webp）。注入层单点归一化转码 JPEG + 剥图重试补词兜底。
 import base64
@@ -15,6 +15,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 from py.llm_tool import _normalize_image_for_server, _SERVER_IMAGE_OK  # noqa: E402
 
 SERVER = (ROOT / "server.py").read_text(encoding="utf-8")
+VISION = (ROOT / "py" / "vision_tools.py").read_text(encoding="utf-8")  # S299 挪锚：视觉域迁出
 
 
 def _img_bytes(fmt, size=(8, 8)):
@@ -57,13 +58,15 @@ def test_garbage_bytes_no_crash():
 
 
 def test_hook_mounted_in_images_in_messages():
-    i = SERVER.index("def images_in_messages")
-    seg = SERVER[i:i + 2200]
+    # S299 挪锚：注入函数随视觉域逐字迁至 py/vision_tools.py
+    i = VISION.index("def images_in_messages")
+    seg = VISION[i:i + 2200]
     assert "_normalize_image_for_server" in seg
     assert "data:%s;base64," % "{mime_type}" in seg or 'f"data:{mime_type};base64,"' in seg
 
 
 def test_strip_retry_covers_base64_reject():
+    # 400 剥图重试层在流式引擎（server），锚不随视觉域迁移
     i = SERVER.index("img_strip_retried")
     seg = SERVER[i:i + 700]
     assert '"base64 encoded image" in _et252' in seg

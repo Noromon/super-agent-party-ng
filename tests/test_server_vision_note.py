@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SERVER = Path(__file__).resolve().parent.parent / "server.py"
+SERVER = Path(__file__).resolve().parent.parent / "py" / "vision_tools.py"  # S299 挪锚：_append_note 随视觉域迁出
 
 
 @pytest.fixture(scope="module")

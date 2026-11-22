@@ -188,6 +188,12 @@ class TestGateBlindSpotClosure:
         New LLM exits must gate themselves or get an explicit exemption."""
         import ast as _ast
         exempt_funcs = {"agent_tool_call"}  # self-call via /v1 (parent gated)
+        # S299：视觉域 VLM 出口自 server.py 逐字迁入。server 不在本棘轮扫描面内=
+        # 历史上从未闸过；迁入即加闸属行为改动，违纯移动纪律——按棘轮自述走显式
+        # 豁免（钉 (文件,函数) 对，不豁免同名未来新出口）。加闸与否并入引擎战役终评。
+        exempt_pairs = {("vision_tools.py", n) for n in (
+            "get_image_content", "analyze_image", "analyze_images",
+            "review_image", "images_add_in_messages")}
         markers = ("@llm_gate.gated", "llm_gate.gate()")
         bad = []
         for path in sorted((ROOT / "py").glob("*.py")):
@@ -216,7 +222,8 @@ class TestGateBlindSpotClosure:
                         if any(m in seg for m in markers) or any(m in " ".join(tail) for m in markers):
                             ok = True
                             break
-                    if not ok and chain[0].name not in exempt_funcs:
+                    if not ok and chain[0].name not in exempt_funcs \
+                            and (path.name, chain[0].name) not in exempt_pairs:
                         bad.append((path.name, chain[0].name, node.lineno))
         assert not bad, f"ungated direct LLM exits: {bad}"
 
