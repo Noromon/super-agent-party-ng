@@ -63,8 +63,12 @@
   var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
   var holdReleaseT = null, pollTimer = null;
   // S285：可观测性——rev 用于诊断台/演示气泡证实实际运行的代码版本；pollTicks 证明轮询活着
-  var HUD_REV = 'S285';
-  var pollTicks = 0;
+  var HUD_REV = 'S286';
+  var pollTicks = 0, dbgLogged = false;
+  // S286：高 DPI（如 125%）下 OS 光标返回物理像素，与 CSS 坐标错位一个 dpr 倍——
+  // 所有命中判定先按原值测，越出视口时再除以 devicePixelRatio 复测（自校准，不猜单位）。
+  function dpr() { var d = window.devicePixelRatio || 1; return d > 0 ? d : 1; }
+  function inVp(x, y) { return x >= 0 && y >= 0 && x < (window.innerWidth || Infinity) && y < (window.innerHeight || Infinity); }
   // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
   var seenIds = [], seenSet = {};
   function isDup(id) {
@@ -277,7 +281,12 @@
     if (!capsule || !e) return;
     var over = false;
     try {
-      over = document.elementFromPoint ? hitHud(document.elementFromPoint(e.clientX, e.clientY)) : false;
+      if (document.elementFromPoint) {
+        var x = e.clientX, y = e.clientY;
+        over = hitHud(document.elementFromPoint(x, y));
+        // S286：穿透转发事件的坐标在高 DPI 下可能带物理像素值，越界时除以 dpr 复判
+        if (!over && !inVp(x, y)) over = hitHud(document.elementFromPoint(x / dpr(), y / dpr()));
+      }
     } catch (er) {}
     if (over !== domOver) { domOver = over; overCapsule = over || !!panel; updateHold(); }
   }
@@ -286,6 +295,13 @@
     if (!r || typeof r.left !== 'number') return false;
     pad = pad || 0;
     return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  }
+
+  function hitPoint(x, y) {
+    try {
+      if (inRect(x, y, capsule.getBoundingClientRect && capsule.getBoundingClientRect(), 8)) return true;
+      return !!panel && inRect(x, y, panel.getBoundingClientRect && panel.getBoundingClientRect(), 8);
+    } catch (e) { return false; }
   }
 
   function startPoll() {
@@ -297,15 +313,20 @@
       if (!api.getCursorScreenPoint || typeof window.screenX !== 'number') return;
       Promise.resolve(api.getCursorScreenPoint()).then(function (p) {
         if (!capsule || !p || typeof p.x !== 'number') return;
-        var ok = false;
+        var hit = false;
         try {
           var x = p.x - window.screenX, y = p.y - window.screenY;
-          ok = inRect(x, y, capsule.getBoundingClientRect && capsule.getBoundingClientRect(), 8)
-            || (!!panel && inRect(x, y, panel.getBoundingClientRect && panel.getBoundingClientRect(), 8));
+          hit = hitPoint(x, y);
+          if (!hit && !inVp(x, y)) hit = hitPoint(x / dpr(), y / dpr()); // S286：物理像素→CSS 自校准
+          if (!dbgLogged && Math.abs(x - (window.innerWidth || 0)) < 400 && Math.abs(y - (window.innerHeight || 0)) < 400) {
+            dbgLogged = true; // S286：角落首访留一行原始坐标底账（现场对质坐标系问题用）
+            console.info('[HudDbg] raw=' + p.x + ',' + p.y + ' local=' + Math.round(x) + ',' + Math.round(y) +
+              ' dpr=' + dpr() + ' inner=' + window.innerWidth + 'x' + window.innerHeight + ' scr=' + window.screenX + ',' + window.screenY);
+          }
         } catch (e) {}
-        if (ok) pollTrusted = true; // 换算首次命中=本窗坐标映射可信
-        if (ok !== pollOver) { pollOver = ok; updateHold(); }
-        if (!ok && pollTrusted && !panel && domOver) { domOver = false; updateHold(); } // 可信后 OS 真相可纠正 DOM 态
+        if (hit) pollTrusted = true; // 换算命中=本窗坐标映射可信（含 S286 缩放候选）
+        if (hit !== pollOver) { pollOver = hit; updateHold(); }
+        if (!hit && pollTrusted && !panel && domOver) { domOver = false; updateHold(); } // 可信后 OS 真相可纠正 DOM 态
       }).catch(function () {});
     }, 150);
   }
@@ -572,10 +593,19 @@
         enabled: cfg.enabled, capsuleMode: cfg.capsule, position: cfg.position,
         holdActive: holdActive, domOver: domOver, pollOver: pollOver, pollTicks: pollTicks,
         rect: r, screenXY: [window.screenX, window.screenY],
+        dpr: window.devicePixelRatio || 1, inner: [window.innerWidth, window.innerHeight],
         apiSet: !!(window.electronAPI && window.electronAPI.setIgnoreMouseEvents),
         apiCursor: !!(window.electronAPI && window.electronAPI.getCursorScreenPoint),
         unread: unread, panelOpen: !!panel
       };
+    };
+    // S286：主进程看门狗轻量几何探针（高频轮询专用，避免整份诊断序列化）
+    window.__hudDiagLite = function () {
+      try {
+        var r = capsule && capsule.getBoundingClientRect ? capsule.getBoundingClientRect() : null;
+        if (!r) return null;
+        return { rect: { l: r.left, t: r.top, w: r.width, h: r.height }, inner: [window.innerWidth, window.innerHeight], pos: cfg.position };
+      } catch (e) { return null; }
     };
     if (!window.electron || !window.electron.ipcRenderer || typeof window.electron.ipcRenderer.on !== 'function') {
       // 无 preload 环境（纯浏览器）：降级为快捷键切换

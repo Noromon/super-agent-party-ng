@@ -1,4 +1,4 @@
-# build=S285
+# build=S286
 # S278：AI 浏览器行为策略引擎——下载/上传框/JS弹窗/离页/权限 的可配置自动处置 +
 # 决策记账回报（browser_policy_report）。静态锁：主进程钩子、IPC/桥、设置面、双注册。
 from pathlib import Path

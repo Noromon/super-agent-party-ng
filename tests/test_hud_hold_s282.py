@@ -1,4 +1,4 @@
-# build=S285
+# build=S286
 # S282：HUD 胶囊持握状态机——穿透窗下点击失灵的双保险修复。静态锁。
 # 行为面由 hud_hold_harness_s282.js 驱动（7 断言）。
 from pathlib import Path
@@ -26,7 +26,7 @@ def test_state_machine_wired():
 
 def test_dom_driver_and_poll_fallback():
     assert "document.addEventListener('mousemove', onDocMove);" in HUD
-    assert "document.elementFromPoint(e.clientX, e.clientY)" in HUD
+    assert "document.elementFromPoint(x, y)" in HUD
     assert "api.getCursorScreenPoint" in HUD
     assert "p.x - window.screenX" in HUD
     assert "}, 150);" in HUD  # 轮询周期

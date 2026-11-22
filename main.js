@@ -1979,7 +1979,7 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
     // 岛窗穿透态下光标进入胶囊热点矩形 → 临时解除穿透。主进程轮询不依赖岛页 JS
     // 新旧/Blink 事件转发是否可靠（S282 页内双保险在部分机器上双双失效，见排障
     // 记录）；他人（island-app/HUD 页）自行解除的穿透完全不介入——"自己放的自己收"。
-    const _hudWatch = { cfg: null, cfgMtime: 0, releasedBy: null, timer: null, probeTs: 0, probeHold: false };
+    const _hudWatch = { cfg: null, cfgMtime: 0, releasedBy: null, timer: null, probeTs: 0, probeHold: false, geom: null, geomTs: 0 };
     function _hudWatchCfg() {
       let st = null;
       try { st = fs.statSync(path.join(app.getPath('userData'), 'hud_cfg.json')); } catch (e) {}
@@ -2022,6 +2022,28 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         w: W, h: H,
       };
     }
+    function _hudGeomProbe(win) {
+      // S286：取页面实测几何（胶囊 rect + 视口 inner），供光标→CSS 空间的比例映射；2.5s 缓存
+      _hudWatch.geomTs = Date.now();
+      win.webContents.executeJavaScript('(window.__hudDiagLite ? __hudDiagLite() : null)')
+        .then((g) => { _hudWatch.geom = (g && g.rect && Array.isArray(g.inner) && g.inner[0] > 0) ? g : null; })
+        .catch(() => { _hudWatch.geom = null; });
+    }
+    function _hudCssPoints(cur, b, g) {
+      // 光标可能处在物理像素或 DIP 坐标系（高 DPI 机器上 getCursorScreenPoint 实测返回物理值）；
+      // 三候选：原值平移、除以 scaleFactor、按 inner/bounds 实测比例缩放——任一命中即认可。
+      const out = [{ x: cur.x - b.x, y: cur.y - b.y }];
+      let sf = 1;
+      try { sf = (screen.getDisplayMatching(b) || screen.getPrimaryDisplay()).scaleFactor || 1; } catch (e) {}
+      out.push({ x: (cur.x - b.x) / sf, y: (cur.y - b.y) / sf });
+      if (g && b.width > 0 && b.height > 0) {
+        out.push({ x: (cur.x - b.x) * g.inner[0] / b.width, y: (cur.y - b.y) * g.inner[1] / b.height });
+      }
+      return out;
+    }
+    function _hudCssHit(r, pts, pad) {
+      return pts.some((c) => c.x >= r.l - pad && c.x <= r.l + r.w + pad && c.y >= r.t - pad && c.y <= r.t + r.h + pad);
+    }
     function hudCapsuleWatchdogTick() {
       try {
         const win = dynamicIslandWindow;
@@ -2031,10 +2053,26 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         let ignore = false;
         try { ignore = win.isIgnoreMouseEvents(); } catch (e) { return; }
         const cur = screen.getCursorScreenPoint();
+        if (!win.webContents.isDestroyed()) {
+          const gts = Date.now() - _hudWatch.geomTs;
+          if (!_hudWatch.geom ? gts > 2500 : gts > 8000) _hudGeomProbe(win); // 无几何勤探，有几何 8s 保鲜
+        }
+        const g = (Date.now() - _hudWatch.geomTs < 15000) ? _hudWatch.geom : null;
         if (!ignore) {
           if (_hudWatch.releasedBy !== 'watchdog') return; // 别人解除的穿透不抢管
           const b = win.getBounds();
-          if (_rectHas(_hudZone(b, cfg.position), cur)) return; // 角落大区=用户可能正在用面板
+          let inZone;
+          if (g) { // S286：角落大区按页面视口坐标算（面板 320 宽 / 62vh+40 高），候选映射裁决
+            const iw = g.inner[0], ih = g.inner[1];
+            const W = Math.min(360, iw), H = Math.round(ih * 0.66) + 40;
+            const p = g.pos || cfg.position;
+            const zl = (p === 'n' || p === 's') ? iw / 2 - W / 2 : (p === 'nw' || p === 'sw') ? 0 : iw - W;
+            const zt = (p === 'nw' || p === 'n' || p === 'ne') ? 0 : ih - H;
+            inZone = _hudCssHit({ l: zl, t: zt, w: W, h: H }, _hudCssPoints(cur, b, g), 8);
+          } else {
+            inZone = _rectHas(_hudZone(b, cfg.position), cur);
+          }
+          if (inZone) return; // 角落大区=用户可能正在用面板
           const now = Date.now();
           if (now - _hudWatch.probeTs > 400) {
             _hudWatch.probeTs = now;
@@ -2051,11 +2089,18 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
           }
           return;
         }
-        if (_rectHas(_hudHotspot(win.getBounds(), cfg.position), cur)) {
+        const b = win.getBounds();
+        let hit;
+        if (g && g.rect) {
+          hit = _hudCssHit(g.rect, _hudCssPoints(cur, b, g), 12); // 实测 rect±12 CSS px
+        } else {
+          hit = _rectHas(_hudHotspot(win.getBounds(), cfg.position), cur); // 页面几何不可用=退回 CSS 契约常量
+        }
+        if (hit) {
           try {
             win.setIgnoreMouseEvents(false);
             _hudWatch.releasedBy = 'watchdog';
-            console.log('[HudWatch] 胶囊热点命中 → 解除穿透 (' + cur.x + ',' + cur.y + ')');
+            console.log('[HudWatch] 胶囊热点命中 → 解除穿透 (' + cur.x + ',' + cur.y + ')' + (g ? ' [geom]' : ' [css]'));
           } catch (e) {}
         }
       } catch (e) {}

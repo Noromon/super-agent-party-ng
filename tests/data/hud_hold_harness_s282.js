@@ -35,7 +35,7 @@ function freshEnv() {
   global.document = {
     body, createElement: () => mkNode(), _ev: {}, readyState: 'complete',
     addEventListener(t, fn) { (global.document._ev[t] = global.document._ev[t] || []).push(fn); },
-    elementFromPoint: () => env.efp || null,
+    elementFromPoint: (x, y) => (env.efpAt ? env.efpAt(x, y) : (env.efp || null)),
     getElementById: () => null,
   };
   global.window = { _ev: {}, addEventListener(t, fn) { (global.window._ev[t] = global.window._ev[t] || []).push(fn); }, electron: undefined, __SAP_TOKEN: '' };
@@ -45,6 +45,7 @@ function freshEnv() {
     getCursorScreenPoint: async () => env.cursor || null,
   };
   global.window.screenX = 0; global.window.screenY = 0;
+  global.window.innerWidth = 1536; global.window.innerHeight = 864; global.window.devicePixelRatio = 1;
   global.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } };
   global.WebSocket = function () { this.close = () => {}; };
   global.MutationObserver = function () { this.observe = () => {}; this.disconnect = () => {}; };
@@ -82,7 +83,8 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   ok(typeof global.window.__hudDiag === 'function', 'S285: 岛宿主已暴露 __hudDiag');
   {
     const d = global.window.__hudDiag();
-    ok(d.rev === 'S285' && d.host === true && d.layer === true && d.apiSet === true, 'S285: 诊断快照 rev/host/layer/api 正常: ' + d.rev);
+    ok(d.rev === 'S286' && d.host === true && d.layer === true && d.apiSet === true, 'S286: 诊断快照 rev/host/layer/api 正常: ' + d.rev);
+    ok(typeof global.window.__hudDiagLite === 'function' && d.dpr === 1, 'S286: __hudDiagLite 已暴露且 dpr 上报');
   }
   env.efp = null;
   (global.document._ev.mousemove || []).forEach(fn => fn({ clientX: 300, clientY: 300 }));
@@ -105,6 +107,30 @@ const last = (calls, ig) => { for (let i = calls.length - 1; i >= 0; i--) if (ca
   await sleep(400 + 320);
   const off2 = last(env.calls, true);
   ok(off2 && off2.fwd === true, 'S282: 光标离开 → 恢复穿透');
+
+  // ===== 段 3：125% DPI 自校准（S286 现场事故：OS 光标物理像素 vs CSS 坐标）=====
+  env = freshEnv();
+  global.window.devicePixelRatio = 1.25;
+  global.window.innerWidth = 1536; global.window.innerHeight = 816;
+  new Function(src)();
+  await sleep(60);
+  const capsule3 = env.body.children[0].children[0];
+  capsule3.getBoundingClientRect = () => ({ left: 1506, top: 786, right: 1524, bottom: 804 });
+  env.efp = null;
+  env.cursor = { x: 1890, y: 990 }; // 物理像素：正好在圈上（CSS 视角 = 1512,792）
+  await sleep(400);
+  ok(last(env.calls, false) !== null, 'S286: 125% 物理像素光标 → /dpr 候选命中矩形 → 解除穿透');
+  const nUn = env.calls.filter(c => c.ig === false).length;
+  env.cursor = { x: 1200, y: 630 }; // 视口内、远离胶囊（1.25 倍后恰好 1500,787.5——不得误伤）
+  await sleep(400);
+  ok(env.calls.filter(c => c.ig === false).length === nUn, 'S286: 视口内 miss 不试缩放候选（无误伤）');
+  await sleep(320 + 200);
+  ok(last(env.calls, true) !== null, 'S286: 离开后恢复穿透');
+  env.cursor = { x: 9000, y: 9000 }; // 轮询彻底失明，只剩 DOM 事件通道
+  env.efpAt = (x, y) => (x >= 1498 && x <= 1532 && y >= 778 && y <= 812 ? capsule3 : null);
+  const nUn2 = env.calls.filter(c => c.ig === false).length;
+  (global.document._ev.mousemove || []).forEach(fn => fn({ clientX: 1890, clientY: 990 }));
+  ok(env.calls.filter(c => c.ig === false).length > nUn2, 'S286: 越界事件坐标 /dpr 复判 → mousemove 救援生效');
 
   console.log(fail ? 'S282-HARNESS failed=' + fail : 'S282-HARNESS all passed');
   process.exit(fail ? 1 : 0);
