@@ -56,6 +56,12 @@
   var layer = null, capsule = null, badge = null, stack = null;
   var unread = 0, idleTimer = null, ws = null, wsRetry = null, wsOpening = false;
   var panel = null, overCapsule = false; // S274：历史面板与鼠标持握状态
+  // S282：持握状态机——三源(panel/domOver/pollOver)并联，250ms 迟滞释放。
+  // 穿透窗下 mouseenter/click 可能整体失灵（本次事故根因），故不赌任何单一事件：
+  // DOM mousemove+elementFromPoint 为主，OS 光标轮询兜底，两路都断也不影响彼此。
+  var ISLAND_HOST = typeof location !== 'undefined' && String(location.pathname || '').indexOf('island') >= 0;
+  var holdActive = false, domOver = false, pollOver = false, pollTrusted = false;
+  var holdReleaseT = null, pollTimer = null;
   // S273：已处理通知 id 环形去重——就算未来再出现任何双投递路径，也只渲染一次
   var seenIds = [], seenSet = {};
   function isDup(id) {
@@ -81,11 +87,13 @@
     stack = el('div', 'sap-hud-stack hud-pos-' + cfg.position);
     layer.appendChild(capsule); layer.appendChild(stack);
     // S274：胶囊可点击展开历史面板——岛窗整体点击穿透，仅胶囊/面板吃鼠标；
-    // 悬停期间经 electron 桥临时关闭穿透（island-app 侧有 __sapHudHoldMouse 守卫防抢关）。
-    capsule.addEventListener('mouseenter', function () { overCapsule = true; hudHoldMouse(true); });
-    capsule.addEventListener('mouseleave', function () { overCapsule = false; if (!panel) hudHoldMouse(false); });
+    // S282：持握改由状态机裁决（mouseenter 仅作加速器，不再独任解锁职责）。
+    capsule.addEventListener('mouseenter', function () { overCapsule = true; domOver = true; updateHold(); });
+    capsule.addEventListener('mouseleave', function () { overCapsule = false; if (!panel) { domOver = false; } updateHold(); });
     capsule.addEventListener('click', function () { togglePanel(); });
     (document.body || document.documentElement).appendChild(layer);
+    document.addEventListener('mousemove', onDocMove);
+    startPoll();
     applyCfg();
     wake();
   }
@@ -111,7 +119,7 @@
 
   function applyCfg() {
     if (!layer) return;
-    if (!cfg.enabled) { closePanel(); layer.classList.add('hud-hidden'); teardownWS(); return; }
+    if (!cfg.enabled) { closePanel(); stopPoll(); layer.classList.add('hud-hidden'); teardownWS(); return; }
     layer.classList.remove('hud-hidden');
     layer.style.opacity = String(cfg.opacity);
     layer.classList.remove('hud-dim');
@@ -224,8 +232,9 @@
     if (capsule) { capsule.classList.remove('hud-has-unread', 'hud-alert'); }
   }
 
-  // ---- S274：鼠标持握桥 + 历史消息面板 ----
+  // ---- S274：历史消息面板；S282：鼠标持握状态机 + 光标轮询兜底 ----
   function hudHoldMouse(on) {
+    if (!ISLAND_HOST) return; // 主窗(index.html 同源加载)整窗天然吃鼠标，绝不允许碰穿透 API
     window.__sapHudHoldMouse = !!on;
     var api = window.electronAPI || {};
     if (!api.setIgnoreMouseEvents) return;
@@ -233,6 +242,72 @@
       if (on) api.setIgnoreMouseEvents(false);
       else api.setIgnoreMouseEvents(true, { forward: true });
     } catch (e) {}
+  }
+
+  function hudHoldWanted() { return !!panel || domOver || pollOver; }
+
+  function updateHold() {
+    if (hudHoldWanted()) {
+      if (holdReleaseT) { clearTimeout(holdReleaseT); holdReleaseT = null; }
+      if (!holdActive) { holdActive = true; hudHoldMouse(true); }
+      return;
+    }
+    if (holdActive && !holdReleaseT) {
+      holdReleaseT = setTimeout(function () {
+        holdReleaseT = null;
+        if (!hudHoldWanted() && holdActive) { holdActive = false; hudHoldMouse(false); }
+      }, 250); // 迟滞：指针沿边缘抖动时不反复开关穿透
+    }
+  }
+
+  function hitHud(hit) {
+    var n = hit;
+    while (n) {
+      if (n === capsule || (panel && n === panel)) return true;
+      n = n.parentNode;
+    }
+    return false;
+  }
+
+  function onDocMove(e) {
+    if (!capsule || !e) return;
+    var over = false;
+    try {
+      over = document.elementFromPoint ? hitHud(document.elementFromPoint(e.clientX, e.clientY)) : false;
+    } catch (er) {}
+    if (over !== domOver) { domOver = over; overCapsule = over || !!panel; updateHold(); }
+  }
+
+  function inRect(x, y, r, pad) {
+    if (!r || typeof r.left !== 'number') return false;
+    pad = pad || 0;
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  }
+
+  function startPoll() {
+    if (pollTimer || !ISLAND_HOST) return;
+    // OS 光标真相同路：即便合成事件整体失灵（本次事故形态），也能解锁首击。
+    pollTimer = setInterval(function () {
+      var api = window.electronAPI || {};
+      if (!api.getCursorScreenPoint || typeof window.screenX !== 'number') return;
+      Promise.resolve(api.getCursorScreenPoint()).then(function (p) {
+        if (!capsule || !p || typeof p.x !== 'number') return;
+        var ok = false;
+        try {
+          var x = p.x - window.screenX, y = p.y - window.screenY;
+          ok = inRect(x, y, capsule.getBoundingClientRect && capsule.getBoundingClientRect(), 8)
+            || (!!panel && inRect(x, y, panel.getBoundingClientRect && panel.getBoundingClientRect(), 8));
+        } catch (e) {}
+        if (ok) pollTrusted = true; // 换算首次命中=本窗坐标映射可信
+        if (ok !== pollOver) { pollOver = ok; updateHold(); }
+        if (!ok && pollTrusted && !panel && domOver) { domOver = false; updateHold(); } // 可信后 OS 真相可纠正 DOM 态
+      }).catch(function () {});
+    }, 150);
+  }
+
+  function stopPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    pollOver = false; pollTrusted = false;
   }
 
   function fmtTime(ts) {
@@ -247,12 +322,12 @@
     var p = panel; panel = null;
     p.classList.remove('hud-show');
     setTimeout(function () { if (p.parentNode) p.parentNode.removeChild(p); }, 300);
-    if (!overCapsule) hudHoldMouse(false);
+    // S282：关面板后由 mousemove/轮询重新裁决在位性；250ms 迟滞内可无感点回胶囊
+    domOver = false; overCapsule = false; updateHold();
   }
 
   function togglePanel() {
     if (panel) { closePanel(); return; }
-    hudHoldMouse(true);
     panel = el('div', 'sap-hud-panel hud-pos-' + cfg.position + (cfg.capsule ? '' : ' hud-solo'));
     var head = el('div', 'hud-p-head');
     var hi = el('i', 'fa fa-clock-rotate-left');
@@ -263,9 +338,10 @@
     head.appendChild(hi); head.appendChild(ht); head.appendChild(sp); head.appendChild(cl);
     var list = el('div', 'hud-p-list', '<div class="hud-p-empty">加载中…</div>');
     panel.appendChild(head); panel.appendChild(list);
-    panel.addEventListener('mouseenter', function () { hudHoldMouse(true); });
-    panel.addEventListener('mouseleave', function () { if (panel) hudHoldMouse(true); }); // 面板开着就一直吃鼠标
+    panel.addEventListener('mouseenter', function () { domOver = true; updateHold(); });
+    // S282：面板在场=状态机硬持握（mouseleave 不再需要续持）
     layer.appendChild(panel);
+    updateHold();
     requestAnimationFrame(function () { panel && panel.classList.add('hud-show'); });
     loadPanelList(list);
   }

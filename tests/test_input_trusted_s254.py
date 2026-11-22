@@ -1,4 +1,4 @@
-# build=S281
+# build=S282
 # S254：CDP 真输入事件（isTrusted wheel/click，命中测试路由=人机等价）+ network_watch 全量 body 落盘
 import asyncio
 import json

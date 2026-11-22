@@ -2235,6 +2235,10 @@ ipcMain.handle('upload-to-workspace', async (event, { targetDirPath, sourceFileP
         const win = BrowserWindow.fromWebContents(event.sender);
         win.setIgnoreMouseEvents(ignore, options);
     });
+    // S282：HUD 胶囊持握兜底——渲染层以 OS 光标真相对照自身命中区（穿透态下合成事件可能整体失灵）
+    ipcMain.handle('get-cursor-screen-point', () => {
+        try { return screen.getCursorScreenPoint(); } catch (e) { return null; }
+    });
     ipcMain.handle('dialog:openDirectory', async () => {
       const { dialog } = require('electron');
       const result = await dialog.showOpenDialog({

@@ -1,4 +1,4 @@
-# build=S281
+# build=S282
 # S266：日记上限可设置(0=无上限)+自动归档+导出+合并抢救原语。
 # 动因：MAX_ENTRIES=500 硬 FIFO 静默挤走旧条目且 diary 不在自动备份内（审计实锤）。
 import asyncio

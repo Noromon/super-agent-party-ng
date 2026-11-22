@@ -1,4 +1,4 @@
-# build=S281
+# build=S282
 # S274：HUD 角标可选 + 胶囊点击展开历史面板（鼠标桥/冲突守卫/标记已读/穿透恢复）。
 # 行为面由 hud_pop_harness_s272.js 第四段驱动；本文件锁接线与静态面。
 from pathlib import Path
@@ -78,7 +78,7 @@ def test_settings_card_and_escaping():
     assert "e.key === 'Escape'" in js
     # HUD 关闭时面板必须收起（防残影）
     i = js.index("function applyCfg")
-    assert "closePanel(); layer.classList.add('hud-hidden')" in js[i:i + 400]
+    assert "closePanel(); stopPoll(); layer.classList.add('hud-hidden')" in js[i:i + 400]  # S282: 禁用时停轮询
 
 
 def test_behavior_harness_covers_s274():

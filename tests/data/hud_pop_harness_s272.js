@@ -149,7 +149,8 @@ const ok = (cond, label) => { console.log((cond ? 'PASS ' : 'FAIL ') + label); i
   fire(capsule3, 'click');
   await new Promise(r => setTimeout(r, 20));
   ok(panel3 && !panel3._cl.has('hud-show'), 'S274: 再点胶囊收起面板');
-  ok(global.window.__sapHudHoldMouse === false, 'S274: 关闭且不在胶囊上 → 恢复点击穿透');
+  await new Promise(r => setTimeout(r, 320)); // S282: 释放走 250ms 迟滞，防边缘抖动反复开关穿透
+  ok(global.window.__sapHudHoldMouse === false, 'S274: 关闭且不在胶囊上 → 恢复点击穿透（S282 迟滞内）');
   // Esc 兜底（document keydown）
   fire(capsule3, 'click');
   await new Promise(r => setTimeout(r, 20));
