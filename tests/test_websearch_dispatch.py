@@ -17,7 +17,7 @@ sys.path.insert(0, str(_ROOT))
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-_S = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()      + io.open(_ROOT / "py" / "stream_prep.py", encoding="utf-8-sig").read()      + io.open(_ROOT / "py" / "stream_engine.py", encoding="utf-8-sig").read())  # S302a：流式域迁 stream_prep/stream_engine，源读合并（体逐字未动）
+_S = (io.open(_ROOT / "server.py", encoding="utf-8-sig").read()      + io.open(_ROOT / "py" / "stream_prep.py", encoding="utf-8-sig").read()      + io.open(_ROOT / "py" / "stream_engine.py", encoding="utf-8-sig").read()      + io.open(_ROOT / "py" / "complete_engine.py", encoding="utf-8-sig").read())  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）  # S302a：流式域迁 stream_prep/stream_engine，源读合并（体逐字未动）
 
 
 def test_engine_tools_announced_by_engine_key():

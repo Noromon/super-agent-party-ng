@@ -160,6 +160,12 @@ def test_tool_dispatch_module_helpers_present_and_small():
 
 def test_complete_split_helpers_present_and_small():
     funcs = {n.name: n for n in _module_funcs()}
+    # S303：complete 引擎域迁 py/complete_engine.py，存在性/尺寸钉合并扫描（体逐字未动）
+    for path in (_ROOT / "py" / "complete_engine.py",):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        for n in tree.body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs.setdefault(n.name, n)
     assert funcs["_generate_complete_impl"].end_lineno - funcs["_generate_complete_impl"].lineno + 1 < 300
     for h in COMPLETE_HELPERS:
         assert h in funcs, "helper %s missing" % h

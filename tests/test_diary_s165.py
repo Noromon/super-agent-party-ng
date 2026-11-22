@@ -19,7 +19,7 @@ if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
 
 from py import diary_engine  # noqa: E402
 
-_SRC_SERVER = (_ROOT / "server.py").read_text(encoding="utf-8-sig")
+_SRC_SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8-sig") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8-sig"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
 
 
 class TestStripTraces:

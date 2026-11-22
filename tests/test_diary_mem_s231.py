@@ -22,7 +22,7 @@ def _t(hm):
 
 
 def _srv_src():
-    return ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
+    return ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，文本钉合并扫描（体逐字未动）
 
 
 # ---------------- B1: mem0 角色锚定 ----------------

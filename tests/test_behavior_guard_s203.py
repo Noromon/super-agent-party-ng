@@ -16,7 +16,7 @@ if str(_ROOT) not in sys.path:
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER = (_ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
 
 # 用户实收样本（2026-11-08 17:55 xmpp）
 _LEAK_BODY = (
@@ -69,8 +69,8 @@ class TestNsBehaviorWiring:
         i_ret = SERVER.index("return JSONResponse(content=response_dict)")
         seg = SERVER[i_fin:i_ret]
         assert "_ns_behavior_sanitize(response_dict)" in seg
-        i_helper = SERVER.index("def _ns_behavior_sanitize(")
-        assert i_helper < i_fin
+        # S303：净化器本体随 complete 引擎迁出，存在性钉改指迁出文件（接线钉不动）
+        assert "def _ns_behavior_sanitize(" in (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8")
 
     def test_all_im_managers_declare_flag(self):
         names = ["dingtalk_bot_manager", "discord_bot_manager", "feishu_bot_manager",

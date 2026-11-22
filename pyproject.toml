@@ -147,6 +147,8 @@ max-complexity = 60
 # S302a：流式域逐字搬移，原形风格问题保留（server.py 同规则豁免；F401=原形函数体冗余 import 保真）
 "py/stream_prep.py" = ["E701", "E702", "E712", "E721", "E722", "E731", "F401", "F541", "F841"]
 "py/stream_engine.py" = ["E701", "E702", "E712", "E721", "E722", "F401", "F541", "F841"]
+# S303：complete 引擎域逐字搬移，原形风格问题保留（server.py 同规则豁免）
+"py/complete_engine.py" = ["E701", "E702", "E712", "E721", "E722", "F401", "F541", "F841"]
 "py/behavior_engine.py" = ["E701", "E722", "F401"]
 "py/blivedm/__init__.py" = ["F403"]
 "py/blivedm/clients/__init__.py" = ["F403"]

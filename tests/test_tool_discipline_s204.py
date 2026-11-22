@@ -16,7 +16,7 @@ if str(_ROOT) not in sys.path:
 if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
     del sys.modules["py"]
 
-SERVER = (_ROOT / "server.py").read_text(encoding="utf-8")
+SERVER = ((_ROOT / "server.py").read_text(encoding="utf-8") + (_ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
 DIARY = (_ROOT / "py" / "diary_engine.py").read_text(encoding="utf-8")
 
 
@@ -108,7 +108,8 @@ class TestServerWiring:
 
     def test_not_gated_by_cli_settings(self):
         seg = SERVER[SERVER.index("def _inject_tool_discipline"):]
-        seg = seg[:seg.index("def _ns_behavior_sanitize")]
+        # S303：原以下一个 def _ns_behavior_sanitize 为段尾，该函数已迁出——改以 impl 为界（段体不变）
+        seg = seg[:seg.index("async def _generate_complete_impl")]
         code = seg[seg.index('"""', seg.index('"""') + 3) + 3:]  # 去 docstring
         assert 'get("CLISettings"' not in code and "agentCorePrompt" not in code
 

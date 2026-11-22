@@ -84,7 +84,7 @@ class TestOutsideSentinelPipelineS182:
         assert obj.get("tool_name") == "read_file_tool_local"
 
     def test_double_push_wiring_present(self):
-        s = _read("server.py")
+        s = _read("server.py") + _read("py", "complete_engine.py")  # S303：complete 引擎域迁出，合并面守恒（体逐字未动）
         store = _read("py", "approval_store.py")
         assert "if _is_approval_result(results) is not None:" in s
         assert "pending_abort = True" in s

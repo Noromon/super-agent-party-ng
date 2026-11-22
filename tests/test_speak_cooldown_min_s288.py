@@ -1,4 +1,4 @@
-# build=S302
+# build=S303
 # S288：发言冷却下限 60s→5s（用户要求）。后端 py/screen_speak.py 用 _num 直读
 # 无下限钳制（本文件回归锁死这一事实，防止日后有人加 floor 把 UI 改动架空）。
 from pathlib import Path

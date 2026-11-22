@@ -1,4 +1,4 @@
-# build=S302
+# build=S303
 # S285：主进程胶囊看门狗 + HUD 诊断台。静态锁（行为面=看门狗依赖 Electron 运行时，
 # 现场验证；页内新增面由 hud_hold_harness_s282.js 的 S285 断言覆盖）。
 from pathlib import Path

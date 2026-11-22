@@ -18,6 +18,7 @@ def _func_src(name):
     # 批 1: 断点续传中继函数已迁 py/stream_relay.py
     # S300: 群记忆域已迁 py/group_memory.py（_extract_group_memories 永不在闸内钉随行）
     sources = [SRC, (ROOT / "py" / "stream_relay.py").read_text(encoding="utf-8"),
+               (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "group_memory.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "tool_hooks.py").read_text(encoding="utf-8"),
                (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8"),
@@ -153,6 +154,9 @@ class TestDriftRadar:
         assert "stream_ttl_task" in _func_src("lifespan")
 
     def test_t9_no_substring_sniffing_left(self):
+        # S303：NS 轮审批哨兵随 complete 引擎迁出，扫描面并入（反钉更严）
+        SRC = ((ROOT / "server.py").read_text(encoding="utf-8")
+               + (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))
         assert "'\"approval_required\"' in results" not in SRC
         assert "_is_approval_result(results)" in SRC
 
@@ -211,7 +215,10 @@ class TestGateBlindSpotClosure:
             "_stream_drs_round", "_stream_drs_loop_round",
             "_stream_reasoner_update")} | \
             {("stream_prep.py", n) for n in (
-                "_stream_deepsearch_pre", "_stream_reasoner_prep")}
+                "_stream_deepsearch_pre", "_stream_reasoner_prep")} | \
+            {("complete_engine.py", n) for n in (
+                "_complete_reasoner_prep", "_complete_drs_step",
+                "_ns_reasoner_pass")}  # S303：同 S302a 先例，server 时代从未在闸内
         markers = ("@llm_gate.gated", "llm_gate.gate()")
         bad = []
         for path in sorted((ROOT / "py").glob("*.py")):

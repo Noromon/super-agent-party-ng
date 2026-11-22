@@ -1,4 +1,4 @@
-# build=S302
+# build=S303
 # S296：相似调用绕圈熔断（贴吧探索事故对症）。纯逻辑单测 + 双侧接线静态锁。
 import sys
 from pathlib import Path
@@ -12,7 +12,7 @@ if _mod is not None and not hasattr(_mod, "__path__"):
 
 from py.tool_spiral import SpiralWatch, signature  # noqa: E402
 
-SRV = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，源读合并（体逐字未动）
+SRV = ((ROOT / "server.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_prep.py").read_text(encoding="utf-8") + (ROOT / "py" / "stream_engine.py").read_text(encoding="utf-8") + (ROOT / "py" / "complete_engine.py").read_text(encoding="utf-8"))  # S302a：流式域迁 stream_prep/stream_engine，源读合并（体逐字未动）
 
 
 def test_percent_variants_converge():
