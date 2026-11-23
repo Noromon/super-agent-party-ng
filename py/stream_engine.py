@@ -1246,8 +1246,11 @@ async def _maybe_inject_browser_vision(request, settings, images, fastapi_base_u
     reqs = reqs[:3]
     inj0 = len(request.messages)
     for u, _src in reqs:
-        _txt = ("[Browser screenshot] 内置浏览器截图的实际画面，请据图判断。" if _src == "take_screenshot" else
-                "[First-hand image] 这是你用 view_images 请求亲自查看的图片，原图像素已附上，"
+        # S307(F3)：前缀声明“框架注入·非用户发言”——df2f8248 事故中模型把视觉注入
+        # 当作用户消息并反复复述（像素必须挂在 user-role 上，vendor 禁 tool-role 多模态，
+        # 无法并入 tool 结果，故以显式元声明消歧）。
+        _txt = ("[Browser screenshot]【框架视觉注入·非用户发言】内置浏览器截图的实际画面，请据图判断。" if _src == "take_screenshot" else
+                "[First-hand image]【框架视觉注入·非用户发言】这是你用 view_images 请求亲自查看的图片，原图像素已附上，"
                 "请直接看图并据此作答，无需再调用 secondhand_* 转述工具。")
         request.messages.append({
             "role": "user",

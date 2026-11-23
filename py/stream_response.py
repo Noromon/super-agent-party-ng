@@ -30,6 +30,7 @@ from py.routers.island import notify_island_reply_done
 from py.llm_recovery import retry_suffix
 from py.model_params import effective_main_params, effective_role_params
 from py.msg_utils import _extract_text_content, content_append
+from py.task_anchor import anchor_stream_in  # S307：任务锚点（df2f8248 续跑头部残缺修复）
 from py.prompt_builders import _inject_screen_context
 from py.srv_ref import srv as _srv
 from py.stream_engine import (_append_loopcap_hint, _drs_round_cap,
@@ -515,6 +516,7 @@ async def generate_stream_response(client, reasoner_client, request: ChatRequest
         # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
+        await anchor_stream_in(request)  # S307: 任务锚点——缺真实 user 消息时回注，防续跑头部残缺致任务失联
         if pending_approval_at_tail(request.messages) is None: append_resume_nudge(request.messages)  # S172: 待批复审批尾部不附继续催办
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'

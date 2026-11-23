@@ -324,6 +324,14 @@ Object.assign(vue_methods, {
         let currentMsg;
         let shouldSyncGroupMemory = false;
         if (isResume && this.messages.length > 0) {
+            // S307(F5)：续跑溯源观测（df2f8248 头部残缺取证）——每次 resume POST 向
+            // evidence 通道留一条消息形态记录，firstUserIdx=-1 即缺头冒烟证据。
+            try {
+                const _fu = this.messages.findIndex(m => m && m.role === 'user');
+                console.warn('[ResumeProvenance] conv=' + this.stringifyEntityId(this.conversationId)
+                    + ' msgs=' + this.messages.length + ' payload=' + messagesPayload.length
+                    + ' firstUserIdx=' + _fu + ' page=' + (location.pathname.split('/').pop() || 'index'));
+            } catch (_) { }
             currentMsg = this.messages[this.messages.length - 1];
             currentMsg.generationFinished = false;
         } else {

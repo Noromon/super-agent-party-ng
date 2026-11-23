@@ -523,9 +523,23 @@ RESUME_NUDGE_TEXT = (
 
 def append_resume_nudge(messages):
     """恢复续跑 nudge：当请求历史以 tool 结果结尾（审批通过后手动执行工具再恢复的典型场景）时，
-    追加一条“继续推进”指令，防止模型把成功的工具结果当成最终报告直接收尾。"""
+    追加一条“继续推进”指令，防止模型把成功的工具结果当成最终报告直接收尾。
+
+    S307(F3)：nudge 合并进尾部 tool 结果文本，不再新增 user 角色消息——
+    df2f8248 事故中链内仅剩的 user-role 注入被模型当成用户发言。
+    tool content 非字符串（多模态等罕见形态）时退回旧的元频道注记。"""
     if messages and get_role(messages[-1]) == "tool":
-        messages.append({"role": "user", "content": RESUME_NUDGE_TEXT, "name": "system_note"})  # S166：元频道注记，不进前端时间线/mem0
+        last = messages[-1]
+        c = last.get("content") if isinstance(last, dict) else getattr(last, "content", None)
+        if isinstance(c, str):
+            if RESUME_NUDGE_TEXT not in c:
+                new_c = c + "\n\n" + RESUME_NUDGE_TEXT
+                if isinstance(last, dict):
+                    last["content"] = new_c
+                else:
+                    last.content = new_c
+        else:
+            messages.append({"role": "user", "content": RESUME_NUDGE_TEXT, "name": "system_note"})  # S166：元频道注记，不进前端时间线/m
     return messages
 
 

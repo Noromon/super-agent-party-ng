@@ -402,6 +402,9 @@ async def init_covs_db():
                     data TEXT NOT NULL
                 )
             ''')
+            # S307：任务锚点表（df2f8248 续跑头部残缺修复，见 py/task_anchor.py）
+            await db.execute('CREATE TABLE IF NOT EXISTS task_anchor ('
+                             'conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL)')
             await _backfill_rows(db)
             await _ensure_ord(db)
             await db.commit()
