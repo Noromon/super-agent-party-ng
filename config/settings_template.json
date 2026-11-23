@@ -20,7 +20,7 @@
     "agentRobustness": {
         "reanchorEveryToolRounds": 6,
         "malformedCallRepairMax": 2,
-        "llmRetryMax": 2,
+        "llmRetryMax": 4,
         "llmRetryBaseDelayMs": 1000,
         "llmRetryMidStream": true
     },

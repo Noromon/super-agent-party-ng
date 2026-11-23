@@ -237,6 +237,7 @@ window.lang_enUS = {
         'theme.ink': 'ink-water',
         'copy_success': 'Copied to clipboard',
         'streamRetrying': 'Model connection lost, retrying automatically ({n}/{m})…',
+        'retryRound': 'Retry round',
         'copy_fail': 'Copy failed',
         'settings_save_failed': 'Settings save failed',
         'invalid_file': 'Invalid file',

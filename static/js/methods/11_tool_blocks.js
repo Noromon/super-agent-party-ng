@@ -182,6 +182,32 @@ Object.assign(vue_methods, {
         }
     },
 
+    // S308：失败消息手动“重试本轮”——瞬断耗尽/StreamError 后复用 isResume 续跑：
+    // 已执行工具的结果保留在 backend_content 链尾，重发只续推理不重放副作用。
+    async retryLastRound() {
+        if (this.isSending || this.isTyping) return;
+        if (this._retryRoundInFlight) return;
+        const last = this.messages[this.messages.length - 1];
+        if (!last || last.role !== 'assistant') {
+            if (typeof showNotification === 'function') showNotification('链条尾部不是助手消息，请重新发送你的消息', 'warning');
+            return;
+        }
+        // 同 S199 审批/提问续跑自备件：generateAIResponse 的 fetch 读 this.abortController.signal
+        this._retryRoundInFlight = true;
+        this.isSending = true;
+        this.isTyping = true;
+        this.abortController = new AbortController();
+        try {
+            await this.generateAIResponse(this.mainAgent, last.agentName || undefined, true);
+        } catch (e) {
+            console.error('[RetryRound] 手动续跑失败:', e);
+            this.isSending = false;
+            this.isTyping = false;
+        } finally {
+            this._retryRoundInFlight = false;
+        }
+    },
+
     // 根据块类型返回对应的图标类名
     getToolBlockIcon(type) {
         const icons = {

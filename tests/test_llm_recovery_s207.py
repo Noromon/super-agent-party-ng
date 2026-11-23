@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """S207：LLM 瞬断故障恢复（引擎推理中途暴毙 terminated 等 → 自动重试）。
 
-语义（用户定稿）：重试预算 2 次退避 1s→2s（agentRobustness.llmRetry* 可配）；
+语义（用户定稿）：重试预算 4 次退避 1s→2s→4s→8s+0-30%抖动（S308 加宽：网关崩溃恢复
+需数十秒，5s 窗耗尽致 15 分钟长跑夭折；agentRobustness.llmRetry* 可配）；
 覆盖全部 create 调用点；流中断=同 messages 原样重发本轮推理——重试边界严格
 不含工具执行（断流时本轮工具零执行，重发零环境副作用）；4xx 语义错不重试；
 耗尽后错误帧标注已自动重试次数。
@@ -76,9 +77,9 @@ class TestClassify:
 
 class TestCfg:
     def test_defaults(self):
-        assert lr.llm_retry_cfg({}) == (2, 1.0, True)
-        assert lr.llm_retry_cfg(None) == (2, 1.0, True)
-        assert lr.llm_retry_cfg({"agentRobustness": {}}) == (2, 1.0, True)
+        assert lr.llm_retry_cfg({}) == (4, 1.0, True)
+        assert lr.llm_retry_cfg(None) == (4, 1.0, True)
+        assert lr.llm_retry_cfg({"agentRobustness": {}}) == (4, 1.0, True)
 
     def test_custom_and_clamp(self):
         s = {"agentRobustness": {"llmRetryMax": 5, "llmRetryBaseDelayMs": 500}}
@@ -91,7 +92,7 @@ class TestCfg:
 
     def test_garbage_falls_back(self):
         s = {"agentRobustness": {"llmRetryMax": "x", "llmRetryBaseDelayMs": None}}
-        assert lr.llm_retry_cfg(s) == (2, 1.0, True)
+        assert lr.llm_retry_cfg(s) == (4, 1.0, True)
 
 
 def _rec_sleep(box):
@@ -239,7 +240,7 @@ class TestWiring:
     def test_template_keys(self):
         d = json.loads(TEMPLATE)
         ar = d["agentRobustness"]
-        assert ar["llmRetryMax"] == 2
+        assert ar["llmRetryMax"] == 4
         assert ar["llmRetryBaseDelayMs"] == 1000
         assert ar["llmRetryMidStream"] is True
 

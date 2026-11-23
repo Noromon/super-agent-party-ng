@@ -26,7 +26,7 @@ from py.get_setting import UPLOAD_FILES_DIR
 from py.guard import check_content_safety
 from py.image_draw import draw_action_feedback, draw_grid_on_image, scale_to_fit
 from py.llm_recovery import (acreate, attach_retry_note as llm_attach,
-                             backoff_sleep as llm_backoff,
+                             backoff_sleep as llm_backoff, brief_llm_error,
                              is_transient_transport_error, llm_retry_cfg,
                              stream_reset_chunk, stream_retry_chunk)
 from py.msg_utils import content_append
@@ -454,10 +454,10 @@ async def _stream_first_round_with_recovery(_st, client, model, msg, extra, extr
             _lr_partial = _lr_delivered or bool(tool_calls)
             logging.getLogger("app").warning(
                 "[LLMRetry] 主流首轮瞬断重试 %d/%d: %s",
-                _lr_attempt + 1, _lr_max, str(_lr_e)[:200])
+                _lr_attempt + 1, _lr_max, brief_llm_error(_lr_e))
             if _lr_partial and _lr_mid:
                 yield stream_reset_chunk(_st.get("_lr_keep_chars", 0))
-            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, str(_lr_e))
+            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, brief_llm_error(_lr_e))
             _st["full_content"] = ""
             _st["content_buffer"] = []
             _st["reasoning_buffer"] = []
@@ -544,10 +544,10 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
             _lr_partial = _lr_delivered or bool(tool_calls)
             logging.getLogger("app").warning(
                 "[LLMRetry] 工具轮瞬断重试 %d/%d: %s",
-                _lr_attempt + 1, _lr_max, str(_lr_e)[:200])
+                _lr_attempt + 1, _lr_max, brief_llm_error(_lr_e))
             if _lr_partial and _lr_mid:
                 yield stream_reset_chunk(_st.get("_lr_keep_chars", 0))
-            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, str(_lr_e))
+            yield stream_retry_chunk(_lr_attempt + 1, _lr_max, brief_llm_error(_lr_e))
             content_buffer = []
             reasoning_buffer = []
             in_reasoning = False

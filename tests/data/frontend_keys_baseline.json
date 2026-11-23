@@ -963,6 +963,7 @@
   "restartDriverGuide",
   "restartMCPServer",
   "resumeRead",
+  "retryLastRound",
   "rewrite",
   "runBehavior",
   "sanitizeConversationForSave",

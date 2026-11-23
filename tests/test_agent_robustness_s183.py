@@ -131,7 +131,7 @@ class TestPipesAndPins:
         assert ar["reanchorEveryToolRounds"] == 6
         assert ar["malformedCallRepairMax"] == 2
         # S207：瞬断重试键（后端 llm_recovery 兜底默认，UI 后续故事接入）
-        assert ar["llmRetryMax"] == 2 and ar["llmRetryBaseDelayMs"] == 1000
+        assert ar["llmRetryMax"] == 4 and ar["llmRetryBaseDelayMs"] == 1000  # S308 加宽
         assert ar["llmRetryMidStream"] is True
         page = _read("static", "templates", "page_system.html")
         assert 'v-model="agentRobustness.reanchorEveryToolRounds"' in page

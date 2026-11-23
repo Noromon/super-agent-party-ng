@@ -11,10 +11,12 @@
   - llm_retry_cfg: 读取 agentRobustness.llmRetry* 配置
   - stream_retry_chunk / stream_reset_chunk: 流中断恢复控制帧
   - retry_suffix:  耗尽后错误标注
+  - brief_llm_error: S308 错误一句话摘要（网关 HTML 错误页折叠）
 """
 import asyncio
 import json
 import logging
+import random
 import time
 
 import httpx
@@ -72,17 +74,36 @@ def is_transient_transport_error(exc):
     return False
 
 
+def brief_llm_error(exc):
+    """S308：错误一句话摘要（日志/展示帧用）。中转网关 5xx 多以 Express/nginx
+    默认 HTML 页形态出现，整页倾倒既刷日志又吓用户——折叠为
+    「网关{status}(HTML,~{len}B)」；纯文本异常原样返回（截 300）。
+    完整 traceback 仍由外层 StreamError ERROR 级日志保留。"""
+    text = str(exc) if exc is not None else ""
+    head = text.lstrip()[:200].lower()
+    if head.startswith("<") or "<!doctype" in head or "<html" in head:
+        status = getattr(exc, "status_code", None)
+        if not isinstance(status, int):
+            status = 500 if any(t in head for t in ("500", "internal server error")) else None
+        return "网关%s(HTML响应,~%dB)" % (status if status else "?", len(text))
+    return text[:300]
+
+
 def llm_retry_cfg(settings):
-    """返回 (max_retries, base_delay_seconds, mid_stream_enabled)。"""
+    """返回 (max_retries, base_delay_seconds, mid_stream_enabled)。
+
+    S308 策略变更：默认 2→4（00:54 事故：网关崩溃 ~30s 才恢复，5s 重试窗
+    耗尽导致 15 分钟 agent 长跑终止；1/2/4/8s 指数退避+抖动 ≈15s 窗口，
+    配置可 5 ≈25s）。"""
     ar = {}
     try:
         ar = (settings or {}).get("agentRobustness") or {}
     except AttributeError:
         ar = {}
     try:
-        maxr = int(ar.get("llmRetryMax", 2))
+        maxr = int(ar.get("llmRetryMax", 4))
     except (TypeError, ValueError):
-        maxr = 2
+        maxr = 4
     maxr = min(max(maxr, 0), 5)
     try:
         delay = float(ar.get("llmRetryBaseDelayMs", 1000))
@@ -94,8 +115,9 @@ def llm_retry_cfg(settings):
 
 
 async def backoff_sleep(base_delay, attempt, cancelled=None, step=0.2):
-    """指数退避 base*2**attempt（封顶 10s），分段睡眠并每段检查取消。"""
-    total = min(base_delay * (2 ** attempt), 10.0)
+    """指数退避 base*2**attempt（封顶 10s），分段睡眠并每段检查取消。
+    S308：加 0–30% 随机抖动，防多路会话同步重试打踩刚恢复的网关。"""
+    total = min(base_delay * (2 ** attempt) * (1.0 + random.random() * 0.3), 10.0)
     deadline = time.monotonic() + total
     while True:
         remain = deadline - time.monotonic()
@@ -144,7 +166,7 @@ async def acreate(make_call, *, attempts=2, base_delay=1.0, label="",
             if i >= attempts:
                 break
             _log.warning("[LLMRetry] %s 瞬断重试 %d/%d: %s",
-                         label or "llm", i + 1, attempts, str(exc)[:200])
+                         label or "llm", i + 1, attempts, brief_llm_error(exc))
             try:
                 await backoff_sleep(base_delay, i, cancelled=cancelled)
             except asyncio.CancelledError:

@@ -499,6 +499,10 @@
                                   <div v-else-if="block.type === 'error'" class="sap-process-block type-error" :id="'tool-error-'+block.id">
                                       <div class="sp-header"><i class="fa-solid fa-xmark"></i> {{ block.name }}</div>
                                       <pre class="sp-content sp-code">{{ block.displayContent ?? block.content ?? '' }}</pre>
+                                      <!-- S308：瞬断耗尽后的手动重试——仅最后一条消息、空闲态显示；isResume 续跑不重放已执行工具 -->
+                                      <div class="sp-footer" v-if="index === messages.length - 1 && !isSending">
+                                          <button @click="retryLastRound()" class="sp-btn primary" :disabled="isSending">{{ t('retryRound') || '重试本轮' }}</button>
+                                      </div>
                                   </div>
 
 

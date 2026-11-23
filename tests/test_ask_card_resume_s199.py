@@ -18,7 +18,9 @@ JS_BLOCKS = (_ROOT / "static" / "js" / "methods" / "11_tool_blocks.js").read_tex
 
 class TestAskResumeAbortController:
     def setup_method(self):
-        self.body = JS_BLOCKS[JS_BLOCKS.index("submitAskAnswer(msg, block)"):]
+        _seg = JS_BLOCKS[JS_BLOCKS.index("submitAskAnswer(msg, block)"):]
+        # S308 起本方法后有兄弟方法 retryLastRound（同含 AbortController）——切片至方法尾
+        self.body = _seg[:_seg.index("async retryLastRound()")]
         self.i_replay = self.body.index("await this.generateAIResponse(this.mainAgent")
 
     def test_controller_created_before_replay(self):
