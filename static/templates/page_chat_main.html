@@ -544,7 +544,10 @@
                         <button type="button" class="el-button is-circle el-button--small Gen-btn" v-if="message.role === 'system'&&index == 0" :title="t('oneClickExpand')" @click="toggleQuickGen(index)" :disabled="isQuickGenerating" :class="{ 'is-disabled': isQuickGenerating }"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                         <button type="button" class="el-button is-circle el-button--small Gen-btn" v-if="message.role === 'system'&&index == 0" :title="t('save')" @click="saveSystemPrompt(index)" :disabled="isQuickGenerating" :class="{ 'is-disabled': isQuickGenerating }"><i class="fa-solid fa-floppy-disk"></i></button>
                         <span class="msg-status" v-if="message.role === 'assistant' && !isMobile">
-                            {{ t('total_tokens')+': '+ (message?.total_tokens ?? 0) +',    '+ t('first_token_latency')+': '+(message?.first_token_latency ?? 0) +'ms'}}
+                            {{ t('total_tokens')+': '+ (message?.usage_est ? '~' : '') + (message?.total_tokens ?? 0)
+                               + (message?.completion_tokens ? ' ('+t('completion_tokens')+': '+(message.usage_est?'~':'')+(message.completion_tokens ?? 0)+(message.context_tokens ? ' / '+t('context_tokens')+': '+(message.context_tokens ?? 0) : '')+')' : '')
+                               +',    '+ t('first_token_latency')+': '+(message?.first_token_latency ?? 0) +'ms'
+                               +',    '+ t('tokens_per_sec')+': '+(message?.tok_per_sec ?? 0) }}
                         </span>
                       </div>
 

@@ -1,0 +1,93 @@
+# S309b: 消息级计费累计帧 + Token 仪表盘（总token恒0/首token错时/无tok/s 修复）。
+# 后端 stream_usage 控制帧（DONE 前、跨轮累计）+ 前端 guarded-once first_token、
+# 实时 tok/s（80ms flush 节流）、无 usage 时字符估算兜底、footer 分项展示。
+import json
+import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+if "py" in sys.modules and not hasattr(sys.modules["py"], "__path__"):
+    del sys.modules["py"]  # site-packages py.py shim 让位给仓库包
+
+from py.msg_utils import accumulate_usage, usage_control_frame  # noqa: E402
+
+STREAM_RESPONSE = (_ROOT / "py" / "stream_response.py").read_text(encoding="utf-8")
+CHAT_JS = (_ROOT / "static" / "js" / "methods" / "10_chat_stream.js").read_text(encoding="utf-8")
+TEMPLATE = (_ROOT / "static" / "templates" / "page_chat_main.html").read_text(encoding="utf-8")
+ZH = (_ROOT / "static" / "js" / "locales" / "zh-CN.js").read_text(encoding="utf-8")
+EN = (_ROOT / "static" / "js" / "locales" / "en-US.js").read_text(encoding="utf-8")
+
+
+class TestAccumulate:
+    def test_cross_round_sum(self):
+        acc = accumulate_usage(None, {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110})
+        acc = accumulate_usage(acc, {"prompt_tokens": 150, "completion_tokens": 5, "total_tokens": 155})
+        assert acc == {"prompt_tokens": 250, "completion_tokens": 15, "total_tokens": 265}
+
+    def test_none_and_junk_passthrough(self):
+        assert accumulate_usage(None, None) is None
+        acc = {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1}
+        assert accumulate_usage(acc, {"completion_tokens": "x", "prompt_tokens": True}) == acc
+        assert accumulate_usage(acc, {"completion_tokens": 2})["completion_tokens"] == 2
+
+    def test_frame_shape(self):
+        frame = usage_control_frame({"prompt_tokens": 250, "completion_tokens": 15, "total_tokens": 265})
+        assert frame.startswith("data: ") and frame.endswith("\n\n")
+        obj = json.loads(frame[len("data: "):])
+        assert obj["type"] == "stream_usage"
+        assert obj["prompt_tokens"] == 250 and obj["completion_tokens"] == 15 and obj["total_tokens"] == 265
+
+    def test_frame_absent_when_empty(self):
+        assert usage_control_frame(None) is None
+        assert usage_control_frame({"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}) is None
+
+
+class TestBackendWiring:
+    def test_init_and_two_accum_sites(self):
+        assert "_usage_acc = None" in STREAM_RESPONSE
+        assert STREAM_RESPONSE.count("accumulate_usage(_usage_acc, usage_info)") == 2
+
+    def test_frame_emitted_before_done(self):
+        i = STREAM_RESPONSE.index("usage_control_frame(_usage_acc)")
+        j = STREAM_RESPONSE.index('yield "data: [DONE]\\n\\n"', i)
+        assert 0 < j - i < 300
+
+    def test_ra11_wipe_not_resetting_acc(self):
+        site = '                usage_info = None\n                if _st.pop("w1_cancel"'
+        assert site in STREAM_RESPONSE  # 轮内擦除处不得误插 _usage_acc 复位
+
+
+class TestFrontendPins:
+    def test_stream_usage_branch(self):
+        assert "parsed.type === 'stream_usage'" in CHAT_JS
+        assert "_applyStreamUsage(currentMsg, parsed)" in CHAT_JS
+
+    def test_first_token_guarded_once(self):
+        assert "if (!currentMsg.first_token_latency)" in CHAT_JS
+        assert "currentMsg.content === '' && !isResume" not in CHAT_JS
+
+    def test_live_tok_per_sec_flush(self):
+        i = CHAT_JS.index("flushStreamTextBuffer() {")
+        seg = CHAT_JS[i:i + 1500]
+        assert "_usageFinal" in seg and "_streamT0" in seg and "tok_per_sec" in seg
+
+    def test_est_finalize_fallback(self):
+        assert "_finalizeUsage(currentMsg)" in CHAT_JS
+        assert CHAT_JS.count("this._finalizeUsage(currentMsg)") == 2
+        assert "/ 1.8" in CHAT_JS
+
+    def test_msg_fields_and_t0(self):
+        for k in ("completion_tokens: 0", "context_tokens: 0", "tok_per_sec: 0", "usage_est: false"):
+            assert k in CHAT_JS
+        assert "this._streamT0 = Date.now()" in CHAT_JS
+
+    def test_template_footer(self):
+        for key in ("completion_tokens", "context_tokens", "tokens_per_sec", "usage_est"):
+            assert key in TEMPLATE[TEMPLATE.index("msg-status"):TEMPLATE.index("msg-status") + 1200]
+
+    def test_locale_keys(self):
+        for src in (ZH, EN):
+            for key in ("'completion_tokens'", "'context_tokens'", "'tokens_per_sec'"):
+                assert key in src

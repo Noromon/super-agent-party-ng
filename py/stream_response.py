@@ -29,7 +29,7 @@ from py.diary_system import DEFAULT_BOOK_ID as DIARY_DEFAULT_BOOK, get_recent_di
 from py.routers.island import notify_island_reply_done
 from py.llm_recovery import retry_suffix
 from py.model_params import effective_main_params, effective_role_params
-from py.msg_utils import _extract_text_content, content_append
+from py.msg_utils import _extract_text_content, content_append, accumulate_usage, usage_control_frame  # S309b
 from py.task_anchor import anchor_stream_in  # S307：任务锚点（df2f8248 续跑头部残缺修复）
 from py import agent_loop_guard as _loop_guard  # S309：工具重复调用熔断
 from py.prompt_builders import _inject_screen_context
@@ -90,7 +90,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         _st["_entry"] = stream_entry or _current_stream_entry.get()
         if _st["_entry"] is None and settings.get('enableStreamResume', True):
             logging.getLogger("app").warning("[Cancel-Miss] stream_generator 无法获取流 entry，取消围栏将失效")
-        usage_info = None
+        usage_info = _usage_acc = None  # S309b：_usage_acc 跨轮累计（RA-11 每轮擦 usage_info，acc 只进不出）
         _ctx_peak = 0
         extra = {}
         reasoner_extra = {}
@@ -212,6 +212,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         async for _c in _stream_first_round_with_recovery(_st, client, model, msg, extra, extra_params, settings, open_tag, close_tag, tool_calls, usage_info, _ctx_peak, in_reasoning, content_buffer, reasoning_buffer):
             yield _c
         usage_info = _st["usage_info"]
+        _usage_acc = accumulate_usage(_usage_acc, usage_info)
         _ctx_peak = _st["_ctx_peak"]
         is_tool_call = _st["is_tool_call"]
         full_content = _st["full_content"]
@@ -287,9 +288,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                     except Exception as _ik_e:
                         logging.getLogger("app").warning("[Inflight] 检查点写入失败: %r", _ik_e)
                 results = _st.get("results")
-                if _loop_guard.observe_round(_st, request, tool_calls):  # S309：重复调用熔断
+                if _loop_guard.observe_round(_st, request, tool_calls):  # S309：重复熔断（警告已并入 tool 结果尾部）
                     force_no_tools = True
-                    logging.getLogger("app").warning("[LoopGuard] 重复调用熔断：本轮后工具禁用，强制收尾")
             # 如果启用推理模型
             if settings['reasoner']['enabled'] or enable_thinking:
                 async for _c in _stream_reasoner_update(_st, request, reasoner_client, settings, reasoner_messages, images, reasoner_extra, open_tag, close_tag, tools, vendor):
@@ -313,6 +313,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                 return  # cancel 路径：helper 已发 DONE
             tool_calls = _st["tc_round"]
             usage_info = _st["usage_info"]
+            _usage_acc = accumulate_usage(_usage_acc, usage_info)
             _ctx_peak = _st["_ctx_peak"]
             full_content = _st["fc"]
             in_reasoning = _st["in_reasoning"]
@@ -330,6 +331,8 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         async for _c in _stream_usage_event(request, settings, usage_info, _ctx_peak, tools):
             yield _c
         logger.info(f"all msg: {request.messages}")
+        if _usage_frame := usage_control_frame(_usage_acc):  # S309b：计费累计帧（前端仪表盘数据源）
+            yield _usage_frame
         yield "data: [DONE]\n\n"
         # S139(R6)：灵动岛热力图+1 并通知（上游 5842-5850 语义：非 sub_agent、异常吞）
         await notify_island_reply_done(request.is_sub_agent)

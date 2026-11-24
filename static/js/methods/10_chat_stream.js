@@ -346,7 +346,8 @@ Object.assign(vue_methods, {
                 displayBlocks: [],
                 isOmni: this.settings.enableOmniTTS || this.fastSettings.enableOmniTTS,
                 omniAudioChunks: [], ttsChunks: [], chunks_voice: [], audioChunks: [],
-                isPlaying: false, total_tokens: 0, first_token_latency: 0, elapsedTime: 0,
+                isPlaying: false, total_tokens: 0, completion_tokens: 0, context_tokens: 0,
+                tok_per_sec: 0, usage_est: false, first_token_latency: 0, elapsedTime: 0,
                 generationFinished: false
             };
             this.messages.push(newMsgData);
@@ -469,6 +470,7 @@ Object.assign(vue_methods, {
             this._streamReasoningBuffer = '';
             this._streamRecvChars = 0;
             this._streamFlushChars = 0;
+            this._streamT0 = Date.now(); // S309b：tok/s 速率基准（resume 路径不重置，保持整段口径）
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
             // 断线也能 resume，停止按钮也能取消后端生产者流
@@ -490,6 +492,10 @@ Object.assign(vue_methods, {
                         this.updateContextStats(parsed);
                         return;
                     }
+                    if (parsed.type === 'stream_usage') { // S309b：消息级计费累计控制帧
+                        this._applyStreamUsage(currentMsg, parsed);
+                        return;
+                    }
                     if (parsed.type === 'todo_stats') {
                         this.updateTodoStats(parsed);
                         return;
@@ -509,10 +515,13 @@ Object.assign(vue_methods, {
                     if (delta.stream_reset) { this._armStreamReset(delta.stream_reset); return; }
                     _chunkIndex++;
 
-                    if (currentMsg.content === '' && !isResume) {
-
-                        this.stopTimer();
-                        currentMsg.first_token_latency = this.elapsedTime;
+                    if (!currentMsg.first_token_latency) { // S309b: guarded-once，任意类型首帧即首token（修每帧覆写 bug）
+                        const hasPayload = delta.content || delta.reasoning_content || delta.tool_progress
+                            || (delta.tool_calls && delta.tool_calls.length) || delta.audio?.data;
+                        if (hasPayload) {
+                            this.stopTimer();
+                            currentMsg.first_token_latency = this.elapsedTime;
+                        }
                     }
 
                     // A. 处理思考 (Reasoning) —— S92: 与文本同款 80ms 缓冲，杜绝每 token 触发渲染
@@ -601,6 +610,7 @@ Object.assign(vue_methods, {
             // 循环结束后，强制刷新缓冲区中剩余的文字
             if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
             this.flushStreamTextBuffer();
+            this._finalizeUsage(currentMsg); // S309b：无 usage 帧时字符估算兜底
             this._flushToolStream(); // S93(F4)
             this._collapseStaleApprovalCards(currentMsg); // S186: 收尾折叠未点名孤儿审批卡
             this._collapseStaleAskCards(currentMsg); // S195: 收尾折叠未点名孤儿提问卡
@@ -648,6 +658,7 @@ Object.assign(vue_methods, {
                         // 续传成功后正常完成
                         if (this._streamUpdateTimer) clearTimeout(this._streamUpdateTimer);
                         this.flushStreamTextBuffer();
+                        this._finalizeUsage(currentMsg); // S309b
                         this._flushToolStream(); // S93(F4)
                         this._collapseStaleApprovalCards(currentMsg); // S186: 续传收尾折叠孤儿审批卡
                         this._collapseStaleAskCards(currentMsg); // S195: 续传收尾折叠孤儿提问卡
@@ -1101,6 +1112,30 @@ Object.assign(vue_methods, {
         }
     },
 
+    // S309b：stream_usage 控制帧落账——厂商真实计费（多轮累计）覆盖估算，精算 tok/s
+    _applyStreamUsage(msg, u) {
+        if (!msg || !u) return;
+        msg.completion_tokens = u.completion_tokens || 0;
+        msg.context_tokens = u.prompt_tokens || 0;
+        msg.total_tokens = u.total_tokens || (msg.completion_tokens + msg.context_tokens);
+        msg.usage_est = false;
+        msg._usageFinal = true;
+        const secs = (Date.now() - (this._streamT0 || Date.now())) / 1000;
+        if (msg.completion_tokens > 0 && secs > 0.5) {
+            msg.tok_per_sec = Math.max(1, Math.round(msg.completion_tokens / secs));
+        }
+    },
+    // S309b：流收尾时若厂商未回 usage（旧后端/网关不支持），按 字符/1.8 估算并标 usage_est
+    _finalizeUsage(msg) {
+        if (!msg || msg._usageFinal) return;
+        const chars = this._streamRecvChars || 0;
+        if (chars > 0 && !msg.total_tokens) {
+            msg.usage_est = true;
+            msg.completion_tokens = Math.round(chars / 1.8);
+            msg.total_tokens = msg.completion_tokens;
+        }
+    },
+
     // 3. 流式文本批量更新（防抖 80ms；S92: 含 reasoning 缓冲）
     // S109 追赶模式：接收-落账字符差 >4000 判定积压，放宽提交/工具 bump 节奏，
     // 用更少更大渲染换泵吞吐；追平自动回到 80ms 手感档
@@ -1134,6 +1169,12 @@ Object.assign(vue_methods, {
             this._streamTextBuffer = '';
             // 触发滚动（节流版）
             this.requestScrollToBottom();
+        }
+        if (__m && !__m._usageFinal) { // S309b：流式期节流刷新实时 tok/s（usage 帧到达后停用估算）
+            const _secs = (Date.now() - (this._streamT0 || Date.now())) / 1000;
+            if (_secs > 0.5) {
+                __m.tok_per_sec = Math.max(1, Math.round((this._streamRecvChars || 0) / 1.8 / _secs));
+            }
         }
         if (__m) __m._rv = (__m._rv || 0) + 1;
     },

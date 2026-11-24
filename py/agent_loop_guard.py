@@ -143,6 +143,8 @@ def observe_round(st, request, tool_calls):
                 _append_note(entry[0], note)
                 logger.warning("[LoopGuard] %s x%s tid=%s -> %s", name, n, tid,
                                "force_stop" if (n >= FORCE_SAME or streak >= FORCE_EDIT_FAIL) else "noted")
+        if force:
+            logger.warning("[LoopGuard] 重复调用熔断触发：本轮后工具禁用，强制收尾")
         return force
     except Exception as e:
         logger.info("[LoopGuard] 观测失败（忽略）: %r", e)

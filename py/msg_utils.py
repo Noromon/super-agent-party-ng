@@ -5,6 +5,34 @@
 """
 from py.tool_call_guard import neutralize_leaked_blocks as _tcg_neutralize  # S300：content_append 原形引用
 
+import json  # S309b：usage 控制帧序列化
+
+
+def accumulate_usage(acc, usage_info):
+    """S309b：单 POST 跨轮累计厂商计费 usage（RA-11 每轮擦除 usage_info，仪表盘需要总和）。"""
+    if not isinstance(usage_info, dict):
+        return acc
+    out = dict(acc) if isinstance(acc, dict) else {"prompt_tokens": 0, "completion_tokens": 0,
+                                                   "total_tokens": 0}
+    for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        v = usage_info.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[k] = int(out.get(k, 0) + v)
+    return out
+
+
+def usage_control_frame(acc):
+    """S309b：DONE 前发出的消息级计费累计控制帧（与 context_usage 同款顶层 type）。"""
+    if not isinstance(acc, dict) or not any(acc.get(k) for k in ("prompt_tokens", "completion_tokens",
+                                                                 "total_tokens")):
+        return None
+    return "data: " + json.dumps({
+        "type": "stream_usage",
+        "prompt_tokens": int(acc.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(acc.get("completion_tokens", 0) or 0),
+        "total_tokens": int(acc.get("total_tokens", 0) or 0),
+    }, ensure_ascii=False) + "\n\n"
+
 
 def _get_target_message(message, role):
     """
