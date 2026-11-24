@@ -561,6 +561,10 @@
                   </div>
                   </template>
                 </div>
+                    <!-- S310：输出期实时流统计徽章（固定右下角，不随滚动/暗行被忽略） -->
+                    <div v-if="isTyping && streamLiveStats && !isMobile" class="stream-live-badge">
+                        {{ t('tokens_per_sec')+': '+streamLiveStats.tok+'  ·  '+t('completion_tokens')+': ~'+streamLiveStats.out+'  ·  '+t('total_tokens')+': ~'+streamLiveStats.total }}
+                    </div>
                     <div class="button-group" v-if="isCapsuleMode">
 
                       <el-button :title="ASRrunning?t('listening'):isTyping?t('typing'):TTSrunning?t('speaking'):t('idle')" v-if="isCapsuleMode" class="icon-btn status-btn" :type="ASRrunning||TTSrunning||isTyping ? 'primary':'default' " circle>

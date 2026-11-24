@@ -471,6 +471,7 @@ Object.assign(vue_methods, {
             this._streamRecvChars = 0;
             this._streamFlushChars = 0;
             this._streamT0 = Date.now(); // S309b：tok/s 速率基准（resume 路径不重置，保持整段口径）
+            this.streamLiveStats = null; // S310：实时徽章随流重置
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
             // 断线也能 resume，停止按钮也能取消后端生产者流
@@ -1170,10 +1171,18 @@ Object.assign(vue_methods, {
             // 触发滚动（节流版）
             this.requestScrollToBottom();
         }
-        if (__m && !__m._usageFinal) { // S309b：流式期节流刷新实时 tok/s（usage 帧到达后停用估算）
+        if (__m && !__m._usageFinal) { // S309b/S310：流式期节流刷新估算落账+实时徽章（usage 帧到达后停用）
             const _secs = (Date.now() - (this._streamT0 || Date.now())) / 1000;
             if (_secs > 0.5) {
-                __m.tok_per_sec = Math.max(1, Math.round((this._streamRecvChars || 0) / 1.8 / _secs));
+                const _est = Math.round((this._streamRecvChars || 0) / 1.8);
+                const _tps = Math.max(1, Math.round(_est / _secs));
+                __m.tok_per_sec = _tps;
+                if (_est > 0) {
+                    __m.usage_est = true;
+                    __m.completion_tokens = _est;
+                    __m.total_tokens = _est;
+                }
+                this.streamLiveStats = { tok: _tps, out: _est, total: _est };
             }
         }
         if (__m) __m._rv = (__m._rv || 0) + 1;

@@ -1779,6 +1779,7 @@
   "startTime",
   "stickerPacks",
   "storageTiles",
+  "streamLiveStats",
   "subMenu",
   "supportedLanguages",
   "systemSettings",
@@ -1934,5 +1935,5 @@
   "vrm.js": 41
  },
  "console_log_total": 198,
- "styles_css_lines": 12871
+ "styles_css_lines": 12887
 }

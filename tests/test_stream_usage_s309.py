@@ -70,7 +70,7 @@ class TestFrontendPins:
 
     def test_live_tok_per_sec_flush(self):
         i = CHAT_JS.index("flushStreamTextBuffer() {")
-        seg = CHAT_JS[i:i + 1500]
+        seg = CHAT_JS[i:i + 1750]
         assert "_usageFinal" in seg and "_streamT0" in seg and "tok_per_sec" in seg
 
     def test_est_finalize_fallback(self):
@@ -91,3 +91,29 @@ class TestFrontendPins:
         for src in (ZH, EN):
             for key in ("'completion_tokens'", "'context_tokens'", "'tokens_per_sec'"):
                 assert key in src
+
+
+class TestS310LiveBadge:
+    DATA = (_ROOT / "static" / "js" / "data" / "00_ui_core.js").read_text(encoding="utf-8")
+    CSS = (_ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")
+
+    def test_flush_updates_live_totals(self):
+        i = CHAT_JS.index("flushStreamTextBuffer() {")
+        seg = CHAT_JS[i:i + 2200]
+        assert "this.streamLiveStats = { tok: _tps, out: _est, total: _est }" in seg
+        assert "__m.usage_est = true" in seg
+        assert "__m.completion_tokens = _est" in seg
+        assert "__m.total_tokens = _est" in seg
+
+    def test_stream_start_resets_badge(self):
+        i = CHAT_JS.index("this._streamT0 = Date.now()")
+        assert "this.streamLiveStats = null" in CHAT_JS[i:i + 220]
+
+    def test_badge_template_and_gate(self):
+        seg = TEMPLATE[TEMPLATE.index("stream-live-badge") - 200:TEMPLATE.index("stream-live-badge") + 500]
+        assert "isTyping && streamLiveStats && !isMobile" in seg
+        assert "streamLiveStats.tok" in seg and "streamLiveStats.out" in seg
+
+    def test_data_key_and_css(self):
+        assert "streamLiveStats: null" in self.DATA
+        assert ".stream-live-badge" in self.CSS and "position: fixed" in self.CSS
