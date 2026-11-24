@@ -3605,12 +3605,12 @@ body {
   margin-left: 8px; /* 文字左侧也保持相同间距 */
 }
 
-/* S310: 输出期右下角实时流统计徽章 */
+/* S310/S312: 输出期右下角实时流统计徽章（Teleport 到 body，z 压过全部浮层） */
 .stream-live-badge {
   position: fixed;
   right: 26px;
   bottom: 118px;
-  z-index: 900;
+  z-index: 9999;
   padding: 4px 12px;
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.62);

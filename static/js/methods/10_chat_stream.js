@@ -1183,6 +1183,10 @@ Object.assign(vue_methods, {
                     __m.total_tokens = _est;
                 }
                 this.streamLiveStats = { tok: _tps, out: _est, total: _est };
+                if (!this._liveBadgeLogged) { // S312：一次性自检日志（F12 可自证 JS 版本与数据流）
+                    this._liveBadgeLogged = true;
+                    console.warn('[S310b] live badge stats', JSON.stringify(this.streamLiveStats));
+                }
             }
         }
         if (__m) __m._rv = (__m._rv || 0) + 1;

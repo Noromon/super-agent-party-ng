@@ -117,3 +117,10 @@ class TestS310LiveBadge:
     def test_data_key_and_css(self):
         assert "streamLiveStats: null" in self.DATA
         assert ".stream-live-badge" in self.CSS and "position: fixed" in self.CSS
+
+    def test_s312_teleport_and_marker(self):
+        i = TEMPLATE.index("stream-live-badge")
+        seg = TEMPLATE[i - 300:i + 400]
+        assert "<Teleport to=" in seg and "</Teleport>" in seg
+        assert "z-index: 9999" in self.CSS
+        assert "[S310b] live badge stats" in CHAT_JS
