@@ -97,7 +97,26 @@ def normalize_questions(args: Any) -> Tuple[List[Dict], str]:
             return [], f"[Error] question #{i} has empty 'question' text."
         opts_raw = q.get("options") or []
         if isinstance(opts_raw, str):
-            opts_raw = [s for s in opts_raw.splitlines() if s.strip()]
+            # S313：模型常把数组字符串化（"[...]"）或用分隔符并排多个选项——
+            # 直接 splitlines 会把 N 个选项合并成 1 个按钮（用户报"选项合并/只剩一个"）。
+            s = opts_raw.strip()
+            parsed = None
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                except Exception:
+                    parsed = None
+            if isinstance(parsed, list):
+                opts_raw = parsed
+            else:
+                parts = [p for p in s.splitlines() if p.strip()]
+                if len(parts) == 1 and s:
+                    for sep in ("、", "；", ";"):
+                        cand = [p.strip() for p in s.split(sep) if p.strip()]
+                        if len(cand) > 1:
+                            parts = cand
+                            break
+                opts_raw = parts
         if not isinstance(opts_raw, list):
             return [], f"[Error] question #{i} 'options' must be an array of strings."
         opts = [str(o).strip()[:200] for o in opts_raw if str(o).strip()][:MAX_OPTIONS]
@@ -201,7 +220,9 @@ def format_result_text(record: Dict, answers: Dict[int, str]) -> str:
     if any(not answers.get(i) for i in range(1, len(qs) + 1)):
         lines.append("（未答复项：按最合理的默认假设继续推进，并在最终答复中向用户说明该假设。）")
     else:
-        lines.append("（答复已确认，按所选继续任务，无需重复追问。）")
+        lines.append("（答复已确认，按所选继续任务，无需重复追问。若当前处于 Plan/只读模式且"
+                 "答复已补齐全部待定项：立刻输出最终计划正文供用户确认，禁止再探索文件、"
+                 "反复权衡或尝试越权执行。）")
     return "\n".join(lines)
 
 

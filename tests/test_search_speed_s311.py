@@ -152,12 +152,30 @@ class TestCollect:
 
         def fake_popen(cmd, *a, **k):
             seen["cmd"] = cmd
+            seen["kw"] = k
             return _FakeProc(_gen_lines(0), rc=1)
         monkeypatch.setattr(cli_tool.subprocess, "Popen", fake_popen)
         cli_tool._rg_search_collect("rg", ".", ".", "p", "", False, 50)
         cmd = " ".join(seen["cmd"])
         assert "--max-filesize" in cmd
         assert "!**/node_modules/**" in cmd and "!**/.git/**" in cmd
+        assert "!*.png" in cmd and "!*.exe" in cmd  # S313 ext 负向 glob（对齐 py 引擎）
+
+    def test_s313_stdin_devnull_and_always_path(self, monkeypatch):
+        # 真因钉桩：无路径参数+stdin 非 TTY（Electron pipe）→ rg 读 stdin 永久挂起。
+        import subprocess as _sp
+        seen = {}
+
+        def fake_popen(cmd, *a, **k):
+            seen["cmd"] = cmd
+            seen["kw"] = k
+            return _FakeProc(_gen_lines(0), rc=1)
+        monkeypatch.setattr(cli_tool.subprocess, "Popen", fake_popen)
+        cli_tool._rg_search_collect("rg", "/cwd", "/cwd", "p", "", False, 50)  # rel="."
+        assert seen["kw"].get("stdin") == _sp.DEVNULL
+        assert seen["cmd"][-2:] == ["--", "."]
+        cli_tool._rg_search_collect("rg", "/cwd", "/cwd/sub", "p", "", False, 50)
+        assert seen["cmd"][-2:] == ["--", "sub"]
 
 
 class TestCaller:

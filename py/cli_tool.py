@@ -1826,6 +1826,8 @@ def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
            "--max-filesize", str(_SEARCH_MAX_FILE_BYTES)]
     for _d in sorted(_SEARCH_SKIP_DIRS):
         cmd += ["--glob", "!**/" + _d + "/**"]
+    for _e in sorted(_SEARCH_SKIP_EXTS):  # S313：与 py 引擎对齐，免开资产文件（AV 逐文件开闸成本）
+        cmd += ["--glob", "!*" + _e]
     if ignore_case:
         cmd.append("-i")
     pats = [p.strip() for p in (include or "").replace(";", ",").split(",") if p.strip()]
@@ -1836,14 +1838,15 @@ def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
         rel = os.path.relpath(target_str, cwd)
     except Exception:
         rel = "."
-    if rel != ".":
-        cmd += ["--", rel]
+    cmd += ["--", rel if rel != "." else "."]  # S313：恒传路径——无路径参数且 stdin 非 TTY
+    # （Electron stdio:['pipe']）时 rg 会转读 stdin 永久挂起，60s 看门狗假 timeout（真因）。
     log = logging.getLogger("app")
     t0 = time.monotonic()
     timed_out = {"v": False}
     try:
         proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, text=True, errors="replace")
+                                stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                text=True, errors="replace")
     except Exception:
         return None, False, "fail"
 
