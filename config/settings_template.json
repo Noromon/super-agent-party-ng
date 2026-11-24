@@ -21,6 +21,7 @@
         "reanchorEveryToolRounds": 6,
         "malformedCallRepairMax": 2,
         "llmRetryMax": 4,
+        "llmRetryMigratedV2": true,
         "llmRetryBaseDelayMs": 1000,
         "llmRetryMidStream": true
     },

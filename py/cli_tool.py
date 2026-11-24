@@ -721,6 +721,8 @@ async def edit_file_patch_tool(path: str, old_string: str = "", new_string: str 
         res = patch_match.apply_edits(content, edit_list)
         if not res.ok:
             return res.report
+        if not res.content:  # S309 net-zero No-op：零净改动，跳过 docker cp
+            return f"'{path}' — {res.report} (sandbox)"
         with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='') as tmp:
             tmp.write(res.content)
             tmp_path = tmp.name
@@ -1700,6 +1702,18 @@ async def edit_file_tool_local(path: str, content: str) -> str:
         
         await aiofiles.os.makedirs(parent_dir, exist_ok=True)
 
+        # 1.5 S309：内容与此前完全一致 → No-op，不备份不落盘（终结整文件重写循环）
+        if target.exists():
+            try:
+                _existing = await aiofiles.open(target, 'r', encoding='utf-8', errors='replace')
+                async with _existing as f:
+                    _old_text = await f.read()
+                if _old_text.replace("\r\n", "\n") == content.replace("\r\n", "\n"):
+                    return (f"[No-op] '{path}' already contains EXACTLY this content; nothing was "
+                            "written. Do NOT repeat this call — run/verify the file state instead.")
+            except Exception as e:
+                logging.getLogger("app").info(f"[Warn] No-op precheck skipped: {e}")
+
         # 2. 创建备份 (如果文件存在)
         backup_msg = ""
         if target.exists():
@@ -2034,6 +2048,8 @@ async def edit_file_patch_tool_local(path: str, old_string: str = "", new_string
         res = patch_match.apply_edits(content, edit_list)
         if not res.ok:
             return res.report
+        if not res.content:  # S309 net-zero No-op：零净改动，跳过写回
+            return f"'{path}' — {res.report}"
         async with aiofiles.open(target, 'w', encoding='utf-8', newline='') as f:
             await f.write(res.content)
         return f"Patched '{path}'.\n{res.report}{_EDIT_CONTINUE_HINT}"

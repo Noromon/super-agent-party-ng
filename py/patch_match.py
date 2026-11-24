@@ -134,9 +134,12 @@ def _miss_report(content: str, old: str, edit_no: int) -> str:
                 f"Closest actual content:\n--- actual ---\n"
                 f"{_snippet(content, win[0] + 1, win[1])}\n--- end ---\n"
                 "Retry the patch by copying the text above VERBATIM; "
-                "no need to re-read the whole file.")
+                "no need to re-read the whole file. If you already tried THIS edit before and got "
+                "success/[No-op], the change IS on disk — verify by running the program or reading "
+                "those lines; NEVER resend the same old_string unchanged.")
     return (f"[Error] edit {edit_no}: old_string not found and no similar region exists. "
-            "No changes were made. Verify the path and that this content belongs to this file.")
+            "No changes were made. Verify the path and that this content belongs to this file. "
+            "If a previous attempt reported success, the file is already in the target state — stop.")
 
 
 def _apply_edit(content: str, old: str, new: str, replace_all: bool,
@@ -278,6 +281,13 @@ def apply_edits(content: str, edits: Any) -> PatchResult:
         work = newc
         summaries.append(msg)
         edit_lines.append(ln or 0)
+    if work == content:
+        # S309 net-zero：逐条都"成功"但文件字节不变（fuzzy 把已写好的 new 当 old
+        # 匹配再写回同样 new 的假成功，df2f8248 事故）→ 报 No-op，不产生落盘内容。
+        return PatchResult(True, content="", edit_lines=edit_lines,
+                           report="[No-op] All edits matched but produced ZERO net change — the file "
+                                  "is ALREADY in the requested state. Nothing was written. Do NOT "
+                                  "repeat this call; verify by running the program or reading the lines.")
     report = "; ".join(summaries)
     diff = _diff_excerpt(content, work)
     if diff:

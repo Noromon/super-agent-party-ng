@@ -635,6 +635,8 @@ async def load_settings():
                 merge_defaults(defaults, user_settings)
                 if _migrate_legacy_keys(user_settings):
                     has_changes[0] = True
+                if _migrate_agent_robustness_v2(user_settings):  # S309：llmRetryMax 2→4 一次性迁移
+                    has_changes[0] = True
                 if has_changes[0] and parse_ok:
                     # 引导/迁移回写：走行写不取 RMW（load 可能被持 RMW 的事务调用，避免自锁）
                     await _write_settings_row(user_settings)  # B8(b03e7c0e): 火忘任务改 await，防与后续保存竞态
@@ -656,6 +658,23 @@ def _sync_eos_guard(settings):
         apply_setting(settings.get("eosGuard") if isinstance(settings, dict) else None)
     except Exception:
         pass
+
+
+def _migrate_agent_robustness_v2(settings):
+    """S309：存量 settings 里烧死的 llmRetryMax=2 升为 4（S308 新默认对老装机不生效）。
+
+    仅一次：写 llmRetryMigratedV2 标记后永不再动（含用户此后手改的任何值）。
+    纯函数（只改传入 dict），返回是否改动以供回写判定。"""
+    try:
+        ar = settings.get("agentRobustness")
+        if not isinstance(ar, dict) or ar.get("llmRetryMigratedV2"):
+            return False
+        if ar.get("llmRetryMax") == 2:
+            ar["llmRetryMax"] = 4
+        ar["llmRetryMigratedV2"] = True
+        return True
+    except Exception:
+        return False
 
 
 async def _write_settings_row(settings):

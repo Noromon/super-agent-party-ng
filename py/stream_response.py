@@ -31,6 +31,7 @@ from py.llm_recovery import retry_suffix
 from py.model_params import effective_main_params, effective_role_params
 from py.msg_utils import _extract_text_content, content_append
 from py.task_anchor import anchor_stream_in  # S307：任务锚点（df2f8248 续跑头部残缺修复）
+from py import agent_loop_guard as _loop_guard  # S309：工具重复调用熔断
 from py.prompt_builders import _inject_screen_context
 from py.srv_ref import srv as _srv
 from py.stream_engine import (_append_loopcap_hint, _drs_round_cap,
@@ -286,6 +287,9 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                     except Exception as _ik_e:
                         logging.getLogger("app").warning("[Inflight] 检查点写入失败: %r", _ik_e)
                 results = _st.get("results")
+                if _loop_guard.observe_round(_st, request, tool_calls):  # S309：重复调用熔断
+                    force_no_tools = True
+                    logging.getLogger("app").warning("[LoopGuard] 重复调用熔断：本轮后工具禁用，强制收尾")
             # 如果启用推理模型
             if settings['reasoner']['enabled'] or enable_thinking:
                 async for _c in _stream_reasoner_update(_st, request, reasoner_client, settings, reasoner_messages, images, reasoner_extra, open_tag, close_tag, tools, vendor):
