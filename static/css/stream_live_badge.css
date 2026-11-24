@@ -1,9 +1,9 @@
-/* S316: 输出期左下角实时流统计胶囊（自 styles.css 拆出——CSS 防恶化棘轮：新样式独立文件）。
-   DOM 直挂 body（_liveBadgePaint，S314）；磨砂主题自适应，深浅色均不刺眼。 */
+/* S316: 输出期实时流统计胶囊（自 styles.css 拆出——CSS 防恶化棘轮：新样式独立文件）。
+   DOM 直挂 body（_liveBadgePaint，S314）；磨砂主题自适应，深浅色均不刺眼。
+   S318：位置由 JS 每次绘制锚定 .messages-container rect（聊天卡片内左下角），
+   故此处不再有 left/bottom 固定值。 */
 .stream-live-badge {
   position: fixed;
-  left: 22px;
-  bottom: 118px;
   z-index: 9999;
   display: inline-flex;
   align-items: center;

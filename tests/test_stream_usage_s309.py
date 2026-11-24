@@ -140,10 +140,16 @@ class TestS310LiveBadge:
         j = CHAT_JS.index("this._streamT0 = Date.now()")
         assert "this._flowTs = 0; this._flowChars = 0; this._tokEma = 0;" in CHAT_JS[j:j + 400]
 
-    def test_s316_badge_frosted_pill_left(self):
+    def test_s318_badge_anchor_inside_chat_area(self):
+        paint = CHAT_JS[CHAT_JS.index("_liveBadgePaint(stats)"):]
+        paint = paint[:paint.index("_applyStreamUsage")]
+        assert "querySelector('.messages-container')" in paint  # 锚定聊天历史卡片
+        assert "getBoundingClientRect" in paint
+        assert "el.style.left" in paint and "el.style.top" in paint
+        assert "!_r.width" in paint and "el.remove(); return" in paint  # 切页/胶囊即毁
         blk = self.CSS[self.CSS.index(".stream-live-badge {"):]
         blk = blk[:blk.index("}")]
-        assert "left: 22px" in blk and "right" not in blk
+        assert "left:" not in blk and "bottom:" not in blk  # S318：位置全 JS 驱动
         assert "backdrop-filter: blur" in blk and "border-radius: 999px" in blk
         assert "var(--el-bg-color" in blk and "rgba(0, 0, 0, 0.62)" not in blk
         assert "fa-gauge-high" in CHAT_JS

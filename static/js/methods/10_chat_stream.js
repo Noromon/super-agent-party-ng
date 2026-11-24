@@ -1130,6 +1130,13 @@ Object.assign(vue_methods, {
             _sp.textContent = this.t('tokens_per_sec') + ' ' + stats.tok
                 + '  ·  ' + this.t('completion_tokens') + ' ~' + stats.out
                 + '  ·  ' + this.t('total_tokens') + ' ~' + stats.total;
+            // S318：锚定聊天历史容器（用户：不要悬在输入框上遮图标）——每次绘制实时
+            // 取 rect，视觉悬浮于聊天卡片内左下角；不注入容器内部 DOM，零滚动副作用。
+            const _box = document.querySelector('.messages-container');
+            const _r = _box && _box.getBoundingClientRect();
+            if (!_r || !_r.width) { el.remove(); return; } // 切页/胶囊模式：聊天区不在，徽章即毁
+            el.style.left = Math.round(_r.left + 16) + 'px';
+            el.style.top = Math.round(_r.bottom - el.offsetHeight - 14) + 'px';
             this._liveBadgeTs = Date.now();
             if (!this._liveBadgeTimer) {
                 this._liveBadgeTimer = setInterval(() => {
