@@ -70,7 +70,7 @@ class TestFrontendPins:
 
     def test_live_tok_per_sec_flush(self):
         i = CHAT_JS.index("flushStreamTextBuffer() {")
-        seg = CHAT_JS[i:i + 1750]
+        seg = CHAT_JS[i:i + 2660]  # S316：守卫块变长，窗扩至函数尾
         assert "_usageFinal" in seg and "_streamT0" in seg and "tok_per_sec" in seg
 
     def test_est_finalize_fallback(self):
@@ -95,11 +95,11 @@ class TestFrontendPins:
 
 class TestS310LiveBadge:
     DATA = (_ROOT / "static" / "js" / "data" / "00_ui_core.js").read_text(encoding="utf-8")
-    CSS = (_ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")
+    CSS = (_ROOT / "static" / "css" / "stream_live_badge.css").read_text(encoding="utf-8")  # S316: 独立文件（CSS 棘轮）
 
     def test_flush_updates_live_totals(self):
         i = CHAT_JS.index("flushStreamTextBuffer() {")
-        seg = CHAT_JS[i:i + 2200]
+        seg = CHAT_JS[i:i + 2660]  # S316：窗扩至函数尾
         assert "this.streamLiveStats = { tok: _tps, out: _est, total: _est }" in seg
         assert "__m.usage_est = true" in seg
         assert "__m.completion_tokens = _est" in seg
@@ -128,3 +128,22 @@ class TestS310LiveBadge:
         assert "b.remove()" in paint and "clearInterval" in paint
         assert "this._liveBadgePaint(this.streamLiveStats)" in CHAT_JS
         assert "z-index: 9999" in self.CSS
+        assert 'href="css/stream_live_badge.css"' in (_ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        assert ".stream-live-badge" not in (_ROOT / "static" / "css" / "styles.css").read_text(encoding="utf-8")
+
+    def test_s316_instant_rate(self):
+        i = CHAT_JS.index("flushStreamTextBuffer() {")
+        seg = CHAT_JS[i:i + 2660]
+        assert "_flowTs" in seg and "_flowChars" in seg  # 滚动窗口 Δchars/Δt
+        assert "_tokEma" in seg and "0.55" in seg and "0.45" in seg  # EMA 平滑
+        assert "_dt >= 0.4" in seg  # 窗口最小间隔，防噪声
+        j = CHAT_JS.index("this._streamT0 = Date.now()")
+        assert "this._flowTs = 0; this._flowChars = 0; this._tokEma = 0;" in CHAT_JS[j:j + 400]
+
+    def test_s316_badge_frosted_pill_left(self):
+        blk = self.CSS[self.CSS.index(".stream-live-badge {"):]
+        blk = blk[:blk.index("}")]
+        assert "left: 22px" in blk and "right" not in blk
+        assert "backdrop-filter: blur" in blk and "border-radius: 999px" in blk
+        assert "var(--el-bg-color" in blk and "rgba(0, 0, 0, 0.62)" not in blk
+        assert "fa-gauge-high" in CHAT_JS

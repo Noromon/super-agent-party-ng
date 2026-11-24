@@ -1,0 +1,30 @@
+/* S316: 输出期左下角实时流统计胶囊（自 styles.css 拆出——CSS 防恶化棘轮：新样式独立文件）。
+   DOM 直挂 body（_liveBadgePaint，S314）；磨砂主题自适应，深浅色均不刺眼。 */
+.stream-live-badge {
+  position: fixed;
+  left: 22px;
+  bottom: 118px;
+  z-index: 9999;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--el-bg-color, #fff);
+  background: color-mix(in srgb, var(--el-bg-color, #fff) 78%, transparent);
+  border: 1px solid var(--el-border-color, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--el-text-color-regular, #606266);
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+.stream-live-badge i {
+  opacity: 0.6;
+}

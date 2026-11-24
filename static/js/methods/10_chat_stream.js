@@ -471,6 +471,7 @@ Object.assign(vue_methods, {
             this._streamRecvChars = 0;
             this._streamFlushChars = 0;
             this._streamT0 = Date.now(); // S309b：tok/s 速率基准（resume 路径不重置，保持整段口径）
+            this._flowTs = 0; this._flowChars = 0; this._tokEma = 0; // S316：瞬时速率窗口状态重置
             this.streamLiveStats = null; // S310：实时徽章随流重置
 
             // C-14: 响应头兜底获取 stream_id——meta 首帧之前（长排队/长提示）
@@ -1122,11 +1123,13 @@ Object.assign(vue_methods, {
                 el = document.createElement('div');
                 el.id = 'sap-live-badge';
                 el.className = 'stream-live-badge';
+                el.innerHTML = '<i class="fa-solid fa-gauge-high"></i><span></span>';
                 document.body.appendChild(el);
             }
-            el.textContent = this.t('tokens_per_sec') + ': ' + stats.tok
-                + '  ·  ' + this.t('completion_tokens') + ': ~' + stats.out
-                + '  ·  ' + this.t('total_tokens') + ': ~' + stats.total;
+            const _sp = el.querySelector('span');
+            _sp.textContent = this.t('tokens_per_sec') + ' ' + stats.tok
+                + '  ·  ' + this.t('completion_tokens') + ' ~' + stats.out
+                + '  ·  ' + this.t('total_tokens') + ' ~' + stats.total;
             this._liveBadgeTs = Date.now();
             if (!this._liveBadgeTimer) {
                 this._liveBadgeTimer = setInterval(() => {
@@ -1198,11 +1201,20 @@ Object.assign(vue_methods, {
             // 触发滚动（节流版）
             this.requestScrollToBottom();
         }
-        if (__m && !__m._usageFinal) { // S309b/S310：流式期节流刷新估算落账+实时徽章（usage 帧到达后停用）
-            const _secs = (Date.now() - (this._streamT0 || Date.now())) / 1000;
+        if (__m && !__m._usageFinal) { // S309b/S310/S316：流式期节流估算落账+实时徽章（usage 帧到达后停用）
+            const _nowMs = Date.now();
+            const _secs = (_nowMs - (this._streamT0 || _nowMs)) / 1000;
             if (_secs > 0.5) {
                 const _est = Math.round((this._streamRecvChars || 0) / 1.8);
-                const _tps = Math.max(1, Math.round(_est / _secs));
+                let _tps = Math.max(1, Math.round(_est / _secs)); // 兜底=全程均值（窗口尚无样本时）
+                const _dt = this._flowTs ? (_nowMs - this._flowTs) / 1000 : 0;
+                if (_dt >= 0.4) { // S316：滚动窗口瞬时速率 Δchars/Δt + EMA(0.45)，不再从 0 慢爬
+                    const _inst = Math.max(0, (((this._streamRecvChars || 0) - (this._flowChars || 0)) / 1.8) / _dt);
+                    this._tokEma = this._tokEma ? this._tokEma * 0.55 + _inst * 0.45 : _inst;
+                    this._flowTs = _nowMs;
+                    this._flowChars = this._streamRecvChars || 0;
+                }
+                if (this._tokEma) _tps = Math.max(0, Math.round(this._tokEma));
                 __m.tok_per_sec = _tps;
                 if (_est > 0) {
                     __m.usage_est = true;
