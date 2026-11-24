@@ -175,16 +175,29 @@ class TestSearchTool:
 
         class FakeProc:
             returncode = 0
-            stdout = "a.py:1:def alpha():\n"
 
-        def fake_run(cmd, **kw):
+            def __init__(self):
+                self.stdout = iter(["a.py:1:def alpha():\n"])
+
+            def poll(self):
+                return 0
+
+            def kill(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+        def fake_popen(cmd, **kw):
             calls.append(cmd)
             return FakeProc()
-        monkeypatch.setattr(ct.subprocess, "run", fake_run)
+        monkeypatch.setattr(ct.subprocess, "Popen", fake_popen)
         out = asyncio.run(ct.search_files_tool_local("alpha", include="*.py",
                                                      case_insensitive=True))
         assert calls and calls[0][0] == "FAKE_RG"
         assert "-i" in calls[0] and "--glob" in calls[0] and "*.py" in calls[0]
+        assert "--max-filesize" in calls[0]                      # S311
+        assert "!**/node_modules/**" in calls[0]                 # S311 默认排除
         assert out.startswith("a.py:1:")
 
 

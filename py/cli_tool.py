@@ -1794,10 +1794,38 @@ def _format_search_rows(rows, skip, limit, capped) -> str:
     return "\n".join(page) + tail
 
 
-def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want):
-    """ripgrep 子进程收集（同步，调用方 to_thread）。rg 异常/超时返回 (None, False) → 上层降级。"""
+_SEARCH_RG_TIMEOUT = 60
+
+
+def _rg_rows_from_lines(lines, want):
+    """S311 解析 rg 输出行 → (rows, capped)。攒够 want 即早停（消费方迭代器
+    随之停止；调用方负责杀掉仍在输出的子进程）。纯函数，单测直打。"""
+    rows = []
+    for line in lines:
+        m = re.match(r"^(.+?):(\d+):(.*)$", line)
+        if not m:
+            continue
+        relp = m.group(1).replace("\\", "/")
+        rows.append(f"{relp}:{m.group(2)}:{m.group(3).strip()[:_SEARCH_MAX_LINE_CHARS]}")
+        if len(rows) >= want:
+            break
+    rows.sort(key=_search_row_key)
+    return rows, len(rows) >= want
+
+
+def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
+                       timeout=_SEARCH_RG_TIMEOUT):
+    """S311 ripgrep 流式收集：逐行读 stdout，want 条即 kill 早停——不再为
+    凑 200 条把整棵树扫完（旧 subprocess.run 全量等待是 60s 卡顿主因）。
+    返回 (rows|None, capped, status)：'ok' 成功/正常无匹配；'timeout' 看门狗
+    超时（调用方勿再静默 py 全树重扫=旧版完成前 IO 爆发元凶）；'fail' 启动
+    失败/rg 错误退出（调用方降级 py 扫描）。"""
+    import threading
     cmd = [rg, "--line-number", "--no-heading", "--color", "never", "-I",
-           "--max-columns", "240", "--max-columns-preview"]
+           "--max-columns", "240", "--max-columns-preview",
+           "--max-filesize", str(_SEARCH_MAX_FILE_BYTES)]
+    for _d in sorted(_SEARCH_SKIP_DIRS):
+        cmd += ["--glob", "!**/" + _d + "/**"]
     if ignore_case:
         cmd.append("-i")
     pats = [p.strip() for p in (include or "").replace(";", ",").split(",") if p.strip()]
@@ -1810,24 +1838,57 @@ def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want)
         rel = "."
     if rel != ".":
         cmd += ["--", rel]
+    log = logging.getLogger("app")
+    t0 = time.monotonic()
+    timed_out = {"v": False}
     try:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              errors="replace", timeout=60)
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, errors="replace")
     except Exception:
-        return None, False
-    if proc.returncode not in (0, 1):  # 1=无匹配（正常）；其余=rg 出错 → 降级
-        return None, False
-    rows = []
-    for line in (proc.stdout or "").splitlines():
-        m = re.match(r"^(.+?):(\d+):(.*)$", line)
-        if not m:
-            continue
-        relp = m.group(1).replace("\\", "/")
-        rows.append(f"{relp}:{m.group(2)}:{m.group(3).strip()[:_SEARCH_MAX_LINE_CHARS]}")
-        if len(rows) >= want:
-            break
-    rows.sort(key=_search_row_key)
-    return rows, len(rows) >= want
+        return None, False, "fail"
+
+    def _kill():
+        timed_out["v"] = True
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+    watchdog = threading.Timer(timeout, _kill)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        rows, capped = _rg_rows_from_lines(proc.stdout, want)
+    except Exception:
+        _kill()
+        return None, False, "fail"
+    finally:
+        watchdog.cancel()
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+    if timed_out["v"]:
+        log.info("[Search] engine=rg status=timeout dur_ms=%d pattern=%r",
+                 round((time.monotonic() - t0) * 1000), pattern[:60])
+        return None, False, "timeout"
+    rc = proc.returncode
+    if rc not in (0, 1) and not capped:  # 早停 kill 造成的非零 rc 不算失败
+        log.info("[Search] engine=rg status=fail rc=%s dur_ms=%d", rc,
+                 round((time.monotonic() - t0) * 1000))
+        return None, False, "fail"
+    log.info("[Search] engine=rg status=ok dur_ms=%d rows=%d capped=%s",
+             round((time.monotonic() - t0) * 1000), len(rows), capped)
+    return rows, capped, "ok"
 
 
 def _py_search_collect(cwd, target_str, regex, include, want):
@@ -1941,16 +2002,25 @@ async def _search_one(pattern: str, path: str = ".", include: str = "",
                     "(a plain substring works too) — escape ( ) [ ] { } * + ? ^ $ | when "
                     "matching them literally, or search a shorter plain substring.")
 
-        rows, capped = None, False
+        rows, capped, status = None, False, "norg"
         from py.tool_output_store import find_ripgrep
         rg = find_ripgrep()
         if rg:
-            rows, capped = await asyncio.to_thread(
+            rows, capped, status = await asyncio.to_thread(
                 _rg_search_collect, rg, cwd, target_str, pattern, include,
                 bool(case_insensitive), skip + limit + 1)
-        if rows is None:
+            if status == "timeout":
+                # S311：超时不再静默 py 全树重扫（旧版=60s+全树两连击），
+                # 明确交还给模型缩窄范围。
+                return (f"[Warn] Search timed out after {_SEARCH_RG_TIMEOUT}s over '{path}' "
+                        "(ripgrep did not finish; likely a huge tree). Narrow the scope and "
+                        "retry: set include (e.g. '*.py') or pass a deeper path.")
+        if status != "ok":
+            _pt0 = time.monotonic()
             rows, capped = await asyncio.to_thread(
                 _py_search_collect, cwd, target_str, regex, include, skip + limit + 1)
+            logging.getLogger("app").info("[Search] engine=py status=ok dur_ms=%d rows=%d",
+                                          round((time.monotonic() - _pt0) * 1000), len(rows))
         return _format_search_rows(rows, skip, limit, capped)
     except Exception as e:
         return f"[Error] Search failed: {str(e)}"
