@@ -24,7 +24,7 @@ _CATEGORIES: Dict[str, tuple] = {
         "edit_file_patch_tool", "edit_file_patch_tool_local", "edit_file_patch_wsl",
     }),
     "file_write": ("file writing", {
-        "edit_file_tool", "edit_file_tool_local", "edit_file_wsl",
+        "edit_file_tool", "edit_file_tool_local", "edit_file_wsl", "delete_file_tool_local",
     }),
     "shell_exec": ("shell & process", {
         "shell_tool_local", "shell_tool_wsl", "docker_sandbox", "list_processes_tool",

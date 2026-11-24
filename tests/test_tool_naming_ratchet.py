@@ -17,7 +17,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 
-_CONFLICT_CAP = 165  # 2026-10-21 S65-A10 上游 youcom_search 移植（*_search 家族契约名，+3 对）
+_CONFLICT_CAP = 169  # 2026-10-21 S65-A10 上游 youcom_search 移植（*_search 家族契约名，+3 对）；2026-11-24 S315 delete_file_tool_local 入 *_file_tool_local 族 +4 对（语义清晰度优先，按棘轮出口上调实测值）
 
 
 def _hook_names():

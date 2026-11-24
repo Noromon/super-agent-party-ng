@@ -30,6 +30,7 @@ PATH_SCOPED_TOOLS = {
     "tail_file_tool_local": ("fs", ["path"]),
     "edit_file_tool_local": ("fs", ["path"]),
     "edit_file_patch_tool_local": ("fs", ["path"]),
+    "delete_file_tool_local": ("fs", ["path"]),
     "search_files_tool_local": ("fs", ["path"]),
     # read：任何本地路径审批，URL 免费
     "get_image_content": ("read", ["image_url"]),

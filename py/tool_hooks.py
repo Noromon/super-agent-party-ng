@@ -169,6 +169,7 @@ def _build_tool_hooks():
         search_files_tool_local,   # 本地文件搜索
         edit_file_tool_local,      # 本地文件写入
         edit_file_patch_tool_local,# 本地精确替换
+        delete_file_tool_local,    # S315 本地删除（入 trash）
         glob_files_tool_local,     # 本地 glob 查找
         todo_write_tool_local,     # 本地任务管理
         ask_user_question_tool,    # S194 结构化提问（主流内被拦截挂起）
@@ -310,6 +311,7 @@ def _build_tool_hooks():
         "search_files_tool_local": search_files_tool_local,     # 本地文件搜索
         "edit_file_tool_local": edit_file_tool_local,           # 本地文件写入
         "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
+        "delete_file_tool_local": delete_file_tool_local,          # S315 本地删除（入 trash）
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
         "todo_write_tool_local": todo_write_tool_local,         # 本地任务管理
         "ask_user_question_tool": ask_user_question_tool,        # S194 提问兜底（主流在工具轮已挂起，不会走到）

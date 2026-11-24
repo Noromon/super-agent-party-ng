@@ -129,7 +129,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         tail_file_tool_local,       # <--- 新增导入
         search_files_tool_local,   # 本地文件搜索
         edit_file_tool_local,      # 本地文件写入
-        edit_file_patch_tool_local,# 本地精确替换
+        edit_file_patch_tool_local, delete_file_tool_local,  # 本地精确替换 / S315 删除入 trash
         glob_files_tool_local,     # 本地 glob 查找
         todo_write_tool_local, ask_user_question_tool,  # 本地任务管理 + S194 提问兜底
         local_net_tool,            # 本地网络工具
@@ -269,7 +269,7 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
         "tail_file_tool_local": tail_file_tool_local,             # <--- 映射新工具
         "search_files_tool_local": search_files_tool_local,     # 本地文件搜索
         "edit_file_tool_local": edit_file_tool_local,           # 本地文件写入
-        "edit_file_patch_tool_local": edit_file_patch_tool_local,  # 本地精确替换
+        "edit_file_patch_tool_local": edit_file_patch_tool_local, "delete_file_tool_local": delete_file_tool_local,  # 本地精确替换 / S315 删除入 trash
         "glob_files_tool_local": glob_files_tool_local,         # 本地 glob 查找
         "todo_write_tool_local": todo_write_tool_local, "ask_user_question_tool": ask_user_question_tool,  # 本地任务管理 + S194 提问兜底
         "local_net_tool": local_net_tool,                       # 本地网络工具

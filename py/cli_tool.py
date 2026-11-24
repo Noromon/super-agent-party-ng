@@ -1702,11 +1702,13 @@ async def edit_file_tool_local(path: str, content: str) -> str:
         
         await aiofiles.os.makedirs(parent_dir, exist_ok=True)
 
-        # 1.5 S309：内容与此前完全一致 → No-op，不备份不落盘（终结整文件重写循环）
+        # 1.5 S309/S315：内容与此前完全一致 → No-op，不备份不落盘（终结整文件重写循环）。
+        # S315 修根：旧写法 await 后再 async with 包裹 AsyncTextIOWrapper，每次必抛
+        # "does not support the asynchronous read protocol" 被跳过——预检从未生效，
+        # 同内容重写仍回 [OK] Saved，模型据此怀疑"没落盘/被覆盖"而绕圈。
         if target.exists():
             try:
-                _existing = await aiofiles.open(target, 'r', encoding='utf-8', errors='replace')
-                async with _existing as f:
+                async with aiofiles.open(target, 'r', encoding='utf-8', errors='replace', newline='') as f:
                     _old_text = await f.read()
                 if _old_text.replace("\r\n", "\n") == content.replace("\r\n", "\n"):
                     return (f"[No-op] '{path}' already contains EXACTLY this content; nothing was "
@@ -1743,6 +1745,37 @@ async def edit_file_tool_local(path: str, content: str) -> str:
 
     except Exception as e:
         return f"[Error] Edit failed: {str(e)}"
+
+
+async def delete_file_tool_local(path: str) -> str:
+    """[Local] S315：删除单个文件=移入 <USER_DATA_DIR>/trash（可找回，非物理抹除）。
+
+    任务收尾清理临时/自检文件用。拒目录、拒符号链接；成功后勿对同一路径重发。"""
+    try:
+        cwd = await _get_current_cwd()
+        # S315：resolve_strict_path 会把 symlink 解到真实目标——删除前必须对原始
+        # 路径判链，否则删 link.txt 会连带摧毁指向的真实文件。
+        if (Path(cwd) / str(path or "")).is_symlink():
+            return f"[Error] '{path}' is a symlink — refusing to delete."
+        target = resolve_strict_path(cwd, path, check_symlink=True)
+        if not target.exists():
+            return (f"[Error] File not found: {path} — it may already be deleted; "
+                    "do NOT retry this path.")
+        if target.is_symlink():
+            return f"[Error] '{path}' is a symlink — refusing to delete."
+        if target.is_dir():
+            return (f"[Error] '{path}' is a directory — delete_file_tool_local removes single files "
+                    "only; delete the files inside individually if needed.")
+        from py.get_setting import USER_DATA_DIR
+        trash_dir = Path(USER_DATA_DIR) / "trash"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = trash_dir / ("%s.%s.%s" % (stamp, target.name, uuid.uuid4().hex[:6]))
+        shutil.move(str(target), str(dest))
+        return (f"[OK] Deleted '{path}' — moved to trash ({dest.name}); recoverable from "
+                "SAP data dir /trash. Cleanup is done — no need to delete again.")
+    except Exception as e:
+        return f"[Error] Delete failed: {str(e)}"
 
 # ---- S184 helpers ----
 _SEARCH_SKIP_DIRS = {'.git', 'node_modules', '__pycache__', 'venv', '.venv', '.env',
@@ -2884,6 +2917,20 @@ LOCAL_TOOLS_REGISTRY = {
             }
         }
     },
+    "delete_file_local": {
+        "type": "function",
+        "function": {
+            "name": "delete_file_tool_local",
+            "description": "Delete ONE local file by moving it to the app trash folder (recoverable, NOT permanent erasure). Intended for end-of-task cleanup of temp/self-test files you created. Directories and symlinks are refused. Success is final for that path — do NOT repeat the deletion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path to the file (from current working directory)."}
+                },
+                "required": ["path"]
+            }
+        }
+    },
     "todo_write_local": {
         "type": "function",
         "function": {
@@ -3073,7 +3120,7 @@ def get_local_tools_for_mode(mode: str) -> list:
         LOCAL_TOOLS_REGISTRY["read_skill_local"],
         LOCAL_TOOLS_REGISTRY["ask_user_question"]  # S194：提问是只读交互，全模式可用
     ]
-    edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
+    edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["delete_file_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     infra = [
         LOCAL_TOOLS_REGISTRY["bash_local"], 
         LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"], LOCAL_TOOLS_REGISTRY["kill_process"],
@@ -3126,7 +3173,7 @@ def get_local_tools_for_permission(permission_mode: str) -> list:
             LOCAL_TOOLS_REGISTRY["glob_files_local"],
             LOCAL_TOOLS_REGISTRY["read_skill_local"],
             LOCAL_TOOLS_REGISTRY["ask_user_question"]]  # S194：提问是只读交互，全模式可用
-    edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
+    edit = [LOCAL_TOOLS_REGISTRY["edit_file_local"], LOCAL_TOOLS_REGISTRY["edit_file_patch_local"], LOCAL_TOOLS_REGISTRY["delete_file_local"], LOCAL_TOOLS_REGISTRY["todo_write_local"]]
     infra = [LOCAL_TOOLS_REGISTRY["bash_local"],
              LOCAL_TOOLS_REGISTRY["list_processes"], LOCAL_TOOLS_REGISTRY["get_process_logs"],
              LOCAL_TOOLS_REGISTRY["kill_process"], LOCAL_TOOLS_REGISTRY["local_net_tool"]]

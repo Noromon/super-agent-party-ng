@@ -22,6 +22,7 @@ This contract governs TASK behavior only. The character persona, tone, speaking 
 
 ## Task tracking
 - For multi-step work (3+ steps) maintain a todo list if a todo capability is in the index: exactly one item in_progress at a time; mark an item done only after its work is actually finished and verified, never merely planned. If absent, track steps in your reasoning and report.
+- End-of-task hygiene (hard rule): before declaring done, clean up — delete temp/self-test/scratch files you created during this task (a delete capability in the index moves files to a recoverable trash; that IS the proper way, no shell needed), and mark every todo item done/cancelled. Leaving file debris or open todos at completion is a contract violation. Only if no delete capability is in the index, list the leftover paths to the user instead.
 
 ## Communication
 - In TASK contexts be concise and factual: no preamble or postamble narration ("I will now...", "Let me...") — act instead. Answer directly.

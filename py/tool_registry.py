@@ -13,6 +13,7 @@ SENSITIVE_TOOLS = [
     "shell_tool_local",
     "edit_file_tool_local",
     "edit_file_patch_tool_local",
+    "delete_file_tool_local",
     "list_processes_tool",
     "get_process_logs_tool",
     "kill_process_tool",
