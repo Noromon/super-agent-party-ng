@@ -1005,7 +1005,7 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "navigate_page",
-            "description": "Navigates a page — the ACTIVE tab by default, or a specific tab via tab_id (stable id from list_pages; it is switched to first, then navigated — avoids wrong-tab bugs caused by pageIdx shifting when tabs open/close). By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating. The tab's network egress (direct vs app proxy) is fixed at creation via new_page(use_proxy); navigation keeps the current egress.",
+            "description": "Navigates a page — the ACTIVE tab by default, or a specific tab via tab_id (stable id from list_pages; it is switched to first, then navigated — avoids wrong-tab bugs caused by pageIdx shifting when tabs open/close). By default it WAITS for the page to finish loading (up to `timeout` seconds, returns early when done) and the result ends with '(loaded)' or '(still loading)' — so you can usually take_snapshot right after without a separate wait. Pass timeout=0 to return immediately (old fire-and-forget behavior). Set mobile=true/false to switch the tab between mobile (phone UA + viewport) and desktop rendering before navigating. The tab's network egress (direct vs app proxy) is fixed at creation via new_page(use_proxy); navigation keeps the current egress. S319: 若目标是虚拟列表/懒加载 SNS 页（贴吧/微博/小红书/信息流），本次导航完成后的第一动作应是 network_watch(mode=start, include_body=true, trigger_scrolls=2) 直接吃列表接口 JSON（S270 接口优先规矩）——反复 scroll+take_snapshot/get_page_markdown 收割 DOM 是慢路径后手，不是首选。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1201,7 +1201,11 @@ all_cdp_tools = [
         "type": "function",
         "function": {
             "name": "network_watch",
-            "description": ("S253: 内置网络观察器（替代手搓 XHR/fetch 钩子）。start=给当前标签页挂 fetch/XHR 钩子（幂等；"
+            "description": ("S270 接口优先规矩（本工具的存在理由）：SPA 列表页（贴吧/微博/信息流）进页面后的第一动作应是 "
+                            "start(include_body=true, pattern=接口关键词, trigger_scrolls=2)——挂钩后引擎自动滚 2 轮"
+                            "触发列表接口并直接随返回收割首批 JSON（read 字段，同款落盘处理），一步到位；"
+                            "接口拿到数据就不要再用 collect_list/take_snapshot 走 DOM 慢路径。"
+                            "S253: 内置网络观察器（替代手搓 XHR/fetch 钩子）。start=给当前标签页挂 fetch/XHR 钩子（幂等；"
                             "S260: start 会自动等页面加载完成再挂，若仍报加载/繁忙类错误直接重试 start 即可；"
                             "S258: start 过一次之后每次导航 dom-ready 自动重挂（模式切换/元素重建后也已自愈跟随），无需再手动 start；"
                             "导航进行中已发出的请求收不到——要全量就 start 后 reload 再操作）→ 然后 navigate/滚动/点击让页面自己发请求 → "
@@ -1210,10 +1214,6 @@ all_cdp_tools = [
                             "S254/S257: include_body=true 时响应体全量保留，read 中 blen>2048 的条目自动落盘并附 body_path"
                             "（本地绝对路径——read_file_range_tool_local/grep 直读，免 token，首选）+body_url+blen，"
                             "收割总量超返回限额时完整清单自动整体落盘回路径，永不被截断；无需再手搓钩子。"
-                            "S270 接口优先规矩：SPA 列表页（贴吧/微博/信息流）进页面后的第一动作应是 "
-                            "start(include_body=true, pattern=接口关键词, trigger_scrolls=2)——挂钩后引擎自动滚 2 轮"
-                            "触发列表接口并直接随返回收割首批 JSON（read 字段，同款落盘处理），一步到位；"
-                            "接口拿到数据就不要再用 collect_list/take_snapshot 走 DOM 慢路径。"
                             "stop=清空并停用。"),
             "parameters": {
                 "type": "object",

@@ -1163,7 +1163,7 @@ from py.prompt_builders import (read_todos_local, read_agents_md, get_system_con
                               _append_agents_md, _append_project_skills, _resolve_agent_name,
                               _append_tts_voice_prompts, _append_avatar_prompts, _append_tha_prompt,
                               _append_affection_prompt, _append_a2ui_prompt, _inject_screen_context,
-                              _inject_task_checkpoint)  # S300：提示词装配域逐字搬移
+                              _inject_task_checkpoint, _append_browser_rules)  # S300：提示词装配域逐字搬移 / S319：浏览器先验规矩
 
 async def tools_change_messages(request: ChatRequest, settings: dict):
     # S194：web 主对话答案拦截——本会话有挂起提问卡时，本条消息即答案，
@@ -1318,6 +1318,7 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
     # ==================== 好感度系统注入结束 ====================
 
     _append_a2ui_prompt(request)
+    _append_browser_rules(request, settings)  # S319：内置浏览器「接口优先」先验规矩（stream/complete 汇流单点，每轮一次）
 
     # ===== L3 任务检查点：注入此前压缩落盘的任务态（7 天内、当前或未知会话、且历史中尚无摘要时） =====
     _inject_task_checkpoint(request, cli_settings, engine)

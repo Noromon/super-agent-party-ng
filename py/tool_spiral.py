@@ -71,3 +71,51 @@ class SpiralWatch:
         if self.trips == 1:
             return _HINT1.format(w=self.window, name=tool, n=n)
         return _HINT2.format(k=self.trips, name=tool, n=n)
+
+
+class BrowserLoopWatch:
+    """S319：懒加载 DOM 收割循环探测——补 S296 盲区：观测类工具被 EXEMPT 豁免、且每次
+    换措辞/参数签名都不同，「策略错误但参数不同」的刷列表绕圈（贴吧事故）永不触发签名熔断。
+    本探测器只回答一个问题：整轮从未 network_watch 出手，DOM 族读取是否已堆到可疑量。
+    纯逻辑无 IO，可单测；提示走 system_note 元频道（同 S296 惯例），一次性、至多两次。"""
+
+    DOM_FAMILY = frozenset({
+        "take_snapshot", "get_page_markdown", "scroll_and_find",
+        "collect_list", "evaluate_script",
+    })
+
+    _HINT1 = ("[系统·浏览器循环] 本轮已第 {n} 次用 DOM 族工具读页面，却始终未用 network_watch。"
+              "虚拟列表/懒加载 SNS 页（贴吧/微博/信息流）离屏节点会卸载，滚动+snapshot/markdown "
+              "收割 DOM 收不全且烧轮次。立刻改走：network_watch(mode=start, include_body=true, "
+              "trigger_scrolls=2) 直接吃列表接口 JSON（导航自动重挂；滚动自动触发接口；"
+              "read 增量收割，长 body 自动落盘给路径）。确认接口无数据才再回 DOM 路径。")
+    _HINT2 = ("[系统·浏览器循环·第2次] 已提醒过改用 network_watch，DOM 族读取又累计到 {n} 次。"
+              "最后提醒：除非已证明接口无数据，唯一正确动作是 network_watch(start, "
+              "include_body=true, trigger_scrolls=2)，或向用户交代卡点后收尾。")
+
+    def __init__(self, threshold=6):
+        self.threshold = max(4, int(threshold))
+        self.n = 0
+        self.armed = False
+        self.trips = 0
+
+    def observe(self, name, args_dict=None):
+        """记录一次调用；应触发时返回提示文本，否则 None。network_watch 出手=立即解除。"""
+        name = str(name)
+        if name == "network_watch":
+            self.armed = True
+            self.n = 0
+            return None
+        if self.armed or name not in self.DOM_FAMILY:
+            return None
+        self.n += 1
+        if self.n < self.threshold:
+            return None
+        self.n = 0
+        if self.trips == 0:
+            self.trips = 1
+            return self._HINT1.format(n=self.threshold)
+        if self.trips == 1:
+            self.trips = 2
+            return self._HINT2.format(n=self.threshold * 2)
+        return None

@@ -907,3 +907,29 @@ def _inject_task_checkpoint(request, cli_settings, engine):
                                        f"\n\n【任务检查点】此前上下文压缩时落盘的任务态（与更新对话冲突时以对话为准）：\n{_cp['summary'][:3000]}\n")
         except Exception as e:
             logging.getLogger("app").info(f"[Context] 检查点注入失败: {e}")
+
+
+_BROWSER_RULES_BLOCK = (
+    "\n\n【浏览器·接口优先（S319 硬规矩）】虚拟列表/懒加载 SNS 页（贴吧/微博/小红书/信息流）："
+    "① 导航完成后第一动作 = network_watch(mode=start, include_body=true, trigger_scrolls=2) 直接吃列表接口 JSON"
+    "（拿到数据即止，不再走 DOM 收割）；"
+    "② 禁止靠反复 scroll_and_find/take_snapshot/get_page_markdown 滚动收割列表 DOM"
+    "（虚拟列表离屏节点会卸载，DOM 慢路径收不全且烧轮次）；"
+    "③ 接口确认无数据才退路用 collect_list / scroll_and_find(match=标题) 点击，同一思路失败 3 次必须换策略；"
+    "④ 不手搓站内搜索 API（触发风控验证码）；captcha_detected 即停手请用户在浏览器标签内手动通过。\n")
+
+
+def _append_browser_rules(request, settings):
+    """S319：内置浏览器先验规矩注入。贴吧绕圈事故（S296 复盘）病根=『接口优先』规矩
+    埋在工具描述第 10 行，模型选工具时看不见——这里给每次任务显式注入 4 行选择规矩。
+    仅内部浏览器启用且非 sub_agent；挂在 server.tools_change_messages（stream/complete
+    汇流单点，每轮一次）；与其他 system 上下文同构（每轮重建、不落库）。"""
+    try:
+        cm = (settings or {}).get("chromeMCPSettings", {}) or {}
+        if not (cm.get("enabled", False) and cm.get("type", "") == "internal"):
+            return
+        if getattr(request, "is_sub_agent", False):
+            return
+        content_append(request.messages, 'system', _BROWSER_RULES_BLOCK)
+    except Exception as e:
+        logging.getLogger("app").info(f"[BrowserRules] 注入失败: {e}")

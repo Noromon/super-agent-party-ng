@@ -51,7 +51,7 @@ from py.tool_dispatch import _is_approval_result
 from py.tool_hooks import _approval_precheck, dispatch_tool, execute_tool
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                      append_missing_results, arg_error_text)
-from py.tool_spiral import SpiralWatch
+from py.tool_spiral import SpiralWatch, BrowserLoopWatch
 from py.vision_tools import (_image_magic_ok, _strip_image_parts_from_messages,
                              images_add_in_messages, images_in_messages,
                              message_without_images)
@@ -663,6 +663,9 @@ def _spiral_observe(_st, name, args_dict):
     _hint = _sp.observe(name, args_dict)
     if _hint:
         _st.setdefault("_spiral_hints", []).append(_hint)
+    _bh = (_st.get("_bloop") or _st.setdefault("_bloop", BrowserLoopWatch())).observe(name, args_dict)  # S319
+    if _bh:
+        _st.setdefault("_spiral_hints", []).append(_bh)
 
 
 def _spiral_drain(request, _st):

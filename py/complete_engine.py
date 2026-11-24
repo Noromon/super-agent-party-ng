@@ -44,7 +44,7 @@ from py.token_guard import apply_eos_guard, neutralize as _neutralize, neutraliz
 from py.tool_dispatch import _is_approval_result, pending_approval_at_tail
 from py.tool_assembly import build_llm_tools
 from py.tool_hooks import _im_approval_hangup, dispatch_tool
-from py.tool_spiral import SpiralWatch
+from py.tool_spiral import SpiralWatch, BrowserLoopWatch
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
                           append_missing_results, arg_error_text)
 from py.vision_tools import (_attach_screen_image_for_behavior,
@@ -455,11 +455,15 @@ async def _complete_drs_step(client, model, extra_params, request, user_prompt, 
     return DRS_STAGE, search_not_done, search_task
 
 
-def _spiral_observe_ns(spiral, name, args_dict, hints):
-    """S296：非流式绕圈记账（watch 由 impl 任务态传入）。"""
+def _spiral_observe_ns(spiral, name, args_dict, hints, bloop=None):
+    """S296：非流式绕圈记账（watch 由 impl 任务态传入）。S319：bloop=浏览器 DOM 循环探测。"""
     _hint = spiral.observe(name, args_dict)
     if _hint:
         hints.append(_hint)
+    if bloop is not None:
+        _bh = bloop.observe(name, args_dict)
+        if _bh:
+            hints.append(_bh)
 
 
 def _spiral_drain_ns(request, hints):
@@ -468,7 +472,7 @@ def _spiral_drain_ns(request, hints):
         request.messages.append({"role": "user", "content": _sp_hint, "name": "system_note"})
 
 
-async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=None):
+async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=None, bloop=None):
     """Non-stream tool_calls round: dispatch, ack, approval abort. Returns abort."""
     from py.know_base import rerank_knowledge_base
     assistant_message = response.choices[0].message
@@ -562,7 +566,7 @@ async def _ns_tool_round(request, reasoner_messages, settings, user_prompt, resp
         })
         # S296：绕圈熔断观测（与流式路径同源；轮末注入）
         if spiral is not None:
-            _spiral_observe_ns(spiral, str(response_content.name), args_dict, _sp_hints)
+            _spiral_observe_ns(spiral, str(response_content.name), args_dict, _sp_hints, bloop=bloop)
         # T-9: 结构化哨兵判定（与 stream 路径同源）
         if _is_approval_result(results) is not None:
             ns_pending_abort = True
@@ -917,7 +921,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         reasoner_messages = copy.deepcopy(request.messages)
         _ns_loop_count = 0
         ns_force_no_tools = False
-        _ns_spiral = SpiralWatch()  # S296：绕圈熔断（任务态，与流式 _st._spiral 对位）
+        _ns_spiral = SpiralWatch(); _ns_bloop = BrowserLoopWatch()  # S296 绕圈熔断 / S319 DOM 循环探测（任务态，与流式 _st 对位；单行并置守 _generate_complete_impl 行量红线）
         while response.choices[0].message and (response.choices[0].message.tool_calls or search_not_done):  # B1: None 守卫
             _ns_loop_count += 1
             _ns_max_iterations = _tool_cap.effective_limit()  # S233：轮边界动态上限（调值/破限即时生效）
@@ -934,7 +938,7 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
                 ns_force_no_tools = True
                 response.choices[0].message.tool_calls = None
             if response.choices[0].message.tool_calls:
-                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=_ns_spiral)
+                abort = await _ns_tool_round(request, reasoner_messages, settings, user_prompt, response, spiral=_ns_spiral, bloop=_ns_bloop)
                 if abort:
                     break
             if settings['webSearch']['when'] == 'after_thinking' or settings['webSearch']['when'] == 'both':
