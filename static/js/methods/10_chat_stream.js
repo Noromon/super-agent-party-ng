@@ -1113,6 +1113,33 @@ Object.assign(vue_methods, {
         }
     },
 
+    // S314：实时徽章 DOM 直连——绕开 Vue 模板/Teleport/v-memo/祖先样式语境，
+    // 直接挂 body；1.5s 无更新看门狗自动清理（任何终止路径自愈）。绝不抛出。
+    _liveBadgePaint(stats) {
+        try {
+            let el = document.getElementById('sap-live-badge');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'sap-live-badge';
+                el.className = 'stream-live-badge';
+                document.body.appendChild(el);
+            }
+            el.textContent = this.t('tokens_per_sec') + ': ' + stats.tok
+                + '  ·  ' + this.t('completion_tokens') + ': ~' + stats.out
+                + '  ·  ' + this.t('total_tokens') + ': ~' + stats.total;
+            this._liveBadgeTs = Date.now();
+            if (!this._liveBadgeTimer) {
+                this._liveBadgeTimer = setInterval(() => {
+                    if (Date.now() - (this._liveBadgeTs || 0) > 1500) {
+                        const b = document.getElementById('sap-live-badge');
+                        if (b) b.remove();
+                        clearInterval(this._liveBadgeTimer);
+                        this._liveBadgeTimer = null;
+                    }
+                }, 1000);
+            }
+        } catch (e) { /* 徽章绝不扰主流 */ }
+    },
     // S309b：stream_usage 控制帧落账——厂商真实计费（多轮累计）覆盖估算，精算 tok/s
     _applyStreamUsage(msg, u) {
         if (!msg || !u) return;
@@ -1183,10 +1210,7 @@ Object.assign(vue_methods, {
                     __m.total_tokens = _est;
                 }
                 this.streamLiveStats = { tok: _tps, out: _est, total: _est };
-                if (!this._liveBadgeLogged) { // S312：一次性自检日志（F12 可自证 JS 版本与数据流）
-                    this._liveBadgeLogged = true;
-                    console.warn('[S310b] live badge stats', JSON.stringify(this.streamLiveStats));
-                }
+                this._liveBadgePaint(this.streamLiveStats); // S314：DOM 直连（模板链路环境不可靠）
             }
         }
         if (__m) __m._rv = (__m._rv || 0) + 1;

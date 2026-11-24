@@ -223,6 +223,7 @@
   "_imPeerEnsurePlat",
   "_ingestToolFrame",
   "_ingestToolProgress",
+  "_liveBadgePaint",
   "_makeScroller",
   "_markReasoningDone",
   "_netwArmExpr",

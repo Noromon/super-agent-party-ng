@@ -110,17 +110,21 @@ class TestS310LiveBadge:
         assert "this.streamLiveStats = null" in CHAT_JS[i:i + 220]
 
     def test_badge_template_and_gate(self):
-        seg = TEMPLATE[TEMPLATE.index("stream-live-badge") - 200:TEMPLATE.index("stream-live-badge") + 500]
-        assert "isTyping && streamLiveStats && !isMobile" in seg
-        assert "streamLiveStats.tok" in seg and "streamLiveStats.out" in seg
+        # S314：徽章改 DOM 直连——模板必须已无 Teleport/徽章节点（模板链路弃用）
+        assert "<Teleport" not in TEMPLATE
+        assert "stream-live-badge" not in TEMPLATE
+        assert "streamLiveStats" not in TEMPLATE
 
     def test_data_key_and_css(self):
         assert "streamLiveStats: null" in self.DATA
         assert ".stream-live-badge" in self.CSS and "position: fixed" in self.CSS
 
-    def test_s312_teleport_and_marker(self):
-        i = TEMPLATE.index("stream-live-badge")
-        seg = TEMPLATE[i - 300:i + 400]
-        assert "<Teleport to=" in seg and "</Teleport>" in seg
+    def test_s314_dom_direct_badge(self):
+        assert "_liveBadgePaint" in CHAT_JS
+        paint = CHAT_JS[CHAT_JS.index("_liveBadgePaint(stats)"):]
+        paint = paint[:paint.index("_applyStreamUsage")]
+        assert "document.body.appendChild" in paint
+        assert "sap-live-badge" in paint and 'className = "stream-live-badge"'.replace('"', "'") in paint
+        assert "b.remove()" in paint and "clearInterval" in paint
+        assert "this._liveBadgePaint(this.streamLiveStats)" in CHAT_JS
         assert "z-index: 9999" in self.CSS
-        assert "[S310b] live badge stats" in CHAT_JS
