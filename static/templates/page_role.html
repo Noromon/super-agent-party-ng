@@ -3094,7 +3094,7 @@
                             </el-form-item>
                             <el-form-item :label="t('diaryChatSummaryIdle') || '空闲分钟数'"
                                           v-if="diarySettings.chatSummary.enabled" class="form-item-align" label-position="left">
-                              <el-input-number v-model="diarySettings.chatSummary.idleMinutes" :min="5" :max="120"
+                              <el-input-number v-model="diarySettings.chatSummary.idleMinutes" :min="1" :max="120"
                                                @change="autoSaveSettings"></el-input-number>
                             </el-form-item>
                             <el-form-item :label="t('diaryChatSummaryTimeout') || '总结响应超时（秒）'"

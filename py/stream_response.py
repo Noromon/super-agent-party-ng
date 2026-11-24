@@ -90,7 +90,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         _st["_entry"] = stream_entry or _current_stream_entry.get()
         if _st["_entry"] is None and settings.get('enableStreamResume', True):
             logging.getLogger("app").warning("[Cancel-Miss] stream_generator 无法获取流 entry，取消围栏将失效")
-        usage_info = _usage_acc = None  # S309b：_usage_acc 跨轮累计（RA-11 每轮擦 usage_info，acc 只进不出）
+        usage_info = _usage_acc = _hold_abort = None  # S309b：_usage_acc 跨轮累计（RA-11 每轮擦 usage_info，acc 只进不出）；S317：_hold_abort=审批/ask 挂起收尾
         _ctx_peak = 0
         extra = {}
         reasoner_extra = {}
@@ -274,7 +274,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
                 if _st.pop("w1_cancel", False):
                     return
                 if _st.pop("w1_abort", False):
-                    break
+                    _hold_abort = True; break  # S317：挂起收尾=本轮未完（等用户批准/回答），不得触发记忆提取
                 for _ij_c in _interject.drain_inject(_st, request):  # S188：轮边界注入插话+ack
                     yield _ij_c
                 _boundary_l1_recheck(request, settings, tools)  # S192：轮边界预算复查（仅 L1）
@@ -336,7 +336,7 @@ async def stream_generator(client, reasoner_client, request, settings, fastapi_b
         yield "data: [DONE]\n\n"
         # S139(R6)：灵动岛热力图+1 并通知（上游 5842-5850 语义：非 sub_agent、异常吞）
         await notify_island_reply_done(request.is_sub_agent)
-        await _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory)
+        await _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory, _hold_abort)  # S317：挂起轮跳过 mem0
 
         return
     except Exception as e:

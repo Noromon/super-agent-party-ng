@@ -402,7 +402,13 @@ class DiaryEngine:
                 # S172：单飞——上一个总结未落地就不再叠任务（曾每分钟积压自调用打满引擎）
                 # S173：在途流=对话正忙（agent 长任务执行中），本 tick 跳过，下个 60s 再查
                 # S232：开关开启时在途非流式请求（IM bot/子代理）同样算忙
-                _busy_now = has_live_streams() or (self._pause_on_busy() and is_agent_busy())
+                # S317：审批/提问卡挂起中=对话等待用户决策，同样推迟总结（防半截对话被当"空闲"总结）
+                try:
+                    from py.approval_store import pending_count as _apc
+                    _appr_held = bool(_apc())
+                except Exception:
+                    _appr_held = False
+                _busy_now = has_live_streams() or _appr_held or (self._pause_on_busy() and is_agent_busy())
                 if ((self._chat_summary_task is None or self._chat_summary_task.done())
                         and not _busy_now):
                     self._chat_summary_task = asyncio.create_task(

@@ -1627,8 +1627,10 @@ async def _stream_usage_event(request, settings, usage_info, _ctx_peak, tools):
         logging.getLogger("app").info(f"[Context] usage 事件生成异常（跳过）: {_ue}")
 
 
-async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory):
-    """turn-log shadow append + affection extraction + mem0 submit job."""
+async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0, memoryId, cur_memory, hold_abort=False):
+    """turn-log shadow append + affection extraction + mem0 submit job.
+    S317：hold_abort=True 表示本轮因审批弹窗/ask 卡片挂起而结束——会话尚未推进，
+    mem0 提取既提取到半截内容，又会打穿本地网关的 KV 前缀缓存，本轮跳过。"""
     try:
         from py.turn_log import shadow_append as _shadow_append
         await _shadow_append(request.conversation_id, request.messages, log=print)
@@ -1652,7 +1654,9 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
                 append_to_chat_buffer(buffer_key, "assistant", _neutralize(full_content, store="diary-buffer"))
     except Exception as e:
         logging.getLogger("app").info(f"[DiaryBuffer] 记录助手回复失败: {e}")
-    if m0 and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
+    if hold_abort and m0 and not request.is_sub_agent:  # S317
+        logging.getLogger("app").info("[Mem0] 审批/ask 挂起收尾：本轮跳过记忆提取提交（防半截提取+KV 缓存冲刷）")
+    if m0 and not hold_abort and not request.is_sub_agent and not request.is_quarantined and getattr(request, "platform", "") != "diary":  # S172: 日记自调用跳过记忆检索
         logging.getLogger("app").info("记忆更新任务开始提交")
         # S231：结构化传角色（user/assistant 各自 sanitize），不再压平成单条 user 文本——
         # 压平会让 mem0 把「你说」段当用户话语提取，造成记忆角色漂移/反转。

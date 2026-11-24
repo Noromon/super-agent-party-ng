@@ -46,7 +46,7 @@ class TestAccumulate:
 
 class TestBackendWiring:
     def test_init_and_two_accum_sites(self):
-        assert "_usage_acc = None" in STREAM_RESPONSE
+        assert "_usage_acc = _hold_abort = None" in STREAM_RESPONSE  # S317: 同行并入 _hold_abort 初始化
         assert STREAM_RESPONSE.count("accumulate_usage(_usage_acc, usage_info)") == 2
 
     def test_frame_emitted_before_done(self):
