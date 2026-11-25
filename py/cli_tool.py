@@ -1846,21 +1846,29 @@ def _rg_rows_from_lines(lines, want):
     return rows, len(rows) >= want
 
 
+def _rg_skip_globs():
+    """S322：skip dirs/exts 负向 glob（collect 与 files_count 共用，口径恒一致）。"""
+    globs = []
+    for _d in sorted(_SEARCH_SKIP_DIRS):
+        globs += ["--glob", "!**/" + _d + "/**"]
+    for _e in sorted(_SEARCH_SKIP_EXTS):  # S313：与 py 引擎对齐，免开资产文件（AV 逐文件开闸成本）
+        globs += ["--glob", "!*" + _e]
+    return globs
+
+
 def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
                        timeout=_SEARCH_RG_TIMEOUT):
     """S311 ripgrep 流式收集：逐行读 stdout，want 条即 kill 早停——不再为
     凑 200 条把整棵树扫完（旧 subprocess.run 全量等待是 60s 卡顿主因）。
     返回 (rows|None, capped, status)：'ok' 成功/正常无匹配；'timeout' 看门狗
     超时（调用方勿再静默 py 全树重扫=旧版完成前 IO 爆发元凶）；'fail' 启动
-    失败/rg 错误退出（调用方降级 py 扫描）。"""
+    失败/rg 错误退出（调用方降级 py 扫描）；'notfound'（S322）rc 异常且
+    target 不存在——调用方须报真错，禁止降级伪装成 No-match。"""
     import threading
     cmd = [rg, "--line-number", "--no-heading", "--color", "never", "-I",
            "--max-columns", "240", "--max-columns-preview",
            "--max-filesize", str(_SEARCH_MAX_FILE_BYTES)]
-    for _d in sorted(_SEARCH_SKIP_DIRS):
-        cmd += ["--glob", "!**/" + _d + "/**"]
-    for _e in sorted(_SEARCH_SKIP_EXTS):  # S313：与 py 引擎对齐，免开资产文件（AV 逐文件开闸成本）
-        cmd += ["--glob", "!*" + _e]
+    cmd += _rg_skip_globs()
     if ignore_case:
         cmd.append("-i")
     pats = [p.strip() for p in (include or "").replace(";", ",").split(",") if p.strip()]
@@ -1878,10 +1886,24 @@ def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
     timed_out = {"v": False}
     try:
         proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                                stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                 text=True, errors="replace")
     except Exception:
         return None, False, "fail"
+
+    # S322：stderr 边跑边抽（防管道满死锁），留头 150 字符进日志与归因
+    err = {"buf": ""}
+
+    def _drain_stderr():
+        try:
+            se = getattr(proc, "stderr", None)
+            if se is not None:
+                err["buf"] = ((se.read(2000) or "")[:150]).strip()
+        except Exception:
+            pass
+
+    drainer = threading.Thread(target=_drain_stderr, daemon=True)
+    drainer.start()
 
     def _kill():
         timed_out["v"] = True
@@ -1910,21 +1932,65 @@ def _rg_search_collect(rg, cwd, target_str, pattern, include, ignore_case, want,
         except Exception:
             pass
         try:
+            drainer.join(timeout=3)
+        except Exception:
+            pass
+        try:
             proc.stdout.close()
         except Exception:
             pass
+    _dur = round((time.monotonic() - t0) * 1000)
     if timed_out["v"]:
-        log.info("[Search] engine=rg status=timeout dur_ms=%d pattern=%r",
-                 round((time.monotonic() - t0) * 1000), pattern[:60])
+        log.info("[Search] engine=rg status=timeout dur_ms=%d pattern=%r target=%s",
+                 _dur, pattern[:60], target_str)
         return None, False, "timeout"
     rc = proc.returncode
     if rc not in (0, 1) and not capped:  # 早停 kill 造成的非零 rc 不算失败
-        log.info("[Search] engine=rg status=fail rc=%s dur_ms=%d", rc,
-                 round((time.monotonic() - t0) * 1000))
-        return None, False, "fail"
-    log.info("[Search] engine=rg status=ok dur_ms=%d rows=%d capped=%s",
-             round((time.monotonic() - t0) * 1000), len(rows), capped)
+        _nf = not os.path.exists(target_str)  # S322：路径缺失必须与 rg 故障分开归因
+        log.info("[Search] engine=rg status=%s rc=%s dur_ms=%d target=%s stderr=%r",
+                 "notfound" if _nf else "fail", rc, _dur, target_str, err["buf"])
+        return None, False, "notfound" if _nf else "fail"
+    log.info("[Search] engine=rg status=ok dur_ms=%d rows=%d capped=%s target=%s",
+             _dur, len(rows), capped, target_str)
     return rows, capped, "ok"
+
+
+def _rg_files_count(rg, cwd, target_str, timeout=20, cap=5000):
+    """S322：rows=0 时数清「实际可扫描文件数」——区分「扫了但没命中」与
+    「目录下根本没可扫文件」。rg --files 尊重同一 skip glob 口径；cap 早停。"""
+    rel = "."
+    try:
+        rel = os.path.relpath(target_str, cwd)
+    except Exception:
+        pass
+    cmd = [rg, "--files"] + _rg_skip_globs() + ["--", rel if rel != "." else "."]
+    t0 = time.monotonic()
+    n = 0
+    proc = None
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                text=True, errors="replace")
+        for n, _line in enumerate(proc.stdout, 1):
+            if n >= cap:
+                break
+    except Exception:
+        return None
+    finally:
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+    log = logging.getLogger("app")
+    log.info("[Search] files_scanned=%d%s dur_ms=%d target=%s",
+             n, "+" if n >= cap else "", round((time.monotonic() - t0) * 1000), target_str)
+    return n
 
 
 def _py_search_collect(cwd, target_str, regex, include, want):
@@ -1977,7 +2043,7 @@ def _py_search_collect(cwd, target_str, regex, include, want):
     with ThreadPoolExecutor(max_workers=8) as ex:
         list(ex.map(lambda t: scan(*t), files))
     rows = sorted(out, key=_search_row_key)[:want]
-    return rows, len(out) >= want
+    return rows, len(out) >= want, len(files)  # S322：n_files 供 0 命中头归因
 
 
 async def search_files_tool_local(pattern: str = "", path: str = ".", include: str = "",
@@ -2051,13 +2117,30 @@ async def _search_one(pattern: str, path: str = ".", include: str = "",
                 return (f"[Warn] Search timed out after {_SEARCH_RG_TIMEOUT}s over '{path}' "
                         "(ripgrep did not finish; likely a huge tree). Narrow the scope and "
                         "retry: set include (e.g. '*.py') or pass a deeper path.")
+        if status == "notfound":
+            # S322：路径不可读绝不伪装成 No-match——模型据此误判「代码不在这」
+            return (f"[Error] Search target not found: '{target_str}' (resolved from path "
+                    "'{path}' against the workspace). This is NOT 'no matches' — rg could "
+                    "not read the path at all (rc/stderr in [Search] log). Verify with "
+                    "list_files_tool_local, then retry with the corrected path.")
+        n_files = None
         if status != "ok":
             _pt0 = time.monotonic()
-            rows, capped = await asyncio.to_thread(
+            rows, capped, n_files = await asyncio.to_thread(
                 _py_search_collect, cwd, target_str, regex, include, skip + limit + 1)
             logging.getLogger("app").info("[Search] engine=py status=ok dur_ms=%d rows=%d",
                                           round((time.monotonic() - _pt0) * 1000), len(rows))
-        return _format_search_rows(rows, skip, limit, capped)
+        out = _format_search_rows(rows, skip, limit, capped)
+        if out == _NO_MATCH_HINT:  # S322：0 命中头——可见实际搜索目标与可扫描文件数
+            if status == "ok" and rg:
+                n = await asyncio.to_thread(_rg_files_count, rg, cwd, target_str)
+                scanned = "unknown" if n is None else (f"{n}+" if n >= 5000 else str(n))
+            elif n_files is not None:
+                scanned = str(n_files)
+            else:
+                scanned = "unknown"
+            out = f"searched {target_str} (files_scanned={scanned}) — 0 matches.\n{out}"
+        return out
     except Exception as e:
         return f"[Error] Search failed: {str(e)}"
 

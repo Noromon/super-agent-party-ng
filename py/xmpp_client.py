@@ -869,6 +869,7 @@ class XmppClient:
         finish_reason = ""
         err_text = ""
         chain = None  # S191：轮内 canonical 链（call/tool_result 帧增量累积）
+        err_noticed = set()  # S322：type=error 重大提示同标题流内去重
         from py import stream_stop
         from py.base_bot import ToolProgressLedger
         ledger = ToolProgressLedger(mode=getattr(self, "progress_mode", "off"))
@@ -921,6 +922,18 @@ class XmppClient:
                     _line = ledger.on_result(_tn, ToolProgressLedger.field(tc, "content"))
                     if _line:
                         await self._send_text(chat_jid, _line)
+                elif _tt == "error":
+                    # S322：闸门放行/畸形拦截等重大提示必达 IM——无视
+                    # progress_mode（02:36 事故：exhaust 通知被 off 模式吞掉，
+                    # 用户视角=agent 跑一半擅自停手）；先封口缓冲再发，同标题去重
+                    if _tn and _tn not in err_noticed:
+                        err_noticed.add(_tn)
+                        if out_buffer.strip():
+                            await self._send_text(chat_jid, out_buffer.strip())
+                            out_buffer = ""
+                        await self._send_text(
+                            chat_jid,
+                            f"{_tn}\n{ToolProgressLedger.field(tc, 'content')}".strip())
             seg = reasoning if (self.reasoningVisible and reasoning) else content
             full_text.append(content)
             if seg:

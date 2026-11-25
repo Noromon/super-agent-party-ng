@@ -625,10 +625,14 @@ async def _stream_second_round(_st, client, model, msg, extra, extra_params, set
                                               _g_payload[:40], bool(_leaked))
                 continue
             if _g_act == "exhaust":
+                _gids = ", ".join(f"#{t.get('id')}[{t.get('status', '?')}]"
+                                  for t in _g_payload[:8])  # S322：列明未完成项
+                _tail = ("（工具调用连续畸形后最终收尾）回复「继续」可再推进。" if _leaked
+                         else "回复「继续」可再推进。")
                 yield _tool_notice_chunk(
                     "⚠️ 任务未完结即收尾",
-                    f"todo 仍有 {len(_g_payload)} 项未收口，闸门返工上限已达，按收尾放行。"
-                    + ("（工具调用连续畸形后最终收尾；回复「继续」可再推进。）" if _leaked else ""))
+                    f"todo 仍有 {len(_g_payload)} 项未收口：{_gids}。闸门返工上限已达，按收尾放行。"
+                    + _tail)
                 logging.getLogger("app").warning(
                     "[Gate] todo 未清收尾放行（闸门 %d 用尽, leaked=%s）：%d 项",
                     GATE_MAX, bool(_leaked), len(_g_payload))
