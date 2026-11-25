@@ -113,7 +113,7 @@ FILE_LINE_BUDGETS = {
     "py/stream_response.py": 650,
     "py/vision_tools.py": 600,
     "py/tool_hooks.py": 590,
-    "py/group_memory.py": 410,
+    "py/group_memory.py": 415,  # S320 勘误：_trim_request_messages 保 user+配对安全+留痕（现值 414）
     "py/approval_exec.py": 350,
 }
 

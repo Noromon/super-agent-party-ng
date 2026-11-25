@@ -796,6 +796,15 @@ class XmppClient:
         # 当前轮用未脱敏 user_msg（媒体部件模型当轮可见）；历史轮走展平重放
         history = im_chain.flatten_memory(self.memoryList[chat_jid][:-1])
         history.append(user_msg)
+        # S320：登记 im 任务锚点（与 web 同语义）——审批续跑快照被历史盲剪
+        # 丢真实 user 时，服务端 F2 防线按 im:{platform}:{peer_id} 键回注原文
+        try:
+            from py.task_anchor import last_genuine_user_text, remember_anchor
+            _at = last_genuine_user_text([user_msg])
+            if _at:
+                await remember_anchor(f"im:xmpp:{chat_jid}", _at)
+        except Exception as _ane:
+            logging.debug("XMPP 锚点登记失败（忽略）: %r", _ane)
 
         try:
             res = await self._agent_stream_to_peer(chat_jid, history)

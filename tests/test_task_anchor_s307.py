@@ -89,7 +89,7 @@ class TestResumeRepairFlow:
             await task_anchor.anchor_stream_in(broken)  # 续跑缺头：回注
             other = types.SimpleNamespace(conversation_id="conv-noanchor",
                                           messages=_msgs(with_task=False))
-            await task_anchor.anchor_stream_in(other)  # 无锚点会话：不动
+            await task_anchor.anchor_stream_in(other)  # S320：无锚点会话注入占位 user
             return req, broken, other
         return asyncio.run(body())
 
@@ -98,7 +98,8 @@ class TestResumeRepairFlow:
         assert task_anchor.last_genuine_user_text(req.messages)  # 首流原样
         repaired = task_anchor.last_genuine_user_text(broken.messages)
         assert repaired == "帮我做一个 GUI 工具清洗差分图片"  # F2 回注
-        assert task_anchor.last_genuine_user_text(other.messages) is None  # 无锚点不动
+        # S320：无锚点也回注占位——负载永远含真实 user，严格模板不再 No-user raise
+        assert task_anchor.last_genuine_user_text(other.messages) == task_anchor.FALLBACK_USER_TEXT
 
     def test_anchor_roundtrip_db(self, tmp_path, monkeypatch):
         async def body():

@@ -150,7 +150,35 @@ def _build_group_memory_prompt(group: dict, memories: list[dict]) -> str:
 def _trim_request_messages(messages: List[Dict], recent_count: int = 12) -> List[Dict]:
     system_messages = [copy.deepcopy(m) for m in messages if m.get("role") == "system"]
     dialog_messages = [copy.deepcopy(m) for m in messages if m.get("role") != "system"]
-    return system_messages + dialog_messages[-recent_count:]
+    if len(dialog_messages) <= recent_count:
+        return system_messages + dialog_messages
+    # S320（kerobros 审批续跑 500 事故）：旧实现盲切后 N 条——续跑快照的真实 user
+    # 恰在窗口外被静默剪掉，严格 chat 模板倒扫无 user 直接 raise（No user query
+    # found）。防线：切点配对安全（不落在 assistant(tool_calls)→tool 对中间）；
+    # 窗口内无真实 user 时把 dialog 中最后一条真实 user 按原序并入；剪了必留痕。
+    from py.task_anchor import is_genuine_user_msg
+    cut = len(dialog_messages) - recent_count
+    while cut > 0 and dialog_messages[cut].get("role") == "tool":
+        cut -= 1
+    if cut > 0:  # 并行工具对：窗口头部 tool 的发起 assistant(tool_calls) 一并带上
+        _prev = dialog_messages[cut - 1]
+        _tcs = _prev.get("tool_calls") if _prev.get("role") == "assistant" else None
+        if _tcs:
+            _ids = {tc.get("id") for tc in _tcs if isinstance(tc, dict)}
+            if any(m.get("role") == "tool" and m.get("tool_call_id") in _ids
+                   for m in dialog_messages[cut:]):
+                cut -= 1
+    kept = dialog_messages[cut:]
+    if not any(is_genuine_user_msg(m) for m in kept):
+        for _i in range(cut - 1, -1, -1):
+            if is_genuine_user_msg(dialog_messages[_i]):
+                logger.warning("[MsgTrim] S320 历史窗口无真实 user，保留 idx=%d 原文防模板拒绝", _i)
+                kept = [dialog_messages[_i]] + kept
+                break
+    if cut > 0:
+        logger.info("[MsgTrim] 历史裁剪 %d→%d 条（recent_count=%d，配对安全+保user）",
+                    len(dialog_messages), len(dialog_messages) - cut, recent_count)
+    return system_messages + kept
 
 async def _apply_group_memory_context(request: ChatRequest) -> dict:
     request.conversation_id = _normalize_entity_id(request.conversation_id) or None

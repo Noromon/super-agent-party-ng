@@ -25,6 +25,8 @@ logger = logging.getLogger("app")
 
 INJECT_NAMES = ("system_note", "browser_vision")
 
+FALLBACK_USER_TEXT = "（系统注记：本会话历史头部已被裁剪，请按现有历史与工具记录继续执行主人的任务。）"
+
 _CREATE_SQL = ("CREATE TABLE IF NOT EXISTS task_anchor ("
                "conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL)")
 
@@ -79,10 +81,27 @@ async def fetch_anchor(conversation_id):
     return row[0] if row else None
 
 
+def req_key(request):
+    """S320：锚点键——web 用 conversation_id；IM bot 无会话 id，回退
+    im:{platform}:{peer_id}（kerobros 事故：xmpp 审批续跑因此绕过 F2 防线）。"""
+    cid = getattr(request, "conversation_id", None)
+    if cid:
+        return str(cid)
+    if getattr(request, "is_app_bot", False):
+        plat, peer = getattr(request, "platform", None), getattr(request, "peer_id", None)
+        if plat and peer:
+            return f"im:{plat}:{peer}"
+    return None
+
+
 async def anchor_stream_in(request):
-    """流入口挂点：有真实 user 消息→持久化锚点；缺→回注锚点。绝不抛出。"""
+    """流入口挂点：有真实 user 消息→持久化锚点；缺→回注锚点/占位。绝不抛出。
+
+    S320：无锚点也回注占位 user（[MsgShape]）——历史盲剪（_trim_request_messages）
+    后整列无真实 user 会让严格 chat 模板倒扫 raise（No user query found → 500），
+    占位保证请求形态永远合法。"""
     try:
-        cid = getattr(request, "conversation_id", None)
+        cid = req_key(request)
         if not cid:
             return
         msgs = getattr(request, "messages", None)
@@ -93,9 +112,14 @@ async def anchor_stream_in(request):
             await remember_anchor(cid, live)
             return
         anchor = await fetch_anchor(cid)
-        if not anchor:
-            return
-        if insert_anchor(msgs, anchor):
-            logger.info("[ResumeRepair] 任务锚点已回注 conv=%s len=%d", cid, len(anchor))
+        if anchor:
+            if insert_anchor(msgs, anchor):
+                logger.info("[ResumeRepair] 任务锚点已回注 conv=%s len=%d", cid, len(anchor))
+        elif (not getattr(request, "behavior_trigger", False)
+                and not str(cid).startswith("im:diary:")):
+            # 行为/独处轮本就无真实用户发言，不适用占位兜底
+            if insert_anchor(msgs, FALLBACK_USER_TEXT):
+                logger.warning("[MsgShape] 负载无真实 user 且无锚点，已注入占位 conv=%s n=%d",
+                               cid, len(msgs))
     except Exception as e:
         logger.info("[ResumeRepair] 锚点处理失败（忽略）: %r", e)
