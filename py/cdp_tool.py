@@ -790,13 +790,16 @@ async def escape_back():
     return await call_vue_method('escapeBack', [])
 
 
-async def reset_page_state(reload=False):
+async def reset_page_state(reload=False, host=False):
     """S277：应急复位——清除当前标签的触摸/移动端/UA/视口仿真残留。
 
     症状对治：鼠标在浏览器区域变成触摸圆点、单击被吞需要双击、右键菜单消失、
     滚轮失真——这些都是移动端仿真（CDP Emulation）没复位干净的典型表现。
-    顺带释放被占用的陈旧调试器；    reload=true 时复位后重载页面。"""
-    return await call_vue_method('resetPageState', [bool(reload)], timeout=30)
+    顺带释放被占用的陈旧调试器；    reload=true 时复位后重载页面。
+
+    S321：host=true 改为清扫宿主窗口触摸模式（窗口层污染不随标签关闭消失，
+    无活动标签也可执行）——用户反馈「整个应用点击都要双击」且标签已全关时用它。"""
+    return await call_vue_method('resetPageState', [bool(reload), bool(host)], timeout=30)
 
 
 async def browser_policy_report(page_index=None):
@@ -963,7 +966,7 @@ all_cdp_tools = [
                     "url": {"type": "string", "description": "URL to load（可直接写原样中文查询词，Chromium 自动百分号编码；NEVER 手敲 %XX 编码 CJK）"},
                     "timeout": {"type": "integer"},
                     "background": {"type": "boolean", "description": "true=后台打开新标签，不抢占用户可见面板（默认 false）。"},
-                    "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。"},
+                    "mobile": {"type": "boolean", "description": "true=用移动端 UA + 手机视口打开（针对只给移动端内容/有App墙的站点）。默认 false。S321：移动模式不含触摸仿真（不再污染宿主鼠标）。"},
                     "use_proxy": {"type": "boolean", "description": "true=本标签走应用内代理（设置→系统→代理 填的地址）；默认 false=直连——对国内站/本机内网地址正确，且不受系统全局代理(翻墙软件改系统代理时 Electron 行为异常)影响。仅目标确需 VPN 出口（如 Google、X）时设 true；设置里未配置可用代理时会直接报错。出口在创建时定死，想换用 close_page + new_page(use_proxy) 重建。"}
                 },
                 "required": ["url"]
@@ -1013,7 +1016,7 @@ all_cdp_tools = [
                     "url": {"type": "string", "description": "S295：目标 URL；查询词可直接写原样中文，Chromium 自动编码——手敲 %XX 编码 CJK 极易出错，禁止"},
                     "ignoreCache": {"type": "boolean"},
                     "timeout": {"type": "integer", "description": "等待页面加载完成的秒数（0-30，默认 8）。加载完成会提前返回；超时返回 (still loading)，可再 wait_for/take_snapshot。0=不等待立即返回。"},
-                    "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。"},
+                    "mobile": {"type": "boolean", "description": "true=以移动端模式导航（手机UA+手机视口，绕过App墙/拿移动端内容）；false=恢复桌面；省略=不改变当前模式。S321：移动模式不含触摸仿真（不再污染宿主鼠标）。"},
                     "tab_id": {"type": "integer", "description": "稳定 tab id（list_pages 的 id）：先切到该标签再导航，跨轮安全；省略=操作活动标签"}
                 },
                 "required": ["type"]
@@ -1417,11 +1420,14 @@ all_cdp_tools = [
             "name": "reset_page_state",
             "description": ("应急复位当前标签页：清除移动端/触摸/UA/视口仿真残留并释放陈旧调试器。"
                             "当你发现输入异常（点击需双击、光标变触摸点、滚轮失真、右键菜单消失）或用户抱怨"
-                            "浏览器交互怪异时立即调用；它不影响页面内容，只清仿真状态。reload=true 复位后顺带重载。"),
+                            "浏览器交互怪异时立即调用；它不影响页面内容，只清仿真状态。reload=true 复位后顺带重载。"
+                            "host=true 改为清扫宿主窗口的触摸模式——S321：旧版触摸仿真的污染挂在窗口层，"
+                            "标签全关后依旧「点击要双击」时用户若无法自救就用 host=true 解（无需活动标签页）。"),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "reload": {"type": "boolean", "description": "true=复位后重载页面。默认 false。"},
+                    "host": {"type": "boolean", "description": "true=清扫宿主窗口触摸模式（标签全关仍双击异常时用），默认 false。"},
                 },
                 "required": []
             }

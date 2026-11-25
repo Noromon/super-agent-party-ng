@@ -1361,7 +1361,17 @@ Object.assign(vue_methods, {
     // S277：应急复位——清除当前标签的触摸/移动端/UA/视口仿真残留（专治"光标变触摸点、
     // 点击需双击"）。主进程 force 清全套 CDP 覆盖并恢复默认 UA；渲染层同步 tab.mobile
     // 与 414px 收窄样式。reload=true 时顺带重载页面（默认否，先救输入再决定要不要刷页面）。
-    async resetPageState(reload) {
+    async resetPageState(reload, host) {
+        // S321：host=true → 宿主窗口触摸清扫（窗口触摸模式挂 NativeWindowKit 层，
+        // 旧版 guest 泄漏关标签也不复原；无活动 webview 时同样可用）。
+        if (host === true || host === "true") {
+            const apih = window.electronAPI || {};
+            if (!apih.emulationReset) return "Error: emulation reset bridge unavailable";
+            let rh = {};
+            try { rh = (await _inputTmo(apih.emulationReset(0), 8000)) || {}; } catch (e) { rh = { ok: false, err: String((e && e.message) || e) }; }
+            return rh.ok ? "reset_page_state: host window touch mode cleared（宿主鼠标已恢复，无需重载页面）"
+                         : "reset_page_state(host) failed: " + (rh.err || "unknown") + "（DevTools 可能占用调试器：关闭 DevTools 后重试）";
+        }
         const wv = this.getWebview();
         if (!wv) return "Error: No active webview";
         let wcId = 0; try { wcId = wv.getWebContentsId(); } catch (e) {}

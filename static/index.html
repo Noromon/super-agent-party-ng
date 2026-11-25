@@ -334,7 +334,7 @@ function updateElement(el, rawMarkdown, formatFn) {
             <button class="ib-btn" @click="goHome" :title="t('home')">
                 <i class="fa-solid fa-house"></i>
             </button>
-            <!-- S229: 移动端模式（Android UA + 手机视口/触摸）切换当前标签页 -->
+            <!-- S229/S321: 移动端模式（Android UA + 手机视口；触摸仿真已全局禁用）切换当前标签页 -->
             <button class="ib-btn" :class="{ 'active': currentTab?.mobile }" @click="toggleTabMobile" :disabled="!currentTab?.url" :title="t('browserMobile')">
                 <i class="fa-solid fa-mobile-screen-button"></i>
             </button>

@@ -869,7 +869,7 @@ if (!global.browserPolicy) {
 // S305：S277 策略/仿真域逐字搬移至 main_lib/sap_emulation.js——状态对象经导出共享
 // 同一实例（无重绑定），main.js 事件处理器继续原位读写，行为逐点等价。
 const { _policyLog, _policyNote, _sapUniquePath, _sapMobileDbg,
-        _sapInputDbg, _sapDlgDbg, sapWatchDetach, sapResetEmulation,
+        _sapInputDbg, _sapDlgDbg, sapWatchDetach, sapResetEmulation, sapHostTouchClear,
         sapEnsureDialogWatch, sapDropDialogWatch,
         sapReconcileDialogWatch } = require('./main_lib/sap_emulation')
 // 通用下载处理函数
@@ -1279,6 +1279,7 @@ app.whenReady().then(async () => {
               _sapMobileDbg.add(wcId);
               sapWatchDetach(wc);
               wc.once('destroyed', () => { _sapMobileDbg.delete(wcId); });
+              touchOn = true;  // S321：语义=「本地 attach 成功，覆盖可能落地」——后续任一失败须强制全量复位
             }
             await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: SAP_MOBILE_UA, acceptLanguage: 'zh-CN,zh;q=0.9,en;q=0.8', platform: 'Android' });
             // S249: dsf 必须用系统默认(3x 缓冲 vs 屏 dpr 不符 → 页面只可见 ~dpr/3 且鼠标坐标错位，人工验证码都点不中)；
@@ -1286,13 +1287,16 @@ app.whenReady().then(async () => {
             let _vh = 896;
             try { const _sz = wc.getContentSize(); if (_sz && _sz[1] > 240) _vh = Math.round(_sz[1]); } catch (_) {}
             await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: 414, height: _vh, deviceScaleFactor: 0, mobile: true, screenOrientation: { type: 'portraitPrimary', angle: 0 } });
-            await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-            touchOn = true;
-            try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' }); } catch (_) {}
-            return { ok: true, cdp: true };
+            // S321（贴吧 new_page(mobile) 事故）：触摸仿真全局停发——guest 的
+            // setTouchEmulationEnabled(true) 会翻转整个窗口的触摸模式（经 NativeWindowKit
+            // 与宿主共享），guest 销毁不复位，主 UI 点击须双击+光标变触摸点，只能重启解。
+            // 移动内容靠 UA+视口即可拿到；此处顺带显式清掉 guest 上旧会话可能残留的触摸覆盖。
+            try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false }); } catch (_) {}
+            try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
+            return { ok: true, cdp: true, touch: 'off-by-policy' };
           } catch (ce) {
-            // S277：触摸已开启但后续步骤失败 → 立即全量补偿复位并如实报错，
-            // 杜绝"渲染层以为成功、实际残留触摸态"。未触及触摸的失败仍走 S229 UA 降级。
+            // S277：CDP 覆盖已落地但后续步骤失败 → 立即全量补偿复位并如实报错，
+            // 杜绝"渲染层以为成功、实际残留覆盖态"。未触及覆盖的失败仍走 S229 UA 降级。
             if (touchOn) {
               try { await sapResetEmulation(wc, wcId, { force: true }); } catch (_) {}
               try { if (desktopUA) wc.setUserAgent(desktopUA); } catch (_) {}
@@ -1367,6 +1371,10 @@ app.whenReady().then(async () => {
     ipcMain.handle('webview-emulation-reset', async (e, wcId) => {
       try {
         const id = Number(wcId);
+        if (id === 0) { // S321：宿主清扫（wcId=0）——标签全关也能解「点击要双击」残局
+          const win = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : (BrowserWindow.getAllWindows()[0] || null);
+          return await sapHostTouchClear(win ? win.webContents : null);
+        }
         if (!id) return { ok: false, err: 'no-wcid' };
         const wc = webContents.fromId(id);
         if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
@@ -1375,6 +1383,15 @@ app.whenReady().then(async () => {
         return rr;
       } catch (err) { return { ok: false, err: String((err && err.message) || err) }; }
     });
+
+    // S321：启动自愈——旧版本 guest 泄漏的宿主触摸模式（点击须双击/光标触摸点，
+    // 关标签不复原）在下次启动即自动清掉；DevTools 占用等情况静默跳过。
+    setTimeout(() => {
+      try {
+        const w = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : (BrowserWindow.getAllWindows()[0] || null);
+        if (w) sapHostTouchClear(w.webContents).catch(() => {});
+      } catch (_) {}
+    }, 2000);
 
     // S278：行为策略热更新 + 持久化（渲染层设置页调用；config.json 落盘供下次启动）
     ipcMain.handle('set-browser-policy', (e, raw) => {

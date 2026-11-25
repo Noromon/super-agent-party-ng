@@ -734,6 +734,7 @@ Object.assign(vue_methods, {
         if (!applied) return 'mobile ' + (enable ? 'ON' : 'OFF') + ' failed: ' + ((res && res.err) || 'unknown') + '（已回滚为桌面模式）';
         const how = (res && res.cdp) ? 'CDP' : 'UA/viewport';
         let out = (enable ? 'mobile ON' : 'mobile OFF') + ' [' + how + ']';
+        if (res && res.touch === 'off-by-policy') out += ' (touch off by policy S321)';
         if (res && res.cdp === false && enable) out += ' (emulation limited: UA/viewport only)';
         else if (res && res.reset && res.reset !== 'ok') out += ' (warn: ' + res.reset + '，可用 reset_page_state 应急复位)';
         return out;

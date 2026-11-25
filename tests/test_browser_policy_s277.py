@@ -57,7 +57,8 @@ def test_on_branch_touch_compensation():
 def test_emergency_reset_ipc_and_bridge():
     assert "ipcMain.handle('webview-emulation-reset'" in MAIN
     i = MAIN.index("ipcMain.handle('webview-emulation-reset'")
-    assert "{ force: true, defaultUA: true, detachInput: true }" in MAIN[i:i + 600]
+    # S321：handle 前新增 host 清扫分支（wcId=0），窗口相应放宽到 900——guest 路径本体未动
+    assert "{ force: true, defaultUA: true, detachInput: true }" in MAIN[i:i + 900]
     pre = (ROOT / "static/js/preload.js").read_text(encoding="utf-8")
     assert "emulationReset: (wcId) => ipcRenderer.invoke('webview-emulation-reset', wcId)" in pre
 
@@ -70,7 +71,7 @@ def test_guest_input_timeout_guard():
     assert js.count("_inputTmo(api.cdpInputWheel") == 4
     assert js.count("_inputTmo(api.cdpInputClick") == 1
     assert "api.emulationReset(wcId)" in js
-    assert "async resetPageState(reload)" in js
+    assert "async resetPageState(reload" in js  # S321：签名扩展为 (reload, host)，钉放宽到前缀
     # tab.mobile 失败回滚（98_browser_tabs）
     tabs = (ROOT / "static/js/methods/98_browser_tabs.js").read_text(encoding="utf-8")
     assert "const applied = !(res && res.ok === false);" in tabs

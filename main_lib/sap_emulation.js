@@ -70,6 +70,26 @@ async function sapResetEmulation(wc, wcId, opts) {
     return { ok: false, err: String((e && e.message) || e).slice(0, 140) };
   }
 }
+// S321：宿主窗口触摸模式清扫——窗口触摸态挂在 NativeWindowKit 层，旧版 guest 开过的
+// 触摸仿真在 guest 销毁后仍粘住（关掉全部标签也「点击要双击/光标是触摸点」）。对宿主
+// webContents 只清触摸两项（不动 UA/视口），全程静默容错；启动自愈与 reset_page_state
+// 的 host 通道共用。
+async function sapHostTouchClear(wc) {
+  if (!wc || wc.isDestroyed()) return { ok: false, err: 'no-webcontents' };
+  let attachedHere = false;
+  try {
+    if (!wc.debugger.isAttached()) { wc.debugger.attach('1.3'); attachedHere = true; }
+  } catch (_) { return { ok: false, err: 'devtools-busy' }; }
+  try {
+    try { await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false }); } catch (_) {}
+    try { await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 0 }); } catch (_) {}
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, err: String((e && e.message) || e).slice(0, 140) };
+  } finally {
+    if (attachedHere) { try { await wc.debugger.detach(); } catch (_) {} }
+  }
+}
 // ---- S278：JS 弹窗策略执行（CDP Page 域主管；attach 失败退 Electron 事件兜底=只关不确认）----
 // 主管原因：Electron 的 javascript-dialog-opening 只能 cancel（关），无法"确认"；accept 语义
 // 必须 CDP Page.handleJavaScriptDialog。代价：watch 期间 guest 调试器被占用（DevTools 互斥），
@@ -130,5 +150,5 @@ function sapReconcileDialogWatch() {
 }
 
 module.exports = { _policyLog, _policyNote, _sapUniquePath, _sapMobileDbg,
-               _sapInputDbg, _sapDlgDbg, sapWatchDetach, sapResetEmulation,
+               _sapInputDbg, _sapDlgDbg, sapWatchDetach, sapResetEmulation, sapHostTouchClear,
                sapEnsureDialogWatch, sapDropDialogWatch, sapReconcileDialogWatch }
