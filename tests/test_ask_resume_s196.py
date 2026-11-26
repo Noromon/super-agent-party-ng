@@ -68,7 +68,8 @@ class TestResumeLlmFunctional:
                                      _send_text=fake_send,
                                      _persist_conv=_noop_async,
                                      _clear_inflight=_noop_async,
-                                     _send_local_images=_noop_async)
+                                     _send_local_images=_noop_async,
+                                     _apply_compact_writeback=_noop_async)
         snap = _snapshot_with_ask()
         asyncio.run(XmppClient._resume_llm(fake, "peer@x", snap, "【提问卡答复】1. b"))
         msgs = captured.get("messages") or []

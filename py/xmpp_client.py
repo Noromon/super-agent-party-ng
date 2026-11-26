@@ -844,7 +844,11 @@ class XmppClient:
         self.__dict__.setdefault("_empty_reply_flags", {})[chat_jid] = False
         self.memoryList[chat_jid].append(
             im_chain.finalize_entry(res.get("chain") or [], assistant_text))
-        if self.memoryLimit > 0:
+        await self._apply_compact_writeback(chat_jid, res)  # S332：L2 摘要持久写回
+        # S332：摘要头存在=L2 接管 token 防线（opencode 语义），条目计数窗让位，
+        # 否则 pair-pop 会把摘要头弹出、写回形同虚设
+        if self.memoryLimit > 0 and not (self.memoryList[chat_jid]
+                                         and self.memoryList[chat_jid][0].get("is_compact_summary")):
             im_chain.trim_memory("xmpp", chat_jid, self.memoryList[chat_jid],
                                  self.memoryLimit * 2, pair=True)
         await self._persist_conv(chat_jid)
@@ -868,6 +872,7 @@ class XmppClient:
         err_text = ""
         chain = None  # S191：轮内 canonical 链（call/tool_result 帧增量累积）
         err_noticed = set()  # S322：type=error 重大提示同标题流内去重
+        compact_evt = None  # S332：引擎 L2 摘要事件（context_compact）→ 轮末写回 memoryList
         from py import stream_stop
         from py.base_bot import ToolProgressLedger
         ledger = ToolProgressLedger(mode=getattr(self, "progress_mode", "off"))
@@ -885,6 +890,11 @@ class XmppClient:
             },
         )
         async for chunk in stream:
+            _mx = getattr(chunk, "model_extra", None) or {}
+            if _mx.get("type") == "context_compact" or getattr(chunk, "type", "") == "context_compact":
+                # S332：无 choices 的非增量事件帧（SDK extra 字段透传），嗅探摘要
+                compact_evt = {"summary": str(_mx.get("summary")
+                                             or getattr(chunk, "summary", "") or "")}
             if not chunk.choices:
                 continue
             finish_reason = chunk.choices[0].finish_reason or finish_reason
@@ -945,7 +955,24 @@ class XmppClient:
             await self._send_text(chat_jid, _summ)
         return {"assistant_text": "".join(full_text), "out_buffer": out_buffer,
                 "reasoning_chars": reasoning_chars, "finish_reason": finish_reason,
-                "err_text": err_text, "chain": chain or []}
+                "err_text": err_text, "chain": chain or [], "compact_evt": compact_evt}
+
+    async def _apply_compact_writeback(self, chat_jid: str, res: Dict):
+        """S332（对齐 opencode compaction boundary）：引擎 L2 摘要事件写回
+        memoryList——老条目替换为摘要头，后续轮次/重启天然继承「摘要+近期尾」，
+        不再每轮全量重放巨链（旧缺口：compact 只改当轮请求，XMPP 无写回路径）。"""
+        evt = res.get("compact_evt") or {}
+        if not (evt.get("summary") or "").strip():
+            return
+        from py.context_manager import get_context_settings
+        _cs = get_context_settings(await load_settings())
+        _tgt = max(2048, int(_cs["context_window"] * _cs["compact_ratio"] * 0.3))
+        _n0 = len(self.memoryList.get(chat_jid) or [])
+        self.memoryList[chat_jid], _dn = im_chain.compact_memory(
+            self.memoryList.get(chat_jid) or [], evt["summary"], _tgt)
+        if _dn:
+            logging.info("[MemTrim] plat=xmpp L2 摘要写回：%d 条目→摘要头（保留 %d）",
+                         _n0, len(self.memoryList[chat_jid]))
 
     # -------------------- S150 审批闭环（通知 / 批复续流 / 排队） --------------------
     def _on_bot_loop(self, coro_factory):
@@ -1047,7 +1074,9 @@ class XmppClient:
                 _lst[-1] = _entry  # 仅替换挂起期落库的空文本链条目
             else:
                 _lst.append(_entry)
-            if self.memoryLimit > 0:
+            await self._apply_compact_writeback(chat_jid, res)  # S332：续流轮同样写回
+            if self.memoryLimit > 0 and not (self.memoryList[chat_jid]
+                                             and self.memoryList[chat_jid][0].get("is_compact_summary")):
                 im_chain.trim_memory("xmpp", chat_jid, self.memoryList[chat_jid],
                                      self.memoryLimit * 2, pair=True)
             await self._persist_conv(chat_jid)

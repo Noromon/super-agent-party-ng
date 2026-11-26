@@ -95,6 +95,34 @@ def flatten_memory(entries: List[dict]) -> List[dict]:
     return out
 
 
+COMPACT_SUMMARY_PREFIX = "【对话摘要·已压缩】"
+
+
+def compact_memory(entries: List[dict], summary_text: str, target_tokens: int):
+    """S332（对齐 opencode compaction boundary）：引擎 L2 自动摘要后写回记忆表
+    ——超出保留预算的老条目以一条摘要条目替换，后续轮次/重启天然继承
+    「摘要+近期尾」，不再每轮全量重放巨链。返回 (新列表, 被替换条数)。
+
+    保留预算 target_tokens≈主模型预算的 30%：给当轮工具增长与主模型留空间。"""
+    from py.context_manager import estimate_tokens
+    kept: List[dict] = []
+    acc = 0
+    for e in reversed(entries or []):
+        cost = estimate_tokens(flatten_memory([e]))
+        if kept and acc + cost > target_tokens:
+            break
+        kept.insert(0, e)
+        acc += cost
+    dropped = len(entries or []) - len(kept)
+    if dropped <= 0 or not (summary_text or "").strip():
+        return list(entries or []), 0
+    head = {"role": "user", "is_compact_summary": True,
+            "content": (f"{COMPACT_SUMMARY_PREFIX}\n{summary_text}\n"
+                        "（以上为本会话早前轮次的压缩摘要，视为已发生且已确认的事实；"
+                        "不要重做其中已完成的动作，直接基于它继续当前任务。）")}
+    return [head] + kept, dropped
+
+
 def pairs_from_snapshot(snapshot: List[dict]) -> List[dict]:
     """审批快照（服务端 request.messages 视图）→ 工具链对（剥 system/普通文本）。
 

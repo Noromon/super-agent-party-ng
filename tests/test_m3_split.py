@@ -115,8 +115,8 @@ FILE_LINE_BUDGETS = {
     "py/vision_tools.py": 600,
     # S330：one-shot grant 规则 C3 +6
     "py/tool_hooks.py": 596,
-    # S330：预算直通（对齐 opencode，9fc4387f 盲切12 截胡压缩体系）
-    "py/group_memory.py": 436,
+    # S332：让位 L1/L2 三级化+动态尾窗（对齐 opencode 完整压缩闭环）
+    "py/group_memory.py": 461,
     # S329：record_always_allow 全局层路由 +2
     # S330：主注册表 fallback +9
     "py/approval_exec.py": 361,

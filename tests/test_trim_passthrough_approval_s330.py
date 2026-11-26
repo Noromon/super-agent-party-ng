@@ -48,12 +48,13 @@ class TestTrimBudget:
         out = _trim_request_messages(msgs, settings=CM_ON)
         assert len(out) == len(msgs)  # est 远小于 262144*0.8 → 全量直通
 
-    def test_over_budget_falls_back_to_window(self):
+    def test_over_window_falls_back_to_dynamic_tail(self):
+        # S332 语义变更：超引擎窗口才裁剪，且按 token 动态尾窗（非固定 12）
         st = {"contextManagement": {"enabled": True, "contextWindow": 200,
                                     "compactRatio": 0.8, "keepRecentDialog": 12}}
         msgs = _dialog(60, chars=3000)
         out = _trim_request_messages(msgs, settings=st)
-        assert len(out) <= 13  # 窗口 12 +（若有）保 user 回捞 1
+        assert len(out) < len(msgs)  # 200-token 窗口塞不下 60×750 → 动态尾窗
         assert out is not msgs
 
     def test_explicit_recent_count_wins_over_budget(self):

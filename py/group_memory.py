@@ -155,26 +155,51 @@ def _trim_request_messages(messages: List[Dict], recent_count: int = None,
     # 压缩/摘要体系，但本函数自 9fc4387f（v0.3.x 群聊盲切12）起坐落其上游，
     # 980→12 硬截把压缩体系整段截胡=失忆级裁剪（实测 est 12k/窗口 262k）。
     # 本函数退居预算超限时的硬保险；显式 recent_count（测试/调用方）仍走定窗。
+    dynamic = False
     if recent_count is None:
         from py.context_manager import estimate_tokens, get_context_settings
         cs = get_context_settings(settings or {})
         recent_count = cs["keep_recent_dialog"]
         if cs["enabled"]:
             budget = max(1024, int(cs["context_window"] * cs["compact_ratio"]))
+            hard = max(budget + 1, int(cs["context_window"]))  # 引擎物理窗口
+            dyn_cap = max(budget + 1, int(hard * 0.92))  # 高于 L2 触发线，让摘要接管
             est = estimate_tokens(system_messages + dialog_messages)
             if est <= budget:
                 if len(dialog_messages) > 50:
                     logger.info("[MsgTrim] S330 预算内全量直通：%d 条 est=%d/budget=%d",
                                 len(dialog_messages), est, budget)
                 return copy.deepcopy(messages)
-    if len(dialog_messages) <= recent_count:
+            if est <= hard:
+                # S332（对齐 opencode）：未超引擎窗口一律让位 L1/L2（修剪+摘要
+                # 在 stream_prep 见得到全量并持久化）；此处盲切会永久截胡该管线
+                logger.info("[MsgTrim] S332 超限 %d 条 est=%d 让位 L1/L2（budget=%d window=%d）",
+                            len(dialog_messages), est, budget, hard)
+                return copy.deepcopy(messages)
+            dynamic = True  # 超引擎窗口：动态尾窗按 token 尽量多保（下方配对安全）
+    if not dynamic and len(dialog_messages) <= recent_count:
         return system_messages + dialog_messages
     # S320（kerobros 审批续跑 500 事故）：旧实现盲切后 N 条——续跑快照的真实 user
     # 恰在窗口外被静默剪掉，严格 chat 模板倒扫无 user 直接 raise（No user query
     # found）。防线：切点配对安全（不落在 assistant(tool_calls)→tool 对中间）；
     # 窗口内无真实 user 时把 dialog 中最后一条真实 user 按原序并入；剪了必留痕。
     from py.task_anchor import is_genuine_user_msg
-    cut = len(dialog_messages) - recent_count
+    if dynamic:
+        # S332：硬保险触发——按 token 从尾部尽量多保留（非固定条数），
+        # 切点随后仍走配对安全+保 user。
+        from py.context_manager import estimate_tokens
+        cut = len(dialog_messages) - 1
+        acc = estimate_tokens(system_messages) + estimate_tokens([dialog_messages[cut]])
+        while cut > 0:
+            _nxt = estimate_tokens([dialog_messages[cut - 1]])
+            if acc + _nxt > dyn_cap:
+                break
+            cut -= 1
+            acc += _nxt
+        logger.info("[MsgTrim] S332 超引擎窗口动态尾窗：%d→%d 条（cap=%d，尾窗 est≈%d）",
+                    len(dialog_messages), len(dialog_messages) - cut, dyn_cap, acc)
+    else:
+        cut = len(dialog_messages) - recent_count
     while cut > 0 and dialog_messages[cut].get("role") == "tool":
         cut -= 1
     if cut > 0:  # 并行工具对：窗口头部 tool 的发起 assistant(tool_calls) 一并带上
