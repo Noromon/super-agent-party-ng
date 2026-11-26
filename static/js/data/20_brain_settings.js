@@ -373,6 +373,13 @@ Object.assign(vue_data, {
 
     extensions: [],              // 所有发现的扩展,
 
+    extAgentAccess: {},          // S324：扩展「允许AI主动拉起该插件」授权表 {ext_id: bool}
+
+    permCwd: "",                 // S324：授权管理——当前工作区
+    permToolsPool: [],           // S324：可授权工具池（SENSITIVE ∪ 已授权）
+    permAllowedTools: [],        // S324：已「总是允许」的工具
+    permAllowedDirs: [],         // S324：已「总是允许」的目录
+
     currentExtension: null,      // 当前加载的扩展,
 
     sidePanelURL: '',            // 侧边栏中显示的扩展URL,

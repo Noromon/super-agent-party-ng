@@ -320,6 +320,10 @@
                       </div>
                       <p class="kb-description">{{ extension.author }}</p>
                       <div class="kb-meta"><p>{{ extension.description }}</p></div>
+                      <div style="margin-top:8px;display:flex;align-items:center;gap:8px;border-top:1px solid rgba(127,127,127,.18);padding-top:8px;">
+                        <el-switch size="small" :model-value="!!extAgentAccess[extension.id]" @change="toggleAgentAccess(extension, $event)" />
+                        <span style="font-size:12px;opacity:.75;" :title="t('allowAiStartExtensionTip')">{{ t('allowAiStartExtension') }}</span>
+                      </div>
                     </div>
                   </div>
                   <!-- 添加新扩展磁贴保持不变 -->

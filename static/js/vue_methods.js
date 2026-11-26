@@ -924,6 +924,8 @@ let vue_methods = {
       
       // 同步本地与远程的“已安装”和“可更新”状态
       this.syncExtensionUpdateStatus();
+      // S324：随列表刷新「允许AI主动拉起该插件」授权表
+      if (this.loadExtAgentAccess) this.loadExtAgentAccess();
     } catch (e) {
       console.error('刷新扩展列表失败', e);
     }

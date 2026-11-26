@@ -75,6 +75,57 @@ def add_tool_to_project_config(cwd: str, tool_name: str):
         os.replace(tmp_path, config_path)
 
 
+def get_project_config_data(cwd: str) -> dict:
+    """S324 授权管理面板：读 allowed_tools/allowed_dirs（无配置=双空表）。"""
+    if not cwd:
+        return {"allowed_tools": [], "allowed_dirs": []}
+    config_path = _get_project_config_path(cwd)
+    if not config_path.exists():
+        return {"allowed_tools": [], "allowed_dirs": []}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        logging.getLogger("app").info(f"[Config Error] Failed to read .party config: {e}")
+        return {"allowed_tools": [], "allowed_dirs": []}
+    return {"allowed_tools": list(data.get("allowed_tools") or []),
+            "allowed_dirs": list(data.get("allowed_dirs") or [])}
+
+
+def _remove_from_project_config(cwd: str, field: str, value: str) -> bool:
+    """S324：从白名单移除一项（锁内读-改-写+原子替换，T-10 同款）。返回是否有变更。"""
+    if not cwd or not value:
+        return False
+    config_path = _get_project_config_path(cwd)
+    if not config_path.exists():
+        return False
+    with _PROJECT_CONFIG_LOCK:
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return False
+        items = data.get(field) or []
+        if value not in items:
+            return False
+        data[field] = [v for v in items if v != value]
+        tmp_path = str(config_path) + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(tmp_path, config_path)
+    logging.getLogger("app").info(f"[Permission] S324 revoked {field}: {value!r} ({cwd})")
+    return True
+
+
+def remove_tool_from_project_config(cwd: str, tool_name: str) -> bool:
+    return _remove_from_project_config(cwd, "allowed_tools", tool_name)
+
+
+def remove_dir_from_project_config(cwd: str, target_dir: str) -> bool:
+    from py.path_scope import path_norm
+    return _remove_from_project_config(cwd, "allowed_dirs", path_norm(target_dir))
+
+
 # ==================== S153: 目录级白名单（allowed_dirs） ====================
 # 与 allowed_tools 相互独立：工具"总是允许"永远绕不过路径门（opencode
 # external_directory 语义）。匹配=前缀+分隔符边界（path_within，normcase）。

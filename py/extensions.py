@@ -13,7 +13,7 @@ import os
 import asyncio
 import time
 
-from py.get_setting import EXT_DIR
+from py.get_setting import EXT_DIR, load_settings, save_settings
 from py.node_runner import node_mgr
 from aiohttp import ClientSession
 
@@ -373,6 +373,49 @@ async def list_extensions():
         raise HTTPException(status_code=500, detail=f"获取扩展列表失败: {str(e)}")
 
 
+class AgentAccessRequest(BaseModel):
+    enabled: bool
+
+
+@router.get("/agent-access/all")
+async def get_agent_access_all():
+    """S324：全量授权表（扩展管理页一次拉取，避免逐扩展 N 次请求）。"""
+    s = await load_settings()
+    acc = s.get("extensionAgentAccess")
+    return {"access": acc if isinstance(acc, dict) else {}}
+
+
+@router.get("/{ext_id}/agent-access")
+async def get_agent_access(ext_id: str):
+    """S324：读「允许AI主动拉起该插件」开关状态（settings 持久化）。"""
+    s = await load_settings()
+    acc = s.get("extensionAgentAccess")
+    return {"ext_id": ext_id, "enabled": bool(isinstance(acc, dict) and acc.get(ext_id))}
+
+
+@router.put("/{ext_id}/agent-access")
+async def put_agent_access(ext_id: str, req: AgentAccessRequest):
+    """S324：写开关。后端局部改+整存（避免前端全量写竞态）；目录不存在=404，
+    防手滑/越界创建孤儿授权键。"""
+    safe = Path(EXT_DIR) / str(ext_id)
+    try:
+        safe.resolve().relative_to(Path(EXT_DIR).resolve())
+    except Exception:
+        raise HTTPException(400, "非法扩展名")
+    if not safe.is_dir():
+        raise HTTPException(404, "扩展不存在")
+    s = await load_settings()
+    acc = s.setdefault("extensionAgentAccess", {})
+    if not isinstance(acc, dict):
+        acc = s["extensionAgentAccess"] = {}
+    if req.enabled:
+        acc[ext_id] = True
+    else:
+        acc.pop(ext_id, None)
+    await save_settings(s)
+    return {"ext_id": ext_id, "enabled": bool(req.enabled)}
+
+
 @router.delete("/{ext_id}", status_code=204)
 async def delete_extension(ext_id: str):
     """删除扩展"""
@@ -383,6 +426,14 @@ async def delete_extension(ext_id: str):
         robust_rmtree(target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+    # S324：删除即撤销 agent 授权，不留孤儿键
+    try:
+        s = await load_settings()
+        acc = s.get("extensionAgentAccess")
+        if isinstance(acc, dict) and acc.pop(ext_id, None) is not None:
+            await save_settings(s)
+    except Exception:
+        pass
 
 
 @router.post("/install-from-github", response_model=InstallResponse)

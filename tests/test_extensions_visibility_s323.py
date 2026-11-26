@@ -104,7 +104,7 @@ class TestHostContext:
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         monkeypatch.setattr(A, "get_port", lambda: 3456)
         _mkext(tmp_path, "demo-ext", desc="tieba viewer")
-        ctx = A.build_host_context()
+        ctx = A.build_host_context({"demo-ext": True})  # S324：可见性=授权门控
         assert "http://127.0.0.1:3456" in ctx
         assert "PAGE IS OPENED" in ctx and "demo-ext" in ctx
         assert "not running" in ctx and "4633" not in ctx   # 无硬编码口（误诊根因）
@@ -122,7 +122,7 @@ class TestHostContext:
         _mkext(tmp_path, "demo-ext")
         monkeypatch.setitem(sys.modules, "server", types.SimpleNamespace(
             node_ext_mcp_tools={"demo-ext": [{"name": "tieba_view_thread"}]}))
-        ctx = A.build_host_context()
+        ctx = A.build_host_context({"demo-ext": True})  # S324：门控放行后可见
         assert "mcp_tools: tieba_view_thread (registered)" in ctx
 
 
@@ -143,29 +143,45 @@ class TestListTool:
     def test_empty_hint(self, monkeypatch, tmp_path):
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         out = asyncio.run(A.list_extensions_tool_local())
-        assert "No installed extensions" in out
+        assert "No extensions visible to you" in out
 
 
 class TestStartTool:
+    def _allow_all(self, monkeypatch):
+        """S324 资格门在存在性检查之前——本类测后续分支，须先放行。"""
+        async def fake():
+            return {"ghost": True, "stat-ext": True, "node-ext": True,
+                    "slow-ext": True, "brk-ext": True}
+        monkeypatch.setattr(A, "_load_agent_access", fake)
+
     def test_rejects_bad_ids(self, monkeypatch, tmp_path):
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         for bad in ("", "a/b", "a\\b", "..", "..x", ".hidden"):
             assert asyncio.run(
                 A.start_extension_node_tool_local(bad)).startswith("[Error]")
+        # S324：资格门拒绝与格式拒绝分离（未授权=统一拒绝话术）
+        async def deny():
+            return {}
+        monkeypatch.setattr(A, "_load_agent_access", deny)
+        out = asyncio.run(A.start_extension_node_tool_local("whatever"))
+        assert "agent access not enabled" in out
 
     def test_unknown_ext_lists_available(self, monkeypatch, tmp_path):
+        self._allow_all(monkeypatch)
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         _mkext(tmp_path, "demo-ext")
         out = asyncio.run(A.start_extension_node_tool_local("ghost"))
         assert "not found" in out and "demo-ext" in out
 
     def test_static_ext_no_node_needed(self, monkeypatch, tmp_path):
+        self._allow_all(monkeypatch)
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         _mkext(tmp_path, "stat-ext", node=False)
         out = asyncio.run(A.start_extension_node_tool_local("stat-ext"))
         assert "static extension" in out
 
     def test_start_ok_reports_port_and_limitation(self, monkeypatch, tmp_path):
+        self._allow_all(monkeypatch)
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         _mkext(tmp_path, "node-ext")
         monkeypatch.setattr("py.node_runner.node_mgr", _Mgr(start_ret=7777))
@@ -174,6 +190,7 @@ class TestStartTool:
         assert "panel page" in out  # 如实注明：起 node ≠ MCP 工具进索引
 
     def test_start_timeout_is_retryable_hint(self, monkeypatch, tmp_path):
+        self._allow_all(monkeypatch)
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         _mkext(tmp_path, "slow-ext")
 
@@ -193,6 +210,7 @@ class TestStartTool:
         monkeypatch.setattr(asyncio, "wait_for", real_wait_for)
 
     def test_start_fail_missing_node_modules(self, monkeypatch, tmp_path):
+        self._allow_all(monkeypatch)
         monkeypatch.setattr(A, "EXT_DIR", str(tmp_path))
         _mkext(tmp_path, "brk-ext")
         monkeypatch.setattr("py.node_runner.node_mgr",

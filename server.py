@@ -810,7 +810,8 @@ async def _approval_exec_dedup(stream_id, tool_name, tool_params, approval_type)
 from py.tool_call_guard import neutralize_leaked_blocks as _tcg_neutralize
 from py.routers import (media, bots, memories, system, files,
                         bot_conversations, tasks, agents, workflows,
-                        status, notifications, transfer)
+                        status, notifications, transfer, permissions)
+app.include_router(permissions.router)  # S324：授权管理面板（总是允许白名单存/取）
 app.include_router(notifications.router)  # S151：通知中心
 app.include_router(transfer.router)  # S161：记忆/日记导入导出
 app.include_router(media.router)
@@ -1327,7 +1328,9 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
     # 误诊框架没挂载」与「扩展对 agent 完全不可见」。失败静默跳过，不断主流程。
     try:
         from py.agent_ext_tools import build_host_context
-        _host_ctx = build_host_context()
+        # S324：关闭态扩展仅对「允许AI主动拉起」开启者可见（settings 本轮已在手，零额外 IO）
+        _acc = settings.get("extensionAgentAccess")
+        _host_ctx = build_host_context(_acc if isinstance(_acc, dict) else {})
         if _host_ctx:
             content_append(request.messages, 'system', _host_ctx)
     except Exception as _hce:

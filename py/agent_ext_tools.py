@@ -92,11 +92,24 @@ def invalidate_cache():
     _CACHE["exts"] = []
 
 
-def build_host_context():
-    """A：宿主环境 system 段（S323）。无扩展也注入 API base 行——
-    端口误诊与扩展无关。失败返回 ''（调用方跳过注入，不断主流程）。"""
+def _visible_exts(exts, agent_access):
+    """S324：关闭态可见性=用户显式授权（扩展设置「允许AI主动拉起该插件」）；
+    页面开着（running）不受开关限制——桥路径本就由用户亲手打开。
+    未授权且关闭的扩展仅以计数一行提示存在（防 agent 误判「不存在」）。"""
+    access = agent_access or {}
+    vis = [e for e in exts if e["running_port"] or access.get(e["id"])]
+    hidden = len(exts) - len(vis)
+    return vis, hidden
+
+
+def build_host_context(agent_access=None):
+    """A：宿主环境 system 段（S323/S324）。无扩展也注入 API base 行——
+    端口误诊与扩展无关。失败返回 ''（调用方跳过注入，不断主流程）。
+    agent_access = settings.extensionAgentAccess {ext_id: bool}。"""
     try:
         exts = scan_extensions()
+        vis, hidden = _visible_exts(exts, agent_access)
+        access = agent_access or {}
         lines = [
             "# Host Environment",
             f"- Host API base: http://127.0.0.1:{get_port()} (requires host auth; "
@@ -106,16 +119,25 @@ def build_host_context():
             "PAGE IS OPENED and unregister on close. Tools not in your index = page "
             "closed, not missing code.",
         ]
-        if not exts:
-            lines.append("- Installed extensions: none.")
+        if not vis:
+            lines.append("- Extensions visible to you: none."
+                         + (f" ({hidden} more installed but hidden: agent access not "
+                            "enabled in extension settings)" if hidden else ""))
         else:
-            for e in exts:
+            for e in vis:
                 st = (f"running(port {e['running_port']})" if e["running_port"]
                       else "not running")
                 mt = (" mcp_tools: " + ", ".join(e["mcp_tools"]) + " (registered)") \
                     if e["mcp_tools"] else ""
+                launch = ""
+                if access.get(e["id"]) and not e["running_port"]:
+                    launch = (" | agent-start: allowed (user enabled "
+                              "'Allow AI to actively start this extension')")
                 lines.append(f"- Extension '{e['id']}': {'node' if e['node'] else 'static'}, "
-                             f"{st}{mt}. {e['description']}")
+                             f"{st}{mt}{launch}. {e['description']}")
+            if hidden:
+                lines.append(f"- (+ {hidden} more installed extensions hidden: agent "
+                             "access off in extension settings — treat them as absent.)")
             lines.append("- Self-check: list_extensions_tool_local. To bring up a node "
                          "service: start_extension_node_tool_local (then its HTTP API is "
                          "reachable, but its MCP tools still only enter your index when "
@@ -126,15 +148,34 @@ def build_host_context():
         return ""
 
 
+async def _load_agent_access():
+    """settings.extensionAgentAccess 读取（S324）。失败按空=全部未授权（保守向）。"""
+    try:
+        from py.get_setting import load_settings
+        s = await load_settings()
+        acc = s.get("extensionAgentAccess")
+        return acc if isinstance(acc, dict) else {}
+    except Exception:
+        return {}
+
+
 async def list_extensions_tool_local() -> str:
-    """[Local] B：只读列出已安装扩展与运行态（plan 模式可用）。"""
+    """[Local] B：只读列出对 agent 可见的扩展与运行态（plan 模式可用）。
+    S324：关闭态可见性受「允许AI主动拉起该插件」开关门控（running 不受限）。"""
     exts = scan_extensions()
-    if not exts:
-        return ("[OK] No installed extensions under ext/. Users can install them from "
-                "the extensions panel; an extension = a directory with index.html "
-                "(UI) and/or index.js (node service) + package.json.")
-    out = ["Installed extensions (%d):" % len(exts)]
-    for e in exts:
+    vis, hidden = _visible_exts(exts, await _load_agent_access())
+    if not vis:
+        return ("[OK] No extensions visible to you under ext/."
+                + (f" ({hidden} more installed but hidden: agent access not enabled "
+                   "in extension settings.)" if hidden else
+                   " Users can install them from the extensions panel; an extension = "
+                   "a directory with index.html (UI) and/or index.js (node service) "
+                   "+ package.json."))
+    out = ["Extensions visible to you (%d):" % len(vis)]
+    if hidden:
+        out.append("(+ %d more installed but hidden: agent access off in extension "
+                   "settings — treat them as absent.)" % hidden)
+    for e in vis:
         kind = "node+ui" if (e["node"] and e["ui"]) else ("node" if e["node"] else "static-ui")
         st = (f"RUNNING port={e['running_port']}" if e["running_port"] else "not running")
         line = (f"- {e['id']} | {e['name']} v{e['version'] or '?'} | {kind} | {st}")
@@ -163,9 +204,15 @@ async def start_extension_node_tool_local(ext_id: str = "") -> str:
         d.resolve().relative_to(base)
     except Exception:
         return f"[Error] ext_id '{eid}' resolves outside the extensions directory."
+    # S324 资格门：未开启「允许AI主动拉起该插件」= 连存在性都不透露。
+    # 顺序在存在性检查之前；审批层（SENSITIVE_TOOLS）在其后照常生效=双重保护。
+    if not (await _load_agent_access()).get(eid):
+        return (f"[Error] '{eid}': agent access not enabled. The user must turn on "
+                "'Allow AI to actively start this extension' in this extension's "
+                "settings in the extensions panel first. Do not retry blindly.")
     if not d.is_dir():
-        avail = ", ".join(e["id"] for e in scan_extensions()) or "(none installed)"
-        return f"[Error] Extension '{eid}' not found. Installed: {avail}"
+        avail = ", ".join(e["id"] for e in scan_extensions()) or "(none visible)"
+        return f"[Error] Extension '{eid}' not found. Visible: {avail}"
     if not (d / "index.js").is_file():
         return (f"[OK] '{eid}' is a static extension (no index.js) — no node service "
                 "to start; it works when its page is opened in the extensions panel.")

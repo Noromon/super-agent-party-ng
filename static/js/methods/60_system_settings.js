@@ -1,6 +1,50 @@
 // 批 3 F2：自 vue_methods.js 搬移的 methods/60_system_settings.js 域（Object.assign 装配，
 // 加载顺序在宿主之后、renderer 之前）。方法体互调仍走 this。
 Object.assign(vue_methods, {
+    // S324：授权管理面板——「总是允许」白名单查看/收回/再授权
+    async loadAllowlist() {
+      try {
+        const r = await fetch('/api/permissions/allowlist');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.permCwd = d.cwd || '';
+        this.permToolsPool = d.tools_pool || [];
+        this.permAllowedTools = d.allowed_tools || [];
+        this.permAllowedDirs = d.allowed_dirs || [];
+      } catch { /* 面板保持原状 */ }
+    },
+    async setToolPerm(name, allowed) {
+      try {
+        const r = await fetch('/api/permissions/allowlist/tool', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, allowed: !!allowed }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const i = this.permAllowedTools.indexOf(name);
+        if (allowed && i < 0) this.permAllowedTools.push(name);
+        if (!allowed && i >= 0) this.permAllowedTools.splice(i, 1);
+        showNotification(this.t('settingsSaved'), 'success');
+      } catch (e) {
+        showNotification(String(e.message || e), 'error');
+        this.loadAllowlist(); // 失败回滚显示=以服务端为准
+      }
+    },
+    async setDirPerm(dir, allowed) {
+      try {
+        const r = await fetch('/api/permissions/allowlist/dir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dir: dir, allowed: !!allowed }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        showNotification(this.t('settingsSaved'), 'success');
+        this.loadAllowlist();
+      } catch (e) {
+        showNotification(String(e.message || e), 'error');
+      }
+    },
+
     // S142：「记住窗口大小」开关——同步给主进程（开=下次恢复上次尺寸，关=每次全屏）
     syncWindowSizeMemory() {
       if (this.isElectron && window.electronAPI && window.electronAPI.setWindowSizeMemory) {

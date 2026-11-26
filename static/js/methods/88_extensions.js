@@ -181,6 +181,30 @@ Object.assign(vue_methods, {
       }
     },
 
+    // S324：扩展「允许AI主动拉起该插件」授权——载入与切换
+    async loadExtAgentAccess() {
+      try {
+        const r = await fetch('/api/extensions/agent-access/all');
+        if (!r.ok) return;
+        const d = await r.json();
+        this.extAgentAccess = (d && d.access) || {};
+      } catch { /* 面板照常渲染=全未授权显示 */ }
+    },
+    async toggleAgentAccess(ext, val) {
+      try {
+        const r = await fetch(`/api/extensions/${ext.id}/agent-access`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !!val }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        this.$set(this.extAgentAccess, ext.id, !!val);
+        showNotification(this.t('settingsSaved'), 'success');
+      } catch (e) {
+        showNotification(String(e.message || e), 'error');
+      }
+    },
+
     // 打开「添加扩展」对话框
     openAddExtensionDialog() {
       this.newExtensionUrl = '';
