@@ -186,4 +186,4 @@ def test_defaults_and_ui_and_i18n():
 
 
 def test_stamp_s232():
-    assert "build=S303" in _read("static", "js", "renderer.js")
+    assert "build=S" in _read("static", "js", "renderer.js")  # S327: prefix pin, version moves on

@@ -289,6 +289,7 @@
                     <el-button @click="openExtfile" type="primary">{{t('openExtfile')}}</el-button>
                     <el-button @click="openRepository('https://github.com/super-agent-party/super-agent-party.github.io')" type="primary">{{t('addYourExtensions')}}</el-button>
                     <el-button @click="handleRefreshClick" type="primary" :loading="refreshing">{{refreshButtonText}}</el-button>
+                    <span style="opacity:.4;font-size:11px;margin-left:6px;" :title="'UI 构建指纹（与控制台 [Probe] 行同源）'">UI: {{ (typeof __UI_BUILD !== 'undefined' && __UI_BUILD) || '?' }}</span>
                   </div>
                 </div>
 
@@ -323,8 +324,8 @@
                       <div style="margin-top:8px;display:flex;align-items:flex-start;gap:8px;border-top:1px solid rgba(127,127,127,.18);padding-top:8px;">
                         <el-switch size="small" style="margin-top:1px;" :model-value="!!extAgentAccess[extension.id]" @change="toggleAgentAccess(extension, $event)" />
                         <div style="flex:1;min-width:0;">
-                          <div style="font-size:12px;opacity:.85;">{{ t('allowAiStartExtension') }}</div>
-                          <div style="font-size:11px;opacity:.55;line-height:1.45;margin-top:2px;">{{ t('allowAiStartExtensionTip') }}</div>
+                          <div style="font-size:12px;opacity:.85;">{{ tf('allowAiStartExtension') }}</div>
+                          <div style="font-size:11px;opacity:.55;line-height:1.45;margin-top:2px;">{{ tf('allowAiStartExtensionTip') }}</div>
                         </div>
                       </div>
                     </div>

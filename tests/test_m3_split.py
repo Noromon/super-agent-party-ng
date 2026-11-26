@@ -105,7 +105,7 @@ def _pb_funcs():
 # S304：composition root 终态锁——server.py 为端点/lifespan/全局状态装配层，
 # 只准缩不许涨（re-export import 行浮动在预算内）；引擎文件同法冻结现值。
 FILE_LINE_BUDGETS = {
-    "server.py": 3150,
+        "server.py": 3170,  # S327: +__UI_BUILD 指纹注入
     "py/stream_engine.py": 1750,   # S302 勘误：纯移动后现值 1725
     "py/stream_prep.py": 1475,
     "py/complete_engine.py": 1010,

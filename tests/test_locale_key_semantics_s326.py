@@ -7,9 +7,12 @@ grep 测试全绿也拦不住。本文件做真正的解析语义验证。
 """
 import json
 import re
+import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 _ZH = _ROOT / "static" / "js" / "locales" / "zh-CN.js"
 _EN = _ROOT / "static" / "js" / "locales" / "en-US.js"
 _BASELINE = _ROOT / "tests" / "data" / "locale_top_violations_baseline.json"

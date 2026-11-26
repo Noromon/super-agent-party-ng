@@ -65,6 +65,9 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
       .then(registration => {
         console.log('SW registered: ', registration);
+        // S327：每次启动立即核对 sw.js 字节（默认节流 24h），配合 CACHE_NAME
+        // 升版即时清退陈旧缓存——修复"改了前端但窗口永远吃旧缓存"取证盲区
+        registration.update().catch(() => {});
       })
       .catch(registrationError => {
         console.log('SW registration failed: ', registrationError);

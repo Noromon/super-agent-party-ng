@@ -915,6 +915,36 @@ def _asset_version_hash(base_dir, url):
     return h
 
 
+_UI_BUILD = None
+
+
+def _ui_build_stamp():
+    """S327: static 内容指纹（文件路径+mtime），首个 HTML 响应时懒算一次。
+    前端任何文件变更 → 指纹必变 → 用户肉眼即可判断窗口加载的是哪版前端。"""
+    global _UI_BUILD
+    if _UI_BUILD is None:
+        base = os.path.join(base_path, "static")
+        h = hashlib.md5()
+        latest, n = 0, 0
+        for root, dirs, fs in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in ("libs",)]
+            for f in fs:
+                if not f.endswith((".js", ".html", ".css")):
+                    continue
+                fp = os.path.join(root, f)
+                try:
+                    st = os.stat(fp)
+                except OSError:
+                    continue
+                latest = max(latest, st.st_mtime_ns)
+                h.update(os.path.relpath(fp, base).replace("\\", "/").encode())
+                h.update(str(st.st_mtime_ns).encode())
+                n += 1
+        stamp = time.strftime("%Y%m%d-%H%M", time.gmtime(latest / 1e9)) if latest else "0"
+        _UI_BUILD = f"{stamp}-n{n}-{h.hexdigest()[:8]}"
+    return _UI_BUILD
+
+
 @app.middleware("http")
 async def inject_asset_versions(request: Request, call_next):
     _tt0 = time.monotonic()
@@ -959,6 +989,11 @@ async def inject_asset_versions(request: Request, call_next):
         return f'{m.group(1)}="{url}{sep}v={h}"'
 
     new_str = _ASSET_VERSION_RE.sub(_repl, body_str)
+    # S327: 注入 UI 构建指纹（与 renderer [Probe] 日志、页面可见文本三处自证）
+    if "__UI_BUILD" not in new_str:
+        _tag = f'<script>window.__UI_BUILD="{_ui_build_stamp()}";</script>'
+        _i = new_str.lower().find("<head>")
+        new_str = (new_str[:_i + 6] + _tag + new_str[_i + 6:]) if _i >= 0 else (_tag + new_str)
     headers = dict(response.headers)
     headers.pop("content-length", None)
     headers["Cache-Control"] = "no-cache"

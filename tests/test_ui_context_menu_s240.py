@@ -153,4 +153,5 @@ def test_main_menu_branches_and_locales():
 
 
 def test_stamp_s240():
-    assert "build=S303" in _read("static", "js", "renderer.js")
+    # S327: 手工版本串 build=S303 升级为内容指纹 __UI_BUILD（renderer 首行）
+    assert "UI build=" in _read("static", "js", "renderer.js")

@@ -4,7 +4,7 @@
 //   - 带 ?v=<hash> 的资源: cache-first（内容寻址，hash 不变即内容没变，永不 revalidate）
 //   - 不带版本号懒加载的库: stale-while-revalidate（兼容特殊动态加载）
 // 注意: 升级缓存策略/缓存结构时必须递增 CACHE_NAME，否则旧缓存不会被清理。
-const CACHE_NAME = 'sap-cache-v2';
+const CACHE_NAME = 'sap-cache-v3';
 
 // 带内容版本号(?v=)的静态资源
 const VERSIONED_ASSET_RE = /\.(?:css|js|png|jpe?g|svg|gif|webp|ico|woff2?|ttf|eot|mp4|webm)\?v=/;

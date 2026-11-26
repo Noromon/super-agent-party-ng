@@ -122,4 +122,5 @@ def test_defaults_ui_i18n_stamp():
         for k in ("maxToolIterationsDesc", "maxToolIterationsHint",
                   "toolCapUnlimitedDesc", "toolCapUnlimitedHint"):
             assert k in s, (loc, k)
-    assert "build=S303" in _read("static", "js", "renderer.js")
+    # S327: 手工版本串 build=S303 升级为内容指纹 __UI_BUILD（renderer 首行）
+    assert "UI build=" in _read("static", "js", "renderer.js")

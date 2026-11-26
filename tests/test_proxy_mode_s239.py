@@ -233,4 +233,4 @@ def test_python_tools_proxies_wired():
 
 
 def test_stamp_s239():
-    assert "build=S303" in _read("static", "js", "renderer.js")
+    assert "build=S" in _read("static", "js", "renderer.js")  # S327: prefix pin, version moves on

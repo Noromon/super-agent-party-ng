@@ -64,7 +64,7 @@ def test_js_partition_plumbing():
 
 
 def test_stamp_s236():
-    assert "build=S303" in _read("static", "js", "renderer.js")
+    assert "build=S" in _read("static", "js", "renderer.js")  # S327: prefix pin, version moves on
 
 
 _AST_SCRIPT = (

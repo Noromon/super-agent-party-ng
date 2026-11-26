@@ -176,7 +176,8 @@ class TestPins:
         i = html.index("allowAiStartExtensionTip")
         seg = html[max(0, i - 400):i + 60]
         assert ':title="t(\'allowAiStartExtensionTip\')"' not in seg  # 常驻显示非 hover
-        assert "{{ t('allowAiStartExtensionTip') }}" in seg
+        import re as _re
+        assert _re.search(r"\{\{\s*tf?\('allowAiStartExtensionTip'\)\s*\}\}", seg)
 
     def test_ui_and_locale_wired(self):
         html = (_ROOT / "static" / "templates" / "page_api-group.html").read_text(encoding="utf-8")

@@ -45,7 +45,7 @@ class TestMinimalModeS135:
         assert 'id="minimal-mode-btn"' in h
         assert 'toggleMinimalMode' in h
         assert "fa-feather" in h
-        assert "build=S303" in _read("static", "js", "renderer.js")
+        assert "build=S" in _read("static", "js", "renderer.js")  # S327: prefix pin, version moves on
 
     def test_stream_snapshot_full_key(self):
         # S138：快照键含内容长度+尾部——上游原版只取前 300 字符，

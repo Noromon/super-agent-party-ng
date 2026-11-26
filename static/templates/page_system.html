@@ -913,28 +913,28 @@
             <div class="tool-header">
               <span>
                 <el-icon><i class="fa-solid fa-shield-halved"></i></el-icon>
-                {{ t('permManageTitle') }}
+                {{ tf('permManageTitle') }}
               </span>
               <el-button link size="small" @click="loadAllowlist">{{ t('refresh') || 'Refresh' }}</el-button>
             </div>
             <div class="tool-content">
               <el-alert type="info" :closable="false" class="mb-2">
                 <div class="alert-content">
-                  {{ t('permManageTip') }}
+                  {{ tf('permManageTip') }}
                   <template v-if="permCwd"><br><code style="font-size:11px;">{{ permCwd }}</code></template>
                 </div>
               </el-alert>
-              <el-divider content-position="left">{{ t('permToolsTitle') }}</el-divider>
-              <div v-if="!permToolsPool.length" style="opacity:.6;font-size:12px;">{{ t('permNoItems') }}</div>
+              <el-divider content-position="left">{{ tf('permToolsTitle') }}</el-divider>
+              <div v-if="!permToolsPool.length" style="opacity:.6;font-size:12px;">{{ tf('permNoItems') }}</div>
               <div v-for="pname in permToolsPool" :key="pname" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
                 <el-switch size="small" :model-value="permAllowedTools.includes(pname)" @change="setToolPerm(pname, $event)" />
-                <span style="font-size:13px;flex:1;">{{ (t('permToolDesc') || {})[pname] || pname }}
+                <span style="font-size:13px;flex:1;">{{ (tf('permToolDesc') || {})[pname] || pname }}
                   <span style="opacity:.5;font-size:11px;">{{ pname }}</span></span>
               </div>
-              <el-divider content-position="left">{{ t('permDirsTitle') }}</el-divider>
-              <div v-if="!permAllowedDirs.length" style="opacity:.6;font-size:12px;">{{ t('permNoItems') }}</div>
+              <el-divider content-position="left">{{ tf('permDirsTitle') }}</el-divider>
+              <div v-if="!permAllowedDirs.length" style="opacity:.6;font-size:12px;">{{ tf('permNoItems') }}</div>
               <div v-for="pdir in permAllowedDirs" :key="pdir" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                <el-button size="small" type="danger" plain @click="setDirPerm(pdir, false)">{{ t('permRevoke') }}</el-button>
+                <el-button size="small" type="danger" plain @click="setDirPerm(pdir, false)">{{ tf('permRevoke') }}</el-button>
                 <code style="font-size:11px;flex:1;word-break:break-all;">{{ pdir }}</code>
               </div>
             </div>

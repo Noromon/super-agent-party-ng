@@ -16,7 +16,8 @@ def test_main_document_versioned_and_nocache(sap):
 def test_swjs_is_v2_policy(sap):
     r = requests.get(f"{sap}/sw.js", timeout=15)
     assert r.status_code == 200
-    assert "sap-cache-v2" in r.text
+    # S327: v2→v3（清退历史陈旧缓存）；策略结构不变
+    assert "sap-cache-v3" in r.text
     assert "my-pwa-cache-v1" not in r.text
 
 

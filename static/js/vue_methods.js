@@ -1,3 +1,59 @@
+// S327 硬编码文案兜底表（tf() 数据源）。zh/en 与 locale 文件顶层键保持同步；
+// locale 链路任何一环断裂时界面仍有完整文案（tests 有语义钉）。
+window.__TF_FALLBACK = {
+  'zh-CN': {
+    'allowAiStartExtension': '允许AI主动拉起该插件',
+    'allowAiStartExtensionTip': '开＝关闭状态下 AI 仍可见并可尝试拉起（每次拉起仍需你审批）；关＝AI 完全看不到',
+    'permManageTitle': '授权管理（"总是允许"）',
+    'permManageTip': '你在审批弹窗点过「总是允许」的操作与目录会记录在当前工作区（.party/config.json），AI 之后执行它们不再询问。在这里可随时收回或重新授权。',
+    'permToolsTitle': '免审批操作',
+    'permDirsTitle': '免审批目录',
+    'permNoItems': '暂无已授权项',
+    'permGrant': '授权',
+    'permRevoke': '收回',
+    'permToolDesc': {
+      'shell_tool_local': '执行本地终端命令',
+      'edit_file_tool': '写入/覆盖文件（Docker）',
+      'edit_file_patch_tool': '精确替换文件（Docker）',
+      'edit_file_tool_local': '写入/覆盖文件（本地）',
+      'edit_file_patch_tool_local': '精确替换文件（本地）',
+      'delete_file_tool_local': '删除文件（入回收站）',
+      'docker_sandbox': 'Docker 沙箱执行',
+      'list_processes_tool': '查看进程列表',
+      'get_process_logs_tool': '查看进程日志',
+      'kill_process_tool': '结束进程',
+      'docker_manage_ports_tool': '管理 Docker 端口',
+      'local_net_tool': '本地网络请求',
+      'start_extension_node_tool_local': '拉起插件后台服务'
+    }
+  },
+  'en-US': {
+    'allowAiStartExtension': 'Allow AI to actively start this extension',
+    'allowAiStartExtensionTip': 'On = stays visible to the AI while closed and may be started by it (each start still needs your approval); Off = invisible to the AI',
+    'permManageTitle': 'Allowlist ("Always Allow") Management',
+    'permManageTip': 'Operations and directories you approved with "Always Allow" are stored in the current workspace (.party/config.json) and run without asking again. Revoke or re-grant them here anytime.',
+    'permToolsTitle': 'Approval-free operations',
+    'permDirsTitle': 'Approval-free directories',
+    'permNoItems': 'Nothing allowed yet',
+    'permGrant': 'Grant',
+    'permRevoke': 'Revoke',
+    'permToolDesc': {
+      'shell_tool_local': 'Run local terminal commands',
+      'edit_file_tool': 'Write/overwrite files (Docker)',
+      'edit_file_patch_tool': 'Exact patch files (Docker)',
+      'edit_file_tool_local': 'Write/overwrite files (local)',
+      'edit_file_patch_tool_local': 'Exact patch files (local)',
+      'delete_file_tool_local': 'Delete files (to trash)',
+      'docker_sandbox': 'Docker sandbox execution',
+      'list_processes_tool': 'List processes',
+      'get_process_logs_tool': 'Read process logs',
+      'kill_process_tool': 'Kill processes',
+      'docker_manage_ports_tool': 'Manage Docker ports',
+      'local_net_tool': 'Local network requests',
+      'start_extension_node_tool_local': 'Start extension node service'
+    }
+  }
+};
 const md = window.markdownit({
     html: true,
     linkify: true,
@@ -411,6 +467,17 @@ let vue_methods = {
       const lang = this.translations[this.currentLanguage];
       const fallback = this.translations['en-US'];
       return (lang && lang[key]) || (fallback && fallback[key]) || key;
+    },
+    // S327：t() 漏键（返值===键名）时用内置硬编码兜底，文案不再赌
+    // locale 文件/ServiceWorker/?v= 注入任何单一环节。新增 UI 文案
+    // 若要求"绝不缺席"，模板用 tf() 并把文案登记进 window.__TF_FALLBACK。
+    tf(key) {
+      const v = this.t(key);
+      if (v && v !== key) return v;
+      const packs = window.__TF_FALLBACK || {};
+      const pack = packs[this.currentLanguage] || packs['en-US'] || {};
+      const d = pack[key];
+      return d || v;
     },
 
 
