@@ -117,7 +117,8 @@
     max_tokens: 4096,
     max_rounds: 0,
     contextManagement: function () {
-      return { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 4, keepRecentDialog: 12, autoAgentCompact: true };
+      // S333：keepRecentTools 4→8、新增 toolOutputBudget（L1 预算，120k 适配大窗口）
+      return { enabled: true, contextWindow: 32000, compactRatio: 0.8, keepRecentTools: 8, keepRecentDialog: 12, toolOutputBudget: 120000, autoAgentCompact: true };
     },
     networkAccessSettings: function () {
       return { allowLocalEquivalentUrls: false, allowLanUrls: false };

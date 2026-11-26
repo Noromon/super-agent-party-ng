@@ -137,7 +137,7 @@ def estimate_tokens(messages, tools=None) -> int:
 # ---------------------------------------------------------------- L1 prune
 
 
-def prune_tool_results(messages, keep_recent_tools: int = 4, tool_output_budget: int = 0):
+def prune_tool_results(messages, keep_recent_tools: int = 8, tool_output_budget: int = 0):
     """把旧 tool 消息内容替换为存根。返回 (新messages, 修剪条数)。
 
     tool_output_budget>0（S192，对齐 opencode token 预算制）：从最新往旧累计，
@@ -366,8 +366,10 @@ def get_context_settings(settings):
         "enabled": bool(cm.get("enabled", True)),
         "context_window": window,
         "compact_ratio": float(cm.get("compactRatio", 0.8) or 0.8),
-        "keep_recent_tools": int(cm.get("keepRecentTools", 4) or 4),
+        # S333：32k 窗口时代的 4 条保底在 262k 窗口下过紧（重工具轮同轮 stubbing）
+        "keep_recent_tools": int(cm.get("keepRecentTools", 8) or 0),
         "keep_recent_dialog": int(cm.get("keepRecentDialog", 12) or 12),
         "auto_agent_compact": bool(cm.get("autoAgentCompact", True)),
-        "tool_output_budget": int(cm.get("toolOutputBudget", 40000) or 0),
+        # S333：默认 40000→120000（用户明确要求 0=关闭预算制时 or 0 语义保留）
+        "tool_output_budget": int(cm.get("toolOutputBudget", 120000) or 0),
     }

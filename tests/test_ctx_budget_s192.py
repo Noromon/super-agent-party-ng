@@ -60,7 +60,9 @@ class TestGetContextSettings:
         assert cm_mod.get_context_settings(s)["context_window"] == 131072
         s2 = {"contextManagement": {"contextWindow": "乱七八糟"}}
         assert cm_mod.get_context_settings(s2)["context_window"] == 32000
-        assert cm_mod.get_context_settings({})["tool_output_budget"] == 40000
+        # S333：40000→120000（大窗口默认宽裕）；0=用户显式关闭预算制语义保留
+        assert cm_mod.get_context_settings({})["tool_output_budget"] == 120000
+        assert cm_mod.get_context_settings({})["keep_recent_tools"] == 8
         s3 = {"contextManagement": {"toolOutputBudget": 0}}
         assert cm_mod.get_context_settings(s3)["tool_output_budget"] == 0
 

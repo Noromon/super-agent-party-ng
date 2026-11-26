@@ -506,6 +506,12 @@
                       <el-form-item :label="t('ctxCompactRatio')" class="form-item-align">
                         <el-slider v-model="settings.contextManagement.compactRatio" :min="0.4" :max="0.95" :step="0.05" show-input :show-input-controls="false" @input="autoSaveSettings" />
                       </el-form-item>
+                      <el-form-item :label="t('ctxToolOutputBudget')" class="form-item-align">
+                        <el-input-number :model-value="settings.contextManagement.toolOutputBudget ?? 120000" :min="0" :max="500000" :step="5000" controls-position="right" @update:model-value="v => { settings.contextManagement.toolOutputBudget = v; autoSaveSettings(); }" style="width: 100%;" />
+                      </el-form-item>
+                      <el-form-item :label="t('ctxKeepRecentTools')" class="form-item-align">
+                        <el-input-number :model-value="settings.contextManagement.keepRecentTools ?? 8" :min="0" :max="50" controls-position="right" @update:model-value="v => { settings.contextManagement.keepRecentTools = v; autoSaveSettings(); }" style="width: 100%;" />
+                      </el-form-item>
                       <el-form-item :label="t('ctxAutoAgentCompact')" class="form-item-align">
                         <el-switch v-model="settings.contextManagement.autoAgentCompact" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
