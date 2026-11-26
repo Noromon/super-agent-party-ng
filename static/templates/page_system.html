@@ -924,6 +924,12 @@
                   <template v-if="permCwd"><br><code style="font-size:11px;">{{ permCwd }}</code></template>
                 </div>
               </el-alert>
+              <el-divider content-position="left">{{ tf('permGlobalTitle') }}</el-divider>
+              <div v-for="pname in permGlobalPool" :key="'g'+pname" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <el-switch size="small" :model-value="permGlobalAllowed.includes(pname)" @change="setToolPerm(pname, $event)"></el-switch>
+                <span style="font-size:13px;flex:1;">{{ (tf('permToolDesc') || {})[pname] || pname }}
+                  <span style="opacity:.5;font-size:11px;">{{ pname }}</span></span>
+              </div>
               <el-divider content-position="left">{{ tf('permToolsTitle') }}</el-divider>
               <div v-if="!permToolsPool.length" style="opacity:.6;font-size:12px;">{{ tf('permNoItems') }}</div>
               <div v-for="pname in permToolsPool" :key="pname" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">

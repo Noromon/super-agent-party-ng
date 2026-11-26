@@ -72,7 +72,9 @@ class TestPermissionsEndpoints:
         assert out["cwd"] == cwd
         assert "legacy_custom_tool" in out["allowed_tools"]
         assert "legacy_custom_tool" in out["tools_pool"]      # 已授权并入池=可收回
-        assert "start_extension_node_tool_local" in out["tools_pool"]  # 敏感池恒在
+        # S329：插件域移出工作区池，进全局区
+        assert "start_extension_node_tool_local" not in out["tools_pool"]
+        assert "start_extension_node_tool_local" in out["global_pool"]
 
     def test_invalid_inputs_rejected(self, monkeypatch, tmp_path):
         from fastapi import HTTPException

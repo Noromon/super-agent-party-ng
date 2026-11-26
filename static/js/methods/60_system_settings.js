@@ -11,6 +11,9 @@ Object.assign(vue_methods, {
         this.permToolsPool = d.tools_pool || [];
         this.permAllowedTools = d.allowed_tools || [];
         this.permAllowedDirs = d.allowed_dirs || [];
+        // S329：全局区（插件域，与 cwd 无关）
+        this.permGlobalPool = d.global_pool || [];
+        this.permGlobalAllowed = d.global_allowed_tools || [];
       } catch { /* 面板保持原状 */ }
     },
     async setToolPerm(name, allowed) {
@@ -21,9 +24,12 @@ Object.assign(vue_methods, {
           body: JSON.stringify({ name: name, allowed: !!allowed }),
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        const i = this.permAllowedTools.indexOf(name);
-        if (allowed && i < 0) this.permAllowedTools.push(name);
-        if (!allowed && i >= 0) this.permAllowedTools.splice(i, 1);
+        let scope = 'project';
+        try { scope = (await r.json()).scope || 'project'; } catch { /* 无 scope 视为 project */ }
+        const arr = scope === 'global' ? this.permGlobalAllowed : this.permAllowedTools;
+        const i = arr.indexOf(name);
+        if (allowed && i < 0) arr.push(name);
+        if (!allowed && i >= 0) arr.splice(i, 1);
         showNotification(this.t('settingsSaved'), 'success');
       } catch (e) {
         showNotification(String(e.message || e), 'error');

@@ -92,7 +92,10 @@ class TestPermissionListsSingleSource:
         spec.loader.exec_module(reg)
         assert "shell_tool_local" in reg.SENSITIVE_TOOLS
         assert "docker_sandbox" in reg.SENSITIVE_TOOLS
-        assert reg.PLAN_BLOCKED_TOOLS >= set(reg.SENSITIVE_TOOLS)
+        # S329：插件域（GLOBAL_APPROVAL_TOOLS）与 cwd/plan 解耦，不再连坐
+        assert reg.PLAN_BLOCKED_TOOLS >= (
+            set(reg.SENSITIVE_TOOLS) - set(reg.GLOBAL_APPROVAL_TOOLS))
+        assert "start_extension_node_tool_local" not in reg.PLAN_BLOCKED_TOOLS
         # S221: todo 属计划可视化工具，plan 允许（对齐 opencode）；桌面控制执行类纳入拦截
         assert "todo_write_tool" not in reg.PLAN_BLOCKED_TOOLS
         assert "todo_write_tool_local" not in reg.PLAN_BLOCKED_TOOLS

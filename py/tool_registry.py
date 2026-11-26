@@ -20,9 +20,15 @@ SENSITIVE_TOOLS = [
     "docker_manage_ports_tool",
     "local_net_tool",
     # S323(C)：起扩展 node 服务=进程级副作用——default/auto-approve 审批弹窗，
-    # yolo/cowork 直通；plan 经 PLAN_BLOCKED_TOOLS 声明层隐藏+dispatch 兜底。
+    # yolo/cowork 直通。S329：插件域与工作区(cwd)解耦——"总是允许"存全局层
+    # (globalAllowedTools)，且不再被 PLAN_BLOCKED_TOOLS 连坐（拉起插件与
+    # 工作区只读语义无关；门槛=扩展卡片 opt-in 开关本身）。
     "start_extension_node_tool_local",
 ]
+
+# S329：审批"总是允许"落全局层（settings.globalAllowedTools）而非 cwd 项目
+# 配置的工具集——这些操作本质与当前工作区无关（插件是用户装的、跑在 EXT_DIR）。
+GLOBAL_APPROVAL_TOOLS = frozenset({"start_extension_node_tool_local"})
 
 # 计划模式（只读）硬拦截集合：敏感工具 + 桌面控制执行类（S221）。
 # S221 对齐 opencode：todo_write_tool(_local) 移出——plan 模式允许 todo 做计划可视化，
@@ -33,6 +39,8 @@ COMPUTER_USE_EXEC_TOOLS = frozenset({
     "mouse_hold", "mouse_scroll", "copy_to_input_box",
     "keyboard_press", "keyboard_sequence", "keyboard_hotkey", "keyboard_hold",
 })
-PLAN_BLOCKED_TOOLS = frozenset(SENSITIVE_TOOLS) | COMPUTER_USE_EXEC_TOOLS | {
-    "acpx_agent", "update_workspace_settings",
-}
+PLAN_BLOCKED_TOOLS = (
+    frozenset(t for t in SENSITIVE_TOOLS if t not in GLOBAL_APPROVAL_TOOLS)
+    | COMPUTER_USE_EXEC_TOOLS
+    | {"acpx_agent", "update_workspace_settings"}
+)

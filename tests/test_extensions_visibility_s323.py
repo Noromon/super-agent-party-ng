@@ -222,7 +222,10 @@ class TestStartTool:
 class TestWiringPins:
     def test_c_is_sensitive_and_plan_blocked(self):
         assert "start_extension_node_tool_local" in SENSITIVE_TOOLS
-        assert "start_extension_node_tool_local" in PLAN_BLOCKED_TOOLS
+        # S329：插件域与 cwd/plan 解耦——不再被 PLAN_BLOCKED_TOOLS 连坐
+        # （default 审批弹窗保留；"总是允许"落全局层）
+        assert "start_extension_node_tool_local" not in PLAN_BLOCKED_TOOLS
+        assert "shell_tool_local" in PLAN_BLOCKED_TOOLS  # 系统高危仍连坐
 
     def test_assembly_announces_both(self):
         assert "_ensure_ext_visibility_tools(tools, tk)" in TA_SRC

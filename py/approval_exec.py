@@ -10,10 +10,28 @@ import logging
 
 from py.agent import add_tool_to_project_config
 from py.diary_query_tool import handle_list_diary_books, handle_query_diary
-from py.get_setting import load_settings
+from py.get_setting import load_settings, save_settings
 from py.srv_ref import srv as _srv
+from py.tool_registry import GLOBAL_APPROVAL_TOOLS
 from py.vision_tools import (analyze_image, analyze_images, get_image_content,
                              review_image, view_images)
+
+
+async def record_always_allow(tool_name, settings, cwd, save_fn):
+    """S329: "总是允许"落库路由——插件域工具(GLOBAL_APPROVAL_TOOLS)写全局层
+    settings.globalAllowedTools，与工作区(cwd)无关；系统高危类照旧写 cwd
+    项目配置(.party/config.json)。返回 (ok, err_msg)。"""
+    if tool_name in GLOBAL_APPROVAL_TOOLS:
+        gl = list(settings.get("globalAllowedTools") or [])
+        if tool_name not in gl:
+            gl.append(tool_name)
+            settings["globalAllowedTools"] = gl
+            await save_fn(settings)
+        return True, None
+    if not cwd:
+        return False, "[System Error] No working directory found to save config."
+    add_tool_to_project_config(cwd, tool_name)
+    return True, None
 
 
 async def execute_approved_tool(tool_name, tool_params, approval_type="once", stream_id=None):
@@ -50,15 +68,16 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
                 logging.getLogger("app").info(f"[PathScope] allowed_dirs += {_ps_grants} ({cwd})")
             except Exception as e:
                 return {"result": f"[System Error] Failed to save dir permission: {str(e)}"}
-        # 如果用户选择"不再询问"，则将该工具写入当前项目的 .agent/config.json
-        if cwd:
-            try:
-                add_tool_to_project_config(cwd, tool_name)
-                logging.getLogger("app").info(f"[Permission] Added {tool_name} to whitelist for project {cwd}")
-            except Exception as e:
-                return {"result": f"[System Error] Failed to save permission: {str(e)}"}
-        else:
-             return {"result": "[System Error] No working directory found to save config."}
+        # "不再询问"落库：S329 路由——插件域→全局层(无需 cwd)；系统高危→cwd 项目配置
+        try:
+            _ok, _err = await record_always_allow(tool_name, settings, cwd, save_settings)
+            if not _ok:
+                return {"result": _err}
+            logging.getLogger("app").info(
+                f"[Permission] Always-allow recorded: {tool_name} "
+                f"({'global' if tool_name in GLOBAL_APPROVAL_TOOLS else 'project:' + str(cwd)})")
+        except Exception as e:
+            return {"result": f"[System Error] Failed to save permission: {str(e)}"}
 
     # ==================== 1. 导入所有工具函数 ====================
     from py.web_search import (

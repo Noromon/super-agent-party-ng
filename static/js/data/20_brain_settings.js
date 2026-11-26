@@ -378,7 +378,9 @@ Object.assign(vue_data, {
     permCwd: "",                 // S324：授权管理——当前工作区
     permToolsPool: [],           // S324：可授权工具池（SENSITIVE ∪ 已授权）
     permAllowedTools: [],        // S324：已「总是允许」的工具
-    permAllowedDirs: [],         // S324：已「总是允许」的目录
+        permAllowedDirs: [],         // S324：已「总是允许」的目录
+        permGlobalPool: [],          // S329：全局层工具池（插件域，与 cwd 无关）
+        permGlobalAllowed: [],       // S329：全局层已「总是允许」项
 
     currentExtension: null,      // 当前加载的扩展,
 

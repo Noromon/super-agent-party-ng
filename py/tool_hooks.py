@@ -23,7 +23,8 @@ from py.tool_dispatch import (_approval_payload, _is_approval_result,
                               dispatch_external_tool as _dispatch_external_tool,
                               dispatch_task_center_tool as _dispatch_task_center_tool,
                               dispatch_unknown_tool as _dispatch_unknown_tool)
-from py.tool_registry import PLAN_BLOCKED_TOOLS, SENSITIVE_TOOLS
+from py.tool_registry import (GLOBAL_APPROVAL_TOOLS, PLAN_BLOCKED_TOOLS,
+                              SENSITIVE_TOOLS)
 from py.vision_tools import analyze_image, analyze_images, get_image_content, review_image, view_images
 from py.ws_manager import ws_manager
 
@@ -410,6 +411,15 @@ def _sensitive_approval(tool_name, tool_params, settings):
         # --- 规则 C: 默认模式 (Default) ---
         # 默认全部拦截
         
+        # --- 规则 C2: 全局白名单 (S329: 插件域与 cwd 解耦) ---
+        # GLOBAL_APPROVAL_TOOLS 的 "Allow Always" 存 settings.globalAllowedTools
+        # （data 目录级），换工作区不需重新授权。
+        if not is_allowed and tool_name in GLOBAL_APPROVAL_TOOLS:
+            if tool_name in (settings.get("globalAllowedTools") or []):
+                is_allowed = True
+                logging.getLogger("app").info(
+                    f"[Permission] Tool '{tool_name}' allowed by global config.")
+
         # --- 规则 D: 项目级白名单覆盖 (Project Config Override) ---
         # 如果以上规则未通过，检查 .agent/config.json
         # 如果用户之前点击过 "Allow Always"，这里会返回 True

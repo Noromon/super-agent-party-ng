@@ -23,7 +23,8 @@ GIANT_WHITELIST = {
     # S132（WSL 引擎）：execute_tool_manually +3 行（wsl hooks/import）越过 300 线，冻结现值，后续拆分时下调
     # S150 拆出 execute_approved_tool（298 含端点体）、S153 路径门 grants 注入 +16 →
     # 314 重冻结（改名条目按 S66 勘误惯例带注）
-    "execute_approved_tool": 314,
+    # S329：always 分支改 record_always_allow 路由（插件域全局层）+1 行
+    "execute_approved_tool": 315,
     # S296（RA-25 勘误惯例）：绕圈熔断接线 +3（observe 调用/注入循环）越线，
     # helper 化（_spiral_observe/_spiral_observe_ns）后重冻结现值，后续只准缩
     "_stream_tool_round": 303,
@@ -114,7 +115,8 @@ FILE_LINE_BUDGETS = {
     "py/vision_tools.py": 600,
     "py/tool_hooks.py": 590,
     "py/group_memory.py": 415,  # S320 勘误：_trim_request_messages 保 user+配对安全+留痕（现值 414）
-    "py/approval_exec.py": 350,
+    # S329：record_always_allow 全局层路由 +2
+    "py/approval_exec.py": 352,
 }
 
 
