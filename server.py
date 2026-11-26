@@ -1781,6 +1781,9 @@ async def chat_endpoint(request: ChatRequest, fastapi_request: Request):
     """S232：在途计数包装——非流式长任务（IM bot/子代理/complete 路径）的
     handler 全程计入繁忙信号；日记自调用（platform=diary）不计，防触发暂停自锁。
     流式任务由 stream_relay._active_streams 覆盖，不依赖本计数。"""
+    # S330：(platform, peer) 绑入本请求任务上下文——hook 审批门消费 one-shot grant 用
+    from py.approval_store import set_current_im_ctx as _sc
+    _sc(getattr(request, "platform", ""), getattr(request, "peer_id", ""))
     _counted = (getattr(request, "platform", "") or "") != "diary"
     if _counted:
         _agent_activity.begin()

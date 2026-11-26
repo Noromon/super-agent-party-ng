@@ -321,8 +321,18 @@ async def execute_approved_tool(tool_name, tool_params, approval_type="once", st
     
 
     if tool_name not in _TOOL_HOOKS:
-        return {"result": f"Tool {tool_name} not found in backend registry."}
-    
+        # S330（17:21 事故）：本表是 S150 时代副本，S323 后新工具只进主注册表
+        # (tool_hooks/server 单一事实源)——审批通过后执行报 "not found"，模型
+        # 当轮只收到错误串，误判"没拉起"并连弹两次审批。副本 miss 回退主表。
+        _main_hooks = getattr(_srv(), "_TOOL_HOOKS", None) or {}
+        _fallback_func = _main_hooks.get(tool_name)
+        if _fallback_func is None:
+            return {"result": f"Tool {tool_name} not found in backend registry."}
+        try:
+            return {"result": str(await _fallback_func(**tool_params))}
+        except Exception as e:
+            return {"result": f"Error executing {tool_name}: {str(e)}"}
+
     tool_func = _TOOL_HOOKS[tool_name]
     
     try:

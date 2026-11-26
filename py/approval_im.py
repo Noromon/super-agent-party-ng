@@ -186,6 +186,9 @@ async def resolve_and_resume(platform: str, peer_id: str, decision: str,
         except Exception as e:
             res = {"result": f"Error executing {tool}: {e}"}
         result_text = str((res or {}).get("result", res))
+        if decision == "approve":  # S330: 一次性通行，防模型批复后即刻重试再弹卡
+            approval_store.grant_oneshot(record.get("platform"),
+                                         record.get("peer_id"), tool)
         reply = (f"✅ 已按批准执行 `{tool}`，继续任务…" if decision == "approve"
                  else f"✅ 已执行 `{tool}` 并将其加入项目白名单，继续任务…")
     elif decision == "deny":
@@ -225,6 +228,9 @@ async def resolve_by_id_web(aid: str, decision: str, note: str = "") -> Tuple[bo
         except Exception as e:
             res = {"result": f"Error executing {tool}: {e}"}
         result_text = str((res or {}).get("result", res))
+        if decision == "approve":  # S330: 同 resolve_and_resume
+            approval_store.grant_oneshot(record.get("platform"),
+                                         record.get("peer_id"), tool)
     else:
         result_text = denied_text(tool, note)
     _log_note(record, decision, note, actor="web-panel")

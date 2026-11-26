@@ -147,9 +147,26 @@ def _build_group_memory_prompt(group: dict, memories: list[dict]) -> str:
             lines.append(f"{idx}. [{memory_type}] {content or summary}")
     return "\n".join(header + lines)
 
-def _trim_request_messages(messages: List[Dict], recent_count: int = 12) -> List[Dict]:
+def _trim_request_messages(messages: List[Dict], recent_count: int = None,
+                           settings: dict = None) -> List[Dict]:
     system_messages = [copy.deepcopy(m) for m in messages if m.get("role") == "system"]
     dialog_messages = [copy.deepcopy(m) for m in messages if m.get("role") != "system"]
+    # S330（对齐 opencode）：token 预算内全量直通——本项目已有 context_manager
+    # 压缩/摘要体系，但本函数自 9fc4387f（v0.3.x 群聊盲切12）起坐落其上游，
+    # 980→12 硬截把压缩体系整段截胡=失忆级裁剪（实测 est 12k/窗口 262k）。
+    # 本函数退居预算超限时的硬保险；显式 recent_count（测试/调用方）仍走定窗。
+    if recent_count is None:
+        from py.context_manager import estimate_tokens, get_context_settings
+        cs = get_context_settings(settings or {})
+        recent_count = cs["keep_recent_dialog"]
+        if cs["enabled"]:
+            budget = max(1024, int(cs["context_window"] * cs["compact_ratio"]))
+            est = estimate_tokens(system_messages + dialog_messages)
+            if est <= budget:
+                if len(dialog_messages) > 50:
+                    logger.info("[MsgTrim] S330 预算内全量直通：%d 条 est=%d/budget=%d",
+                                len(dialog_messages), est, budget)
+                return copy.deepcopy(messages)
     if len(dialog_messages) <= recent_count:
         return system_messages + dialog_messages
     # S320（kerobros 审批续跑 500 事故）：旧实现盲切后 N 条——续跑快照的真实 user
@@ -185,15 +202,20 @@ async def _apply_group_memory_context(request: ChatRequest) -> dict:
     request.user_message_id = _normalize_entity_id(request.user_message_id) or None
     request.group_id = _normalize_entity_id(request.group_id) or "default"
     group_id = request.group_id or "default"
+    try:
+        from py.get_setting import load_settings
+        _cs = await load_settings()
+    except Exception:
+        _cs = None
     if not group_id or group_id == "default":
-        request.messages = _trim_request_messages(request.messages)
+        request.messages = _trim_request_messages(request.messages, settings=_cs)
         return {"enabled": False, "group_id": group_id}
 
     group_map = await _load_group_map()
     group = group_map.get(group_id)
     memory_enabled = bool(group and (group.get("memoryConfig") or {}).get("enabled"))
 
-    request.messages = _trim_request_messages(request.messages)
+    request.messages = _trim_request_messages(request.messages, settings=_cs)
     if not memory_enabled:
         return {"enabled": False, "group_id": group_id, "group": group}
 

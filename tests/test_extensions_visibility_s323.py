@@ -187,7 +187,8 @@ class TestStartTool:
         monkeypatch.setattr("py.node_runner.node_mgr", _Mgr(start_ret=7777))
         out = asyncio.run(A.start_extension_node_tool_local("node-ext"))
         assert "port 7777" in out and "127.0.0.1:7777" in out
-        assert "panel page" in out  # 如实注明：起 node ≠ MCP 工具进索引
+        assert "extension page" in out  # 如实注明：起 node ≠ MCP 工具进索引
+        assert "do not retry the start" in out  # S330：防误判失败重刷
 
     def test_start_timeout_is_retryable_hint(self, monkeypatch, tmp_path):
         self._allow_all(monkeypatch)

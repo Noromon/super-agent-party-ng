@@ -232,8 +232,11 @@ async def start_extension_node_tool_local(ext_id: str = "") -> str:
             f"- Direct HTTP: http://127.0.0.1:{port}/<path> (see its README/index.js "
             "for endpoints; call via simple_fetch or browser tools).\n"
             f"- Host proxy path: /api/extensions/{eid}/node/<path> on the host API base.\n"
-            "- Note: its MCP tools enter your tool index only when the panel page is "
-            "open — starting the service alone does not add them.")
+            "- IMPORTANT: its MCP tools are NOT added to your index by this call "
+            "(they register only while the user keeps the extension page open in "
+            "the panel). This is expected, NOT a failure — do not retry the start. "
+            "Use the HTTP endpoints above for this session, or ask the user to "
+            "open the extension page once to register its tools.")
 
 
 LIST_EXTENSIONS_TOOL = {

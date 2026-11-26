@@ -420,6 +420,19 @@ def _sensitive_approval(tool_name, tool_params, settings):
                 logging.getLogger("app").info(
                     f"[Permission] Tool '{tool_name}' allowed by global config.")
 
+        # --- 规则 C3: one-shot 放行 (S330) ---
+        # 用户刚 /y 批准过（或面板批准）且模型随即重试同一工具：消费一次性
+        # grant 直接放行，不再二次送审（17:21 双弹窗事故）。
+        if not is_allowed:
+            try:
+                from py.approval_store import grant_active
+                if grant_active(tool_name):
+                    is_allowed = True
+                    logging.getLogger("app").info(
+                        f"[Permission] Tool '{tool_name}' allowed by one-shot grant.")
+            except Exception:
+                pass
+
         # --- 规则 D: 项目级白名单覆盖 (Project Config Override) ---
         # 如果以上规则未通过，检查 .agent/config.json
         # 如果用户之前点击过 "Allow Always"，这里会返回 True

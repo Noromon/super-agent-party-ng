@@ -10,6 +10,7 @@
   restore_pending 重建，用户仍可批复续跑；工具在挂起期从未执行过，无副作用残留。
 """
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -359,3 +360,37 @@ async def restore_pending() -> int:
         logging.getLogger("app").info("[Approval] 重启恢复挂起审批 %d 条", n)
         _dump()
     return n
+
+
+# ---------------------------------------------------------------- S330 one-shot
+
+
+_GRANTS: Dict[Tuple[str, str, str], float] = {}  # (platform, peer, tool) -> expiry
+_CUR_IM_CTX = contextvars.ContextVar("sap_im_ctx", default=None)  # (platform, peer)
+_GRANT_TTL = 90.0
+
+
+def set_current_im_ctx(platform, peer_id):
+    """chat 端点入口调用：把请求携带的 (platform, peer_id) 绑入任务上下文，
+    供 hook 审批门消费 one-shot grant。非 IM 请求传空即天然不匹配。"""
+    _CUR_IM_CTX.set((platform or "", peer_id or ""))
+
+
+def grant_oneshot(platform, peer_id, tool_name, ttl: float = _GRANT_TTL):
+    """approve 批复后同 (platform, peer, tool) 短期免弹窗（TTL 窗，见
+    grant_active）：模型批复后立刻重试同一工具不再二次送审（17:21 事故）。"""
+    _GRANTS[(platform or "", peer_id or "", tool_name)] = time.time() + ttl
+
+
+def grant_active(tool_name) -> bool:
+    """S330: TTL 窗口内有效即 True（不弹出——同轮 precheck 与 dispatch 会
+    两次过审批门，pop 语义会造成第一道门吃掉 grant 第二道反而拦截）。
+    一次批复 = 同 peer 同工具 90s 短窗免弹窗（防的是批复后立刻重试双弹）。"""
+    ctx = _CUR_IM_CTX.get()
+    if not ctx:
+        return False
+    exp = _GRANTS.get((ctx[0], ctx[1], tool_name))
+    if exp and exp > time.time():
+        return True
+    _GRANTS.pop((ctx[0], ctx[1], tool_name), None)
+    return False
