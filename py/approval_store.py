@@ -92,6 +92,10 @@ def _dump():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, p)
+        sz = os.path.getsize(p)
+        if sz > 512 * 1024:  # S331: 快照含全量消息+工具输出，无上限时唯一可观测点
+            logging.getLogger("app").warning(
+                "[Approval] 快照文件 %dKB（pending=%d 条，含全量消息）", sz // 1024, len(data))
     except Exception as e:
         logging.getLogger("app").warning("[Approval] 快照落盘失败: %r", e)
 

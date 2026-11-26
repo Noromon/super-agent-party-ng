@@ -251,8 +251,8 @@ class SlackBotManager(BaseBotManager):
 
             self.memory[cid].append({"role": "assistant", "content": full_content})
             if self.config.memory_limit > 0:
-                while len(self.memory[cid]) > self.config.memory_limit * 2:
-                    self.memory[cid].pop(0)
+                from py.im_chain import trim_memory
+                trim_memory("slack", cid, self.memory[cid], self.config.memory_limit * 2)
 
         except Exception as e:
             logging.error(f"Slack Bot Error: {e}")

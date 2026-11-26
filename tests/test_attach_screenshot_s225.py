@@ -143,8 +143,8 @@ class TestWiring:
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "_generate_complete_impl":
                 size = n.end_lineno - n.lineno + 1
-                # S225 实测 289；S296 绕圈熔断 +1（watch 初始化）；红线余量 ≤291
-                assert size <= 291   # <300 M3 红线
+                # S225 实测 289；S296 绕圈熔断 +1（watch 初始化）；S331 非流式锚点钩子 +2
+                assert size <= 293   # <300 M3 红线
                 return
         raise AssertionError("_generate_complete_impl not found")
 

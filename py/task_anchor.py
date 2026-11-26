@@ -28,7 +28,21 @@ INJECT_NAMES = ("system_note", "browser_vision")
 FALLBACK_USER_TEXT = "（系统注记：本会话历史头部已被裁剪，请按现有历史与工具记录继续执行主人的任务。）"
 
 _CREATE_SQL = ("CREATE TABLE IF NOT EXISTS task_anchor ("
-               "conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL)")
+               "conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL,"
+               " original TEXT)")
+
+_migrated = set()  # S331：每进程每库一次 ALTER（存量库无 original 列）
+
+
+async def _ensure_schema(db):
+    await db.execute(_CREATE_SQL)
+    key = str(COVS_PATH)
+    if key not in _migrated:
+        _migrated.add(key)
+        try:  # 存量库轻量迁移：缺列则补（重复列报错即忽略）
+            await db.execute("ALTER TABLE task_anchor ADD COLUMN original TEXT")
+        except Exception:
+            pass
 
 
 def is_genuine_user_msg(m):
@@ -63,22 +77,38 @@ def insert_anchor(messages, text):
 
 
 async def remember_anchor(conversation_id, text):
+    # S331 双层锚：text 随最新真实 user 滚动（模板合法性兜底）；original 只在
+    # 锚缺失时写入一次、此后永不覆盖（任务原文，F2 事故回注优先用它——旧实现
+    # 每轮覆盖导致锚钝化成"最近一句话"，S307 防线失去任务源头）。
     async with aiosqlite.connect(COVS_PATH) as db:
-        await db.execute(_CREATE_SQL)
+        await _ensure_schema(db)
         await db.execute(
-            "INSERT OR REPLACE INTO task_anchor (conv_id, text, updated_at) VALUES (?, ?, ?)",
-            (str(conversation_id), text, time.time()))
+            "INSERT INTO task_anchor (conv_id, text, updated_at, original) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(conv_id) DO UPDATE SET "
+            "text=excluded.text, updated_at=excluded.updated_at, "
+            "original=COALESCE(original, excluded.original)",
+            (str(conversation_id), text, time.time(), text))
         await db.commit()
 
 
 async def fetch_anchor(conversation_id):
     async with aiosqlite.connect(COVS_PATH) as db:
-        await db.execute(_CREATE_SQL)
+        await _ensure_schema(db)
         async with db.execute(
                 "SELECT text FROM task_anchor WHERE conv_id=?",
                 (str(conversation_id),)) as cur:
             row = await cur.fetchone()
     return row[0] if row else None
+
+
+async def fetch_anchor_original(conversation_id):
+    async with aiosqlite.connect(COVS_PATH) as db:
+        await _ensure_schema(db)
+        async with db.execute(
+                "SELECT original FROM task_anchor WHERE conv_id=?",
+                (str(conversation_id),)) as cur:
+            row = await cur.fetchone()
+    return (row[0] if row and row[0] else None)
 
 
 def req_key(request):
@@ -111,7 +141,8 @@ async def anchor_stream_in(request):
         if live:
             await remember_anchor(cid, live)
             return
-        anchor = await fetch_anchor(cid)
+        # S331：优先任务原文锚（original，写入一次不被覆盖）；无则回退滚动锚
+        anchor = await fetch_anchor_original(cid) or await fetch_anchor(cid)
         if anchor:
             if insert_anchor(msgs, anchor):
                 logger.info("[ResumeRepair] 任务锚点已回注 conv=%s len=%d", cid, len(anchor))

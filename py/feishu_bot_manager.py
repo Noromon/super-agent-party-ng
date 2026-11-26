@@ -636,11 +636,11 @@ class FeishuClient:
                 
             self.memoryList[chat_id].append({"role": "assistant", "content": full_content})
             
-            # 限制记忆
+            # 限制记忆（S331 统一留痕）
             if self.memoryLimit > 0:
-                while len(self.memoryList[chat_id]) > self.memoryLimit * 2:
-                    self.memoryList[chat_id].pop(0)
-                    if self.memoryList[chat_id]: self.memoryList[chat_id].pop(0)
+                from py.im_chain import trim_memory
+                trim_memory("feishu", chat_id, self.memoryList[chat_id],
+                            self.memoryLimit * 2, pair=True)
             
         except Exception as e:
             logging.getLogger("app").info(f"处理消息异常: {e}")

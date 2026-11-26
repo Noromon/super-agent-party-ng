@@ -325,9 +325,11 @@ async def compact_messages(client, model, messages, task_mode=None, focus=None,
             resp = await use_client.chat.completions.create(**kwargs)
         summary = (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        logging.getLogger("app").info(f"[Compact] 摘要调用失败: {e}")
+        # S331: INFO→WARNING——L2 压缩静默失败=预算防线失效，必须显眼
+        logging.getLogger("app").warning(f"[Compact] 摘要调用失败: {e}")
         return None
     if not summary:
+        logging.getLogger("app").warning("[Compact] 摘要为空，本轮跳过压缩")
         return None
 
     summary_msg = {"role": "user", "content": f"{SUMMARY_HEADER}\n{summary}\n{SUMMARY_FOOTER}",

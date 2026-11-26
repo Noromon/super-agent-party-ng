@@ -336,9 +336,31 @@ async def _sync_rows(db, conversations):
             idx += 1
     async with db.execute("SELECT conv_id FROM conversation_rows WHERE conv_id NOT LIKE 'bot:%'") as cur:
         existing = {r[0] for r in await cur.fetchall()}
-    for cid in existing - set(snap):
+    vanished = existing - set(snap)
+    if vanished:
+        # S331: rows-first 下行即会话本体，delete-on-vanished 属高危静默面——
+        # 全量保存路径每次枚举将被删项留痕（stale 前端全量保存可致误删）。
+        _v = sorted(vanished)
+        logging.warning("[Covs] 全量保存将删除 %d 行: %s%s", len(_v),
+                        _v[:10], "…" if len(_v) > 10 else "")
+    for cid in vanished:
         await db.execute('DELETE FROM conversation_rows WHERE conv_id = ?', (cid,))
     return len(snap), len(existing)
+
+
+async def gc_stale_inflight(max_age: float = 86400.0) -> int:
+    """S331: 崩溃轮遗留的 bot:*#inflight 检查点行——对端不再回来则永无 GC；
+    启动期清扫超龄孤儿（正常轮闭合自删，见 xmpp_client._clear_inflight）。"""
+    try:
+        async with aiosqlite.connect(COVS_PATH) as db:
+            cur = await db.execute(
+                "DELETE FROM conversation_rows WHERE conv_id LIKE 'bot:%#inflight' "
+                "AND updated_at < ?", (time.time() - max_age,))
+            await db.commit()
+            return cur.rowcount or 0
+    except Exception as e:
+        logging.info("[Covs] inflight GC 跳过: %r", e)
+        return 0
 
 
 async def init_covs_db():
@@ -402,13 +424,17 @@ async def init_covs_db():
                     data TEXT NOT NULL
                 )
             ''')
-            # S307：任务锚点表（df2f8248 续跑头部残缺修复，见 py/task_anchor.py）
+            # S307：任务锚点表（df2f8248 续跑头部残缺修复，见 py/task_anchor.py）；
+            # S331 双层锚：original 列=任务原文（存量旧表由 task_anchor ALTER 补列）
             await db.execute('CREATE TABLE IF NOT EXISTS task_anchor ('
-                             'conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL)')
+                             'conv_id TEXT PRIMARY KEY, text TEXT NOT NULL, updated_at REAL, original TEXT)')
             await _backfill_rows(db)
             await _ensure_ord(db)
             await db.commit()
         _covs_db_init_done = True
+    n = await gc_stale_inflight()  # S331：崩溃遗留的 #inflight 孤儿检查点行自愈清扫
+    if n:
+        logging.info("[Covs] inflight 孤儿检查点 GC %d 行", n)
 
 # ----------------- 6. 业务功能函数 -----------------
 

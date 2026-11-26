@@ -87,6 +87,12 @@ Object.assign(vue_methods, {
       const sysMsg = this.messages.find(m => m.role === 'system');
       const nonSys = this.messages.filter(m => m.role !== 'system');
       const kept = nonSys.slice(-6);
+      // S331: 任务源头必须活过压缩（对齐 opencode 的 compaction）——首条真实
+      // user 若已滑出窗口则回补窗口头部，否则原始任务从发送负载中永久消失，
+      // 只剩有损 LLM 摘要的转述。
+      const firstUser = nonSys.find(m => m.role === 'user' &&
+        String(m.content || '').trim());
+      if (firstUser && !kept.includes(firstUser)) kept.unshift(firstUser);
       const summaryText = evt.summary || '';
       const summaryMsg = {
         id: Date.now() + Math.random(),

@@ -371,10 +371,9 @@ class TelegramClient:
 
             # 记忆限制
             if self.memoryLimit > 0:
-                while len(self.memoryList[chat_id]) > self.memoryLimit * 2:
-                    self.memoryList[chat_id].pop(0)
-                    if self.memoryList[chat_id]:
-                        self.memoryList[chat_id].pop(0)
+                from py.im_chain import trim_memory
+                trim_memory("telegram", chat_id, self.memoryList[chat_id],
+                            self.memoryLimit * 2, pair=True)
 
             # 传统 TTS (如果没有 Omni 音频且开启了 TTS)
             if self.enableTTS and assistant_text and not has_omni_audio:

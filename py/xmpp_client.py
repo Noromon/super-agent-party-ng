@@ -845,10 +845,8 @@ class XmppClient:
         self.memoryList[chat_jid].append(
             im_chain.finalize_entry(res.get("chain") or [], assistant_text))
         if self.memoryLimit > 0:
-            while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:
-                self.memoryList[chat_jid].pop(0)
-                if self.memoryList[chat_jid]:
-                    self.memoryList[chat_jid].pop(0)
+            im_chain.trim_memory("xmpp", chat_jid, self.memoryList[chat_jid],
+                                 self.memoryLimit * 2, pair=True)
         await self._persist_conv(chat_jid)
         await self._clear_inflight(chat_jid)  # S191：回合闭合，检查点作废
 
@@ -1050,10 +1048,8 @@ class XmppClient:
             else:
                 _lst.append(_entry)
             if self.memoryLimit > 0:
-                while len(self.memoryList[chat_jid]) > self.memoryLimit * 2:
-                    self.memoryList[chat_jid].pop(0)
-                    if self.memoryList[chat_jid]:
-                        self.memoryList[chat_jid].pop(0)
+                im_chain.trim_memory("xmpp", chat_jid, self.memoryList[chat_jid],
+                                     self.memoryLimit * 2, pair=True)
             await self._persist_conv(chat_jid)
             await self._clear_inflight(chat_jid)  # S191：续流闭合，检查点作废
             await self._send_local_images(chat_jid, assistant_text)

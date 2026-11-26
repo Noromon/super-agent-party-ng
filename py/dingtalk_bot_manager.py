@@ -382,9 +382,9 @@ class DingtalkClientLogic:
                 return
             self.memoryList[cid].append({"role": "assistant", "content": state["full_response"]})
             if self.config.memoryLimit > 0:
-                # 保持 memoryLimit 组对话 (1 user + 1 assistant = 2条)
-                while len(self.memoryList[cid]) > self.config.memoryLimit * 2:
-                    self.memoryList[cid].pop(0)
+                # 保持 memoryLimit 组对话 (1 user + 1 assistant = 2条)；S331 统一留痕
+                from py.im_chain import trim_memory
+                trim_memory("dingtalk", cid, self.memoryList[cid], self.config.memoryLimit * 2)
 
         except Exception as e:
             logging.getLogger("app").info(f"钉钉 AI 生成异常: {e}")

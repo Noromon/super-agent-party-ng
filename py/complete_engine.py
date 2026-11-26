@@ -826,9 +826,11 @@ async def _generate_complete_impl(client,reasoner_client, request: ChatRequest, 
         else:
             kb_list = []
         request = await _srv().tools_change_messages(request, settings)
-        # 如果系统消息为空字符串或者仅包含空白符，则将系统消息改成"you are a helpful assistant."
+        # 如果系统消息为空字符串或者仅存在空白符，则将系统消息改成"you are a helpful assistant."
         if request.messages[0]['role'] == 'system' and not request.messages[0]['content'].strip():
             request.messages[0]['content'] = "you are a helpful assistant."
+        from py.task_anchor import anchor_stream_in  # S331: 非流式同挂任务锚点（与流式对称）
+        await anchor_stream_in(request)
         if pending_approval_at_tail(request.messages) is None: append_resume_nudge(request.messages)  # S172: 待批复审批尾部不附继续催办
         chat_vendor = 'OpenAI'
         reasoner_vendor = 'OpenAI'

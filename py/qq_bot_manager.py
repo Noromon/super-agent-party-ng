@@ -483,8 +483,8 @@ class MyClient(botpy.Client):
                 return
             self.memoryList[c_id].append({"role": "assistant", "content": full_content})
             if self.memoryLimit > 0:
-                while len(self.memoryList[c_id]) > self.memoryLimit:
-                    self.memoryList[c_id].pop(0)
+                from py.im_chain import trim_memory
+                trim_memory("qq-c2c", c_id, self.memoryList[c_id], self.memoryLimit * 2)
 
         except Exception as e:
             logging.getLogger("app").info(f"处理异常: {e}")
@@ -774,8 +774,8 @@ class MyClient(botpy.Client):
                 return
             self.memoryList[g_id].append({"role": "assistant", "content": full_content})
             if self.memoryLimit > 0:
-                while len(self.memoryList[g_id]) > self.memoryLimit:
-                    self.memoryList[g_id].pop(0)
+                from py.im_chain import trim_memory
+                trim_memory("qq-group", g_id, self.memoryList[g_id], self.memoryLimit * 2)
 
         except Exception as e:
             logging.getLogger("app").info(f"群聊处理异常: {e}")

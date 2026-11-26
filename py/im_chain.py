@@ -6,7 +6,22 @@
 重建（能力断崖）。本模块把链以 backend_content 挂在最终 assistant 条目上随
 memoryList 持久化，下一轮展平重放，与 web 渠道 backend_content 机制同构。
 """
+import logging
 from typing import Any, Dict, List, Optional
+
+
+def trim_memory(plat: str, peer: str, mem: list, cap: int, pair: bool = False):
+    """S331: 各 IM 平台记忆窗统一裁剪+留痕。旧实现 7 平台各自静默 pop(0)，
+    任务源头被无声弹出=排查盲区；现任何裁剪都打 [MemTrim] 日志。"""
+    n0 = len(mem)
+    while len(mem) > cap:
+        mem.pop(0)
+        if pair and mem:
+            mem.pop(0)
+    if len(mem) < n0:
+        logging.getLogger("app").info(
+            "[MemTrim] plat=%s peer=%s %d→%d (cap=%d, pair=%s)",
+            plat, peer, n0, len(mem), cap, pair)
 
 
 def _clip(text: str, limit: int) -> str:
