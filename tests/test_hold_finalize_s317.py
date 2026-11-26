@@ -36,7 +36,8 @@ def submitted(monkeypatch):
     import py.stream_engine as se
     calls = []
     monkeypatch.setattr(se.llm_gate, "submit_memory_job",
-                        lambda mid, fn, name="", debounce=0.0, wait_idle=False:
+                        lambda mid, fn, name="", debounce=0.0, wait_idle=False,
+                        conv_key=None:
                         calls.append((name, debounce, wait_idle)) or True)
     return calls
 

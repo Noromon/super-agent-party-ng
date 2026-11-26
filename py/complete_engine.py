@@ -659,11 +659,13 @@ async def _complete_finalize(request, settings, response, m0, memoryId, cur_memo
             _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
             logging.getLogger("app").info("知识库更新完成")
 
+        from py.task_anchor import req_key as _req_key  # S334：提取防抖按会话隔离
         llm_gate.submit_memory_job(
             _mid, _mem_job, name="mem0-add-complete",
             debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
                      if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
-            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
+            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True),
+            conv_key=_req_key(request))
     try:
         from py.turn_log import shadow_append as _shadow_append
         await _shadow_append(request.conversation_id, request.messages, log=print)

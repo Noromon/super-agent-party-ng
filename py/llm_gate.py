@@ -88,7 +88,8 @@ _inflight = 0
 
 _mem0_lock = threading.Lock()
 _gen_lock = threading.Lock()
-_pending = {}
+_pending = {}          # (memory_id, conv_key) -> 最新代际
+_wakers = {}           # (memory_id, conv_key) -> threading.Event（S334 可取消防抖）
 
 DEFAULT_DEBOUNCE_SECONDS = 20.0
 
@@ -276,34 +277,49 @@ def wait_chat_idle(timeout=600.0, poll=1.5):
 
 
 def submit_memory_job(memory_id, fn, name="mem0-add",
-                      debounce=DEFAULT_DEBOUNCE_SECONDS, wait_idle=True):
+                      debounce=DEFAULT_DEBOUNCE_SECONDS, wait_idle=True,
+                      conv_key=None):
     """Run fn() (blocking, e.g. m0.add) serialized against the chat.
 
-    Only the newest job per memory_id runs; older queued jobs are dropped
-    (their information is stale/redundant relative to the newest turn).
-    All memory jobs run one at a time. With debounce/wait_idle enabled the
-    job also waits for a quiet period with no chat activity before starting,
-    so continuous conversations never interleave memory extraction prefixes
-    into the LLM prompt cache.
+    S334 重构（三缺陷）：旧实现①防抖 sleep 位于全局锁之内——N 个作废任务
+    逐个持锁假睡，会话结束后提取连环空转，真任务被排到最后（debounce 越长
+    越几何恶化）；②作废检查排在 sleep 之后，防抖有名无实；③generation 仅按
+    memory_id 计数——多会话共享记忆库时互相顶掉且无人补发，内容静默丢失。
+
+    现语义：防抖/作废按 (memory_id, conv_key) 会话级隔离，新提交即时唤醒旧
+    runner（Event 可取消等待，退场在拿锁之前）；执行锁保持全局串行（FAISS
+    单资源）。wait_idle 仍在锁内要求零在途聊天。
 
     debounce: quiet seconds required before starting (0 disables)
     wait_idle: also require zero chat requests in flight at start
+    conv_key: 会话标识（conversation_id 或 im:platform:peer），缺省并入全局线
     """
+    key = (memory_id, conv_key or "")
     with _gen_lock:
-        gen = _pending.get(memory_id, 0) + 1
-        _pending[memory_id] = gen
+        gen = _pending.get(key, 0) + 1
+        _pending[key] = gen
+        old_ev = _wakers.get(key)
+        ev = threading.Event()
+        _wakers[key] = ev
+    if old_ev is not None:
+        old_ev.set()  # S334：即时唤醒上一任——防抖是"可取消等待"而非死睡
 
     def runner():
+        if debounce and debounce > 0:
+            ev.wait(debounce)
+        with _gen_lock:
+            if _pending.get(key) != gen:
+                logging.getLogger("app").info(
+                    f"[LlmGate] {name}: 静默窗内有新回合，本次提取作废（未占锁）")
+                return
         acquired = _mem0_lock.acquire(timeout=1800)
         if not acquired:
             logging.getLogger("app").info(f"[LlmGate] {name}: 互斥锁获取超时，放弃本次记忆提取")
             return
         try:
-            if debounce and debounce > 0:
-                time.sleep(debounce)
             with _gen_lock:
-                if _pending.get(memory_id) != gen:
-                    logging.getLogger("app").info(f"[LlmGate] {name}: 静默窗内有新回合，本次提取已推迟给新任务")
+                if _pending.get(key) != gen:
+                    logging.getLogger("app").info(f"[LlmGate] {name}: 排队期间已被新回合取代")
                     return
             if wait_idle and not wait_chat_idle(timeout=600):
                 logging.getLogger("app").info(f"[LlmGate] {name}: 等待会话空闲超时(600s)，跳过本次记忆提取")
@@ -316,6 +332,11 @@ def submit_memory_job(memory_id, fn, name="mem0-add",
             logging.getLogger("app").info(f"[LlmGate] {name}: 任务异常: {e}")
         finally:
             _mem0_lock.release()
+            with _gen_lock:
+                # 仅当自己仍是该会话最新线时销线（新任务已接管则不动它们）
+                if _wakers.get(key) is ev:
+                    _wakers.pop(key, None)
+                    _pending.pop(key, None)
 
     threading.Thread(target=runner, daemon=True, name=name).start()
 

@@ -1682,11 +1682,13 @@ async def _stream_finalize_jobs(request, settings, full_content, user_prompt, m0
             }
             _m0_job.add(_job_msgs, user_id=_mid, metadata=metadata, infer=infer)
 
+        from py.task_anchor import req_key as _req_key  # S334：提取防抖按会话隔离
         llm_gate.submit_memory_job(
             _mid, _mem_job, name="mem0-add",
             debounce=float((settings.get('llmGuardSettings') or {}).get('debounceSeconds', 20) or 0)
                      if (settings.get('llmGuardSettings') or {}).get('enabled', True) else 0.0,
-            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True))
+            wait_idle=(settings.get('llmGuardSettings') or {}).get('enabled', True),
+            conv_key=_req_key(request))
         logging.getLogger("app").info("记忆更新任务已提交到后台线程")
 
 
