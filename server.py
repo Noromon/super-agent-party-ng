@@ -3139,7 +3139,12 @@ if __name__ == "__main__":
 
     # 格式化显示地址
     display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
-    
+
+    # S328: 血缘自证——进程谱系一行写死进日志（双胞胎/复制品事故时
+    # 一眼查谁生谁，不再靠 netstat+PPID 现场猜）
+    logging.getLogger("app").info(
+        f"[Boot] pid={os.getpid()} ppid={os.getppid()} "
+        f"exe={sys.executable} argv={sys.argv}")
     logging.getLogger("app").info("\n" + "="*50)
     logging.getLogger("app").info(f"🚀 后端服务已启动")
     logging.getLogger("app").info(f"🔗 本地运行地址: http://{display_host}:{PORT}")

@@ -42,7 +42,7 @@
                               </el-link>
                             </span>
                           </div>
-                          <el-switch v-model="memorySettings.is_memory" @click.stop @change="changeMemory"/>
+                          <el-switch v-model="memorySettings.is_memory" @click.stop @change="changeMemory"></el-switch>
                         </div>
                         <div class="tool-content">
                           <el-form-item :label="t('memoryResultCount')" class="form-item-align">
@@ -98,8 +98,7 @@
                           <el-form-item :label="t('llmGuardEnable')" class="form-item-align">
                             <el-switch
                               v-model="llmGuardSettings.enabled"
-                              @change="autoSaveSettings"
-                            />
+                              @change="autoSaveSettings"></el-switch>
                             <div class="form-item-hint">{{ t('llmGuardNote') }}</div>
                           </el-form-item>
                           <el-form-item v-if="llmGuardSettings.enabled" :label="t('llmGuardDebounce')" class="form-item-align">
@@ -2322,8 +2321,7 @@
                         <el-switch 
                           v-model="behaviorSettings.enabled" 
                           @change="resetCycleTimers();autoSaveSettings()"
-                          style="--el-switch-on-color: #13ce66;"
-                        />
+                          style="--el-switch-on-color: #13ce66;"></el-switch>
                       </div>
                     </div>
                   </div>
@@ -2629,7 +2627,7 @@
                           {{ t('desktopVision') }}
                         </span>
                       </div>
-                      <el-switch v-model="visionSettings.desktopVision" @click.stop @change="autoSaveSettings"/>
+                      <el-switch v-model="visionSettings.desktopVision" @click.stop @change="autoSaveSettings"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item v-if="isElectron" :label="t('enableDesktopVisionWakeWord')" class="form-item-align" label-position="left">
@@ -2691,7 +2689,7 @@
                               {{ t('affectionSystem') || '羁绊与数值系统' }}
                             </span>
                           </div>
-                          <el-switch v-model="loveSettings.enabled" @change="autoSaveSettings"/>
+                          <el-switch v-model="loveSettings.enabled" @change="autoSaveSettings"></el-switch>
                         </div>
                         
                         <div class="tool-content">

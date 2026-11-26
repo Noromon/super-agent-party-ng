@@ -700,6 +700,25 @@ function applyAgentBypassLine(val) {
  * 启动后端服务
  * 逻辑：传 port 0 -> 捕获 REAL_PORT_FOUND -> 返回真实端口
  */
+// S328: 复用防护——3456 上已有健康实例（双入口/残留实例抢端口，Windows
+// SO_REUSEADDR 下 bind 探测不会失败，会产生"双胞胎 server 随机分连接"）
+// 时跳过重复 spawn，窗口照常 loadURL 复用现有实例。
+function backendHealthy(port = 3456, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    let done = false;
+    const fin = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const http = require('http');
+      const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: timeoutMs }, (res) => {
+        res.resume();
+        fin(res.statusCode === 200);
+      });
+      req.on('error', () => fin(false));
+      req.on('timeout', () => { req.destroy(); fin(false); });
+    } catch (_) { fin(false); }
+  });
+}
+
 async function startBackend() {
   // S236: agent-direct 分区启动即钉死直连（Electron webview 默认裸随系统
   // 代理=全局翻墙时行为异常的根源；agent 工具默认走本分区）
@@ -707,6 +726,13 @@ async function startBackend() {
     .setProxy({ mode: 'direct' })
     .then(() => session.fromPartition(AGENT_DIRECT_PARTITION).clearCache().catch(() => {}))
     .catch((e) => console.error('[AgentProxy] agent-direct 初始化失败: ' + e.message))
+  // S328: 端口上已有健康 server（双入口启动/残留实例）→ 直接复用，
+  // 不再 spawn 第二个。Windows SO_REUSEADDR 下两个 server 可同时"拥有"
+  // 3456 且新连接被随机分配——曾致前端修复长期看似无效。
+  if (await backendHealthy()) {
+    console.log('[S328] 3456 已有健康后端实例，复用之（跳过重复 spawn）');
+    return;
+  }
   return new Promise((resolve, reject) => {
     try {
       console.log('🔍 准备启动后端进程...');

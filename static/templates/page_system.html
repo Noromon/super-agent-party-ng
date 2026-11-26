@@ -610,7 +610,7 @@
 
                 <!-- S284：灵动岛外联并发竞速开关（默认开；关=回退逐路串行） -->
                 <el-form-item :label="t('islandFetchRace')" class="form-item-align" label-position="left">
-                  <el-switch v-model="systemSettings.islandFetchRace" @change="autoSaveSettings" />
+                  <el-switch v-model="systemSettings.islandFetchRace" @change="autoSaveSettings"></el-switch>
                   <div class="form-tip" style="width: 100%;">{{ t('islandFetchRaceHint') }}</div>
                 </el-form-item>
 
@@ -792,7 +792,7 @@
                     <span class="eos-help-pop" v-html="t('eosHelpSanitize')"></span>
                   </span>
                   </template>
-                  <el-switch v-model="eosGuardSettings.sanitize" @change="autoSaveSettings" />
+                  <el-switch v-model="eosGuardSettings.sanitize" @change="autoSaveSettings"></el-switch>
                   <span v-if="eosPatrol.sanitizeActive" style="margin-left:10px; font-size:12px; color:#67c23a;">{{ t('eosGuardActive') }}</span>
                   <span v-else style="margin-left:10px; font-size:12px; color:#e6a23c;">{{ t('eosGuardInactive') }}</span>
                   <div class="form-item-hint">{{ t('eosGuardSanitizeNote') }}</div>
@@ -805,7 +805,7 @@
                     <span class="eos-help-pop" v-html="t('eosHelpBias')"></span>
                   </span>
                   </template>
-                  <el-switch v-model="eosGuardSettings.enabled" @change="autoSaveSettings" />
+                  <el-switch v-model="eosGuardSettings.enabled" @change="autoSaveSettings"></el-switch>
                   <div class="form-item-hint">{{ t('eosGuardBiasNote') }}</div>
                 </el-form-item>
                 <template v-if="eosGuardSettings.enabled">
@@ -927,7 +927,7 @@
               <el-divider content-position="left">{{ tf('permToolsTitle') }}</el-divider>
               <div v-if="!permToolsPool.length" style="opacity:.6;font-size:12px;">{{ tf('permNoItems') }}</div>
               <div v-for="pname in permToolsPool" :key="pname" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-                <el-switch size="small" :model-value="permAllowedTools.includes(pname)" @change="setToolPerm(pname, $event)" />
+                <el-switch size="small" :model-value="permAllowedTools.includes(pname)" @change="setToolPerm(pname, $event)"></el-switch>
                 <span style="font-size:13px;flex:1;">{{ (tf('permToolDesc') || {})[pname] || pname }}
                   <span style="opacity:.5;font-size:11px;">{{ pname }}</span></span>
               </div>

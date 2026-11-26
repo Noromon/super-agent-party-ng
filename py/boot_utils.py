@@ -9,8 +9,35 @@ import importlib
 import os
 import pathlib
 import socket
+import subprocess
 import sys
 from pathlib import Path
+
+
+def port_listener_pid(port, host="127.0.0.1"):
+    """S328: 真实 TCP connect 探测 + netstat 点名占用者 PID。
+    Windows 的 SO_REUSEADDR 使 bind() 探测在端口已被监听时照样成功——
+    探测必须走 connect，否则双胞胎 server 会静默共存、随机分连接。"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        s.connect((host, port))
+        s.close()
+    except OSError:
+        return None
+    try:
+        out = subprocess.run(["netstat", "-ano"], capture_output=True,
+                             text=True, timeout=6).stdout
+        suffix = ":%d" % port
+        for line in out.splitlines():
+            cols = line.split()
+            if (len(cols) >= 5 and cols[0].upper() == "TCP"
+                    and cols[1].endswith(suffix)
+                    and cols[3].upper() == "LISTENING"):
+                return cols[4]
+    except Exception:
+        pass
+    return "unknown"
 
 
 def is_addr_in_use_error(e):
@@ -53,6 +80,16 @@ def force_bind_or_fallback(host, preferred_port):
     2. 如果被真正占用/无权限/系统保留，自动降级到随机端口
     3. 绝不抛出异常导致退出
     """
+    # S328: Windows 下 SO_REUSEADDR 的 bind() 探测在端口已被监听时也会
+    # "成功"→ 双 server 静默共存、新连接随机分（曾致前端修复看似无效）。
+    # 用真实 TCP connect 探测并点名占用者；行为保持兼容（仍尝试绑定），
+    # 但把共存事实大声写进日志。
+    occupier = port_listener_pid(preferred_port, host if host != "0.0.0.0" else "127.0.0.1")
+    if occupier is not None:
+        print(f"[PortProbe] WARNING port {preferred_port} already LISTENING "
+              f"(pid={occupier}); windows SO_REUSEADDR allows coexistence - "
+              f"new connections may split randomly. Kill the stale instance "
+              f"and restart.", file=sys.stderr, flush=True)
     # 尝试绑定首选端口
     sock = None
     try:

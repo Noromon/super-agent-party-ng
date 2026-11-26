@@ -322,7 +322,7 @@
                       <p class="kb-description">{{ extension.author }}</p>
                       <div class="kb-meta"><p>{{ extension.description }}</p></div>
                       <div style="margin-top:8px;display:flex;align-items:flex-start;gap:8px;border-top:1px solid rgba(127,127,127,.18);padding-top:8px;">
-                        <el-switch size="small" style="margin-top:1px;" :model-value="!!extAgentAccess[extension.id]" @change="toggleAgentAccess(extension, $event)" />
+                        <el-switch size="small" style="margin-top:1px;" :model-value="!!extAgentAccess[extension.id]" @change="toggleAgentAccess(extension, $event)"></el-switch>
                         <div style="flex:1;min-width:0;">
                           <div style="font-size:12px;opacity:.85;">{{ tf('allowAiStartExtension') }}</div>
                           <div style="font-size:11px;opacity:.55;line-height:1.45;margin-top:2px;">{{ tf('allowAiStartExtensionTip') }}</div>

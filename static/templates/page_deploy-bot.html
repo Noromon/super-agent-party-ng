@@ -52,7 +52,7 @@
                                 </el-link>
                               </span>
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="qqBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="qqBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -259,7 +259,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="wechatBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="wechatBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -487,7 +487,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="feishuBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="feishuBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -713,7 +713,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="weComBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="weComBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -846,7 +846,7 @@
 
                               <!-- 按钮组 (启动/停止/重载) -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="dingtalkBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="dingtalkBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -1037,7 +1037,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="telegramBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="telegramBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -1233,7 +1233,7 @@
                                 {{ t('xmpp_bot_config') }}
                               </span>
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="xmppBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="xmppBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -1489,7 +1489,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="discordBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="discordBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -1680,7 +1680,7 @@
 
                               <!-- 按钮组 -->
                               <div style="display:flex; align-items:center; gap:8px; margin:6px 0;">
-                                <el-switch v-model="slackBotConfig.auto_connect" @change="autoSaveSettings" />
+                                <el-switch v-model="slackBotConfig.auto_connect" @change="autoSaveSettings"></el-switch>
                                 <span style="font-size:13px;">{{ t('botAutoConnect') }}</span>
                               </div>
                               <div>
@@ -2103,8 +2103,7 @@
                             <el-form-item :label="t('memoryEnable')" class="form-item-align" label-position="left">
                               <el-switch 
                               v-model="memorySettings.is_memory" 
-                              @click.stop @change="changeMemory" 
-                              />
+                              @click.stop @change="changeMemory"></el-switch>
                             </el-form-item>
                             <el-form-item :label="t('selectMemory')">
                               <el-select :persistent="false" 
@@ -2167,7 +2166,7 @@
 
                           <!-- 角色记忆开关 -->
                           <el-form-item :label="t('memoryEnable')" class="form-item-align" label-position="left">
-                            <el-switch v-model="memorySettings.is_memory" @click.stop @change="changeMemory" />
+                            <el-switch v-model="memorySettings.is_memory" @click.stop @change="changeMemory"></el-switch>
                           </el-form-item>
                           
                           <!-- 记忆卡选择 -->
@@ -2304,8 +2303,7 @@
                             <el-form-item :label="t('memoryEnable')" class="form-item-align" label-position="left">
                               <el-switch 
                               v-model="memorySettings.is_memory" 
-                              @click.stop @change="changeMemory" 
-                              />
+                              @click.stop @change="changeMemory"></el-switch>
                             </el-form-item>
                             <el-form-item :label="t('selectMemory')">
                               <el-select :persistent="false" 
@@ -3049,7 +3047,7 @@
                           </el-form-item>
 
                           <el-form-item :label="t('soulxTransparentBg')" class="form-item-align" label-position="left">
-                            <el-switch v-model="SoulxConfig.transparentBg" @change="autoSaveSettings" />
+                            <el-switch v-model="SoulxConfig.transparentBg" @change="autoSaveSettings"></el-switch>
                           </el-form-item>
 
                           <el-form-item :label="t('soulxRefImage')" class="form-item-align">
@@ -3693,7 +3691,7 @@
                                   </el-link>
                                 </span>
                               </div>
-                              <el-switch v-model="liveConfig.bilibili_enabled" @click.stop @change="autoSaveSettings"/>
+                              <el-switch v-model="liveConfig.bilibili_enabled" @click.stop @change="autoSaveSettings"></el-switch>
                             </div>
                             <div class="tool-content">    
                               <el-form-item label="ACCESS KEY ID">
@@ -3810,8 +3808,7 @@
                               </div>
                               <el-switch
                                 v-model="liveConfig.youtube_enabled"
-                                @change="autoSaveSettings"
-                              />
+                                @change="autoSaveSettings"></el-switch>
                             </div>
 
                             <div class="tool-content">
@@ -3919,8 +3916,7 @@
                               </div>
                               <el-switch
                                 v-model="liveConfig.twitch_enabled"
-                                @change="autoSaveSettings"
-                              />
+                                @change="autoSaveSettings"></el-switch>
                             </div>
 
                             <div class="tool-content">

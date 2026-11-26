@@ -497,7 +497,7 @@
                         />
                       </el-form-item>
                       <el-form-item :label="t('ctxMgmtEnabled')" class="form-item-align">
-                        <el-switch v-model="settings.contextManagement.enabled" @change="autoSaveSettings" />
+                        <el-switch v-model="settings.contextManagement.enabled" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
                       <el-form-item :label="t('ctxWindow')" class="form-item-align">
                         <el-input-number :model-value="Number(settings.contextManagement.contextWindow) || undefined" :min="4096" :max="10485760" :step="1024" controls-position="right" :disabled="String(settings.contextManagement.contextWindow) === 'auto'" @update:model-value="v => { settings.contextManagement.contextWindow = v; autoSaveSettings(); }" style="width: 100%;" />
@@ -507,13 +507,13 @@
                         <el-slider v-model="settings.contextManagement.compactRatio" :min="0.4" :max="0.95" :step="0.05" show-input :show-input-controls="false" @input="autoSaveSettings" />
                       </el-form-item>
                       <el-form-item :label="t('ctxAutoAgentCompact')" class="form-item-align">
-                        <el-switch v-model="settings.contextManagement.autoAgentCompact" @change="autoSaveSettings" />
+                        <el-switch v-model="settings.contextManagement.autoAgentCompact" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
                       <el-form-item :label="t('netAllowLocalUrls')" class="form-item-align">
-                        <el-switch v-model="settings.networkAccessSettings.allowLocalEquivalentUrls" @change="autoSaveSettings" />
+                        <el-switch v-model="settings.networkAccessSettings.allowLocalEquivalentUrls" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
                       <el-form-item :label="t('netAllowLanUrls')" class="form-item-align">
-                        <el-switch v-model="settings.networkAccessSettings.allowLanUrls" @change="autoSaveSettings" />
+                        <el-switch v-model="settings.networkAccessSettings.allowLanUrls" @change="autoSaveSettings"></el-switch>
                       </el-form-item>
                       <el-form-item :label="t('reasoningEffort')" class="form-item-align">
                         <el-select :persistent="false"
@@ -722,7 +722,7 @@
                           {{ t('fastModelConfiguration') }}
                         </span>
                       </div>
-                      <el-switch v-model="fastSettings.enabled" @click.stop @change="autoSaveSettings"/>
+                      <el-switch v-model="fastSettings.enabled" @click.stop @change="autoSaveSettings"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('provider')" class="form-item-align">
@@ -1052,7 +1052,7 @@
                         <p v-if="settings.unifiedModel" style="margin: 5px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('unifiedModelNeedsVision') }}</p>
                       </div>
                     </div>
-                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"/>
+                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"></el-switch>
                   </div>
                 </div>
                 <el-form :model="settings" class="settings-form" label-position="top">
@@ -1066,7 +1066,7 @@
                           {{ t('reasonerConfig') }}
                         </span>
                       </div>
-                      <el-switch v-model="reasonerSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="autoSaveSettings"/>
+                      <el-switch v-model="reasonerSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="autoSaveSettings"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('reasoningProvider')" class="form-item-align">
@@ -1205,7 +1205,7 @@
                         <p v-if="settings.unifiedModel" style="margin: 5px 0 0 0; color: #e6a23c; font-size: 12px; font-weight: bold;"><i class="fa-solid fa-triangle-exclamation"></i> {{ t('unifiedModelNeedsVision') }}</p>
                       </div>
                     </div>
-                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"/>
+                    <el-switch v-model="settings.unifiedModel" @click.stop @change="handleUnifiedModelToggle"></el-switch>
                   </div>
                 </div>
                 <el-form :model="settings" class="settings-form" label-position="top">
@@ -1217,7 +1217,7 @@
                           {{ t('visionSettings') }}
                         </span>
                       </div>
-                      <el-switch v-model="visionSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="handleVisionEnableToggle(visionSettings.enabled)"/>
+                      <el-switch v-model="visionSettings.enabled" :disabled="settings.unifiedModel" @click.stop @change="handleVisionEnableToggle(visionSettings.enabled)"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('visionProvider')" class="form-item-align">
@@ -1320,7 +1320,7 @@
                           {{ t('imgModel') }}
                         </span>
                       </div>
-                      <el-switch v-model="text2imgSettings.enabled" @click.stop @change="autoSaveSettings"/>
+                      <el-switch v-model="text2imgSettings.enabled" @click.stop @change="autoSaveSettings"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('imgEngine')" class="form-item-align">
@@ -1534,7 +1534,7 @@
                           {{ t('asrModel') }}
                         </span>
                       </div>
-                      <el-switch v-model="asrSettings.enabled" @click.stop @change="handleASRchange"/>
+                      <el-switch v-model="asrSettings.enabled" @click.stop @change="handleASRchange"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('asrEngine')" class="form-item-align">
@@ -1881,7 +1881,7 @@
                           {{ t('ttsModel') }}
                         </span>
                       </div>
-                      <el-switch v-model="ttsSettings.enabled" @click.stop @change="changeTTSstatus" />
+                      <el-switch v-model="ttsSettings.enabled" @click.stop @change="changeTTSstatus"></el-switch>
                     </div>
                     <div class="tool-content">
                       <el-form-item :label="t('ttsEngine')" class="form-item-align">
