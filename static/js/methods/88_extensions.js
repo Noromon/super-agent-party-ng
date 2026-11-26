@@ -198,7 +198,7 @@ Object.assign(vue_methods, {
           body: JSON.stringify({ enabled: !!val }),
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        this.$set(this.extAgentAccess, ext.id, !!val);
+        this.extAgentAccess[ext.id] = !!val;  // Vue3 无 $set（Proxy 自动追踪新键）
         showNotification(this.t('settingsSaved'), 'success');
       } catch (e) {
         showNotification(String(e.message || e), 'error');

@@ -160,6 +160,24 @@ class TestAgentAccessEndpoint:
 
 
 class TestPins:
+    def test_no_vue2_set_anywhere(self):
+        """Vue3 无 $set（12:5x 事故：S324 新代码 this.$set 点击即崩）。
+        全 static/js 基线=0 处，钉全域防复发。"""
+        bad = []
+        for f in (_ROOT / "static" / "js").rglob("*.js"):
+            if "libs" in f.parts:
+                continue
+            if "$set(" in f.read_text(encoding="utf-8", errors="replace"):
+                bad.append(f.name)
+        assert not bad, bad
+
+    def test_tip_is_displayed_not_hover_only(self):
+        html = (_ROOT / "static" / "templates" / "page_api-group.html").read_text(encoding="utf-8")
+        i = html.index("allowAiStartExtensionTip")
+        seg = html[max(0, i - 400):i + 60]
+        assert ':title="t(\'allowAiStartExtensionTip\')"' not in seg  # 常驻显示非 hover
+        assert "{{ t('allowAiStartExtensionTip') }}" in seg
+
     def test_ui_and_locale_wired(self):
         html = (_ROOT / "static" / "templates" / "page_api-group.html").read_text(encoding="utf-8")
         assert "toggleAgentAccess" in html and "allowAiStartExtension" in html
