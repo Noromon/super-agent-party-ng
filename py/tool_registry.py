@@ -19,6 +19,9 @@ SENSITIVE_TOOLS = [
     "kill_process_tool",
     "docker_manage_ports_tool",
     "local_net_tool",
+    # S323(C)：起扩展 node 服务=进程级副作用——default/auto-approve 审批弹窗，
+    # yolo/cowork 直通；plan 经 PLAN_BLOCKED_TOOLS 声明层隐藏+dispatch 兜底。
+    "start_extension_node_tool_local",
 ]
 
 # 计划模式（只读）硬拦截集合：敏感工具 + 桌面控制执行类（S221）。

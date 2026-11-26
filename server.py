@@ -52,6 +52,8 @@ def _assemble_toolkit():
     from py.computer_use_tool import computer_use_tools, mouse_use_tools, keyboard_use_tools, desktopVision_use_tools
     from py.mode_change import mode_change_tool
     from py.acpx_tools import acp_agent_tool
+    from py.agent_ext_tools import (LIST_EXTENSIONS_TOOL,  # S323：公告位=schema dict
+                                    START_EXTENSION_NODE_TOOL)
     return {
         "mcp_client_list": app_state.mcp_client_list,
         "mcp_status": app_state.mcp_status,
@@ -99,6 +101,8 @@ def _assemble_toolkit():
         # 绑成函数本体=公告位混入 callable→json.dumps TypeError，两事故均实证）。
         # 公告位值必须是 schema dict；执行层绑 callable 在 _TOOL_HOOKS。契约钉见 test_tool_assembly_parity
         "read_skill_tool_local": LOCAL_TOOLS_REGISTRY["read_skill_local"],
+        "list_extensions_tool": LIST_EXTENSIONS_TOOL,               # S323(B)
+        "start_extension_node_tool": START_EXTENSION_NODE_TOOL,     # S323(C)
     }
 
 from py.tool_loop import (NONE_TEXT, TOOL_EXC_TMPL,
@@ -1319,6 +1323,15 @@ async def tools_change_messages(request: ChatRequest, settings: dict):
 
     _append_a2ui_prompt(request)
     _append_browser_rules(request, settings)  # S319：内置浏览器「接口优先」先验规矩（stream/complete 汇流单点，每轮一次）
+    # S323(A)：宿主 API base + 已装扩展摘要——根治「拿 Electron UI 口当 API 口→404→
+    # 误诊框架没挂载」与「扩展对 agent 完全不可见」。失败静默跳过，不断主流程。
+    try:
+        from py.agent_ext_tools import build_host_context
+        _host_ctx = build_host_context()
+        if _host_ctx:
+            content_append(request.messages, 'system', _host_ctx)
+    except Exception as _hce:
+        logging.getLogger("app").info("[S323] 宿主环境注入跳过: %r", _hce)
 
     # ===== L3 任务检查点：注入此前压缩落盘的任务态（7 天内、当前或未知会话、且历史中尚无摘要时） =====
     _inject_task_checkpoint(request, cli_settings, engine)

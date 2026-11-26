@@ -177,6 +177,12 @@ def _build_tool_hooks():
         read_skill_tool_local,
     )
 
+    # S323：扩展可见性/可及性门面
+    from py.agent_ext_tools import (
+        list_extensions_tool_local,
+        start_extension_node_tool_local,
+    )
+
     from py.cdp_tool import (
         list_pages,
         navigate_page,
@@ -317,6 +323,8 @@ def _build_tool_hooks():
         "ask_user_question_tool": ask_user_question_tool,        # S194 提问兜底（主流在工具轮已挂起，不会走到）
         "local_net_tool": local_net_tool,                       # 本地网络工具
         "read_skill_tool_local": read_skill_tool_local,         # 本地技能读取
+        "list_extensions_tool_local": list_extensions_tool_local,        # S323(B) 只读
+        "start_extension_node_tool_local": start_extension_node_tool_local,  # S323(C) SENSITIVE
 
         # 任务中心工具（新增）
         "create_subtask": create_subtask,

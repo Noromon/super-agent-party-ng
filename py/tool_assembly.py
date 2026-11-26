@@ -42,6 +42,29 @@ def _ensure_read_skill_local(tools, tk):
     tools.append(tk["read_skill_tool_local"])
 
 
+def _ensure_tool_once(tools, schema):
+    """S323：按工具名去重的恒定公告（幂等，两引擎/全模式单点语义）。"""
+    name = schema.get("function", {}).get("name", "")
+    if not name:
+        return
+    for t in tools:
+        if t.get("function", {}).get("name") == name:
+            return
+    tools.append(schema)
+
+
+def _ensure_ext_visibility_tools(tools, tk):
+    """S323(B)：扩展自查——纯只读，恒定公告（含 plan，read_skill 同语义先例）。
+    S323(C)：起扩展 node 服务——声明层恒定公告，闸门在 SENSITIVE_TOOLS：plan 由
+    _plan_hide_blocked_tools 隐藏，default/auto-approve 审批弹窗，yolo/cowork 直通
+    （对齐 delete_file_tool_local 先例，dispatch 兜底同集合）。缺键=老式 toolkit，
+    优雅跳过（S210 KeyError→500 事故反面教训）。"""
+    for key in ("list_extensions_tool", "start_extension_node_tool"):
+        schema = tk.get(key)
+        if isinstance(schema, dict):
+            _ensure_tool_once(tools, schema)
+
+
 async def build_llm_tools(request, settings, tk):
     """Assemble the OpenAI-format tool list announced to the LLM.
 
@@ -128,6 +151,7 @@ async def build_llm_tools(request, settings, tk):
     if settings['CLISettings']['mode_change'] and tk["cli_permission_mode_for"](settings) != "plan":
         tools.append(tk["mode_change_tool"])
     _ensure_read_skill_local(tools, tk)
+    _ensure_ext_visibility_tools(tools, tk)  # S323(B/C)：扩展可见性/可及性门面
     if settings['visionControlSettings']['enabled']:
         tools.extend(tk["computer_use_tools"])
         if settings['visionControlSettings']['mouse']:
